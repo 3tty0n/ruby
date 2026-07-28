@@ -1,0 +1,73 @@
+#!/bin/bash
+#
+# Verify the interception path.
+#
+#   script/check [SCRIPT.rb]
+#
+# Env: BUILD (CRuby build tree), PROBE, SHIM.
+# Defaults assume it is run from the rpyyarv/ directory or via `make check`.
+
+set -uo pipefail
+
+HERE=$(cd "$(dirname "$0")" && pwd)
+PROJ=$(dirname "$HERE")
+TOP=$(dirname "$PROJ")
+
+BUILD=${BUILD:-$TOP/build}
+PROBE=${PROBE:-$PROJ/test/probe}
+SHIM=${SHIM:-$PROJ/librpyyarv_boot.dylib}
+SCRIPT=${1:-$PROJ/test/fib.rb}
+
+MARKER=EXECUTED:832040
+
+failed=0
+
+ok()  { echo "OK: $1"; }
+ng()  { echo "NG: $1"; failed=1; }
+hdr() { echo "=== $1 ==="; }
+
+require_file() {
+  [ -e "$1" ] || { echo "NG: missing $1 (run make first)"; exit 1; }
+}
+
+require_file "$PROBE"
+require_file "$SHIM"
+require_file "$SCRIPT"
+
+hdr "Interception"
+if "$PROBE" "$SCRIPT" 2>&1 | grep -q "$MARKER"; then
+  ng "CRuby executed the script"
+else
+  ok "CRuby did not execute the script"
+fi
+
+hdr "ISeq capture"
+if "$PROBE" "$SCRIPT" 2>&1 | grep -q 'Success'; then
+  ok "got the main ISeq"
+else
+  ng "could not get the ISeq"
+fi
+
+# Without this the negative test above could pass vacuously.
+hdr "Marker sanity (CRuby must print it when it does run)"
+if DYLD_LIBRARY_PATH=$BUILD "$BUILD/ruby" "$SCRIPT" 2>/dev/null | grep -q "$MARKER"; then
+  ok "marker is reachable"
+else
+  ng "marker never appears; the interception check proves nothing"
+fi
+
+hdr "ctypes path"
+if RPYYARV_BUILD=$BUILD python3 "$PROJ/test/test_boot_ctypes.py" "$SCRIPT" 2>&1 \
+     | grep -q 'Success'; then
+  ok "rffi shim works through ctypes"
+else
+  ng "ctypes path failed"
+fi
+
+echo
+if [ "$failed" -eq 0 ]; then
+  echo "all checks passed"
+else
+  echo "FAILED"
+fi
+exit "$failed"

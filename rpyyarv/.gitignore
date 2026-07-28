@@ -1,0 +1,7 @@
+*.dylib
+*.so
+*.dSYM/
+*.pyc
+test/probe
+rpyyarv
+!Makefile
