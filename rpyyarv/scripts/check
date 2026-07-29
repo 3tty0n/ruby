@@ -56,6 +56,13 @@ else
   ng "marker never appears; the interception check proves nothing"
 fi
 
+hdr "Generated instruction facts in step with insns.def"
+if (cd "$TOP/rpyvmgen" && ruby verify.rb) >/dev/null 2>&1; then
+  ok "yarv_insns.py and yarv_map.py agree with insns.def"
+else
+  ng "instruction tables drifted; run: make -C rpyvmgen check"
+fi
+
 hdr "ctypes path"
 if RPYYARV_BUILD=$BUILD python3 "$PROJ/test/test_boot_ctypes.py" "$SCRIPT" 2>&1 \
      | grep -q 'Success'; then
