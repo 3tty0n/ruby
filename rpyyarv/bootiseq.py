@@ -1,23 +1,16 @@
-"""Front end over an embedded CRuby: iseqw.to_a -> rawiseq objects.
+"""Front end over an embedded CRuby: iseqw.to_a -> rawiseq objects."""
 
-Only this module and boot.py pull in rpython.rtyper; the loader, the
-interpreter and their tests stay importable on plain CPython.
-"""
+# Only this module and boot.py import rpython; the loader, the interpreter
+# and their tests stay importable on plain CPython.
 
 import boot
 import rawiseq
+import to_a_layout
+from error import LoadError
+from to_a_layout import (I_BODY, I_CATCH, I_LABEL, I_LOCALS, I_MAGIC, I_MISC,
+                         I_PARAMS, I_TYPE)
 
-ISEQ_MAGIC = 'YARVInstructionSequence/SimpleDataFormat'
 EVENT_PREFIX = 'RUBY_EVENT_'
-
-# Indices into to_a, as iseq_data_to_ary builds it.
-I_MISC = 4
-I_LABEL = 5
-I_TYPE = 9
-I_LOCALS = 10
-I_PARAMS = 11
-I_CATCH = 12
-I_BODY = 13
 
 
 def is_iseq(v):
@@ -26,7 +19,39 @@ def is_iseq(v):
     if boot.ary_len(v) < 1:
         return False
     head = boot.ary_entry(v, 0)
-    return boot.is_string(head) and boot.str_of(head) == ISEQ_MAGIC
+    return boot.is_string(head) and boot.str_of(head) == to_a_layout.MAGIC
+
+
+def kind_of(v):
+    if boot.is_fixnum(v):
+        return to_a_layout.K_INTEGER
+    if boot.is_string(v):
+        return to_a_layout.K_STRING
+    if boot.is_symbol(v):
+        return to_a_layout.K_SYMBOL
+    if boot.is_array(v):
+        return to_a_layout.K_ARRAY
+    if boot.is_hash(v):
+        return to_a_layout.K_HASH
+    return boot.inspect(v)
+
+
+def check(ary):
+    """Refuse a to_a whose shape is not the one to_a_layout.py describes."""
+    moved = 'iseq_data_to_ary in iseq.c moved a field; update to_a_layout.py'
+    n = boot.ary_len(ary)
+    if n != to_a_layout.LENGTH:
+        raise LoadError('iseqw.to_a has %d elements, expected %d: %s'
+                        % (n, to_a_layout.LENGTH, moved))
+    for index, kind in to_a_layout.EXPECTED:
+        found = kind_of(boot.ary_entry(ary, index))
+        if found != kind:
+            raise LoadError('iseqw.to_a[%d] holds %s, expected %s: %s'
+                            % (index, found, kind, moved))
+    magic = boot.str_of(boot.ary_entry(ary, I_MAGIC))
+    if magic != to_a_layout.MAGIC:
+        raise LoadError('iseqw.to_a[%d] is "%s", expected "%s": %s'
+                        % (I_MAGIC, magic, to_a_layout.MAGIC, moved))
 
 
 def load(iseqw):
@@ -48,6 +73,7 @@ def _path(iseqw):
 
 
 def _read_iseq(program, pending, ary):
+    check(ary)
     misc = boot.ary_entry(ary, I_MISC)
     params = boot.ary_entry(ary, I_PARAMS)
     raw = rawiseq.RawISeq(

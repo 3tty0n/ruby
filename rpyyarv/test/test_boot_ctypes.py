@@ -11,6 +11,11 @@ PROJ = os.path.dirname(HERE)
 TOP = os.path.dirname(PROJ)
 BUILD = os.environ.get("RPYYARV_BUILD", os.path.join(TOP, "build"))
 
+if PROJ not in sys.path:
+    sys.path.insert(0, PROJ)
+
+import to_a_layout
+
 VALUE = ctypes.c_size_t
 INTP = ctypes.POINTER(ctypes.c_int)
 
@@ -51,39 +56,117 @@ def load_shim():
     sys.exit("librpyyarv_boot not found; run `make shim` first")
 
 
-def check_frontend_helpers(lib, ary):
-    """The shim calls bootiseq.py makes, exercised without RPython."""
-    def sym(v):
-        return lib.rpyyarv_sym_cstr(v).decode()
+def sym(lib, v):
+    return lib.rpyyarv_sym_cstr(v).decode()
 
-    misc = lib.rpyyarv_ary_entry(ary, 4)
-    assert lib.rpyyarv_is_hash(misc), "misc is a Hash"
-    stack_max = lib.rpyyarv_hash_aref(misc, b"stack_max")
-    assert lib.rpyyarv_num2long(stack_max) > 0, "misc[:stack_max]"
-    assert lib.rpyyarv_is_nil(lib.rpyyarv_hash_aref(misc, b"nope"))
-    # ruby_options yields ISEQ_TYPE_MAIN where compile_file yields :top
-    assert sym(lib.rpyyarv_ary_entry(ary, 9)) in ("top", "main")
 
-    body = lib.rpyyarv_ary_entry(ary, 13)
-    seen = {}
+def kind_of(lib, v):
+    if lib.rpyyarv_is_fixnum(v):
+        return to_a_layout.K_INTEGER
+    if lib.rpyyarv_is_string(v):
+        return to_a_layout.K_STRING
+    if lib.rpyyarv_is_symbol(v):
+        return to_a_layout.K_SYMBOL
+    if lib.rpyyarv_is_array(v):
+        return to_a_layout.K_ARRAY
+    if lib.rpyyarv_is_hash(v):
+        return to_a_layout.K_HASH
+    return "?"
+
+
+def check_layout(lib, ary, what):
+    """The table bootiseq.py trusts, against a real iseq."""
+    n = lib.rpyyarv_ary_len(ary)
+    assert n == to_a_layout.LENGTH, \
+        "%s: to_a has %d elements, expected %d" % (what, n, to_a_layout.LENGTH)
+    for index, kind in to_a_layout.EXPECTED:
+        found = kind_of(lib, lib.rpyyarv_ary_entry(ary, index))
+        assert found == kind, \
+            "%s: to_a[%d] holds %s, expected %s" % (what, index, found, kind)
+    magic = lib.rpyyarv_cstr(
+        lib.rpyyarv_ary_entry(ary, to_a_layout.I_MAGIC)).decode()
+    assert magic == to_a_layout.MAGIC, "%s: to_a[0] is %r" % (what, magic)
+
+
+def insns_of(lib, ary):
+    found = {}
+    body = lib.rpyyarv_ary_entry(ary, to_a_layout.I_BODY)
     for i in range(lib.rpyyarv_ary_len(body)):
         e = lib.rpyyarv_ary_entry(body, i)
-        if not lib.rpyyarv_is_array(e):
-            continue
-        name = sym(lib.rpyyarv_ary_entry(e, 0))
-        seen[name] = e
+        if lib.rpyyarv_is_array(e):
+            found[sym(lib, lib.rpyyarv_ary_entry(e, 0))] = e
+    return found
+
+
+def params_of(lib, call0, ary):
+    """(lead_num, extra keys) exactly as bootiseq._extra_params computes it."""
+    params = lib.rpyyarv_ary_entry(ary, to_a_layout.I_PARAMS)
+    lead = lib.rpyyarv_hash_aref(params, b"lead_num")
+    keys = call0(params, "keys")
+    names = []
+    for i in range(lib.rpyyarv_ary_len(keys)):
+        name = sym(lib, lib.rpyyarv_ary_entry(keys, i))
+        if name != "lead_num":
+            names.append(name)
+    return (0 if lib.rpyyarv_is_nil(lead) else lib.rpyyarv_num2long(lead),
+            ",".join(names))
+
+
+def dumped_params(path):
+    rows = []
+    with open(path) as f:
+        for line in f:
+            fields = line.rstrip("\n").split("\t")
+            if fields[0] == "params":
+                rows.append((int(fields[1]), fields[2] if len(fields) > 2
+                             else ""))
+    return rows
+
+
+def check_frontend_helpers(lib, call0, ary, script):
+    """The shim calls bootiseq.py makes, exercised without RPython."""
+    check_layout(lib, ary, "<main>")
+
+    misc = lib.rpyyarv_ary_entry(ary, to_a_layout.I_MISC)
+    assert lib.rpyyarv_num2long(
+        lib.rpyyarv_hash_aref(misc, b"stack_max")) > 0, "misc[:stack_max]"
+    assert lib.rpyyarv_is_nil(lib.rpyyarv_hash_aref(misc, b"nope"))
+    # ruby_options yields ISEQ_TYPE_MAIN where compile_file yields :top
+    assert sym(lib, lib.rpyyarv_ary_entry(ary, to_a_layout.I_TYPE)) \
+        in ("top", "main")
+
+    seen = insns_of(lib, ary)
     assert "definemethod" in seen, "definemethod in <main>"
-    assert sym(lib.rpyyarv_ary_entry(seen["definemethod"], 1)) == "fib"
+    assert sym(lib, lib.rpyyarv_ary_entry(seen["definemethod"], 1)) == "fib"
+
+    nested = lib.rpyyarv_ary_entry(seen["definemethod"], 2)
+    check_layout(lib, nested, "fib")
 
     cd = lib.rpyyarv_ary_entry(seen["opt_send_without_block"], 1)
     assert lib.rpyyarv_is_hash(cd), "call data is a Hash"
-    assert sym(lib.rpyyarv_hash_aref(cd, b"mid")) in ("fib", "puts")
+    assert sym(lib, lib.rpyyarv_hash_aref(cd, b"mid")) in ("fib", "puts")
     assert lib.rpyyarv_num2long(lib.rpyyarv_hash_aref(cd, b"orig_argc")) == 1
     assert lib.rpyyarv_is_nil(lib.rpyyarv_hash_aref(cd, b"kw_arg"))
 
     lit = lib.rpyyarv_ary_entry(seen["putobject"], 1)
     assert lib.rpyyarv_is_string(lit) or lib.rpyyarv_is_fixnum(lit) \
         or lib.rpyyarv_is_array(lit)
+
+    try:
+        check_layout(lib, lib.rpyyarv_ary_entry(ary, to_a_layout.I_BODY),
+                     "body")
+    except AssertionError:
+        pass
+    else:
+        raise AssertionError("check_layout accepted a non-iseq array")
+
+    # Both front ends must judge simple-params the same way.
+    dump = os.path.splitext(script)[0] + ".iseq"
+    if os.path.exists(dump):
+        booted = [params_of(lib, call0, ary), params_of(lib, call0, nested)]
+        assert booted == dumped_params(dump), \
+            "params disagree: booted %r, dumped %r" % (booted,
+                                                       dumped_params(dump))
     print("[rpyyarv] front-end helpers: ok")
 
 
@@ -145,7 +228,7 @@ def main(argv):
         print("[rpyyarv]   %s" % (s[:100] + ("..." if len(s) > 100 else "")))
         shown += 1
 
-    check_frontend_helpers(lib, ary)
+    check_frontend_helpers(lib, call0, ary, script)
 
     print("[rpyyarv] ruby_run_node() was never called.")
     return lib.rpyyarv_cleanup(0)

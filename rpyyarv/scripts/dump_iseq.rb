@@ -39,6 +39,25 @@
 FORMAT_VERSION = 1
 ISEQ_MAGIC = 'YARVInstructionSequence/SimpleDataFormat'
 
+# Must match rpyyarv/to_a_layout.py, which bootiseq.py enforces at run time.
+TO_A_LENGTH = 14
+TO_A_LAYOUT = [[0, String], [1, Integer], [2, Integer], [4, Hash],
+               [5, String], [8, Integer], [9, Symbol], [10, Array],
+               [11, Hash], [12, Array], [13, Array]].freeze
+MOVED = 'iseq_data_to_ary in iseq.c moved a field; update to_a_layout.py'
+
+def check_layout!(ary)
+  if ary.size != TO_A_LENGTH
+    abort "to_a has #{ary.size} elements, expected #{TO_A_LENGTH}: #{MOVED}"
+  end
+  TO_A_LAYOUT.each do |index, klass|
+    next if ary[index].is_a?(klass)
+    abort "to_a[#{index}] holds #{ary[index].class}, expected #{klass}: #{MOVED}"
+  end
+  return if ary[0] == ISEQ_MAGIC
+  abort "to_a[0] is #{ary[0].inspect}, expected #{ISEQ_MAGIC.inspect}: #{MOVED}"
+end
+
 def esc(str)
   out = ''
   str.each_char do |c|
@@ -98,6 +117,7 @@ class Dumper
   end
 
   def emit(index, ary)
+    check_layout!(ary)
     _magic, _major, _minor, _format, misc, label, _path, _abs, _lineno,
       type, locals, params, catch_table, body = ary
 
