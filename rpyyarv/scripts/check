@@ -15,7 +15,8 @@ TOP=$(dirname "$PROJ")
 
 BUILD=${BUILD:-$TOP/build}
 PROBE=${PROBE:-$PROJ/test/probe}
-SHIM=${SHIM:-$PROJ/librpyyarv_boot.dylib}
+case $(uname -s) in Darwin) SOEXT=dylib;; *) SOEXT=so;; esac
+SHIM=${SHIM:-$PROJ/librpyyarv_boot.$SOEXT}
 SCRIPT=${1:-$PROJ/test/fib.rb}
 PYTHON=${PYTHON:-python3}
 
@@ -69,19 +70,31 @@ fi
 
 # Without this the negative test above could pass vacuously.
 hdr "Marker sanity (CRuby must print it when it does run)"
-if DYLD_LIBRARY_PATH=$BUILD "$BUILD/ruby" "$SCRIPT" 2>/dev/null | grep -q "$MARKER"; then
+if DYLD_LIBRARY_PATH=$BUILD LD_LIBRARY_PATH=$BUILD "$BUILD/ruby" "$SCRIPT" \
+     2>/dev/null | grep -q "$MARKER"; then
   ok "marker is reachable"
 else
   ng "marker never appears; the interception check proves nothing"
 fi
 
 hdr "ctypes path"
-if RPYYARV_BUILD=$BUILD python3 "$PROJ/test/test_boot_ctypes.py" "$SCRIPT" 2>&1 \
-     | grep -q 'Success'; then
+if RPYYARV_BUILD=$BUILD "$PYTHON" "$PROJ/test/test_boot_ctypes.py" "$SCRIPT" 2>&1 \
+     | grep -q 'front-end helpers: ok'; then
   ok "rffi shim works through ctypes"
 else
   ng "ctypes path failed"
 fi
+
+hdr "Translated binaries"
+for exe in rpyyarv rpyyarv-jit; do
+  if [ ! -x "$PROJ/$exe" ]; then
+    echo "--: $exe not built (make build-interp / build-jit)"
+  elif "$PROJ/$exe" "$SCRIPT" 2>/dev/null | grep -q "$MARKER"; then
+    ok "$exe ran $(basename "$SCRIPT") through the boot path"
+  else
+    ng "$exe did not print $MARKER"
+  fi
+done
 
 echo
 if [ "$failed" -eq 0 ]; then

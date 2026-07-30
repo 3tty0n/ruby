@@ -22,6 +22,8 @@ EMIT = {
     'setlocal': [0],        # likewise
     'dup': [],
     'pop': [],
+    'swap': [],
+    'expandarray': [0],     # flag is checked, only plain masgn
     'opt_plus': [],         # CALL_DATA dropped
     'opt_minus': [],
     'opt_mult': [],
@@ -30,6 +32,9 @@ EMIT = {
     'opt_le': [],
     'opt_ge': [],
     'opt_eq': [],
+    'objtostring': [],      # CALL_DATA dropped: to_s is resolved inline
+    'anytostring': [],
+    'concatstrings': [0],
     'jump': [0],
     'branchif': [0],
     'branchunless': [0],

@@ -10,6 +10,12 @@ class W_Root(object):
     def int_w(self):
         raise UnsupportedOperation('not an integer')
 
+    def str_w(self):
+        raise UnsupportedOperation('not a string')
+
+    def to_s_str(self):
+        raise UnsupportedOperation('no to_s for %s' % self.repr())
+
     def lookup_method(self, mid):
         raise self.no_method_error(mid)
 

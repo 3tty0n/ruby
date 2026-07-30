@@ -65,6 +65,14 @@ rb_ary_entry = _ext('rpyyarv_ary_entry', [VALUE, rffi.LONG], VALUE)
 rb_is_array = _ext('rpyyarv_is_array', [VALUE], rffi.INT)
 rb_is_symbol = _ext('rpyyarv_is_symbol', [VALUE], rffi.INT)
 rb_is_fixnum = _ext('rpyyarv_is_fixnum', [VALUE], rffi.INT)
+rb_is_string = _ext('rpyyarv_is_string', [VALUE], rffi.INT)
+rb_is_hash = _ext('rpyyarv_is_hash', [VALUE], rffi.INT)
+rb_is_nil = _ext('rpyyarv_is_nil', [VALUE], rffi.INT)
+rb_is_true = _ext('rpyyarv_is_true', [VALUE], rffi.INT)
+rb_is_false = _ext('rpyyarv_is_false', [VALUE], rffi.INT)
+rb_num2long = _ext('rpyyarv_num2long', [VALUE], rffi.LONG)
+rb_hash_aref = _ext('rpyyarv_hash_aref', [VALUE, rffi.CCHARP], VALUE)
+rb_sym_cstr = _ext('rpyyarv_sym_cstr', [VALUE], rffi.CCHARP)
 
 
 class RubyError(Exception):
@@ -99,6 +107,57 @@ def is_symbol(v):
 
 def is_fixnum(v):
     return rffi.cast(lltype.Signed, rb_is_fixnum(v)) != 0
+
+
+def is_string(v):
+    return rffi.cast(lltype.Signed, rb_is_string(v)) != 0
+
+
+def is_hash(v):
+    return rffi.cast(lltype.Signed, rb_is_hash(v)) != 0
+
+
+def is_nil(v):
+    return rffi.cast(lltype.Signed, rb_is_nil(v)) != 0
+
+
+def is_true(v):
+    return rffi.cast(lltype.Signed, rb_is_true(v)) != 0
+
+
+def is_false(v):
+    return rffi.cast(lltype.Signed, rb_is_false(v)) != 0
+
+
+def num2long(v):
+    return rffi.cast(lltype.Signed, rb_num2long(v))
+
+
+def ary_len(v):
+    return rffi.cast(lltype.Signed, rb_ary_len(v))
+
+
+def ary_entry(v, i):
+    return rb_ary_entry(v, rffi.cast(rffi.LONG, i))
+
+
+def hash_aref(hash_v, key):
+    with rffi.scoped_str2charp(key) as c_key:
+        return rb_hash_aref(hash_v, c_key)
+
+
+def str_of(v):
+    p = rb_cstr(v)
+    if not p:
+        raise RubyError('to_s')
+    return rffi.charp2str(p)
+
+
+def sym_of(v):
+    p = rb_sym_cstr(v)
+    if not p:
+        raise RubyError('id2name')
+    return rffi.charp2str(p)
 
 
 def boot(argv):

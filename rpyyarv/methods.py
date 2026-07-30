@@ -1,19 +1,36 @@
 """Methods and method tables.
-
-The only table so far is the one W_Main carries; per-class tables arrive by
-giving other objects a table and making lookup() walk a superclass chain.
 """
 
+import symbols
+from error import UnsupportedOperation
 from objects.base import W_Root
 
 
 class W_Method(W_Root):
-    def __init__(self, mid, w_iseq):
+    def __init__(self, mid):
         self.mid = mid
+
+    def repr(self):
+        return '<W_Method %s>' % symbols.name_of(self.mid)
+
+
+class W_ISeqMethod(W_Method):
+    def __init__(self, mid, w_iseq):
+        W_Method.__init__(self, mid)
         self.w_iseq = w_iseq
 
     def repr(self):
-        return '<W_Method %s>' % self.w_iseq.name
+        return '<W_ISeqMethod %s>' % self.w_iseq.name
+
+
+class W_CFunc(W_Method):
+    def __init__(self, mid, arity):
+        W_Method.__init__(self, mid)
+        self.arity = arity      # -1 takes any number of arguments
+
+    def call(self, w_recv, args_w):
+        raise UnsupportedOperation("'%s' has no body"
+                                   % symbols.name_of(self.mid))
 
 
 class MethodTable(object):

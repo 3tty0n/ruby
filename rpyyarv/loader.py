@@ -1,10 +1,4 @@
-"""Raw ISeqs in, W_ISeqs out, applying the yarv_map.py contract.
-
-Operands are transformed by their declared type in insns.def, not per
-instruction, and positions yarv_map.py does not emit are still checked.
-Every ISeq is scanned before any is emitted, so one run reports the whole
-backlog of unimplemented instructions instead of its first item.
-"""
+"""Load raw ISeqs into W_ISeqs, transforming operands by their insns.def type."""
 
 import insns
 import iseqdump
@@ -13,6 +7,8 @@ import rawiseq
 import symbols
 from error import LoadError, UnsupportedOperation
 from iseq import W_CallInfo, W_ISeq, NO_BLOCK_ISEQ
+from objects.array import W_Array
+from objects.string import W_String
 from objects.transparent import W_Fixnum, w_nil, w_true, w_false
 
 
@@ -160,7 +156,7 @@ class Loader(object):
         for i in range(len(opcodes)):
             op = opcodes[i]
             ops = operands[i]
-            self.check_local_level(op, ops, raw)
+            self.check_dropped(op, ops, raw)
             code.append(op)
             for pos in optable.EMIT_POSITIONS[op]:
                 code.append(self.operand(op, pos, ops[pos], raw, pool,
@@ -171,16 +167,21 @@ class Loader(object):
         self.w_iseqs[index] = w_iseq
         return w_iseq
 
-    def check_local_level(self, op, ops, raw):
-        """yarv_map.py drops the level operand, so it is checked here."""
-        if op != insns.GETLOCAL and op != insns.SETLOCAL:
-            return
-        level = self.int_of(ops[1], op, raw, 'level')
-        if level > optable.MAX_LOCAL_LEVEL:
-            raise UnsupportedOperation(
-                "%s at level %d in '%s' reaches an enclosing scope, which "
-                "RPyYARV does not support"
-                % (insns.NAMES[op], level, raw.name))
+    def check_dropped(self, op, ops, raw):
+        """Operand positions yarv_map.py does not emit, checked here."""
+        if op == insns.GETLOCAL or op == insns.SETLOCAL:
+            level = self.int_of(ops[1], op, raw, 'level')
+            if level > optable.MAX_LOCAL_LEVEL:
+                raise UnsupportedOperation(
+                    "%s at level %d in '%s' reaches an enclosing scope, which "
+                    "RPyYARV does not support"
+                    % (insns.NAMES[op], level, raw.name))
+        elif op == insns.EXPANDARRAY:
+            flag = self.int_of(ops[1], op, raw, 'flag')
+            if flag != 0:
+                raise UnsupportedOperation(
+                    "expandarray with a splat or post arguments in '%s' is "
+                    "not supported" % raw.name)
 
     def operand(self, op, pos, operand, raw, pool, labels):
         t = insns.OPERAND_TYPES[op][pos]
@@ -209,15 +210,27 @@ class Loader(object):
                         % (insns.NAMES[op], raw.name, insns.TYPE_NAMES[t]))
 
     def literal(self, operand, op, raw, pool):
+        if operand.kind == rawiseq.OP_INT:
+            return pool.add_fixnum(operand.intval)
+        return pool.add(self.literal_value(operand, op, raw))
+
+    def literal_value(self, operand, op, raw):
         kind = operand.kind
         if kind == rawiseq.OP_INT:
-            return pool.add_fixnum(operand.intval)
+            return W_Fixnum(operand.intval)
         if kind == rawiseq.OP_NIL:
-            return pool.add(w_nil)
+            return w_nil
         if kind == rawiseq.OP_TRUE:
-            return pool.add(w_true)
+            return w_true
         if kind == rawiseq.OP_FALSE:
-            return pool.add(w_false)
+            return w_false
+        if kind == rawiseq.OP_STR:
+            return W_String(operand.strval)
+        if kind == rawiseq.OP_ARRAY:
+            items_w = []
+            for item in operand.items:
+                items_w.append(self.literal_value(item, op, raw))
+            return W_Array(items_w)
         raise UnsupportedOperation(
             "%s of %s in '%s': RPyYARV has no such object yet"
             % (insns.NAMES[op], operand.describe(), raw.name))

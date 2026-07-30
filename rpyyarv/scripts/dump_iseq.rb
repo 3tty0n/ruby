@@ -29,6 +29,8 @@
 #   y:<name>  Symbol: an ID, a Symbol literal, or a label reference
 #   s:<text>  String
 #   q:<index> nested ISeq
+#   a:<item>,<item>...  Array; each item is a token whose backslashes and
+#             commas are escaped again, so nesting stays unambiguous
 #   c:<argc>,<flags>,<kwarg?>,<mid>   CALL_DATA
 #   x:<text>  anything else, verbatim, so a refusal can name it
 #
@@ -45,6 +47,18 @@ def esc(str)
     when "\t" then out << '\\t'
     when "\n" then out << '\\n'
     when "\r" then out << '\\r'
+    else out << c
+    end
+  end
+  out
+end
+
+def esc_item(tok)
+  out = ''
+  tok.each_char do |c|
+    case c
+    when "\\" then out << '\\\\'
+    when ','   then out << '\\c'
     else out << c
     end
   end
@@ -118,7 +132,11 @@ class Dumper
     when Symbol  then "y:#{esc(obj.to_s)}"
     when String  then "s:#{esc(obj)}"
     when Array
-      iseq_array?(obj) ? "q:#{intern(obj)}" : "x:#{esc(obj.inspect)}"
+      if iseq_array?(obj)
+        "q:#{intern(obj)}"
+      else
+        "a:" + obj.map { |o| esc_item(operand(o)) }.join(',')
+      end
     when Hash
       if obj.key?(:mid) && obj.key?(:orig_argc)
         "c:#{obj[:orig_argc]},#{obj[:flag]},#{obj[:kw_arg] ? 1 : 0}," \

@@ -1,14 +1,13 @@
 class RPyYarvError(Exception):
-    pass
+    def __init__(self, msg):
+        self.msg = msg
 
 
 class UnsupportedOperation(RPyYarvError):
-    def __init__(self, msg):
-        self.msg = msg
+    pass
 
 
 class LoadError(RPyYarvError):
     # Malformed input, kept apart from UnsupportedOperation so the count of
     # unimplemented instructions stays a count of real work.
-    def __init__(self, msg):
-        self.msg = msg
+    pass

@@ -1,7 +1,6 @@
 """Read the text dump scripts/dump_iseq.rb writes into rawiseq objects.
 
-Record and operand grammar: see scripts/dump_iseq.rb. Nothing here decides
-what an instruction means; that is loader.py.
+Record and operand grammar: see scripts/dump_iseq.rb.
 """
 
 import rawiseq
@@ -44,6 +43,35 @@ def _unescape(text):
     return ''.join(out)
 
 
+def _split_items(body):
+    items = []
+    cur = []
+    i = 0
+    n = len(body)
+    while i < n:
+        c = body[i]
+        if c == '\\' and i + 1 < n:
+            e = body[i + 1]
+            if e == 'c':
+                cur.append(',')
+            elif e == '\\':
+                cur.append('\\')
+            else:
+                cur.append(c)
+                cur.append(e)
+            i += 2
+        elif c == ',':
+            items.append(''.join(cur))
+            cur = []
+            i += 1
+        else:
+            cur.append(c)
+            i += 1
+    if len(cur) > 0 or len(items) > 0:
+        items.append(''.join(cur))
+    return items
+
+
 def _operand(token):
     if len(token) < 2 or token[1] != ':':
         raise LoadError('malformed operand: %s' % token)
@@ -63,6 +91,11 @@ def _operand(token):
         return rawiseq.RawOperand(rawiseq.OP_STR, 0, _unescape(body))
     if kind == 'q':
         return rawiseq.RawOperand(rawiseq.OP_ISEQ, _int(body, 'iseq index'))
+    if kind == 'a':
+        items = []
+        for item in _split_items(body):
+            items.append(_operand(item))
+        return rawiseq.RawOperand(rawiseq.OP_ARRAY, 0, '', 0, False, items)
     if kind == 'x':
         return rawiseq.RawOperand(rawiseq.OP_OTHER, 0, _unescape(body))
     if kind == 'c':

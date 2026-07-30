@@ -1,6 +1,6 @@
-"""Loaded code.
+"""Loaded code: W_ISeq.code is a flat list of ints.
 
-W_ISeq.code is a flat list of ints. Operands that are already ints (local
+Operands that are already ints (local
 slots, branch targets, interned ids) sit in it directly; everything else --
 literals, nested ISeqs, the W_CallInfo distilled from CALL_DATA -- goes into
 consts and the code stream carries the index.

@@ -3,5 +3,9 @@
 *.dSYM/
 *.pyc
 test/probe
+docs/
 rpyyarv
+rpyyarv-jit
+rpyyarv-dump
+rpyyarv-dump-jit
 !Makefile

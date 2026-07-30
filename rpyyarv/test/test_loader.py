@@ -1,9 +1,4 @@
-"""Loader tests.
-
-The .iseq fixtures are real RubyVM::InstructionSequence output (`make
-fixtures`). Tests needing a program the compiler will not produce edit a
-dump instead of inventing bytecode.
-"""
+"""Loader tests; the .iseq fixtures are real InstructionSequence output."""
 
 import os
 import subprocess
@@ -18,12 +13,14 @@ for _p in (_HERE, _ROOT):
 import insns
 import interp
 import iseqdump
+import kernel
 import loader
 from error import LoadError, UnsupportedOperation
 from frame import Frame
 from iseq import W_CallInfo, W_ISeq, NO_BLOCK_ISEQ
+from objects.string import W_String
 from objects.main import W_Main
-from objects.transparent import W_Fixnum
+from objects.transparent import W_Fixnum, w_nil
 
 DUMPER = os.path.join(_ROOT, 'scripts', 'dump_iseq.rb')
 
@@ -80,6 +77,25 @@ def test_fib_rec_from_source():
     assert run(text).int_w() == 6765
 
 
+def test_fib_iterative_end_to_end():
+    # test/fib.rb, the interception fixture: interpolation, puts and all
+    out = []
+    saved = kernel.write
+    kernel.write = lambda s: out.append(s)
+    try:
+        w_ret = run(fixture('fib.iseq'))
+    finally:
+        kernel.write = saved
+    assert ''.join(out) == 'EXECUTED:832040\n'
+    assert w_ret is w_nil
+
+
+def test_string_literal_loaded():
+    w_iseq = loader.load_dump(fixture('fib.iseq'))
+    strings = [w.str_w() for w in w_iseq.consts if isinstance(w, W_String)]
+    assert strings == ['EXECUTED:']
+
+
 def test_locals_end_to_end():
     # f(9, 4)
     w_iseq = loader.load_dump(fixture('locals.iseq'))
@@ -120,25 +136,28 @@ def test_specialized_variants_and_const_pool():
 
 
 def test_missing_instructions_are_reported_together():
-    text = fixture('fib.iseq')
+    text = patched(fixture('fib_rec.iseq'), 'insn\tputself\ninsn\tputobject',
+                   'insn\tputstring\ts:x\ninsn\tnewhash\ti:0\n'
+                   'insn\tputstring\ts:y\n'
+                   'insn\tputself\ninsn\tputobject')
     l = loader.Loader(iseqdump.parse(text))
     l.scan()
-    assert l.missing == {'objtostring': 1, 'anytostring': 1,
-                         'concatstrings': 1}
-    assert l.missing_names == ['objtostring', 'anytostring', 'concatstrings']
+    assert l.missing == {'putstring': 2, 'newhash': 1}
+    assert l.missing_names == ['putstring', 'newhash']
     expect(UnsupportedOperation, text,
-           '3 unimplemented instruction(s) in 3 occurrence(s): '
-           'objtostring x1, anytostring x1, concatstrings x1')
+           '2 unimplemented instruction(s) in 3 occurrence(s): '
+           'putstring x2, newhash x1')
 
 
 def test_missing_instructions_are_counted():
     text = patched(fixture('fib_rec.iseq'),
                    'insn\tputself\ninsn\tgetlocal_WC_0\ti:3',
-                   'insn\tswap\ninsn\tswap\ninsn\tputstring\ts:x\n'
+                   'insn\tnewarray\ti:0\ninsn\tnewarray\ti:0\n'
+                   'insn\tputstring\ts:x\n'
                    'insn\tputself\ninsn\tgetlocal_WC_0\ti:3')
     expect(UnsupportedOperation, text,
            '2 unimplemented instruction(s) in 3 occurrence(s): '
-           'swap x2, putstring x1')
+           'newarray x2, putstring x1')
 
 
 def test_local_level_rejected():
@@ -190,9 +209,9 @@ def test_operand_shape_is_checked():
 
 def test_unsupported_literal():
     text = patched(fixture('fib_rec.iseq'), 'insn\tputobject\ti:20',
-                   'insn\tputobject\ts:hello')
+                   'insn\tputobject\ty:a_symbol')
     expect(UnsupportedOperation, text,
-           "putobject of String hello in '<main>': RPyYARV has no such "
+           "putobject of Symbol a_symbol in '<main>': RPyYARV has no such "
            "object yet")
 
 

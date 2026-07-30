@@ -132,3 +132,32 @@ rpyyarv_ary_entry(uintptr_t ary, long idx)
 int rpyyarv_is_array(uintptr_t v)  { return RB_TYPE_P((VALUE)v, T_ARRAY) ? 1 : 0; }
 int rpyyarv_is_symbol(uintptr_t v) { return SYMBOL_P((VALUE)v) ? 1 : 0; }
 int rpyyarv_is_fixnum(uintptr_t v) { return FIXNUM_P((VALUE)v) ? 1 : 0; }
+int rpyyarv_is_string(uintptr_t v) { return RB_TYPE_P((VALUE)v, T_STRING) ? 1 : 0; }
+int rpyyarv_is_hash(uintptr_t v)   { return RB_TYPE_P((VALUE)v, T_HASH) ? 1 : 0; }
+int rpyyarv_is_nil(uintptr_t v)    { return NIL_P((VALUE)v) ? 1 : 0; }
+int rpyyarv_is_true(uintptr_t v)   { return (VALUE)v == Qtrue ? 1 : 0; }
+int rpyyarv_is_false(uintptr_t v)  { return (VALUE)v == Qfalse ? 1 : 0; }
+
+long
+rpyyarv_num2long(uintptr_t v)
+{
+    VALUE val = (VALUE)v;
+    if (!RB_INTEGER_TYPE_P(val)) return 0;
+    return NUM2LONG(val);
+}
+
+uintptr_t
+rpyyarv_hash_aref(uintptr_t hash, const char *key)
+{
+    VALUE h = (VALUE)hash;
+    if (!RB_TYPE_P(h, T_HASH)) return (uintptr_t)Qnil;
+    return (uintptr_t)rb_hash_aref(h, ID2SYM(rb_intern(key)));
+}
+
+const char *
+rpyyarv_sym_cstr(uintptr_t sym)
+{
+    VALUE v = (VALUE)sym;
+    if (!SYMBOL_P(v)) return NULL;
+    return rb_id2name(SYM2ID(v));
+}

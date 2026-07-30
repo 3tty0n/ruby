@@ -8,6 +8,9 @@ class W_Fixnum(W_Root):
     def int_w(self):
         return self.intval
 
+    def to_s_str(self):
+        return str(self.intval)
+
     def repr(self):
         return str(self.intval)
 
@@ -16,11 +19,17 @@ class W_Nil(W_Root):
     def is_true(self):
         return False
 
+    def to_s_str(self):
+        return ''
+
     def repr(self):
         return 'nil'
 
 
 class W_True(W_Root):
+    def to_s_str(self):
+        return 'true'
+
     def repr(self):
         return 'true'
 
@@ -28,6 +37,9 @@ class W_True(W_Root):
 class W_False(W_Root):
     def is_true(self):
         return False
+
+    def to_s_str(self):
+        return 'false'
 
     def repr(self):
         return 'false'

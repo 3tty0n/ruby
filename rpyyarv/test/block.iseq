@@ -1,4 +1,4 @@
-dump	1	3.3.8	test/block.rb
+dump	1	4.0.6	test/block.rb
 iseq	0	top	<main>
 locals	1
 stackmax	1

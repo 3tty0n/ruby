@@ -1,6 +1,4 @@
-"""Join insns.py's generated facts with yarv_map.py's decisions, indexed by
-opcode, at import time. A name yarv_map.py invents raises here.
-"""
+"""Join insns.py's facts with yarv_map.py's decisions, indexed by opcode."""
 
 import insns
 import yarv_map

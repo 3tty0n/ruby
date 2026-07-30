@@ -1,4 +1,4 @@
-dump	1	3.3.8	test/fib.rb
+dump	1	4.0.6	test/fib.rb
 iseq	0	top	<main>
 locals	0
 stackmax	4
@@ -29,37 +29,38 @@ catch	0
 line	7
 event	RUBY_EVENT_LINE
 event	RUBY_EVENT_CALL
-insn	putobject_INT2FIX_0_
-insn	putobject_INT2FIX_1_
-insn	setlocal_WC_0	i:3
+insn	putobject	a:i:0,i:1
+insn	expandarray	i:2	i:0
 insn	setlocal_WC_0	i:4
+insn	setlocal_WC_0	i:3
 line	8
 event	RUBY_EVENT_LINE
-insn	jump	y:label_31
+insn	jump	y:label_35
 insn	putnil
 insn	pop
-insn	jump	y:label_31
-label	label_12
+insn	jump	y:label_35
+label	label_15
 line	9
 event	RUBY_EVENT_LINE
 insn	getlocal_WC_0	i:3
 insn	getlocal_WC_0	i:4
 insn	getlocal_WC_0	i:3
 insn	opt_plus	c:1,16,0,+
-insn	setlocal_WC_0	i:3
+insn	swap
 insn	setlocal_WC_0	i:4
+insn	setlocal_WC_0	i:3
 line	10
 event	RUBY_EVENT_LINE
 insn	getlocal_WC_0	i:5
 insn	putobject_INT2FIX_1_
 insn	opt_minus	c:1,16,0,-
 insn	setlocal_WC_0	i:5
-label	label_31
+label	label_35
 line	8
 insn	getlocal_WC_0	i:5
 insn	putobject_INT2FIX_0_
 insn	opt_gt	c:1,16,0,>
-insn	branchif	y:label_12
+insn	branchif	y:label_15
 insn	putnil
 insn	pop
 line	12

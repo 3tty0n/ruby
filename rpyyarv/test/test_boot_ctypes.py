@@ -1,8 +1,4 @@
-"""ctypes check of the same boot_shim.c that boot.py drives through rffi.
-
-Runs without the RPython toolchain, so a failure here points at CRuby or the
-FFI boundary rather than at RPython.
-"""
+"""ctypes check of the same boot_shim.c that boot.py drives through rffi."""
 
 from __future__ import print_function
 
@@ -31,6 +27,14 @@ SIGNATURES = {
     "rpyyarv_is_array": ([VALUE], ctypes.c_int),
     "rpyyarv_is_symbol": ([VALUE], ctypes.c_int),
     "rpyyarv_is_fixnum": ([VALUE], ctypes.c_int),
+    "rpyyarv_is_string": ([VALUE], ctypes.c_int),
+    "rpyyarv_is_hash": ([VALUE], ctypes.c_int),
+    "rpyyarv_is_nil": ([VALUE], ctypes.c_int),
+    "rpyyarv_is_true": ([VALUE], ctypes.c_int),
+    "rpyyarv_is_false": ([VALUE], ctypes.c_int),
+    "rpyyarv_num2long": ([VALUE], ctypes.c_long),
+    "rpyyarv_hash_aref": ([VALUE, ctypes.c_char_p], VALUE),
+    "rpyyarv_sym_cstr": ([VALUE], ctypes.c_char_p),
 }
 
 
@@ -45,6 +49,42 @@ def load_shim():
                 fn.restype = restype
             return lib
     sys.exit("librpyyarv_boot not found; run `make shim` first")
+
+
+def check_frontend_helpers(lib, ary):
+    """The shim calls bootiseq.py makes, exercised without RPython."""
+    def sym(v):
+        return lib.rpyyarv_sym_cstr(v).decode()
+
+    misc = lib.rpyyarv_ary_entry(ary, 4)
+    assert lib.rpyyarv_is_hash(misc), "misc is a Hash"
+    stack_max = lib.rpyyarv_hash_aref(misc, b"stack_max")
+    assert lib.rpyyarv_num2long(stack_max) > 0, "misc[:stack_max]"
+    assert lib.rpyyarv_is_nil(lib.rpyyarv_hash_aref(misc, b"nope"))
+    # ruby_options yields ISEQ_TYPE_MAIN where compile_file yields :top
+    assert sym(lib.rpyyarv_ary_entry(ary, 9)) in ("top", "main")
+
+    body = lib.rpyyarv_ary_entry(ary, 13)
+    seen = {}
+    for i in range(lib.rpyyarv_ary_len(body)):
+        e = lib.rpyyarv_ary_entry(body, i)
+        if not lib.rpyyarv_is_array(e):
+            continue
+        name = sym(lib.rpyyarv_ary_entry(e, 0))
+        seen[name] = e
+    assert "definemethod" in seen, "definemethod in <main>"
+    assert sym(lib.rpyyarv_ary_entry(seen["definemethod"], 1)) == "fib"
+
+    cd = lib.rpyyarv_ary_entry(seen["opt_send_without_block"], 1)
+    assert lib.rpyyarv_is_hash(cd), "call data is a Hash"
+    assert sym(lib.rpyyarv_hash_aref(cd, b"mid")) in ("fib", "puts")
+    assert lib.rpyyarv_num2long(lib.rpyyarv_hash_aref(cd, b"orig_argc")) == 1
+    assert lib.rpyyarv_is_nil(lib.rpyyarv_hash_aref(cd, b"kw_arg"))
+
+    lit = lib.rpyyarv_ary_entry(seen["putobject"], 1)
+    assert lib.rpyyarv_is_string(lit) or lib.rpyyarv_is_fixnum(lit) \
+        or lib.rpyyarv_is_array(lit)
+    print("[rpyyarv] front-end helpers: ok")
 
 
 def main(argv):
@@ -104,6 +144,8 @@ def main(argv):
         s = show(e)
         print("[rpyyarv]   %s" % (s[:100] + ("..." if len(s) > 100 else "")))
         shown += 1
+
+    check_frontend_helpers(lib, ary)
 
     print("[rpyyarv] ruby_run_node() was never called.")
     return lib.rpyyarv_cleanup(0)

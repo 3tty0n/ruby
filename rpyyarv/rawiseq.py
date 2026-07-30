@@ -1,9 +1,8 @@
-"""The loader's input: ISeqs as CRuby spelled them, nothing decided yet.
+"""The seam between front end and loader: ISeqs as CRuby spelled them.
 
-The seam between front end and loader: iseqdump.py fills these in from the
-text dump, the boot path will fill them from to_a, and loader.py works on
-them without knowing which ran. Nested ISeqs sit in one flat table addressed
-by index, so no reader has to recurse.
+iseqdump.py and bootiseq.py both fill these in; loader.py works on them
+without knowing which ran. Nested ISeqs sit in one flat table addressed by
+index, so no reader has to recurse.
 """
 
 # Flat kinds rather than a class hierarchy: the loader picks the meaning from
@@ -17,20 +16,25 @@ OP_STR = 5
 OP_ISEQ = 6     # intval indexes RawProgram.iseqs
 OP_CALL = 7     # intval=orig_argc, flag=flags, strval=mid
 OP_OTHER = 8
+OP_ARRAY = 9    # items holds the elements
 
 KIND_NAMES = ['Integer', 'nil', 'true', 'false', 'Symbol', 'String',
-              'ISeq', 'call data', 'object']
+              'ISeq', 'call data', 'object', 'Array']
 
 
 class RawOperand(object):
-    def __init__(self, kind, intval=0, strval='', flag=0, has_kwarg=False):
+    def __init__(self, kind, intval=0, strval='', flag=0, has_kwarg=False,
+                 items=None):
         self.kind = kind
         self.intval = intval
         self.strval = strval
         self.flag = flag
         self.has_kwarg = has_kwarg
+        self.items = items if items is not None else []
 
     def describe(self):
+        if self.kind == OP_ARRAY:
+            return 'Array of %d' % len(self.items)
         if self.kind == OP_INT or self.kind == OP_ISEQ:
             return '%s %d' % (KIND_NAMES[self.kind], self.intval)
         if self.kind == OP_SYM or self.kind == OP_STR or \

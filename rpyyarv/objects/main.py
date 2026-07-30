@@ -1,7 +1,6 @@
-"""The toplevel self: one object standing in for CRuby's main, its singleton
-class and Object, so a toplevel `def` and a `putself` call meet in one table.
-"""
+"""The toplevel self, standing in for main, its singleton class and Object."""
 
+import kernel
 from methods import MethodTable
 from objects.base import W_Root
 
@@ -9,6 +8,7 @@ from objects.base import W_Root
 class W_Main(W_Root):
     def __init__(self):
         self.methods = MethodTable()
+        kernel.install(self)
 
     def lookup_method(self, mid):
         w_method = self.methods.lookup(mid)

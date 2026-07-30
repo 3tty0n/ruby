@@ -1,8 +1,4 @@
-"""Interned names: an ID is an index into this table, as in CRuby.
-
-Only the loader interns, so these tables are written before the interpreter
-runs and read-only afterwards.
-"""
+"""Interned names: an ID is an index into this table, as in CRuby."""
 
 _ids = {}
 _names = []

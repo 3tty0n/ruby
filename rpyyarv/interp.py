@@ -4,10 +4,11 @@ import symbols
 from error import UnsupportedOperation
 from frame import Frame
 from iseq import W_CallInfo, W_ISeq, NO_BLOCK_ISEQ
-from methods import W_Method
+from methods import W_CFunc, W_ISeqMethod
+from objects.array import W_Array
+from objects.string import W_String
 from objects.transparent import w_nil
-
-# Annotation-zero baseline: no rpython imports, no JIT hints.
+from rlib import JitDriver
 
 
 def _as_iseq(w_x):
@@ -22,7 +23,6 @@ def _callinfo(iseq, idx):
 
 
 def invoke(frame, w_ci):
-    """One call. The receiver sits below its arguments; both are popped."""
     argc = w_ci.argc
     recv_at = frame.sp - argc - 1
     if recv_at < 0:
@@ -36,32 +36,63 @@ def invoke(frame, w_ci):
 
     w_recv = frame.stack[recv_at]
     w_method = w_recv.lookup_method(w_ci.mid)
-    callee_iseq = w_method.w_iseq
-    if not callee_iseq.simple_params:
-        raise UnsupportedOperation(
-            "method '%s' has parameters RPyYARV does not support"
-            % symbols.name_of(w_ci.mid))
-    if argc != callee_iseq.nparams:
-        raise UnsupportedOperation(
-            "wrong number of arguments to '%s' (given %d, expected %d)"
-            % (symbols.name_of(w_ci.mid), argc, callee_iseq.nparams))
 
-    callee = Frame(callee_iseq, w_recv)
+    if isinstance(w_method, W_ISeqMethod):
+        callee_iseq = w_method.w_iseq
+        if not callee_iseq.simple_params:
+            raise UnsupportedOperation(
+                "method '%s' has parameters RPyYARV does not support"
+                % symbols.name_of(w_ci.mid))
+        _check_argc(w_ci.mid, argc, callee_iseq.nparams)
+        callee = Frame(callee_iseq, w_recv)
+        i = 0
+        while i < argc:
+            callee.locals[i] = frame.stack[recv_at + 1 + i]
+            i += 1
+        _drop(frame, recv_at)
+        return execute(callee_iseq, callee)
+
+    assert isinstance(w_method, W_CFunc)
+    if w_method.arity >= 0:
+        _check_argc(w_ci.mid, argc, w_method.arity)
+    args_w = []
     i = 0
     while i < argc:
-        callee.locals[i] = frame.stack[recv_at + 1 + i]
+        args_w.append(frame.stack[recv_at + 1 + i])
         i += 1
-    while frame.sp > recv_at:
+    _drop(frame, recv_at)
+    return w_method.call(w_recv, args_w)
+
+
+def _check_argc(mid, argc, want):
+    if argc != want:
+        raise UnsupportedOperation(
+            "wrong number of arguments to '%s' (given %d, expected %d)"
+            % (symbols.name_of(mid), argc, want))
+
+
+def _drop(frame, sp):
+    while frame.sp > sp:
         frame.sp -= 1
         frame.stack[frame.sp] = None
 
-    return execute(callee_iseq, callee)
+
+def _to_s(w_x):
+    if isinstance(w_x, W_String):
+        return w_x
+    return W_String(w_x.to_s_str())
+
+
+jitdriver = JitDriver(greens=['pc', 'iseq'], reds=['frame'])
 
 
 def execute(iseq, frame):
-    code = iseq.code
     pc = 0
     while True:
+        jitdriver.jit_merge_point(iseq=iseq, pc=pc, frame=frame)
+        # rebound from the green iseq each iteration; hoisting it would leave a
+        # live variable across the merge point that is neither green nor red
+        code = iseq.code
         opcode = code[pc]
         pc += 1
 
@@ -89,6 +120,26 @@ def execute(iseq, frame):
             frame.push(w_x)
         elif opcode == insns.POP:
             frame.pop()
+        elif opcode == insns.SWAP:
+            w_a = frame.pop()
+            w_b = frame.pop()
+            frame.push(w_a)
+            frame.push(w_b)
+        elif opcode == insns.EXPANDARRAY:
+            n = code[pc]
+            pc += 1
+            w_ary = frame.pop()
+            if not isinstance(w_ary, W_Array):
+                raise UnsupportedOperation('expandarray needs an Array, got %s'
+                                           % w_ary.repr())
+            items_w = w_ary.items_w
+            i = n - 1
+            while i >= 0:
+                if i < len(items_w):
+                    frame.push(items_w[i])
+                else:
+                    frame.push(w_nil)
+                i -= 1
         elif opcode == insns.OPT_PLUS:
             w_b = frame.pop()
             w_a = frame.pop()
@@ -121,11 +172,30 @@ def execute(iseq, frame):
             w_b = frame.pop()
             w_a = frame.pop()
             frame.push(helpers.w_eq(w_a, w_b))
+        elif opcode == insns.OBJTOSTRING:
+            frame.push(_to_s(frame.pop()))
+        elif opcode == insns.ANYTOSTRING:
+            w_str = frame.pop()
+            w_val = frame.pop()
+            if not isinstance(w_str, W_String):
+                raise UnsupportedOperation('to_s on %s did not return a String'
+                                           % w_val.repr())
+            frame.push(w_str)
+        elif opcode == insns.CONCATSTRINGS:
+            n = code[pc]
+            pc += 1
+            parts = [''] * n
+            i = n - 1
+            while i >= 0:
+                parts[i] = frame.pop().str_w()
+                i -= 1
+            frame.push(W_String(''.join(parts)))
         elif opcode == insns.DEFINEMETHOD:
             mid = code[pc]
             w_body = iseq.consts[code[pc + 1]]
             pc += 2
-            frame.w_self.define_method(mid, W_Method(mid, _as_iseq(w_body)))
+            frame.w_self.define_method(
+                mid, W_ISeqMethod(mid, _as_iseq(w_body)))
         elif opcode == insns.OPT_SEND_WITHOUT_BLOCK:
             idx = code[pc]
             pc += 1

@@ -44,6 +44,19 @@ uintptr_t rpyyarv_ary_entry(uintptr_t ary, long idx);
 int rpyyarv_is_array(uintptr_t v);
 int rpyyarv_is_symbol(uintptr_t v);
 int rpyyarv_is_fixnum(uintptr_t v);
+int rpyyarv_is_string(uintptr_t v);
+int rpyyarv_is_hash(uintptr_t v);
+int rpyyarv_is_nil(uintptr_t v);
+int rpyyarv_is_true(uintptr_t v);
+int rpyyarv_is_false(uintptr_t v);
+
+long rpyyarv_num2long(uintptr_t v);
+
+/* hash[:key], for the to_a side tables (misc, params, call data). */
+uintptr_t rpyyarv_hash_aref(uintptr_t hash, const char *key);
+
+/* Symbol#to_s without a rb_funcall round trip. */
+const char *rpyyarv_sym_cstr(uintptr_t sym);
 
 #ifdef __cplusplus
 }

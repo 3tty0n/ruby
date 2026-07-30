@@ -9,12 +9,14 @@ for _p in (_HERE, _ROOT):
 
 import insns
 import interp
+import kernel
 import symbols
 from error import UnsupportedOperation
 from frame import Frame
 from iseq import W_CallInfo, W_ISeq, NO_BLOCK_ISEQ
-from methods import W_Method
+from methods import W_CFunc, W_ISeqMethod, W_Method
 from objects.main import W_Main, w_main
+from objects.string import W_String
 from objects.transparent import W_Fixnum, w_nil, w_true, w_false
 
 
@@ -251,7 +253,7 @@ def test_definemethod_and_call():
     frame = Frame(iseq, w_self)
     assert interp.execute(iseq, frame).int_w() == 7
     w_method = w_self.methods.lookup(add_id)
-    assert isinstance(w_method, W_Method)
+    assert isinstance(w_method, W_ISeqMethod)
     assert w_method.w_iseq is w_body
     assert frame.sp == 0
     for slot in frame.stack:
@@ -412,6 +414,134 @@ def test_definemethod_needs_a_receiver_with_a_table():
         insns.LEAVE,
     ])
     expect_unsupported(iseq, w_nil, 'cannot define a method on nil')
+
+
+def capture(func):
+    """Collect what the builtins print instead of writing to stdout."""
+    out = []
+    saved = kernel.write
+    kernel.write = lambda s: out.append(s)
+    try:
+        w_ret = func()
+    finally:
+        kernel.write = saved
+    return ''.join(out), w_ret
+
+
+def test_string_literal_and_concat():
+    # "ab" + "c" as the compiler builds an interpolation
+    iseq = asm([W_String('ab'), W_String('c')], 0, 4, [
+        insns.PUTOBJECT, 0,
+        insns.PUTOBJECT, 1,
+        insns.CONCATSTRINGS, 2,
+        insns.LEAVE,
+    ])
+    w_str = interp.run(iseq)
+    assert isinstance(w_str, W_String)
+    assert w_str.str_w() == 'abc'
+    assert w_str.to_s_str() == 'abc'
+    assert w_str.is_true()
+
+
+def test_concatstrings_needs_strings():
+    iseq = asm([W_Fixnum(1), W_String('x')], 0, 4, [
+        insns.PUTOBJECT, 0,
+        insns.PUTOBJECT, 1,
+        insns.CONCATSTRINGS, 2,
+        insns.LEAVE,
+    ])
+    expect_unsupported(iseq, W_Main(), 'not a string')
+
+
+def test_to_s_str():
+    assert W_Fixnum(-7).to_s_str() == '-7'
+    assert w_nil.to_s_str() == ''
+    assert w_true.to_s_str() == 'true'
+    assert w_false.to_s_str() == 'false'
+
+
+def test_objtostring():
+    # dup / objtostring / anytostring, the interpolation shape
+    iseq = asm([W_Fixnum(832040)], 0, 4, [
+        insns.PUTOBJECT, 0,
+        insns.DUP,
+        insns.OBJTOSTRING,
+        insns.ANYTOSTRING,
+        insns.LEAVE,
+    ])
+    assert interp.run(iseq).str_w() == '832040'
+
+    # a String is already its own to_s
+    w_str = W_String('done')
+    iseq2 = asm([w_str], 0, 4, [
+        insns.PUTOBJECT, 0,
+        insns.OBJTOSTRING,
+        insns.LEAVE,
+    ])
+    assert interp.run(iseq2) is w_str
+
+
+def test_objtostring_without_to_s():
+    iseq = asm([asm([], 0, 1, [insns.LEAVE], name='inner')], 0, 4, [
+        insns.PUTOBJECT, 0,
+        insns.OBJTOSTRING,
+        insns.LEAVE,
+    ])
+    expect_unsupported(iseq, W_Main(), 'no to_s for <W_ISeq inner>')
+
+
+def test_anytostring_needs_a_string():
+    iseq = asm([W_Fixnum(1), W_Fixnum(2)], 0, 4, [
+        insns.PUTOBJECT, 0,
+        insns.PUTOBJECT, 1,
+        insns.ANYTOSTRING,
+        insns.LEAVE,
+    ])
+    expect_unsupported(iseq, W_Main(), 'to_s on 1 did not return a String')
+
+
+def _puts_iseq(consts, argc):
+    items = [insns.PUTSELF]
+    for i in range(argc):
+        items.append(insns.PUTOBJECT)
+        items.append(i)
+    items.append(insns.OPT_SEND_WITHOUT_BLOCK)
+    items.append(len(consts) - 1)
+    items.append(insns.LEAVE)
+    return asm(consts, 0, 4, items)
+
+
+def test_puts():
+    puts_id = symbols.intern('puts')
+    iseq = _puts_iseq([W_String('hi'), W_Fixnum(7), W_CallInfo(puts_id, 2)], 2)
+    printed, w_ret = capture(lambda: interp.run(iseq))
+    assert printed == 'hi\n7\n'
+    assert w_ret is w_nil
+
+    iseq2 = _puts_iseq([W_CallInfo(puts_id, 0)], 0)
+    printed2, w_ret2 = capture(lambda: interp.run(iseq2))
+    assert printed2 == '\n'
+    assert w_ret2 is w_nil
+
+
+def test_cfunc_arity_is_checked():
+    class W_One(W_CFunc):
+        def call(self, w_recv, args_w):
+            return args_w[0]
+
+    one_id = symbols.intern('one')
+    w_self = W_Main()
+    w_self.define_method(one_id, W_One(one_id, 1))
+    iseq = asm([W_Fixnum(1), W_Fixnum(2), W_CallInfo(one_id, 2)], 0, 4, [
+        insns.PUTSELF,
+        insns.PUTOBJECT, 0,
+        insns.PUTOBJECT, 1,
+        insns.OPT_SEND_WITHOUT_BLOCK, 2,
+        insns.LEAVE,
+    ])
+    expect_unsupported(
+        iseq, w_self,
+        "wrong number of arguments to 'one' (given 2, expected 1)")
 
 
 def _main():

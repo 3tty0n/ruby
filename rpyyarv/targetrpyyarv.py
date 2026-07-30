@@ -1,50 +1,10 @@
-"""RPython translation entry point
-"""
+"""RPython translation entry point: embedded CRuby compiles, RPyYARV runs."""
 
 import boot
-
-
-def probe(iseqw):
-    """Dump the intercepted ISeq. Placeholder until interp.py lands."""
-    print '[rpyyarv] === Success: intercepted main ISeq ==='
-    print '[rpyyarv] label         : %s' % boot.inspect(boot.call0(iseqw, 'label'))
-    print '[rpyyarv] absolute_path : %s' % boot.inspect(
-        boot.call0(iseqw, 'absolute_path'))
-
-    ary = boot.call0(iseqw, 'to_a')
-    print '[rpyyarv] to_a.size     : %d' % boot.rb_ary_len(ary)
-
-    insns = boot.rb_ary_entry(ary, boot.rb_ary_len(ary) - 1)
-    n_elem = boot.rb_ary_len(insns)
-    n_insn = 0
-    n_label = 0
-    n_lineno = 0
-    i = 0
-    while i < n_elem:
-        e = boot.rb_ary_entry(insns, i)
-        if boot.is_array(e):
-            n_insn += 1
-        elif boot.is_symbol(e):
-            n_label += 1
-        elif boot.is_fixnum(e):
-            n_lineno += 1
-        i += 1
-    print '[rpyyarv] elements: %d (insn %d / label %d / lineno %d)' % (
-        n_elem, n_insn, n_label, n_lineno)
-
-    shown = 0
-    i = 0
-    while i < n_elem and shown < 6:
-        e = boot.rb_ary_entry(insns, i)
-        if boot.is_array(e):
-            s = boot.inspect(e)
-            if len(s) > 100:
-                s = s[:100] + '...'
-            print '[rpyyarv]   %s' % s
-            shown += 1
-        i += 1
-
-    print '[rpyyarv] ruby_run_node() was never called.'
+import bootiseq
+import interp
+import loader
+from error import RPyYarvError
 
 
 def entry_point(argv):
@@ -57,7 +17,11 @@ def entry_point(argv):
         return status
 
     try:
-        probe(iseqw)
+        w_iseq = loader.load(bootiseq.load(iseqw))
+        interp.run(w_iseq)
+    except RPyYarvError, e:
+        print '[rpyyarv] %s' % e.msg
+        return 1
     except boot.RubyError, e:
         print '[rpyyarv] Ruby exception in %s' % e.mid
         return 1
