@@ -14,6 +14,8 @@ LDLIBS  += -lruby.$(SOVER)
 PROBE   := test/probe
 SHIM    := librpyyarv_boot.dylib
 PYPY    ?= $(HOME)/src/pypy
+PYTHON  ?= python3
+RUBY    ?= ruby
 
 .PHONY: all
 all: $(SHIM) $(PROBE)
@@ -46,7 +48,21 @@ $(PROBE): test/probe.c
 
 .PHONY: test
 test: $(SHIM)
-	RPYYARV_BUILD=$(BUILD) python3 test/test_boot_ctypes.py $(SCRIPT)
+	RPYYARV_BUILD=$(BUILD) $(PYTHON) test/test_boot_ctypes.py $(SCRIPT)
+
+.PHONY: test-unit
+test-unit:
+	$(PYTHON) test/test_interp.py
+	$(PYTHON) test/test_loader.py
+
+# Checked in, so the tests do not need a ruby.
+FIXTURES := $(patsubst %.rb,%.iseq,$(wildcard test/*.rb))
+
+.PHONY: fixtures
+fixtures: $(FIXTURES)
+
+test/%.iseq: test/%.rb scripts/dump_iseq.rb
+	$(RUBY) scripts/dump_iseq.rb $< > $@
 
 .PHONY: build-interp
 build-interp:

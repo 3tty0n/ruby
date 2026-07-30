@@ -1,0 +1,36 @@
+dump	1	3.3.8	test/locals.rb
+iseq	0	top	<main>
+locals	0
+stackmax	3
+params	0	
+catch	0
+line	3
+event	RUBY_EVENT_LINE
+insn	definemethod	y:f	q:1
+line	8
+event	RUBY_EVENT_LINE
+insn	putself
+insn	putobject	i:9
+insn	putobject	i:4
+insn	opt_send_without_block	c:2,20,0,f
+insn	leave
+endiseq
+iseq	1	method	f
+locals	3
+stackmax	2
+params	2	
+catch	0
+line	4
+event	RUBY_EVENT_LINE
+event	RUBY_EVENT_CALL
+insn	getlocal_WC_0	i:5
+insn	getlocal_WC_0	i:4
+insn	opt_minus	c:1,16,0,-
+insn	setlocal_WC_0	i:3
+line	5
+event	RUBY_EVENT_LINE
+insn	getlocal_WC_0	i:3
+line	6
+event	RUBY_EVENT_RETURN
+insn	leave
+endiseq

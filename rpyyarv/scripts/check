@@ -4,7 +4,7 @@
 #
 #   script/check [SCRIPT.rb]
 #
-# Env: BUILD (CRuby build tree), PROBE, SHIM.
+# Env: BUILD (CRuby build tree), PROBE, SHIM, PYTHON.
 # Defaults assume it is run from the rpyyarv/ directory or via `make check`.
 
 set -uo pipefail
@@ -17,6 +17,7 @@ BUILD=${BUILD:-$TOP/build}
 PROBE=${PROBE:-$PROJ/test/probe}
 SHIM=${SHIM:-$PROJ/librpyyarv_boot.dylib}
 SCRIPT=${1:-$PROJ/test/fib.rb}
+PYTHON=${PYTHON:-python3}
 
 MARKER=EXECUTED:832040
 
@@ -30,9 +31,27 @@ require_file() {
   [ -e "$1" ] || { echo "NG: missing $1 (run make first)"; exit 1; }
 }
 
+require_file "$SCRIPT"
+
+# Sections that need no CRuby build come first, so they still report here.
+hdr "Generated instruction facts in step with insns.def"
+if (cd "$TOP/rpyvmgen" && ruby verify.rb) >/dev/null 2>&1; then
+  ok "yarv_insns.py and yarv_map.py agree with insns.def"
+else
+  ng "instruction tables drifted; run: make -C rpyvmgen check"
+fi
+
+hdr "Interpreter and loader unit tests"
+for t in test_interp test_loader; do
+  if "$PYTHON" "$PROJ/test/$t.py" >/dev/null 2>&1; then
+    ok "$t"
+  else
+    ng "$t (run: $PYTHON $PROJ/test/$t.py)"
+  fi
+done
+
 require_file "$PROBE"
 require_file "$SHIM"
-require_file "$SCRIPT"
 
 hdr "Interception"
 if "$PROBE" "$SCRIPT" 2>&1 | grep -q "$MARKER"; then
@@ -54,13 +73,6 @@ if DYLD_LIBRARY_PATH=$BUILD "$BUILD/ruby" "$SCRIPT" 2>/dev/null | grep -q "$MARK
   ok "marker is reachable"
 else
   ng "marker never appears; the interception check proves nothing"
-fi
-
-hdr "Generated instruction facts in step with insns.def"
-if (cd "$TOP/rpyvmgen" && ruby verify.rb) >/dev/null 2>&1; then
-  ok "yarv_insns.py and yarv_map.py agree with insns.def"
-else
-  ng "instruction tables drifted; run: make -C rpyvmgen check"
 fi
 
 hdr "ctypes path"

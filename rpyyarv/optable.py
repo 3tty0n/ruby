@@ -1,7 +1,5 @@
-"""Join generated facts with hand-written decisions, indexed by opcode.
-
-Computed at import time. A name missing from insns.py raises here,
-which is the check that insns.py.
+"""Join insns.py's generated facts with yarv_map.py's decisions, indexed by
+opcode, at import time. A name yarv_map.py invents raises here.
 """
 
 import insns
@@ -9,11 +7,8 @@ import yarv_map
 
 _N = insns.INSTRUCTION_COUNT
 
-# True where RPyYARV implements the instruction; the loader rejects the rest.
 IMPLEMENTED = [False] * _N
 
-# Operand positions the loader emits, and how many words that is. Unimplemented
-# instructions keep an empty list, which is never read.
 EMIT_POSITIONS = []
 NUM_OPERANDS = [0] * _N
 for _i in range(_N):
@@ -34,3 +29,6 @@ for _i in range(len(insns.TYPE_NAMES)):
     DISCARDED_TYPES[_i] = _t in yarv_map.DISCARDED_OPERAND_TYPES
 
 MAX_LOCAL_LEVEL = yarv_map.MAX_LOCAL_LEVEL
+ENV_DATA_SIZE = yarv_map.ENV_DATA_SIZE
+SIMPLE_CALL_FLAGS = yarv_map.SIMPLE_CALL_FLAGS
+CALL_FLAG_ARGS_SIMPLE = yarv_map.CALL_FLAG_ARGS_SIMPLE

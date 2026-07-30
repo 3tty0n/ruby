@@ -1,0 +1,71 @@
+dump	1	3.3.8	test/fib.rb
+iseq	0	top	<main>
+locals	0
+stackmax	4
+params	0	
+catch	0
+line	6
+event	RUBY_EVENT_LINE
+insn	definemethod	y:fib	q:1
+line	15
+event	RUBY_EVENT_LINE
+insn	putself
+insn	putobject	s:EXECUTED:
+insn	putself
+insn	putobject	i:30
+insn	opt_send_without_block	c:1,20,0,fib
+insn	dup
+insn	objtostring	c:0,20,0,to_s
+insn	anytostring
+insn	concatstrings	i:2
+insn	opt_send_without_block	c:1,20,0,puts
+insn	leave
+endiseq
+iseq	1	method	fib
+locals	3
+stackmax	3
+params	1	
+catch	0
+line	7
+event	RUBY_EVENT_LINE
+event	RUBY_EVENT_CALL
+insn	putobject_INT2FIX_0_
+insn	putobject_INT2FIX_1_
+insn	setlocal_WC_0	i:3
+insn	setlocal_WC_0	i:4
+line	8
+event	RUBY_EVENT_LINE
+insn	jump	y:label_31
+insn	putnil
+insn	pop
+insn	jump	y:label_31
+label	label_12
+line	9
+event	RUBY_EVENT_LINE
+insn	getlocal_WC_0	i:3
+insn	getlocal_WC_0	i:4
+insn	getlocal_WC_0	i:3
+insn	opt_plus	c:1,16,0,+
+insn	setlocal_WC_0	i:3
+insn	setlocal_WC_0	i:4
+line	10
+event	RUBY_EVENT_LINE
+insn	getlocal_WC_0	i:5
+insn	putobject_INT2FIX_1_
+insn	opt_minus	c:1,16,0,-
+insn	setlocal_WC_0	i:5
+label	label_31
+line	8
+insn	getlocal_WC_0	i:5
+insn	putobject_INT2FIX_0_
+insn	opt_gt	c:1,16,0,>
+insn	branchif	y:label_12
+insn	putnil
+insn	pop
+line	12
+event	RUBY_EVENT_LINE
+insn	getlocal_WC_0	i:4
+line	13
+event	RUBY_EVENT_RETURN
+insn	leave
+endiseq

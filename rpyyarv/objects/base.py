@@ -1,3 +1,4 @@
+import symbols
 from error import UnsupportedOperation
 
 
@@ -8,6 +9,17 @@ class W_Root(object):
 
     def int_w(self):
         raise UnsupportedOperation('not an integer')
+
+    def lookup_method(self, mid):
+        raise self.no_method_error(mid)
+
+    def define_method(self, mid, w_method):
+        raise UnsupportedOperation(
+            'cannot define a method on %s' % self.repr())
+
+    def no_method_error(self, mid):
+        return UnsupportedOperation("undefined method '%s' for %s"
+                                    % (symbols.name_of(mid), self.repr()))
 
     def repr(self):
         return '<W_Root>'

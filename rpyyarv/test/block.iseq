@@ -1,0 +1,28 @@
+dump	1	3.3.8	test/block.rb
+iseq	0	top	<main>
+locals	1
+stackmax	1
+params	0	
+catch	0
+line	3
+event	RUBY_EVENT_LINE
+insn	putobject_INT2FIX_1_
+insn	setlocal_WC_0	i:3
+line	4
+event	RUBY_EVENT_LINE
+insn	putobject_INT2FIX_1_
+insn	send	c:0,0,0,times	q:1
+insn	leave
+endiseq
+iseq	1	block	block in <main>
+locals	0
+stackmax	1
+params	0	
+catch	0
+line	4
+event	RUBY_EVENT_LINE
+event	RUBY_EVENT_B_CALL
+insn	getlocal_WC_1	i:3
+event	RUBY_EVENT_B_RETURN
+insn	leave
+endiseq
