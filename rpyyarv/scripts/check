@@ -44,7 +44,7 @@ fi
 
 hdr "Interpreter and loader unit tests"
 for t in test_interp test_loader; do
-  if "$PYTHON" "$PROJ/test/$t.py" >/dev/null 2>&1; then
+  if RPYYARV_BUILD=$BUILD "$PYTHON" "$PROJ/test/$t.py" >/dev/null 2>&1; then
     ok "$t"
   else
     ng "$t (run: $PYTHON $PROJ/test/$t.py)"
@@ -75,6 +75,13 @@ if DYLD_LIBRARY_PATH=$BUILD LD_LIBRARY_PATH=$BUILD "$BUILD/ruby" "$SCRIPT" \
   ok "marker is reachable"
 else
   ng "marker never appears; the interception check proves nothing"
+fi
+
+hdr "Generated instruction facts in step with insns.def"
+if (cd "$TOP/rpyvmgen" && ruby verify.rb) >/dev/null 2>&1; then
+  ok "yarv_insns.py and yarv_map.py agree with insns.def"
+else
+  ng "instruction tables drifted; run: make -C rpyvmgen check"
 fi
 
 hdr "ctypes path"

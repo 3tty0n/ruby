@@ -2,6 +2,7 @@
 """
 
 import os
+import sys
 
 from rpython.rtyper.lltypesystem import lltype, rffi
 from rpython.translator.tool.cbuild import ExternalCompilationInfo
@@ -35,13 +36,21 @@ def _libruby_name():
     raise RuntimeError('no libruby shared library in %s' % _BUILD)
 
 
+def _link_extra():
+    flags = ['-Wl,-rpath,' + _BUILD]
+    if sys.platform == 'darwin':
+        # ld bakes in libruby's install prefix; `make relink` rewrites it after
+        flags.append('-Wl,-headerpad_max_install_names')
+    return flags
+
+
 eci = ExternalCompilationInfo(
     includes=['ruby.h', 'boot_shim.h'],
     include_dirs=[os.path.join(_TOP, 'include'), _arch_include_dir(), _HERE],
     separate_module_files=[os.path.join(_HERE, 'boot_shim.c')],
     libraries=[_libruby_name()],
     library_dirs=[_BUILD],
-    link_extra=['-Wl,-rpath,' + _BUILD],
+    link_extra=_link_extra(),
 )
 
 # VALUE is uintptr_t. Only VALUEs cross this boundary

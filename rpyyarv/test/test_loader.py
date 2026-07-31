@@ -23,6 +23,20 @@ from objects.main import W_Main
 from objects.transparent import W_Fixnum, w_nil
 
 DUMPER = os.path.join(_ROOT, 'scripts', 'dump_iseq.rb')
+_BUILD = os.environ.get('RPYYARV_BUILD',
+                        os.path.join(os.path.dirname(_ROOT), 'build'))
+
+
+def build_ruby():
+    """Only this tree's ruby emits instructions that match insns.py."""
+    exe = os.environ.get('RUBY', os.path.join(_BUILD, 'ruby'))
+    if not os.path.exists(exe):
+        return None, None
+    env = dict(os.environ)
+    # The build tree's libruby is tagged with its install prefix, not its path
+    for var in ('DYLD_LIBRARY_PATH', 'LD_LIBRARY_PATH'):
+        env[var] = os.pathsep.join([_BUILD] + [p for p in [env.get(var)] if p])
+    return exe, env
 
 
 def fixture(name):
@@ -66,11 +80,15 @@ def test_fib_rec_end_to_end():
 
 def test_fib_rec_from_source():
     """.rb in, value out, when a ruby is around."""
+    exe, env = build_ruby()
+    if exe is None:
+        print('   (no ruby in %s: fixture only)' % _BUILD)
+        return
     try:
         text = subprocess.check_output(
-            ['ruby', DUMPER, os.path.join(_HERE, 'fib_rec.rb')])
+            [exe, DUMPER, os.path.join(_HERE, 'fib_rec.rb')], env=env)
     except (OSError, subprocess.CalledProcessError):
-        print('   (no ruby on PATH: fixture only)')
+        print('   (build ruby will not run: fixture only)')
         return
     if not isinstance(text, str):
         text = text.decode('utf-8')
