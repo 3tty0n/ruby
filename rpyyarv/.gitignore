@@ -9,3 +9,5 @@ rpyyarv-jit
 rpyyarv-dump
 rpyyarv-dump-jit
 !Makefile
+
+pypy/
