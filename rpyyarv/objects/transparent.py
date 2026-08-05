@@ -1,9 +1,14 @@
 from objects.base import W_Root
+from objects.klass import (w_false_class, w_integer_class, w_nil_class,
+                           w_true_class)
 
 
 class W_Fixnum(W_Root):
     def __init__(self, intval):
         self.intval = intval
+
+    def getclass(self):
+        return w_integer_class
 
     def int_w(self):
         return self.intval
@@ -16,6 +21,9 @@ class W_Fixnum(W_Root):
 
 
 class W_Nil(W_Root):
+    def getclass(self):
+        return w_nil_class
+
     def is_true(self):
         return False
 
@@ -27,6 +35,9 @@ class W_Nil(W_Root):
 
 
 class W_True(W_Root):
+    def getclass(self):
+        return w_true_class
+
     def to_s_str(self):
         return 'true'
 
@@ -35,6 +46,9 @@ class W_True(W_Root):
 
 
 class W_False(W_Root):
+    def getclass(self):
+        return w_false_class
+
     def is_true(self):
         return False
 

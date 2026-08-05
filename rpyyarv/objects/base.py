@@ -1,5 +1,6 @@
 import symbols
 from error import UnsupportedOperation
+from rlib import promote
 
 
 class W_Root(object):
@@ -16,8 +17,15 @@ class W_Root(object):
     def to_s_str(self):
         raise UnsupportedOperation('no to_s for %s' % self.repr())
 
+    def getclass(self):
+        raise UnsupportedOperation('no class for %s' % self.repr())
+
     def lookup_method(self, mid):
-        raise self.no_method_error(mid)
+        w_class = promote(self.getclass())
+        w_method = w_class.find_method(mid)
+        if w_method is None:
+            raise self.no_method_error(mid)
+        return w_method
 
     def define_method(self, mid, w_method):
         raise UnsupportedOperation(

@@ -1,4 +1,5 @@
 from objects.base import W_Root
+from objects.klass import w_string_class
 
 
 class W_String(W_Root):
@@ -6,6 +7,9 @@ class W_String(W_Root):
     # ordinary literals are all the same object here.
     def __init__(self, strval):
         self.strval = strval
+
+    def getclass(self):
+        return w_string_class
 
     def str_w(self):
         return self.strval

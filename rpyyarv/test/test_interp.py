@@ -249,10 +249,10 @@ def test_definemethod_and_call():
         insns.LEAVE,
     ])
     w_self = W_Main()
-    assert w_self.methods.lookup(add_id) is None
+    assert w_self.w_class.find_method(add_id) is None
     frame = Frame(iseq, w_self)
     assert interp.execute(iseq, frame).int_w() == 7
-    w_method = w_self.methods.lookup(add_id)
+    w_method = w_self.w_class.find_method(add_id)
     assert isinstance(w_method, W_ISeqMethod)
     assert w_method.w_iseq is w_body
     assert frame.sp == 0

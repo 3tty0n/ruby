@@ -1,26 +1,24 @@
-"""The toplevel self, standing in for main, its singleton class and Object."""
+"""The toplevel self: an object whose singleton class is where `def` lands."""
 
 import kernel
-from methods import MethodTable
 from objects.base import W_Root
+from objects.klass import W_Class, w_object_class
 
 
 class W_Main(W_Root):
     def __init__(self):
-        self.methods = MethodTable()
-        kernel.install(self)
+        self.w_class = W_Class('#<Class:main>', w_object_class)
 
-    def lookup_method(self, mid):
-        w_method = self.methods.lookup(mid)
-        if w_method is None:
-            raise self.no_method_error(mid)
-        return w_method
+    def getclass(self):
+        return self.w_class
 
     def define_method(self, mid, w_method):
-        self.methods.define(mid, w_method)
+        self.w_class.add_method(mid, w_method)
 
     def repr(self):
         return 'main'
 
+
+kernel.install(w_object_class)
 
 w_main = W_Main()

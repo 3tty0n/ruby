@@ -1,4 +1,4 @@
-"""Builtin methods, installed on every toplevel self."""
+"""Builtin methods, installed on Object."""
 
 import os
 
@@ -20,6 +20,6 @@ class W_Puts(W_CFunc):
         return w_nil
 
 
-def install(w_obj):
+def install(w_class):
     mid = symbols.intern('puts')
-    w_obj.define_method(mid, W_Puts(mid, -1))
+    w_class.add_method(mid, W_Puts(mid, -1))
