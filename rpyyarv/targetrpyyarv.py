@@ -2,6 +2,7 @@
 
 import boot
 import bootiseq
+import debug
 import interp
 import loader
 from error import RPyYarvError
@@ -11,6 +12,10 @@ def entry_point(argv):
     if len(argv) < 2:
         print 'usage: %s SCRIPT.rb' % argv[0]
         return 1
+
+    for name in debug.configure_from_env():
+        debug.note('unknown RPYYARV_DEBUG channel %s; known: %s'
+                   % (name, debug.CHANNELS))
 
     iseqw, status = boot.boot(argv)
     if not iseqw:

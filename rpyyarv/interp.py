@@ -1,3 +1,4 @@
+import debug
 import insns
 import helpers
 import symbols
@@ -53,7 +54,13 @@ def invoke(frame, w_ci):
             callee.locals[i] = frame.stack[recv_at + 1 + i]
             i += 1
         _drop(frame, recv_at)
-        return execute(callee_iseq, callee)
+        if not debug.state.enabled:
+            return execute(callee_iseq, callee)
+        assert argc >= 0                # RPython proof for the slice
+        debug.trace_enter(w_ci.mid, callee.locals[:argc])
+        w_ret = execute(callee_iseq, callee)
+        debug.trace_leave(w_ci.mid, w_ret)
+        return w_ret
 
     assert isinstance(w_method, W_CFunc)
     if w_method.arity >= 0:
@@ -64,7 +71,12 @@ def invoke(frame, w_ci):
         args_w.append(frame.stack[recv_at + 1 + i])
         i += 1
     _drop(frame, recv_at)
-    return w_method.call(w_recv, args_w)
+    if not debug.state.enabled:
+        return w_method.call(w_recv, args_w)
+    debug.trace_enter(w_ci.mid, args_w)
+    w_ret = w_method.call(w_recv, args_w)
+    debug.trace_leave(w_ci.mid, w_ret)
+    return w_ret
 
 
 def _check_argc(mid, argc, want):
@@ -98,6 +110,8 @@ def execute(iseq, frame):
         # live variable across the merge point that is neither green nor red
         code = iseq.code
         opcode = code[pc]
+        if debug.state.enabled:
+            debug.trace_insn(iseq, pc, frame)
         pc += 1
 
         if opcode == insns.NOP:
@@ -233,4 +247,7 @@ def execute(iseq, frame):
 
 
 def run(iseq):
-    return execute(iseq, Frame(iseq))
+    debug.dump_iseq(iseq)
+    w_ret = execute(iseq, Frame(iseq))
+    debug.summary()
+    return w_ret

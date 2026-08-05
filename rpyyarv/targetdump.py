@@ -1,5 +1,6 @@
 import os
 
+import debug
 import interp
 import loader
 
@@ -20,6 +21,9 @@ def entry_point(argv):
     if len(argv) != 2:
         print 'usage: %s FILE.iseq' % argv[0]
         return 1
+    for name in debug.configure_from_env():
+        debug.note('unknown RPYYARV_DEBUG channel %s; known: %s'
+                   % (name, debug.CHANNELS))
     interp.run(loader.load_dump(read_file(argv[1])))
     return 0
 

@@ -43,7 +43,7 @@ else
 fi
 
 hdr "Interpreter and loader unit tests"
-for t in test_interp test_loader; do
+for t in test_interp test_debug test_loader; do
   if RPYYARV_BUILD=$BUILD "$PYTHON" "$PROJ/test/$t.py" >/dev/null 2>&1; then
     ok "$t"
   else

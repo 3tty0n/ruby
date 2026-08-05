@@ -76,7 +76,15 @@ test: $(SHIM)
 .PHONY: test-unit
 test-unit:
 	$(PYTHON) test/test_interp.py
+	$(PYTHON) test/test_debug.py
 	RPYYARV_BUILD=$(BUILD) $(PYTHON) test/test_loader.py
+
+CHANNELS ?= insn,stack,call
+TRACED   ?= test/fib.rb
+
+.PHONY: trace
+trace:
+	RPYYARV_DEBUG=$(CHANNELS) ./rpyyarv $(TRACED)
 
 # Checked in, so the tests do not need a ruby.
 FIXTURES := $(patsubst %.rb,%.iseq,$(wildcard test/*.rb))

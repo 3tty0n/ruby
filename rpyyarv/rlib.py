@@ -1,5 +1,8 @@
+import os
+
 try:
-    from rpython.rlib.jit import JitDriver, elidable, promote, unroll_safe
+    from rpython.rlib.jit import (
+        JitDriver, elidable, promote, unroll_safe, dont_look_inside)
 except ImportError:
     class JitDriver(object):
         def __init__(self, **kwargs):
@@ -19,3 +22,11 @@ except ImportError:
 
     def unroll_safe(func):
         return func
+
+    def dont_look_inside(func):
+        return func
+
+    def oswrite(fd, s):
+        if not isinstance(s, bytes):
+            s = s.encode('utf-8')
+        os.write(fd, s)
