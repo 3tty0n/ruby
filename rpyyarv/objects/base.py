@@ -27,6 +27,9 @@ class W_Root(object):
             raise self.no_method_error(mid)
         return w_method
 
+    def defines_private(self):
+        return False
+
     def define_method(self, mid, w_method):
         raise UnsupportedOperation(
             'cannot define a method on %s' % self.repr())

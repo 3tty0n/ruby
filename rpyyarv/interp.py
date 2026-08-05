@@ -25,8 +25,6 @@ def _callinfo(iseq, idx):
 
 @unroll_safe
 def invoke(frame, w_ci):
-    # RPython refuses to trace into a function with a loop unless it is told
-    # the loop is short (policy.py look_inside_graph); argc bounds these.
     argc = w_ci.argc
     recv_at = frame.sp - argc - 1
     if recv_at < 0:
@@ -40,6 +38,9 @@ def invoke(frame, w_ci):
 
     w_recv = frame.stack[recv_at]
     w_method = w_recv.lookup_method(w_ci.mid)
+    if w_method.private and not w_ci.fcall:
+        raise UnsupportedOperation("private method '%s' called for %s"
+                                   % (symbols.name_of(w_ci.mid), w_recv.repr()))
 
     if isinstance(w_method, W_ISeqMethod):
         callee_iseq = w_method.w_iseq
@@ -79,6 +80,27 @@ def invoke(frame, w_ci):
     return w_ret
 
 
+def call_method(w_method, w_recv, args_w):
+    if isinstance(w_method, W_CFunc):
+        if w_method.arity >= 0:
+            _check_argc(w_method.mid, len(args_w), w_method.arity)
+        return w_method.call(w_recv, args_w)
+
+    assert isinstance(w_method, W_ISeqMethod)
+    callee_iseq = w_method.w_iseq
+    if not callee_iseq.simple_params:
+        raise UnsupportedOperation(
+            "method '%s' has parameters RPyYARV does not support"
+            % symbols.name_of(w_method.mid))
+    _check_argc(w_method.mid, len(args_w), callee_iseq.nparams)
+    callee = Frame(callee_iseq, w_recv)
+    i = 0
+    while i < len(args_w):
+        callee.locals[i] = args_w[i]
+        i += 1
+    return execute(callee_iseq, callee)
+
+
 def _check_argc(mid, argc, want):
     if argc != want:
         raise UnsupportedOperation(
@@ -99,7 +121,12 @@ def _to_s(w_x):
     return W_String(w_x.to_s_str())
 
 
-jitdriver = JitDriver(greens=['pc', 'iseq'], reds=['frame'])
+def get_printable_location(pc, iseq):
+    return '%s@%d %s' % (iseq.name, pc, insns.NAMES[iseq.code[pc]])
+
+
+jitdriver = JitDriver(greens=['pc', 'iseq'], reds=['frame'],
+                      get_printable_location=get_printable_location)
 
 
 def execute(iseq, frame):
@@ -212,8 +239,9 @@ def execute(iseq, frame):
             mid = code[pc]
             w_body = iseq.consts[code[pc + 1]]
             pc += 2
-            frame.w_self.define_method(
-                mid, W_ISeqMethod(mid, _as_iseq(w_body)))
+            w_self = frame.w_self
+            w_self.define_method(mid, W_ISeqMethod(
+                mid, _as_iseq(w_body), w_self.defines_private()))
         elif opcode == insns.OPT_SEND_WITHOUT_BLOCK:
             idx = code[pc]
             pc += 1
@@ -229,17 +257,28 @@ def execute(iseq, frame):
                     % symbols.name_of(w_ci.mid))
             frame.push(invoke(frame, w_ci))
         elif opcode == insns.JUMP:
-            pc = code[pc]
+            target = code[pc]
+            pc += 1
+            backward = target < pc
+            pc = target
+            if target < pc:
+                jitdriver.can_enter_jit(iseq=iseq, pc=pc, frame=frame)
         elif opcode == insns.BRANCHIF:
             target = code[pc]
             pc += 1
             if frame.pop().is_true():
+                backward = target < pc
                 pc = target
+                if backward:
+                    jitdriver.can_enter_jit(iseq=iseq, pc=pc, frame=frame)
         elif opcode == insns.BRANCHUNLESS:
             target = code[pc]
             pc += 1
             if not frame.pop().is_true():
+                backward = target < pc
                 pc = target
+                if backward:
+                    jitdriver.can_enter_jit(iseq=iseq, pc=pc, frame=frame)
         elif opcode == insns.LEAVE:
             return frame.pop()
         else:

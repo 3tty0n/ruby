@@ -15,6 +15,8 @@ from error import UnsupportedOperation
 from frame import Frame
 from iseq import W_CallInfo, W_ISeq, NO_BLOCK_ISEQ
 from methods import W_CFunc, W_ISeqMethod, W_Method
+from objects.instance import W_Object
+from objects.klass import W_Class, w_class_class, w_object_class
 from objects.main import W_Main, w_main
 from objects.string import W_String
 from objects.transparent import W_Fixnum, w_nil, w_true, w_false
@@ -249,10 +251,11 @@ def test_definemethod_and_call():
         insns.LEAVE,
     ])
     w_self = W_Main()
-    assert w_self.w_class.find_method(add_id) is None
+    # A toplevel `def` lands on Object, not on a singleton class of main.
+    assert w_object_class.find_method(add_id) is None
     frame = Frame(iseq, w_self)
     assert interp.execute(iseq, frame).int_w() == 7
-    w_method = w_self.w_class.find_method(add_id)
+    w_method = w_object_class.find_method(add_id)
     assert isinstance(w_method, W_ISeqMethod)
     assert w_method.w_iseq is w_body
     assert frame.sp == 0
@@ -544,6 +547,147 @@ def test_cfunc_arity_is_checked():
         "wrong number of arguments to 'one' (given 2, expected 1)")
 
 
+def test_class_is_an_object():
+    w_class = W_Class('Foo', w_object_class)
+    assert w_class.getclass() is w_class_class
+    assert w_class_class.getclass() is w_class_class
+
+
+def test_definemethod_in_a_class_body():
+    # `class Foo; def bar; 42; end; end` runs the body with self = Foo.
+    bar_id = symbols.intern('bar')
+    body = asm([W_Fixnum(42)], 0, 2, [insns.PUTOBJECT, 0, insns.LEAVE],
+               name='bar')
+    iseq = asm([body], 0, 2, [
+        insns.DEFINEMETHOD, bar_id, 0,
+        insns.PUTNIL,
+        insns.LEAVE,
+    ])
+    w_class = W_Class('Foo', w_object_class)
+    interp.execute(iseq, Frame(iseq, w_class))
+    assert w_class.find_method(bar_id) is not None
+    assert w_object_class.find_method(bar_id) is None
+
+
+def test_new_allocates_an_instance():
+    w_class = W_Class('Foo', w_object_class)
+    w_obj = _send_new(w_class, [])
+    assert isinstance(w_obj, W_Object)
+    assert w_obj.getclass() is w_class
+    assert w_obj.repr() == '#<Foo>'
+    assert _send_new(w_class, []) is not w_obj
+
+
+def test_new_runs_initialize():
+    # def initialize(a); @x would go here; end -- proves args reach the body.
+    seen = []
+
+    class W_Init(W_CFunc):
+        def call(self, w_recv, args_w):
+            seen.append((w_recv, args_w[0].int_w()))
+            return w_nil
+
+    init_id = symbols.intern('initialize')
+    w_class = W_Class('Foo', w_object_class)
+    w_class.add_method(init_id, W_Init(init_id, 1))
+    w_obj = _send_new(w_class, [W_Fixnum(7)])
+    assert seen == [(w_obj, 7)]
+
+
+def test_new_without_initialize_rejects_arguments():
+    w_class = W_Class('Foo', w_object_class)
+    try:
+        _send_new(w_class, [W_Fixnum(1)])
+    except UnsupportedOperation as e:
+        assert e.msg == ("wrong number of arguments to 'new' "
+                         "(given 1, expected 0)")
+    else:
+        raise AssertionError('expected UnsupportedOperation')
+
+
+def test_instance_method_is_found_through_its_class():
+    bar_id = symbols.intern('bar')
+    body = asm([W_Fixnum(42)], 0, 2, [insns.PUTOBJECT, 0, insns.LEAVE],
+               name='bar')
+    w_class = W_Class('Foo', w_object_class)
+    w_class.add_method(bar_id, W_ISeqMethod(bar_id, body))
+    w_obj = _send_new(w_class, [])
+    iseq = asm([W_CallInfo(bar_id, 0)], 1, 2, [
+        insns.GETLOCAL, 0,
+        insns.OPT_SEND_WITHOUT_BLOCK, 0,
+        insns.LEAVE,
+    ])
+    frame = Frame(iseq, w_main)
+    frame.locals[0] = w_obj
+    assert interp.execute(iseq, frame).int_w() == 42
+
+
+def test_new_is_not_inherited_by_instances():
+    w_class = W_Class('Foo', w_object_class)
+    w_obj = _send_new(w_class, [])
+    new_id = symbols.intern('new')
+    iseq = asm([W_CallInfo(new_id, 0)], 1, 2, [
+        insns.GETLOCAL, 0,
+        insns.OPT_SEND_WITHOUT_BLOCK, 0,
+        insns.LEAVE,
+    ])
+    frame = Frame(iseq, w_main)
+    frame.locals[0] = w_obj
+    try:
+        interp.execute(iseq, frame)
+    except UnsupportedOperation as e:
+        assert e.msg == "undefined method 'new' for #<Foo>"
+    else:
+        raise AssertionError('expected UnsupportedOperation')
+
+
+def test_toplevel_def_is_private():
+    # def helper; 42; end -- reachable as `helper`, not as `1.helper`.
+    helper_id = symbols.intern('helper')
+    body = asm([W_Fixnum(42)], 0, 2, [insns.PUTOBJECT, 0, insns.LEAVE],
+               name='helper')
+
+    def iseq_calling(recv_insns, fcall):
+        return asm([body, W_CallInfo(helper_id, 0, True, fcall),
+                    W_Fixnum(42)], 0, 4,
+                   [insns.DEFINEMETHOD, helper_id, 0] + recv_insns +
+                   [insns.OPT_SEND_WITHOUT_BLOCK, 1, insns.LEAVE])
+
+    iseq = iseq_calling([insns.PUTSELF], True)
+    assert interp.execute(iseq, Frame(iseq, W_Main())).int_w() == 42
+    assert w_object_class.find_method(helper_id).private
+
+    iseq2 = iseq_calling([insns.PUTOBJECT, 2], False)
+    expect_unsupported(iseq2, W_Main(),
+                       "private method 'helper' called for 42")
+
+
+def test_method_in_a_class_body_is_public():
+    bar_id = symbols.intern('bar')
+    body = asm([W_Fixnum(1)], 0, 2, [insns.PUTOBJECT, 0, insns.LEAVE],
+               name='bar')
+    iseq = asm([body], 0, 2, [
+        insns.DEFINEMETHOD, bar_id, 0, insns.PUTNIL, insns.LEAVE])
+    w_class = W_Class('Foo', w_object_class)
+    interp.execute(iseq, Frame(iseq, w_class))
+    assert not w_class.find_method(bar_id).private
+
+
+def _send_new(w_class, args_w):
+    """Foo.new(*args) through the interpreter's own dispatch."""
+    new_id = symbols.intern('new')
+    items = [insns.GETLOCAL, 0]
+    consts = [W_CallInfo(new_id, len(args_w))]
+    for i in range(len(args_w)):
+        consts.append(args_w[i])
+        items += [insns.PUTOBJECT, i + 1]
+    items += [insns.OPT_SEND_WITHOUT_BLOCK, 0, insns.LEAVE]
+    iseq = asm(consts, 1, 4 + len(args_w), items)
+    frame = Frame(iseq, w_main)
+    frame.locals[0] = w_class
+    return interp.execute(iseq, frame)
+
+
 def _main():
     tests = []
     for name in globals().keys():
@@ -551,8 +695,12 @@ def _main():
             func = globals()[name]
             tests.append((func.__code__.co_firstlineno, name, func))
     tests.sort()
+    # A toplevel `def` now mutates the one Object, so undo it between tests.
+    baseline = w_object_class.methods.methods.copy()
     for lineno, name, func in tests:
         func()
+        w_object_class.methods.methods = baseline.copy()
+        w_object_class.method_table_changed()
         print('ok %s' % name)
     print('%d passed' % len(tests))
 

@@ -7,16 +7,19 @@ from objects.base import W_Root
 
 
 class W_Method(W_Root):
-    def __init__(self, mid):
+    _immutable_fields_ = ['mid', 'private']
+
+    def __init__(self, mid, private=False):
         self.mid = mid
+        self.private = private
 
     def repr(self):
         return '<W_Method %s>' % symbols.name_of(self.mid)
 
 
 class W_ISeqMethod(W_Method):
-    def __init__(self, mid, w_iseq):
-        W_Method.__init__(self, mid)
+    def __init__(self, mid, w_iseq, private=False):
+        W_Method.__init__(self, mid, private)
         self.w_iseq = w_iseq
 
     def repr(self):

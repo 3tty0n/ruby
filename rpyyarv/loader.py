@@ -267,7 +267,7 @@ class Loader(object):
                   and (flags & ~optable.SIMPLE_CALL_FLAGS) == 0
                   and (flags & optable.CALL_FLAG_ARGS_SIMPLE) != 0)
         return W_CallInfo(symbols.intern(operand.strval), operand.intval,
-                          simple)
+                          simple, (flags & optable.CALL_FLAG_FCALL) != 0)
 
     def int_of(self, operand, op, raw, what):
         if operand.kind != rawiseq.OP_INT:

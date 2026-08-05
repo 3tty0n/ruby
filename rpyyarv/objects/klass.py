@@ -21,6 +21,12 @@ class W_Class(W_Root):
         if w_superclass is not None:
             w_superclass.subclasses_w.append(self)
 
+    def getclass(self):
+        return w_class_class
+
+    def define_method(self, mid, w_method):
+        self.add_method(mid, w_method)
+
     def add_method(self, mid, w_method):
         self.methods.define(mid, w_method)
         self.method_table_changed()
@@ -50,6 +56,8 @@ class W_Class(W_Root):
 
 
 w_object_class = W_Class('Object')
+# Ruby interposes Module between Class and Object; it owns nothing we call yet.
+w_class_class = W_Class('Class', w_object_class)
 w_integer_class = W_Class('Integer', w_object_class)
 w_string_class = W_Class('String', w_object_class)
 w_array_class = W_Class('Array', w_object_class)

@@ -1,24 +1,28 @@
-"""The toplevel self: an object whose singleton class is where `def` lands."""
+"""The toplevel self: an ordinary Object, as in CRuby."""
 
+import classlib
 import kernel
 from objects.base import W_Root
-from objects.klass import W_Class, w_object_class
+from objects.klass import w_class_class, w_object_class
 
 
 class W_Main(W_Root):
-    def __init__(self):
-        self.w_class = W_Class('#<Class:main>', w_object_class)
-
     def getclass(self):
-        return self.w_class
+        return w_object_class
+
+    # CRuby defines a toplevel `def` as a private method on Object, not on a
+    # singleton class of main.
+    def defines_private(self):
+        return True
 
     def define_method(self, mid, w_method):
-        self.w_class.add_method(mid, w_method)
+        w_object_class.add_method(mid, w_method)
 
     def repr(self):
         return 'main'
 
 
 kernel.install(w_object_class)
+classlib.install(w_class_class)
 
 w_main = W_Main()

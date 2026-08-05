@@ -1,11 +1,17 @@
 from objects.base import W_Root
 from objects.klass import (w_false_class, w_integer_class, w_nil_class,
                            w_true_class)
-
+from rlib import elidable
 
 class W_Fixnum(W_Root):
+    _immutable_fields_ = ['intval']
+
     def __init__(self, intval):
         self.intval = intval
+
+    @elidable
+    def get_intval(self):
+        return self.intval
 
     def getclass(self):
         return w_integer_class

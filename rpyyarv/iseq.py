@@ -37,13 +37,15 @@ class W_ISeq(W_Root):
 
 
 class W_CallInfo(W_Root):
-    _immutable_fields_ = ['mid', 'argc', 'simple']
+    _immutable_fields_ = ['mid', 'argc', 'simple', 'fcall']
 
-    def __init__(self, mid, argc, simple=True):
+    def __init__(self, mid, argc, simple=True, fcall=True):
         self.mid = mid
         self.argc = argc
         # False once the loader saw call flags outside SIMPLE_CALL_FLAGS.
         self.simple = simple
+        # A receiverless call, or an explicit `self.`: may reach a private one.
+        self.fcall = fcall
 
     def repr(self):
         return '<W_CallInfo %s argc=%d>' % (symbols.name_of(self.mid),
