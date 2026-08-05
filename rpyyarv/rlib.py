@@ -2,7 +2,11 @@ import os
 
 try:
     from rpython.rlib.jit import (
-        JitDriver, elidable, promote, unroll_safe, dont_look_inside)
+        JitDriver, elidable, promote, unroll_safe, dont_look_inside, hint)
+
+    def oswrite(fd, s):
+        os.write(fd, s)
+
 except ImportError:
     class JitDriver(object):
         def __init__(self, **kwargs):
@@ -25,6 +29,9 @@ except ImportError:
 
     def dont_look_inside(func):
         return func
+
+    def hint(x, **kwds):
+        return x
 
     def oswrite(fd, s):
         if not isinstance(s, bytes):

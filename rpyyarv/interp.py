@@ -57,8 +57,12 @@ def invoke(frame, w_ci):
         _drop(frame, recv_at)
         if not debug.state.enabled:
             return execute(callee_iseq, callee)
-        assert argc >= 0                # RPython proof for the slice
-        debug.trace_enter(w_ci.mid, callee.locals[:argc])
+        traced_w = []
+        i = 0
+        while i < argc:
+            traced_w.append(callee.locals[i])
+            i += 1
+        debug.trace_enter(w_ci.mid, traced_w)
         w_ret = execute(callee_iseq, callee)
         debug.trace_leave(w_ci.mid, w_ret)
         return w_ret
@@ -111,8 +115,7 @@ def _check_argc(mid, argc, want):
 @unroll_safe
 def _drop(frame, sp):
     while frame.sp > sp:
-        frame.sp -= 1
-        frame.stack[frame.sp] = None
+        frame.pop()
 
 
 def _to_s(w_x):
@@ -126,6 +129,7 @@ def get_printable_location(pc, iseq):
 
 
 jitdriver = JitDriver(greens=['pc', 'iseq'], reds=['frame'],
+                      virtualizables=['frame'],
                       get_printable_location=get_printable_location)
 
 
@@ -154,10 +158,12 @@ def execute(iseq, frame):
         elif opcode == insns.GETLOCAL:
             idx = code[pc]
             pc += 1
+            assert idx >= 0
             frame.push(frame.locals[idx])
         elif opcode == insns.SETLOCAL:
             idx = code[pc]
             pc += 1
+            assert idx >= 0
             frame.locals[idx] = frame.pop()
         elif opcode == insns.DUP:
             w_x = frame.pop()
