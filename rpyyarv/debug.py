@@ -9,8 +9,6 @@ RPYYARV_DEBUG names the channels to turn on, comma separated:
     summary  how many times each instruction ran, at exit
     all      every channel above
 
-Everything goes to stderr, so a traced run's stdout is byte for byte what
-an untraced one prints.
 """
 
 import os
