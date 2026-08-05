@@ -38,15 +38,16 @@ endif
 
 PROBE   := test/probe
 SHIM    := librpyyarv_boot.$(SOEXT)
-PYPY    ?= $(HOME)/src/pypy
+PYPY    ?= ./pypy
 PYTHON  ?= python3
 RPYTHON ?= python2 $(PYPY)/rpython/bin/rpython
 RUBY    ?= $(BUILD)/ruby
 
-.PHONY: all
+.PHONY: all info setup test test-unit fixtures build-interp build-jit relink \
+        trace clean
+
 all: $(SHIM) $(PROBE)
 
-.PHONY: info
 info:
 	@echo "OS       = $(OS)"
 	@echo "TOP      = $(TOP)"
@@ -57,23 +58,19 @@ info:
 	@echo "SHIM     = $(SHIM)"
 	@echo "RUBY     = $(LIBPATH) $(RUBY)"
 
-.PHONY: $(SHIM)
 $(SHIM): boot_shim.c boot_shim.h
 	@test -n "$(ARCHDIR)" || { echo "ERROR: build CRuby first (--enable-shared)"; exit 1; }
 	$(CC) $(CFLAGS) $(CPPFLAGS) $(SHARED) -o $@ boot_shim.c $(LDFLAGS) $(LDLIBS)
 	$(call fix_install_name,$@)
 
-.PHONY: $(PROBE)
 $(PROBE): test/probe.c
 	@test -n "$(ARCHDIR)" || { echo "ERROR: build CRuby first (--enable-shared)"; exit 1; }
 	$(CC) $(CFLAGS) $(CPPFLAGS) -o $@ $< $(LDFLAGS) $(LDLIBS)
 	$(call fix_install_name,$@)
 
-.PHONY: test
 test: $(SHIM)
 	RPYYARV_BUILD=$(BUILD) $(PYTHON) test/test_boot_ctypes.py $(SCRIPT)
 
-.PHONY: test-unit
 test-unit:
 	$(PYTHON) test/test_interp.py
 	$(PYTHON) test/test_debug.py
@@ -82,42 +79,37 @@ test-unit:
 CHANNELS ?= insn,stack,call
 TRACED   ?= test/fib.rb
 
-.PHONY: trace
 trace:
 	RPYYARV_DEBUG=$(CHANNELS) ./rpyyarv $(TRACED)
 
 # Checked in, so the tests do not need a ruby.
 FIXTURES := $(patsubst %.rb,%.iseq,$(wildcard test/*.rb))
 
-.PHONY: fixtures
 fixtures: $(FIXTURES)
 
 test/%.iseq: test/%.rb scripts/dump_iseq.rb
 	$(LIBPATH) $(RUBY) scripts/dump_iseq.rb $< > $@
 
-.PHONY: build-interp
-build-interp:
+build-interp: | $(PYPY)
 	RPYYARV_BUILD=$(BUILD) $(RPYTHON) --output=rpyyarv targetrpyyarv.py
 	$(call fix_install_name,rpyyarv)
 
-.PHONY: build-jit
-build-jit:
+build-jit: | $(PYPY)
 	RPYYARV_BUILD=$(BUILD) $(RPYTHON) -Ojit --output=rpyyarv-jit targetrpyyarv.py
 	$(call fix_install_name,rpyyarv-jit)
 
 # For binaries RPython linked outside `make build-*`.
-.PHONY: relink
 relink:
 	$(call fix_install_name,rpyyarv)
 	$(call fix_install_name,rpyyarv-jit)
 	$(call fix_install_name,$(SHIM))
 	$(call fix_install_name,$(PROBE))
 
-.PHONY: build-dump
-build-dump:
-	$(RPYTHON) --output=rpyyarv-dump targetdump.py
+setup: $(PYPY)
 
-.PHONY: clean
+$(PYPY):
+	git clone --depth=1 https://github.com/pypy/pypy $@
+
 clean:
-	rm -f $(PROBE) $(SHIM) rpyyarv rpyyarv-jit rpyyarv-dump
+	rm -f $(PROBE) $(SHIM) rpyyarv rpyyarv-jit
 	rm -rf $(PROBE).dSYM $(SHIM).dSYM *.pyc
