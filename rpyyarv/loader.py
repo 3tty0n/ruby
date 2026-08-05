@@ -151,18 +151,22 @@ class Loader(object):
             at = raw.labels[name]
             labels[name] = pc if at >= len(starts) else starts[at]
 
+        # W_ISeq declares code and consts immutable, so both have to reach it
+        # as lists that were never resized: pc already holds the final length.
         pool = ConstPool()
-        code = []
+        code = [0] * pc
+        at = 0
         for i in range(len(opcodes)):
             op = opcodes[i]
             ops = operands[i]
             self.check_dropped(op, ops, raw)
-            code.append(op)
+            code[at] = op
+            at += 1
             for pos in optable.EMIT_POSITIONS[op]:
-                code.append(self.operand(op, pos, ops[pos], raw, pool,
-                                         labels))
+                code[at] = self.operand(op, pos, ops[pos], raw, pool, labels)
+                at += 1
 
-        w_iseq = W_ISeq(raw.name, code, pool.consts, raw.nlocals,
+        w_iseq = W_ISeq(raw.name, code, [w for w in pool.consts], raw.nlocals,
                         raw.stack_max, raw.lead_num, raw.extra_params == '')
         self.w_iseqs[index] = w_iseq
         return w_iseq

@@ -14,6 +14,11 @@ NO_BLOCK_ISEQ = -1
 
 
 class W_ISeq(W_Root):
+    # The loader hands over finished lists; nothing appends afterwards, so the
+    # JIT may fold code[pc] and consts[idx] away when pc and iseq are green.
+    _immutable_fields_ = ['name', 'code[*]', 'consts[*]', 'nlocals',
+                          'stack_max', 'nparams', 'simple_params']
+
     def __init__(self, name, code, consts, nlocals, stack_max,
                  nparams=0, simple_params=True):
         self.name = name
@@ -32,6 +37,8 @@ class W_ISeq(W_Root):
 
 
 class W_CallInfo(W_Root):
+    _immutable_fields_ = ['mid', 'argc', 'simple']
+
     def __init__(self, mid, argc, simple=True):
         self.mid = mid
         self.argc = argc

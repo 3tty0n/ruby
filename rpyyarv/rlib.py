@@ -1,5 +1,5 @@
 try:
-    from rpython.rlib.jit import JitDriver, elidable, promote
+    from rpython.rlib.jit import JitDriver, elidable, promote, unroll_safe
 except ImportError:
     class JitDriver(object):
         def __init__(self, **kwargs):
@@ -16,3 +16,6 @@ except ImportError:
 
     def promote(x):
         return x
+
+    def unroll_safe(func):
+        return func

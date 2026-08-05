@@ -8,7 +8,7 @@ from methods import W_CFunc, W_ISeqMethod
 from objects.array import W_Array
 from objects.string import W_String
 from objects.transparent import w_nil
-from rlib import JitDriver
+from rlib import JitDriver, unroll_safe
 
 
 def _as_iseq(w_x):
@@ -22,7 +22,10 @@ def _callinfo(iseq, idx):
     return w_ci
 
 
+@unroll_safe
 def invoke(frame, w_ci):
+    # RPython refuses to trace into a function with a loop unless it is told
+    # the loop is short (policy.py look_inside_graph); argc bounds these.
     argc = w_ci.argc
     recv_at = frame.sp - argc - 1
     if recv_at < 0:
@@ -71,6 +74,7 @@ def _check_argc(mid, argc, want):
             % (symbols.name_of(mid), argc, want))
 
 
+@unroll_safe
 def _drop(frame, sp):
     while frame.sp > sp:
         frame.sp -= 1
