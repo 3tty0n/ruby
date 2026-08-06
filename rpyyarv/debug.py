@@ -16,7 +16,8 @@ import os
 import insns
 import optable
 import symbols
-from iseq import W_ISeq, NO_BLOCK_ISEQ
+import value
+from iseq import NO_BLOCK_ISEQ
 from rlib import dont_look_inside, oswrite
 
 INSN = 1
@@ -106,20 +107,20 @@ def trace_insn(w_iseq, pc, frame):
 
 
 @dont_look_inside
-def trace_enter(mid, args_w):
+def trace_enter(mid, args):
     if state.channels & CALL:
         write('%s-> %s(%s)\n' % (_indent(), symbols.name_of(mid),
-                                 _list_repr(args_w)))
+                                 _list_repr(args)))
     state.depth += 1
 
 
 @dont_look_inside
-def trace_leave(mid, w_ret):
+def trace_leave(mid, ret):
     if state.depth > 0:
         state.depth -= 1
     if state.channels & CALL:
         write('%s<- %s = %s\n' % (_indent(), symbols.name_of(mid),
-                                  w_ret.repr()))
+                                  value.repr_of(ret)))
 
 
 def dump_iseq(w_iseq):
@@ -168,19 +169,20 @@ def _disasm_into(w_iseq, lines):
     while pc < len(code):
         lines.append('%s  %s\n' % (_pad(str(pc), 4), insn_at(w_iseq, pc)))
         pc += 1 + optable.NUM_OPERANDS[code[pc]]
-    for w_const in w_iseq.consts:
-        if isinstance(w_const, W_ISeq):
-            _disasm_into(w_const, lines)
+    for w_nested in w_iseq.iseqs:
+        _disasm_into(w_nested, lines)
 
 
 def _operand(w_iseq, op, pos, val):
     t = insns.OPERAND_TYPES[op][pos]
-    if t == insns.T_VALUE or t == insns.T_CALL_DATA:
-        return w_iseq.consts[val].repr()
+    if t == insns.T_VALUE:
+        return value.repr_of(w_iseq.consts[val])
+    if t == insns.T_CALL_DATA:
+        return w_iseq.callinfos[val].repr()
     if t == insns.T_ISEQ:
         if val == NO_BLOCK_ISEQ:
             return 'no block'
-        return w_iseq.consts[val].repr()
+        return w_iseq.iseqs[val].repr()
     if t == insns.T_ID:
         return symbols.name_of(val)
     if t == insns.T_LINDEX_T:
@@ -193,14 +195,14 @@ def _operand(w_iseq, op, pos, val):
 def _stack_repr(frame):
     parts = []
     for i in range(frame.sp):
-        parts.append(frame.stack[i].repr())
+        parts.append(value.repr_of(frame.stack[i]))
     return '[%s]' % ', '.join(parts)
 
 
-def _list_repr(args_w):
+def _list_repr(args):
     parts = []
-    for i in range(len(args_w)):
-        parts.append(args_w[i].repr())
+    for i in range(len(args)):
+        parts.append(value.repr_of(args[i]))
     return ', '.join(parts)
 
 

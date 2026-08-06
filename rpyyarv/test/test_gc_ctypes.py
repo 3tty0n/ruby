@@ -1,0 +1,137 @@
+"""GC torture test: VALUEs held only in a Python list vs. the shim mark hook."""
+
+from __future__ import print_function
+
+import ctypes
+import os
+import sys
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+PROJ = os.path.dirname(HERE)
+TOP = os.path.dirname(PROJ)
+BUILD = os.environ.get("RPYYARV_BUILD", os.path.join(TOP, "build"))
+
+VALUE = ctypes.c_size_t
+INTP = ctypes.POINTER(ctypes.c_int)
+MARK_HOOK = ctypes.CFUNCTYPE(None)
+
+SIGNATURES = {
+    "rpyyarv_boot": ([ctypes.c_int, ctypes.POINTER(ctypes.c_char_p), INTP],
+                     ctypes.c_void_p),
+    "rpyyarv_cleanup": ([ctypes.c_int], ctypes.c_int),
+    "rpyyarv_cstr": ([VALUE], ctypes.c_char_p),
+    "rpyyarv_is_string": ([VALUE], ctypes.c_int),
+    "rpyyarv_gc_set_mark_hook": ([MARK_HOOK], None),
+    "rpyyarv_gc_mark_value": ([VALUE], None),
+    "rpyyarv_gc_start": ([], None),
+    "rpyyarv_str_new": ([ctypes.c_char_p], VALUE),
+}
+
+N_LIVE = 1000
+N_GARBAGE = 2000
+PAYLOAD = "torture-%d-payload"
+
+# The ctypes callback must outlive the C side, so it is kept here.
+HOOK = None
+
+
+def load_shim():
+    for ext in ("dylib", "so"):
+        path = os.path.join(PROJ, "librpyyarv_boot." + ext)
+        if os.path.exists(path):
+            lib = ctypes.CDLL(path)
+            for name, (argtypes, restype) in SIGNATURES.items():
+                fn = getattr(lib, name)
+                fn.argtypes = argtypes
+                fn.restype = restype
+            return lib
+    sys.exit("librpyyarv_boot not found; run `make link` first")
+
+
+def make_strings(lib, n):
+    return [lib.rpyyarv_str_new((PAYLOAD % i).encode()) for i in range(n)]
+
+
+def churn(lib):
+    """Two GCs, then enough allocation to reuse whatever slots were freed."""
+    lib.rpyyarv_gc_start()
+    lib.rpyyarv_gc_start()
+    for i in range(N_GARBAGE):
+        lib.rpyyarv_str_new(("garbage-%d-filler" % i).encode())
+    lib.rpyyarv_gc_start()
+
+
+def survivors(lib, values):
+    """Slots that still hold their original string. Reading a freed slot is
+    technically UB, but on CRuby it is a plain heap read and observable."""
+    alive = []
+    for i, v in enumerate(values):
+        if not lib.rpyyarv_is_string(v):
+            continue
+        s = lib.rpyyarv_cstr(v)
+        if s is not None and s.decode("utf-8", "replace") == PAYLOAD % i:
+            alive.append(i)
+    return alive
+
+
+def test_unrooted_values_die(lib):
+    values = make_strings(lib, N_LIVE)
+    churn(lib)
+    alive = survivors(lib, values)
+    if len(alive) == N_LIVE:
+        print("warning: no unrooted VALUE was observed to die "
+              "(all %d intact); the torture test did not bite" % N_LIVE)
+    else:
+        print("  %d/%d unrooted VALUEs were collected"
+              % (N_LIVE - len(alive), N_LIVE))
+
+
+def test_mark_hook_keeps_values_alive(lib):
+    global HOOK
+    values = make_strings(lib, N_LIVE)
+
+    def mark_all():
+        for v in values:
+            lib.rpyyarv_gc_mark_value(v)
+
+    HOOK = MARK_HOOK(mark_all)
+    lib.rpyyarv_gc_set_mark_hook(HOOK)
+    try:
+        churn(lib)
+        alive = survivors(lib, values)
+        assert len(alive) == N_LIVE, \
+            "%d/%d marked VALUEs lost their contents" % (
+                N_LIVE - len(alive), N_LIVE)
+    finally:
+        lib.rpyyarv_gc_set_mark_hook(MARK_HOOK())
+        HOOK = None
+
+    churn(lib)
+    print("  after unregistering the hook: %d/%d intact"
+          % (len(survivors(lib, values)), N_LIVE))
+
+
+TESTS = [test_unrooted_values_die, test_mark_hook_keeps_values_alive]
+
+
+def main(argv):
+    lib = load_shim()
+
+    script = argv[1] if len(argv) > 1 else os.path.join(HERE, "fib.rb")
+    args = [b"rpyyarv", script.encode() if str is not bytes else script]
+    argv_arr = (ctypes.c_char_p * (len(args) + 1))(*(args + [None]))
+    status = ctypes.c_int(0)
+
+    if not lib.rpyyarv_boot(len(args), argv_arr, ctypes.byref(status)):
+        print("[rpyyarv] no executable node (status=%d)" % status.value)
+        return status.value
+
+    for t in TESTS:
+        t(lib)
+        print("ok %s" % t.__name__)
+    print("%d passed" % len(TESTS))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))

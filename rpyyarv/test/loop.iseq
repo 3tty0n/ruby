@@ -1,0 +1,50 @@
+dump	1	4.0.6	test/loop.rb
+iseq	0	top	<main>
+locals	0
+stackmax	2
+params	0	
+catch	0
+line	1
+event	RUBY_EVENT_LINE
+insn	definemethod	y:myloop	q:1
+line	8
+event	RUBY_EVENT_LINE
+insn	putself
+insn	putobject	i:100000000
+insn	opt_send_without_block	c:1,20,0,myloop
+insn	leave
+endiseq
+iseq	1	method	myloop
+locals	2
+stackmax	2
+params	1	
+catch	0
+line	2
+event	RUBY_EVENT_LINE
+event	RUBY_EVENT_CALL
+insn	putobject_INT2FIX_0_
+insn	setlocal_WC_0	i:3
+line	3
+event	RUBY_EVENT_LINE
+insn	jump	y:label_16
+insn	putnil
+insn	pop
+insn	jump	y:label_16
+label	label_9
+line	4
+event	RUBY_EVENT_LINE
+insn	getlocal_WC_0	i:3
+insn	putobject_INT2FIX_1_
+insn	opt_plus	c:1,16,0,+
+insn	setlocal_WC_0	i:3
+label	label_16
+line	3
+insn	getlocal_WC_0	i:3
+insn	getlocal_WC_0	i:4
+insn	opt_lt	c:1,16,0,<
+insn	branchif	y:label_9
+insn	putnil
+line	6
+event	RUBY_EVENT_RETURN
+insn	leave
+endiseq

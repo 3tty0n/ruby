@@ -1,31 +1,43 @@
 """Load raw ISeqs into W_ISeqs, transforming operands by their insns.def type."""
 
+import boot
+import gcroots
 import insns
 import iseqdump
 import optable
 import rawiseq
 import symbols
+import value
 from error import LoadError, UnsupportedOperation
 from iseq import W_CallInfo, W_ISeq, NO_BLOCK_ISEQ
-from objects.array import W_Array
-from objects.string import W_String
-from objects.transparent import W_Fixnum, w_nil, w_true, w_false
 
 
 class ConstPool(object):
+    # Three pools, one per operand type: VALUEs are ints and cannot share a
+    # list with W_ISeq or W_CallInfo.
     def __init__(self):
         self.consts = []
-        self.fixnums = {}       # value -> index
+        self.iseqs = []
+        self.callinfos = []
+        self.fixnums = {}       # integer -> index
 
-    def add(self, w_x):
-        self.consts.append(w_x)
+    def add(self, v):
+        self.consts.append(v)
         return len(self.consts) - 1
 
-    def add_fixnum(self, value):
-        if value in self.fixnums:
-            return self.fixnums[value]
-        idx = self.add(W_Fixnum(value))
-        self.fixnums[value] = idx
+    def add_iseq(self, w_iseq):
+        self.iseqs.append(w_iseq)
+        return len(self.iseqs) - 1
+
+    def add_callinfo(self, w_ci):
+        self.callinfos.append(w_ci)
+        return len(self.callinfos) - 1
+
+    def add_fixnum(self, n):
+        if n in self.fixnums:
+            return self.fixnums[n]
+        idx = self.add(value.int2fix(n))
+        self.fixnums[n] = idx
         return idx
 
 
@@ -40,7 +52,9 @@ class Loader(object):
         self.scan()
         if len(self.missing_names) > 0:
             raise UnsupportedOperation(self.report())
-        return self.load_iseq(0)
+        w_iseq = self.load_iseq(0)
+        gcroots.release_load_temporaries()
+        return w_iseq
 
     def scan(self):
         for raw in self.program.iseqs:
@@ -166,8 +180,11 @@ class Loader(object):
                 code[at] = self.operand(op, pos, ops[pos], raw, pool, labels)
                 at += 1
 
-        w_iseq = W_ISeq(raw.name, code, [w for w in pool.consts], raw.nlocals,
+        consts = [v for v in pool.consts]
+        w_iseq = W_ISeq(raw.name, code, consts, [w for w in pool.iseqs],
+                        [c for c in pool.callinfos], raw.nlocals,
                         raw.stack_max, raw.lead_num, raw.extra_params == '')
+        gcroots.register_consts(consts)
         self.w_iseqs[index] = w_iseq
         return w_iseq
 
@@ -206,9 +223,9 @@ class Loader(object):
                 raise LoadError("%s in '%s' wants an ISeq, got %s"
                                 % (insns.NAMES[op], raw.name,
                                    operand.describe()))
-            return pool.add(self.load_iseq(operand.intval))
+            return pool.add_iseq(self.load_iseq(operand.intval))
         if t == insns.T_CALL_DATA:
-            return pool.add(self.callinfo(operand, op, raw))
+            return pool.add_callinfo(self.callinfo(operand, op, raw))
         raise LoadError("%s in '%s' has an operand of type %s, which "
                         "yarv_map.py supports but the loader does not"
                         % (insns.NAMES[op], raw.name, insns.TYPE_NAMES[t]))
@@ -219,22 +236,32 @@ class Loader(object):
         return pool.add(self.literal_value(operand, op, raw))
 
     def literal_value(self, operand, op, raw):
+        """A real CRuby VALUE, built once at load time. Until its pool is
+        registered it is reachable from nothing CRuby scans, so keepalive
+        holds it across the rb_* calls the rest of the load makes."""
+        v = self._literal_value(operand, op, raw)
+        gcroots.keepalive(v)
+        return v
+
+    def _literal_value(self, operand, op, raw):
         kind = operand.kind
         if kind == rawiseq.OP_INT:
-            return W_Fixnum(operand.intval)
+            if value.fixable(operand.intval):
+                return value.int2fix(operand.intval)
+            return boot.int2inum(operand.intval)
         if kind == rawiseq.OP_NIL:
-            return w_nil
+            return value.Q_NIL
         if kind == rawiseq.OP_TRUE:
-            return w_true
+            return value.Q_TRUE
         if kind == rawiseq.OP_FALSE:
-            return w_false
+            return value.Q_FALSE
         if kind == rawiseq.OP_STR:
-            return W_String(operand.strval)
+            return boot.str_new(operand.strval)
         if kind == rawiseq.OP_ARRAY:
-            items_w = []
+            items = []
             for item in operand.items:
-                items_w.append(self.literal_value(item, op, raw))
-            return W_Array(items_w)
+                items.append(self.literal_value(item, op, raw))
+            return boot.ary_new(items)
         raise UnsupportedOperation(
             "%s of %s in '%s': RPyYARV has no such object yet"
             % (insns.NAMES[op], operand.describe(), raw.name))

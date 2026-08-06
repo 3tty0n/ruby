@@ -6,10 +6,21 @@ _ids = {}
 _names = {}
 
 
+class _Next(object):
+    # len(_ids) folds to the translation-time size of the prebuilt dict, so
+    # every ID interned at run time aliased one interned at import time.
+    def __init__(self):
+        self.mid = 0
+
+
+_next = _Next()
+
+
 def intern(name):
     if name in _ids:
         return _ids[name]
-    mid = len(_ids)
+    mid = _next.mid
+    _next.mid = mid + 1
     _ids[name] = mid
     _names[mid] = name
     return mid

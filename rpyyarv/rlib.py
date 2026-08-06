@@ -3,11 +3,18 @@ import os
 try:
     from rpython.rlib.jit import (
         JitDriver, elidable, promote, unroll_safe, dont_look_inside, hint)
+    from rpython.rlib.rarithmetic import LONG_BIT, ovfcheck
 
     def oswrite(fd, s):
         os.write(fd, s)
 
 except ImportError:
+    import sys
+    LONG_BIT = 64 if sys.maxsize > 2 ** 32 else 32
+
+    def ovfcheck(x):
+        return x
+
     class JitDriver(object):
         def __init__(self, **kwargs):
             pass

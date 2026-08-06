@@ -32,6 +32,36 @@ int rpyyarv_cleanup(int status);
 /* Zero-arg method call guarded by rb_protect. *state is non-zero on raise. */
 uintptr_t rpyyarv_call0(uintptr_t recv, const char *mid, int *state);
 
+/* rb_intern, so a caller can hoist the ID out of its send path. */
+uintptr_t rpyyarv_intern(const char *name);
+
+/* Largest argc rpyyarv_funcallv* copies onto the machine stack. */
+#define RPYYARV_MAX_ARGC 32
+
+/*
+ * rb_funcallv guarded by rb_protect; *state is non-zero on raise, -1 when
+ * argc exceeds RPYYARV_MAX_ARGC. argv may live in memory CRuby never scans,
+ * so it is copied to the machine stack before the call.
+ */
+uintptr_t rpyyarv_funcallv_id(uintptr_t recv, uintptr_t mid, int argc,
+                              const uintptr_t *argv, int *state);
+uintptr_t rpyyarv_funcallv(uintptr_t recv, const char *mid, int argc,
+                           const uintptr_t *argv, int *state);
+
+/* The toplevel `main`, pinned on first use. */
+uintptr_t rpyyarv_top_self(void);
+
+/* Bignum-safe long -> Integer, for fixnum overflow. */
+uintptr_t rpyyarv_int2inum(long n);
+
+/*
+ * Immediate tags are compiled into the interpreter; this reports the ones
+ * this libruby actually uses so a mismatch fails at startup instead of
+ * silently mis-decoding every VALUE.
+ */
+void rpyyarv_special_consts(uintptr_t *qfalse, uintptr_t *qnil,
+                            uintptr_t *qtrue, uintptr_t *fixnum_flag);
+
 /* rb_iseq_t is incomplete here, so the ISeq crosses the FFI as void *. */
 uintptr_t rpyyarv_iseqw_new(void *iseq);
 
@@ -57,6 +87,25 @@ uintptr_t rpyyarv_hash_aref(uintptr_t hash, const char *key);
 
 /* Symbol#to_s without a rb_funcall round trip. */
 const char *rpyyarv_sym_cstr(uintptr_t sym);
+
+/*
+ * VALUEs escaped into a foreign heap (ctypes lists here, RPython objects
+ * later) are invisible to CRuby's conservative stack scan. The hook is a
+ * TypedData object registered as a GC root whose dmark calls fn; fn marks
+ * the escaped VALUEs with rpyyarv_gc_mark_value. NULL disables the hook.
+ */
+void rpyyarv_gc_set_mark_hook(void (*fn)(void));
+
+/* rb_gc_mark on a VALUE; only meaningful while the mark hook is running. */
+void rpyyarv_gc_mark_value(uintptr_t v);
+
+void rpyyarv_gc_start(void);
+
+uintptr_t rpyyarv_str_new(const char *s);
+
+/* Both copy their input onto the machine stack first, as funcallv does. */
+uintptr_t rpyyarv_ary_new(int n, const uintptr_t *elems);
+uintptr_t rpyyarv_str_concat(int n, const uintptr_t *parts);
 
 #ifdef __cplusplus
 }
