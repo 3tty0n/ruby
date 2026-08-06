@@ -43,20 +43,9 @@ PYTHON  ?= python3
 RPYTHON ?= python2 $(PYPY)/rpython/bin/rpython
 RUBY    ?= $(BUILD)/ruby
 
-.PHONY: all info setup test test-unit fixtures build-interp build-jit relink \
-        trace clean
+.PHONY: all test build-interp build-jit link clean
 
-all: $(SHIM) $(PROBE)
-
-info:
-	@echo "OS       = $(OS)"
-	@echo "TOP      = $(TOP)"
-	@echo "BUILD    = $(BUILD)"
-	@echo "ARCHDIR  = $(ARCHDIR)"
-	@echo "LIBRUBY  = $(LIBRUBY)"
-	@echo "INSTNAME = $(INSTNAME)"
-	@echo "SHIM     = $(SHIM)"
-	@echo "RUBY     = $(LIBPATH) $(RUBY)"
+link: $(SHIM)
 
 $(SHIM): boot_shim.c boot_shim.h
 	@test -n "$(ARCHDIR)" || { echo "ERROR: build CRuby first (--enable-shared)"; exit 1; }
@@ -70,25 +59,9 @@ $(PROBE): test/probe.c
 
 test: $(SHIM)
 	RPYYARV_BUILD=$(BUILD) $(PYTHON) test/test_boot_ctypes.py $(SCRIPT)
-
-test-unit:
 	$(PYTHON) test/test_interp.py
 	$(PYTHON) test/test_debug.py
 	RPYYARV_BUILD=$(BUILD) $(PYTHON) test/test_loader.py
-
-CHANNELS ?= insn,stack,call
-TRACED   ?= test/fib.rb
-
-trace:
-	RPYYARV_DEBUG=$(CHANNELS) ./rpyyarv $(TRACED)
-
-# Checked in, so the tests do not need a ruby.
-FIXTURES := $(patsubst %.rb,%.iseq,$(wildcard test/*.rb))
-
-fixtures: $(FIXTURES)
-
-test/%.iseq: test/%.rb scripts/dump_iseq.rb
-	$(LIBPATH) $(RUBY) scripts/dump_iseq.rb $< > $@
 
 build-interp: | $(PYPY)
 	RPYYARV_BUILD=$(BUILD) $(RPYTHON) --output=rpyyarv targetrpyyarv.py
@@ -97,15 +70,6 @@ build-interp: | $(PYPY)
 build-jit: | $(PYPY)
 	RPYYARV_BUILD=$(BUILD) $(RPYTHON) -Ojit --output=rpyyarv-jit targetrpyyarv.py
 	$(call fix_install_name,rpyyarv-jit)
-
-# For binaries RPython linked outside `make build-*`.
-relink:
-	$(call fix_install_name,rpyyarv)
-	$(call fix_install_name,rpyyarv-jit)
-	$(call fix_install_name,$(SHIM))
-	$(call fix_install_name,$(PROBE))
-
-setup: $(PYPY)
 
 $(PYPY):
 	git clone --depth=1 https://github.com/pypy/pypy $@
