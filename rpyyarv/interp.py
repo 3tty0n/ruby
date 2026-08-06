@@ -1,36 +1,30 @@
 import boot
 import debug
+import dispatch
 import gcroots
 import helpers
 import insns
+import optable
 import rubycall
 import symbols
 import value
 from error import UnsupportedOperation
 from frame import Frame
 from iseq import NO_BLOCK_ISEQ
-from rlib import JitDriver, unroll_safe, dont_look_inside
+from rlib import JitDriver, unroll_safe, dont_look_inside, promote
 
 TO_S = symbols.intern('to_s')
 DUP = symbols.intern('dup')
 
 
-class _Methods(object):
-    # Phase 1 dispatch: one global table filled by definemethod. Phase 2
-    # replaces it with a real class/inline-cache design.
-    def __init__(self):
-        self.table = {}
-
-
-methods = _Methods()
-
-
-def define_method(mid, w_iseq):
-    methods.table[mid] = w_iseq
-
-
-def lookup(mid):
-    return methods.table.get(mid, None)
+def define_method(frame, mid, w_iseq):
+    """A def in a class body lands on that class; a toplevel def lands on
+    Object as a private method, which is where Ruby puts it too."""
+    klass = frame.cref
+    if klass == 0:
+        dispatch.define(value.core_class(value.C_OBJECT), mid, w_iseq, True)
+    else:
+        dispatch.define(klass, mid, w_iseq, False)
 
 
 @unroll_safe
@@ -48,7 +42,13 @@ def invoke(frame, w_ci):
 
     rubycall.gc_stress_point()
     recv = frame.stack[recv_at]
-    callee_iseq = lookup(w_ci.mid)
+    # Promoted, so a trace guards the class word once and the lookup below
+    # folds away: that guard is the inline cache.
+    klass = promote(value.class_of(recv))
+    entry = dispatch.lookup(klass, w_ci.mid)
+    callee_iseq = None
+    if entry is not None and (w_ci.fcall or not entry.private):
+        callee_iseq = entry.w_iseq
 
     if callee_iseq is not None:
         if not callee_iseq.simple_params:
@@ -124,6 +124,30 @@ def _expand(frame, v, n):
         else:
             frame.push(value.Q_NIL)
         i -= 1
+
+
+def _const_base(frame):
+    """The cref's constant base: the class a class body is defining into, and
+    Object everywhere else. TODO: a nested cref chain, once modules land."""
+    if frame.cref != 0:
+        return frame.cref
+    return value.core_class(value.C_OBJECT)
+
+
+def _defineclass(mid, w_body, cbase, super_v):
+    klass = dispatch.define_class(cbase, mid, super_v)
+    return execute(w_body, Frame(w_body, klass, klass))
+
+
+@dont_look_inside
+def _opt_new_alloc(klass):
+    """insns.def's fast half, minus the stack writes: a fresh instance, or 0
+    for the miss branch. Only classes RPyYARV made can take it -- nothing
+    else is known to have kept Class#new, and their `initialize` is in
+    RPyYARV's registry rather than CRuby's."""
+    if not dispatch.is_known_class(klass):
+        return 0
+    return dispatch.alloc(klass)
 
 
 def get_printable_location(pc, iseq):
@@ -245,11 +269,74 @@ def _execute(iseq, frame):
                 parts[i] = frame.pop()
                 i -= 1
             frame.push(_concat(parts))
+        elif opcode == insns.OPT_DIV:
+            b = frame.pop()
+            a = frame.pop()
+            frame.push(helpers.div(a, b))
+        elif opcode == insns.OPT_MOD:
+            b = frame.pop()
+            a = frame.pop()
+            frame.push(helpers.mod(a, b))
+        elif opcode == insns.OPT_NEQ:
+            b = frame.pop()
+            a = frame.pop()
+            frame.push(helpers.neq(a, b))
+        elif opcode == insns.GETINSTANCEVARIABLE:
+            mid = code[pc]
+            pc += 1
+            frame.push(dispatch.ivar_get(frame.self_val, mid))
+        elif opcode == insns.SETINSTANCEVARIABLE:
+            mid = code[pc]
+            pc += 1
+            dispatch.ivar_set(frame.self_val, mid, frame.pop())
+        elif opcode == insns.PUTSPECIALOBJECT:
+            # The loader has already refused every kind but CONST_BASE.
+            pc += 1
+            frame.push(_const_base(frame))
+        elif opcode == insns.OPT_GETCONSTANT_PATH:
+            mid = code[pc]
+            pc += 1
+            frame.push(dispatch.const_get(_const_base(frame), mid))
+        elif opcode == insns.SETCONSTANT:
+            mid = code[pc]
+            pc += 1
+            cbase = frame.pop()
+            dispatch.const_set(cbase, mid, frame.pop())
+        elif opcode == insns.DEFINECLASS:
+            mid = code[pc]
+            w_body = iseq.iseqs[code[pc + 1]]
+            flags = code[pc + 2]
+            pc += 3
+            super_v = frame.pop()
+            cbase = frame.pop()
+            if not flags & optable.DEFINECLASS_FLAG_HAS_SUPERCLASS:
+                super_v = 0
+            frame.push(_defineclass(mid, w_body, cbase, super_v))
+        elif opcode == insns.OPT_NEW:
+            w_ci = iseq.callinfos[code[pc]]
+            target = code[pc + 1]
+            pc += 2
+            at = frame.sp - w_ci.argc - 1
+            below = at - 1
+            if below < 0:
+                raise UnsupportedOperation(
+                    'opt_new with %d argument(s) underflows the stack'
+                    % w_ci.argc)
+            assert at >= 1
+            assert below >= 0
+            obj = _opt_new_alloc(frame.stack[at])
+            if obj == 0:
+                pc = target
+            else:
+                # The class becomes the receiver of the `initialize` send that
+                # follows, and the slot below it becomes that send's result.
+                frame.stack[at] = obj
+                frame.stack[below] = obj
         elif opcode == insns.DEFINEMETHOD:
             mid = code[pc]
             w_body = iseq.iseqs[code[pc + 1]]
             pc += 2
-            define_method(mid, w_body)
+            define_method(frame, mid, w_body)
         elif opcode == insns.OPT_SEND_WITHOUT_BLOCK:
             idx = code[pc]
             pc += 1

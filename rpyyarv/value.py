@@ -6,7 +6,7 @@ them against rpyyarv_special_consts so a libruby with other tags fails at
 startup instead of mis-decoding every VALUE.
 """
 
-from rlib import LONG_BIT
+from rlib import LONG_BIT, elidable, raw_word
 
 Q_FALSE = 0x00
 Q_NIL = 0x04
@@ -14,6 +14,29 @@ Q_TRUE = 0x14
 Q_UNDEF = 0x24
 FIXNUM_FLAG = 0x01
 IMMEDIATE_MASK = 0x07
+FLONUM_MASK = 0x03
+FLONUM_FLAG = 0x02
+SYMBOL_MASK = 0xff
+SYMBOL_FLAG = 0x0c
+
+# rbasic.h: flags then klass, one word each. RBASIC_SHAPE_ID_FIELD adds a
+# third word only when SIZEOF_VALUE < 8, which RPyYARV does not support.
+KLASS_WORD = 1
+
+# Slots of the table rpyyarv_core_classes fills, in its order.
+C_OBJECT = 0
+C_INTEGER = 1
+C_FLOAT = 2
+C_SYMBOL = 3
+C_NILCLASS = 4
+C_TRUECLASS = 5
+C_FALSECLASS = 6
+C_STRING = 7
+C_ARRAY = 8
+C_HASH = 9
+C_CLASS = 10
+C_MODULE = 11
+NCLASS = 12
 
 FIXNUM_MAX = (1 << (LONG_BIT - 2)) - 1
 FIXNUM_MIN = -(1 << (LONG_BIT - 2))
@@ -48,6 +71,49 @@ def newbool(flag):
 def is_immediate(v):
     # 0 is both Qfalse and a cleared stack slot; neither needs marking.
     return v == 0 or (v & IMMEDIATE_MASK) != 0
+
+
+class _Classes(object):
+    # Not _immutable_fields_: on a prebuilt instance the rtyper would fold
+    # every read to the zeros this list holds before boot fills it.
+    def __init__(self):
+        self.tab = [0] * NCLASS
+
+
+classes = _Classes()
+
+
+def install_classes(tab):
+    classes.tab = tab
+
+
+@elidable
+def core_class(i):
+    """install_classes runs before any Ruby code, so this never changes."""
+    return classes.tab[i]
+
+
+def class_of(v):
+    """The receiver's class VALUE. Immediates answer from the boot table, a
+    heap object from its RBasic->klass word; neither costs an rb_* call.
+
+    Heap objects are tested first: one guard, not the whole tag ladder, in
+    front of the guard_value that makes a send site an inline cache."""
+    if v != 0 and (v & IMMEDIATE_MASK) == 0:
+        return raw_word(v, KLASS_WORD)
+    if (v & FIXNUM_FLAG) != 0:
+        return core_class(C_INTEGER)
+    if (v & FLONUM_MASK) == FLONUM_FLAG:
+        return core_class(C_FLOAT)
+    if (v & SYMBOL_MASK) == SYMBOL_FLAG:
+        return core_class(C_SYMBOL)
+    if v == Q_FALSE:
+        return core_class(C_FALSECLASS)
+    if v == Q_NIL:
+        return core_class(C_NILCLASS)
+    if v == Q_TRUE:
+        return core_class(C_TRUECLASS)
+    return 0            # Qundef, or an immediate this build invented
 
 
 def repr_of(v):

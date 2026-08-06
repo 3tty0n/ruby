@@ -92,6 +92,7 @@ rb_num2long = _ext('rpyyarv_num2long', [VALUE], rffi.LONG)
 rb_hash_aref = _ext('rpyyarv_hash_aref', [VALUE, rffi.CCHARP], VALUE)
 rb_sym_cstr = _ext('rpyyarv_sym_cstr', [VALUE], rffi.CCHARP)
 rb_intern_ = _ext('rpyyarv_intern', [rffi.CCHARP], VALUE)
+rb_sym_new = _ext('rpyyarv_sym_new', [rffi.CCHARP], VALUE)
 rb_funcallv_id = _ext('rpyyarv_funcallv_id',
                       [VALUE, VALUE, rffi.INT, VALUEP, INTP], VALUE)
 rb_top_self = _ext('rpyyarv_top_self', [], VALUE)
@@ -105,6 +106,21 @@ rb_gc_set_mark_hook = _ext('rpyyarv_gc_set_mark_hook', [MARK_HOOK],
                            lltype.Void)
 rb_gc_mark_value = _ext('rpyyarv_gc_mark_value', [VALUE], lltype.Void)
 rb_gc_start = _ext('rpyyarv_gc_start', [], lltype.Void)
+rb_core_classes = _ext('rpyyarv_core_classes', [VALUEP], lltype.Void)
+rb_define_class_ = _ext('rpyyarv_define_class',
+                        [VALUE, VALUE, VALUE, INTP], VALUE)
+rb_class_superclass = _ext('rpyyarv_class_superclass', [VALUE, INTP], VALUE)
+rb_obj_alloc = _ext('rpyyarv_obj_alloc', [VALUE, INTP], VALUE)
+rb_const_get_ = _ext('rpyyarv_const_get', [VALUE, VALUE, INTP], VALUE)
+rb_const_set_ = _ext('rpyyarv_const_set', [VALUE, VALUE, VALUE, INTP],
+                     lltype.Void)
+rb_ivar_get_ = _ext('rpyyarv_ivar_get', [VALUE, VALUE, INTP], VALUE)
+rb_ivar_set_ = _ext('rpyyarv_ivar_set', [VALUE, VALUE, VALUE, INTP],
+                    lltype.Void)
+rb_is_class = _ext('rpyyarv_is_class', [VALUE], rffi.INT)
+rb_gc_register = _ext('rpyyarv_gc_register_mark_object', [VALUE], lltype.Void)
+
+NCLASS = 12
 
 
 def _v(n):
@@ -203,6 +219,11 @@ def intern(name):
         return rffi.cast(lltype.Signed, rb_intern_(c_name))
 
 
+def sym_new(name):
+    with rffi.scoped_str2charp(name) as c_name:
+        return rffi.cast(lltype.Signed, rb_sym_new(c_name))
+
+
 def funcallv(recv, rid, args, name):
     """rb_funcallv on signed VALUEs; RubyError when the callee raised."""
     argc = len(args)
@@ -274,6 +295,98 @@ def special_consts():
                 rffi.cast(lltype.Signed, out[1]),
                 rffi.cast(lltype.Signed, out[2]),
                 rffi.cast(lltype.Signed, out[3]))
+
+
+def core_classes():
+    with lltype.scoped_alloc(rffi.CArray(VALUE), NCLASS) as out:
+        rb_core_classes(out)
+        result = [0] * NCLASS
+        i = 0
+        while i < NCLASS:
+            result[i] = rffi.cast(lltype.Signed, out[i])
+            i += 1
+        return result
+
+
+def define_class(cbase, rid, super_v):
+    with lltype.scoped_alloc(INTP.TO, 1) as state:
+        state[0] = rffi.cast(rffi.INT, 0)
+        v = rb_define_class_(_v(cbase), _v(rid), _v(super_v), state)
+        failed = rffi.cast(lltype.Signed, state[0]) != 0
+        ret = rffi.cast(lltype.Signed, v)
+    if failed:
+        raise RubyError('Class.new')
+    return ret
+
+
+def class_superclass(klass):
+    with lltype.scoped_alloc(INTP.TO, 1) as state:
+        state[0] = rffi.cast(rffi.INT, 0)
+        v = rb_class_superclass(_v(klass), state)
+        failed = rffi.cast(lltype.Signed, state[0]) != 0
+        ret = rffi.cast(lltype.Signed, v)
+    if failed:
+        return 0
+    return ret
+
+
+def obj_alloc(klass):
+    with lltype.scoped_alloc(INTP.TO, 1) as state:
+        state[0] = rffi.cast(rffi.INT, 0)
+        v = rb_obj_alloc(_v(klass), state)
+        failed = rffi.cast(lltype.Signed, state[0]) != 0
+        ret = rffi.cast(lltype.Signed, v)
+    if failed:
+        raise RubyError('allocate')
+    return ret
+
+
+def const_get(klass, rid):
+    with lltype.scoped_alloc(INTP.TO, 1) as state:
+        state[0] = rffi.cast(rffi.INT, 0)
+        v = rb_const_get_(_v(klass), _v(rid), state)
+        failed = rffi.cast(lltype.Signed, state[0]) != 0
+        ret = rffi.cast(lltype.Signed, v)
+    if failed:
+        raise RubyError('const_get')
+    return ret
+
+
+def const_set(klass, rid, val):
+    with lltype.scoped_alloc(INTP.TO, 1) as state:
+        state[0] = rffi.cast(rffi.INT, 0)
+        rb_const_set_(_v(klass), _v(rid), _v(val), state)
+        failed = rffi.cast(lltype.Signed, state[0]) != 0
+    if failed:
+        raise RubyError('const_set')
+
+
+def ivar_get(obj, rid):
+    with lltype.scoped_alloc(INTP.TO, 1) as state:
+        state[0] = rffi.cast(rffi.INT, 0)
+        v = rb_ivar_get_(_v(obj), _v(rid), state)
+        failed = rffi.cast(lltype.Signed, state[0]) != 0
+        ret = rffi.cast(lltype.Signed, v)
+    if failed:
+        raise RubyError('instance_variable_get')
+    return ret
+
+
+def ivar_set(obj, rid, val):
+    with lltype.scoped_alloc(INTP.TO, 1) as state:
+        state[0] = rffi.cast(rffi.INT, 0)
+        rb_ivar_set_(_v(obj), _v(rid), _v(val), state)
+        failed = rffi.cast(lltype.Signed, state[0]) != 0
+    if failed:
+        raise RubyError('instance_variable_set')
+
+
+def is_class(v):
+    return rffi.cast(lltype.Signed, rb_is_class(_v(v))) != 0
+
+
+def gc_register(v):
+    rb_gc_register(_v(v))
 
 
 def gc_mark_value(v):

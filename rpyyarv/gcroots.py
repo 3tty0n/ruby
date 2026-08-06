@@ -19,9 +19,15 @@ class Registry(object):
         self.top = None         # innermost live Frame
         self.consts = []        # every loaded ISeq's constant pool
         self.pinned = []        # VALUEs built during load, before their pool
+        self.classes = []       # classes RPyYARV defined, keys of the registry
 
 
 state = Registry()
+
+
+def register_class(v):
+    if not value.is_immediate(v):
+        state.classes.append(v)
 
 
 def register_consts(consts):
@@ -69,6 +75,11 @@ def mark_roots():
         if not value.is_immediate(v):
             boot.gc_mark_value(v)
         k += 1
+    klasses = state.classes
+    k = 0
+    while k < len(klasses):
+        boot.gc_mark_value(klasses[k])
+        k += 1
     pools = state.consts
     i = 0
     while i < len(pools):
@@ -83,6 +94,8 @@ def mark_roots():
         _mark_array(f.locals)
         if not value.is_immediate(f.self_val):
             boot.gc_mark_value(f.self_val)
+        if not value.is_immediate(f.cref):
+            boot.gc_mark_value(f.cref)
         f = f.prev_frame
 
 

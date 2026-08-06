@@ -12,6 +12,10 @@ from to_a_layout import (I_BODY, I_CATCH, I_LABEL, I_LOCALS, I_MAGIC, I_MISC,
 
 EVENT_PREFIX = 'RUBY_EVENT_'
 
+# Keys of the params hash that leave the argument layout alone. use_block is
+# a hint CRuby sets on every method named initialize (iseq.c:615).
+PLAIN_PARAM_KEYS = ['lead_num', 'use_block']
+
 
 def is_iseq(v):
     if not boot.is_array(v):
@@ -158,7 +162,7 @@ def _extra_params(params):
     i = 0
     while i < n:
         name = boot.sym_of(boot.ary_entry(keys, i))
-        if name != 'lead_num':
+        if name not in PLAIN_PARAM_KEYS:
             names.append(name)
         i += 1
     return ','.join(names)

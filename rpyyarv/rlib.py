@@ -4,6 +4,13 @@ try:
     from rpython.rlib.jit import (
         JitDriver, elidable, promote, unroll_safe, dont_look_inside, hint)
     from rpython.rlib.rarithmetic import LONG_BIT, ovfcheck
+    from rpython.rtyper.lltypesystem import lltype, rffi
+
+    _WORDP = rffi.CArrayPtr(rffi.LONG)
+
+    def raw_word(addr, index):
+        """The index'th machine word at a raw address, as a signed word."""
+        return rffi.cast(lltype.Signed, rffi.cast(_WORDP, addr)[index])
 
     def oswrite(fd, s):
         os.write(fd, s)
@@ -39,6 +46,9 @@ except ImportError:
 
     def hint(x, **kwds):
         return x
+
+    def raw_word(addr, index):
+        raise NotImplementedError('raw_word needs the RPython backend')
 
     def oswrite(fd, s):
         if not isinstance(s, bytes):

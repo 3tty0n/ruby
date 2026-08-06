@@ -7,12 +7,14 @@ class Frame(object):
     # with a fresh Frame, so Ruby call depth is interpreter recursion depth.
     _virtualizable_ = ['sp', 'stack[*]', 'locals[*]']
 
-    def __init__(self, iseq, self_val):
+    def __init__(self, iseq, self_val, cref=0):
         self = hint(self, access_directly=True, fresh_virtualizable=True)
         self.stack = [0] * iseq.stack_max
         self.sp = 0
         self.locals = [value.Q_NIL] * iseq.nlocals
         self.self_val = self_val
+        # The class a class body defines into; 0 outside one, meaning Object.
+        self.cref = cref
         # gcroots links live frames through this; not virtualizable.
         self.prev_frame = None
 

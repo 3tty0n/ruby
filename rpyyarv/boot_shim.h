@@ -35,6 +35,9 @@ uintptr_t rpyyarv_call0(uintptr_t recv, const char *mid, int *state);
 /* rb_intern, so a caller can hoist the ID out of its send path. */
 uintptr_t rpyyarv_intern(const char *name);
 
+/* The Symbol for a name, for a :sym literal in a constant pool. */
+uintptr_t rpyyarv_sym_new(const char *name);
+
 /* Largest argc rpyyarv_funcallv* copies onto the machine stack. */
 #define RPYYARV_MAX_ARGC 32
 
@@ -106,6 +109,30 @@ uintptr_t rpyyarv_str_new(const char *s);
 /* Both copy their input onto the machine stack first, as funcallv does. */
 uintptr_t rpyyarv_ary_new(int n, const uintptr_t *elems);
 uintptr_t rpyyarv_str_concat(int n, const uintptr_t *parts);
+
+/*
+ * The classes of the immediates, fetched once at boot so class_of() can
+ * answer for a Fixnum without any rb_* call. Slot order is value.py's
+ * C_* constants; RPYYARV_NCLASS is the length rpyyarv_core_classes fills.
+ */
+#define RPYYARV_NCLASS 12
+void rpyyarv_core_classes(uintptr_t *out);
+
+/* Class and object operations, each guarded by rb_protect. */
+uintptr_t rpyyarv_define_class(uintptr_t cbase, uintptr_t id, uintptr_t super,
+                               int *state);
+uintptr_t rpyyarv_class_superclass(uintptr_t klass, int *state);
+uintptr_t rpyyarv_obj_alloc(uintptr_t klass, int *state);
+uintptr_t rpyyarv_const_get(uintptr_t klass, uintptr_t id, int *state);
+void rpyyarv_const_set(uintptr_t klass, uintptr_t id, uintptr_t val,
+                       int *state);
+uintptr_t rpyyarv_ivar_get(uintptr_t obj, uintptr_t id, int *state);
+void rpyyarv_ivar_set(uintptr_t obj, uintptr_t id, uintptr_t val, int *state);
+
+int rpyyarv_is_class(uintptr_t v);
+
+/* Pin a VALUE for the process lifetime; used for the classes RPyYARV made. */
+void rpyyarv_gc_register_mark_object(uintptr_t v);
 
 #ifdef __cplusplus
 }

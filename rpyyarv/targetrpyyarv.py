@@ -5,6 +5,7 @@ import os
 import boot
 import bootiseq
 import debug
+import dispatch
 import gcroots
 import interp
 import loader
@@ -40,6 +41,8 @@ def entry_point(argv):
 
     if not _check_special_consts():
         return 1
+
+    dispatch.install()
 
     # RPYYARV_GC_NO_HOOK leaves the escaped VALUEs unreachable on purpose, so
     # the stress run can show what the hook is buying.

@@ -14,6 +14,9 @@ GT = symbols.intern('>')
 LE = symbols.intern('<=')
 GE = symbols.intern('>=')
 EQ = symbols.intern('==')
+NEQ = symbols.intern('!=')
+DIV = symbols.intern('/')
+MOD = symbols.intern('%')
 
 
 def _from_int(n):
@@ -71,3 +74,28 @@ def eq(a, b):
     if value.is_fixnum(a) and value.is_fixnum(b):
         return value.newbool(a == b)
     return rubycall.call1(a, EQ, b)
+
+
+def neq(a, b):
+    if value.is_fixnum(a) and value.is_fixnum(b):
+        return value.newbool(a != b)
+    return rubycall.call1(a, NEQ, b)
+
+
+def _both_positive(a, b):
+    # Ruby's / and % floor; RPython's truncate. Rather than reimplement the
+    # correction, the fast path takes only the operands where they agree.
+    return (value.is_fixnum(a) and value.is_fixnum(b)
+            and value.fix2int(a) >= 0 and value.fix2int(b) > 0)
+
+
+def div(a, b):
+    if _both_positive(a, b):
+        return value.int2fix(value.fix2int(a) // value.fix2int(b))
+    return rubycall.call1(a, DIV, b)
+
+
+def mod(a, b):
+    if _both_positive(a, b):
+        return value.int2fix(value.fix2int(a) % value.fix2int(b))
+    return rubycall.call1(a, MOD, b)

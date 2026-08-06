@@ -34,6 +34,16 @@ EMIT = {
     'opt_le': [],
     'opt_ge': [],
     'opt_eq': [],
+    'opt_div': [],
+    'opt_mod': [],
+    'opt_neq': [],          # both CALL_DATA dropped
+    'getinstancevariable': [0],     # IVC dropped
+    'setinstancevariable': [0],
+    'opt_getconstant_path': [0],    # IC carries the constant path segments
+    'setconstant': [0],
+    'putspecialobject': [0],
+    'defineclass': [0, 1, 2],
+    'opt_new': [0, 1],
     'objtostring': [],      # CALL_DATA dropped: to_s is resolved inline
     'anytostring': [],
     'concatstrings': [0],
@@ -58,6 +68,8 @@ EMIT = {
 #   CALL_DATA  -> W_CallInfo(mid, orig_argc) in the constant pool, index
 #                 emitted. Flags outside SIMPLE_CALL_FLAGS must clear
 #                 W_CallInfo.simple so the call fails loudly.
+#   IC         -> iseq_data_to_ary spells it as the constant path segments;
+#                 a one-segment path becomes an interned id.
 SUPPORTED_OPERAND_TYPES = frozenset([
     'VALUE',
     'lindex_t',
@@ -66,12 +78,12 @@ SUPPORTED_OPERAND_TYPES = frozenset([
     'ID',
     'ISEQ',
     'CALL_DATA',
+    'IC',
 ])
 
 # Operands the loader drops: CRuby's inline caches, which the meta-tracing
 # JIT is meant to rediscover.
 DISCARDED_OPERAND_TYPES = frozenset([
-    'IC',
     'IVC',
     'ICVARC',
     'ISE',
@@ -94,3 +106,14 @@ CALL_FLAG_ARGS_SIMPLE = 0x10
 CALL_FLAG_TAILCALL = 0x80
 SIMPLE_CALL_FLAGS = (CALL_FLAG_FCALL | CALL_FLAG_VCALL |
                      CALL_FLAG_ARGS_SIMPLE | CALL_FLAG_TAILCALL)
+
+# vm_core.h. Only a plain `class Foo` is supported: no module, no singleton
+# class, no `class A::B`.
+DEFINECLASS_TYPE_MASK = 0x07
+DEFINECLASS_TYPE_CLASS = 0x00
+DEFINECLASS_FLAG_SCOPED = 0x08
+DEFINECLASS_FLAG_HAS_SUPERCLASS = 0x10
+
+# vm_core.h, enum vm_special_object_type. Only the cref's constant base,
+# which is what `class Foo` and a toplevel constant assignment emit.
+SPECIAL_OBJECT_CONST_BASE = 3

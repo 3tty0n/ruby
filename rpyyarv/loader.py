@@ -6,6 +6,7 @@ import insns
 import iseqdump
 import optable
 import rawiseq
+import rubycall
 import symbols
 import value
 from error import LoadError, UnsupportedOperation
@@ -203,6 +204,23 @@ class Loader(object):
                 raise UnsupportedOperation(
                     "expandarray with a splat or post arguments in '%s' is "
                     "not supported" % raw.name)
+        elif op == insns.PUTSPECIALOBJECT:
+            kind = self.int_of(ops[0], op, raw, 'object type')
+            if kind != optable.SPECIAL_OBJECT_CONST_BASE:
+                raise UnsupportedOperation(
+                    "putspecialobject %d in '%s' is not supported"
+                    % (kind, raw.name))
+        elif op == insns.DEFINECLASS:
+            flags = self.int_of(ops[2], op, raw, 'flags')
+            if flags & optable.DEFINECLASS_TYPE_MASK != \
+                    optable.DEFINECLASS_TYPE_CLASS:
+                raise UnsupportedOperation(
+                    "'%s' defines a module or a singleton class, which "
+                    "RPyYARV does not support" % raw.name)
+            if flags & optable.DEFINECLASS_FLAG_SCOPED:
+                raise UnsupportedOperation(
+                    "'%s' defines a class under an explicit scope, which "
+                    "RPyYARV does not support" % raw.name)
 
     def operand(self, op, pos, operand, raw, pool, labels):
         t = insns.OPERAND_TYPES[op][pos]
@@ -215,7 +233,13 @@ class Loader(object):
         if t == insns.T_OFFSET:
             return self.label(operand, op, raw, labels)
         if t == insns.T_ID:
-            return symbols.intern(self.sym_of(operand, op, raw))
+            mid = symbols.intern(self.sym_of(operand, op, raw))
+            if op == insns.GETINSTANCEVARIABLE or \
+                    op == insns.SETINSTANCEVARIABLE:
+                rubycall.rid(mid)       # intern the ivar's CRuby ID once
+            return mid
+        if t == insns.T_IC:
+            return self.const_path(operand, op, raw)
         if t == insns.T_ISEQ:
             if operand.kind == rawiseq.OP_NIL:
                 return NO_BLOCK_ISEQ      # no block at this call site
@@ -229,6 +253,16 @@ class Loader(object):
         raise LoadError("%s in '%s' has an operand of type %s, which "
                         "yarv_map.py supports but the loader does not"
                         % (insns.NAMES[op], raw.name, insns.TYPE_NAMES[t]))
+
+    def const_path(self, operand, op, raw):
+        """An IC operand reaches to_a as the path's segments, one Symbol each."""
+        if operand.kind != rawiseq.OP_ARRAY:
+            raise LoadError("%s in '%s' wants a constant path, got %s"
+                            % (insns.NAMES[op], raw.name, operand.describe()))
+        if len(operand.items) != 1:
+            raise UnsupportedOperation(
+                "a qualified constant path in '%s' is not supported" % raw.name)
+        return symbols.intern(self.sym_of(operand.items[0], op, raw))
 
     def literal(self, operand, op, raw, pool):
         if operand.kind == rawiseq.OP_INT:
@@ -257,6 +291,8 @@ class Loader(object):
             return value.Q_FALSE
         if kind == rawiseq.OP_STR:
             return boot.str_new(operand.strval)
+        if kind == rawiseq.OP_SYM:
+            return boot.sym_new(operand.strval)
         if kind == rawiseq.OP_ARRAY:
             items = []
             for item in operand.items:

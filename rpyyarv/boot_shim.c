@@ -73,6 +73,12 @@ rpyyarv_intern(const char *name)
     return (uintptr_t)rb_intern(name);
 }
 
+uintptr_t
+rpyyarv_sym_new(const char *name)
+{
+    return (uintptr_t)ID2SYM(rb_intern(name));
+}
+
 struct funcallv_args {
     VALUE recv;
     ID    mid;
@@ -317,6 +323,181 @@ rpyyarv_ary_new(int n, const uintptr_t *elems)
     if (n < 0 || n > RPYYARV_MAX_ARGC) return (uintptr_t)Qundef;
     for (i = 0; i < n; i++) buf[i] = (VALUE)elems[i];
     return (uintptr_t)rb_ary_new_from_values(n, buf);
+}
+
+void
+rpyyarv_core_classes(uintptr_t *out)
+{
+    out[0]  = (uintptr_t)rb_cObject;
+    out[1]  = (uintptr_t)rb_cInteger;
+    out[2]  = (uintptr_t)rb_cFloat;
+    out[3]  = (uintptr_t)rb_cSymbol;
+    out[4]  = (uintptr_t)rb_cNilClass;
+    out[5]  = (uintptr_t)rb_cTrueClass;
+    out[6]  = (uintptr_t)rb_cFalseClass;
+    out[7]  = (uintptr_t)rb_cString;
+    out[8]  = (uintptr_t)rb_cArray;
+    out[9]  = (uintptr_t)rb_cHash;
+    out[10] = (uintptr_t)rb_cClass;
+    out[11] = (uintptr_t)rb_cModule;
+}
+
+/* One argument block for every rb_protect'ed class/object helper below. */
+struct obj_args {
+    VALUE a;
+    VALUE b;
+    VALUE c;
+    ID    id;
+};
+
+static VALUE
+define_class_body(VALUE argp)
+{
+    struct obj_args *p = (struct obj_args *)argp;
+    return rb_define_class_id_under(p->a, p->id, p->b);
+}
+
+uintptr_t
+rpyyarv_define_class(uintptr_t cbase, uintptr_t id, uintptr_t super,
+                     int *state)
+{
+    struct obj_args a;
+    a.a = (VALUE)cbase;
+    a.b = (VALUE)super;
+    a.id = (ID)id;
+    *state = 0;
+    VALUE r = rb_protect(define_class_body, (VALUE)&a, state);
+    if (*state) { rb_set_errinfo(Qnil); return (uintptr_t)Qnil; }
+    return (uintptr_t)r;
+}
+
+static VALUE
+class_superclass_body(VALUE argp)
+{
+    struct obj_args *p = (struct obj_args *)argp;
+    return rb_class_superclass(p->a);
+}
+
+uintptr_t
+rpyyarv_class_superclass(uintptr_t klass, int *state)
+{
+    struct obj_args a;
+    a.a = (VALUE)klass;
+    *state = 0;
+    VALUE r = rb_protect(class_superclass_body, (VALUE)&a, state);
+    if (*state) { rb_set_errinfo(Qnil); return (uintptr_t)Qnil; }
+    return (uintptr_t)r;
+}
+
+static VALUE
+obj_alloc_body(VALUE argp)
+{
+    struct obj_args *p = (struct obj_args *)argp;
+    return rb_obj_alloc(p->a);
+}
+
+uintptr_t
+rpyyarv_obj_alloc(uintptr_t klass, int *state)
+{
+    struct obj_args a;
+    a.a = (VALUE)klass;
+    *state = 0;
+    VALUE r = rb_protect(obj_alloc_body, (VALUE)&a, state);
+    if (*state) { rb_set_errinfo(Qnil); return (uintptr_t)Qnil; }
+    return (uintptr_t)r;
+}
+
+static VALUE
+const_get_body(VALUE argp)
+{
+    struct obj_args *p = (struct obj_args *)argp;
+    return rb_const_get(p->a, p->id);
+}
+
+uintptr_t
+rpyyarv_const_get(uintptr_t klass, uintptr_t id, int *state)
+{
+    struct obj_args a;
+    a.a = (VALUE)klass;
+    a.id = (ID)id;
+    *state = 0;
+    VALUE r = rb_protect(const_get_body, (VALUE)&a, state);
+    if (*state) { rb_set_errinfo(Qnil); return (uintptr_t)Qnil; }
+    return (uintptr_t)r;
+}
+
+static VALUE
+const_set_body(VALUE argp)
+{
+    struct obj_args *p = (struct obj_args *)argp;
+    rb_const_set(p->a, p->id, p->b);
+    return Qnil;
+}
+
+void
+rpyyarv_const_set(uintptr_t klass, uintptr_t id, uintptr_t val, int *state)
+{
+    struct obj_args a;
+    a.a = (VALUE)klass;
+    a.b = (VALUE)val;
+    a.id = (ID)id;
+    *state = 0;
+    rb_protect(const_set_body, (VALUE)&a, state);
+    if (*state) rb_set_errinfo(Qnil);
+}
+
+static VALUE
+ivar_get_body(VALUE argp)
+{
+    struct obj_args *p = (struct obj_args *)argp;
+    return rb_ivar_get(p->a, p->id);
+}
+
+uintptr_t
+rpyyarv_ivar_get(uintptr_t obj, uintptr_t id, int *state)
+{
+    struct obj_args a;
+    a.a = (VALUE)obj;
+    a.id = (ID)id;
+    *state = 0;
+    VALUE r = rb_protect(ivar_get_body, (VALUE)&a, state);
+    if (*state) { rb_set_errinfo(Qnil); return (uintptr_t)Qnil; }
+    return (uintptr_t)r;
+}
+
+static VALUE
+ivar_set_body(VALUE argp)
+{
+    struct obj_args *p = (struct obj_args *)argp;
+    rb_ivar_set(p->a, p->id, p->b);
+    return Qnil;
+}
+
+void
+rpyyarv_ivar_set(uintptr_t obj, uintptr_t id, uintptr_t val, int *state)
+{
+    struct obj_args a;
+    a.a = (VALUE)obj;
+    a.b = (VALUE)val;
+    a.id = (ID)id;
+    *state = 0;
+    rb_protect(ivar_set_body, (VALUE)&a, state);
+    if (*state) rb_set_errinfo(Qnil);
+}
+
+int
+rpyyarv_is_class(uintptr_t v)
+{
+    VALUE val = (VALUE)v;
+    if (SPECIAL_CONST_P(val)) return 0;
+    return (RB_TYPE_P(val, T_CLASS) || RB_TYPE_P(val, T_MODULE)) ? 1 : 0;
+}
+
+void
+rpyyarv_gc_register_mark_object(uintptr_t v)
+{
+    if (SPECIAL_CONST_P((VALUE)v)) return;
+    rb_gc_register_mark_object((VALUE)v);
 }
 
 uintptr_t

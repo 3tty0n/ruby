@@ -183,7 +183,7 @@ def _operand(w_iseq, op, pos, val):
         if val == NO_BLOCK_ISEQ:
             return 'no block'
         return w_iseq.iseqs[val].repr()
-    if t == insns.T_ID:
+    if t == insns.T_ID or t == insns.T_IC:
         return symbols.name_of(val)
     if t == insns.T_LINDEX_T:
         return 'local[%d]' % val
