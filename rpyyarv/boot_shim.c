@@ -1,5 +1,10 @@
 #include <stdlib.h>
+#include <stddef.h>
 #include <ruby.h>
+
+/* In-tree headers: the shim is built against this CRuby checkout, so the
+   object-shape API is reachable even though libruby does not export it. */
+#include "shape.h"
 
 #include "boot_shim.h"
 
@@ -483,6 +488,42 @@ rpyyarv_ivar_set(uintptr_t obj, uintptr_t id, uintptr_t val, int *state)
     *state = 0;
     rb_protect(ivar_set_body, (VALUE)&a, state);
     if (*state) rb_set_errinfo(Qnil);
+}
+
+/* A corrupt shape tree would otherwise spin here forever. */
+#define RPYYARV_SHAPE_MAX_DEPTH 256
+
+int
+rpyyarv_shape_iv_index(unsigned int shape_id, uintptr_t id, int *index)
+{
+    *index = -1;
+    if (shape_id == INVALID_SHAPE_ID) return -1;
+    /* A too-complex object keeps its ivars in an st_table, not in slots. */
+    if (rb_shape_too_complex_p((shape_id_t)shape_id)) return -1;
+
+    rb_shape_t *shape = RSHAPE((shape_id_t)shape_id);
+    int depth = 0;
+    while (shape->parent_id != INVALID_SHAPE_ID) {
+        if (++depth > RPYYARV_SHAPE_MAX_DEPTH) return -1;
+        if (shape->type == SHAPE_IVAR && shape->edge_name == (ID)id) {
+            if (shape->next_field_index == 0) return -1;
+            *index = (int)(shape->next_field_index - 1);
+            return 1;
+        }
+        shape = RSHAPE(shape->parent_id);
+    }
+    return 0;
+}
+
+void
+rpyyarv_object_layout(int *out)
+{
+    out[0] = (int)SHAPE_FLAG_SHIFT;
+    out[1] = (int)SHAPE_ID_NUM_BITS;
+    out[2] = (int)ROBJECT_HEAP;
+    out[3] = (int)(offsetof(struct RObject, as.ary) / SIZEOF_VALUE);
+    out[4] = (int)RUBY_T_MASK;
+    out[5] = (int)RUBY_T_OBJECT;
 }
 
 int

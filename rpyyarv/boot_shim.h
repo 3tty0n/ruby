@@ -129,6 +129,15 @@ void rpyyarv_const_set(uintptr_t klass, uintptr_t id, uintptr_t val,
 uintptr_t rpyyarv_ivar_get(uintptr_t obj, uintptr_t id, int *state);
 void rpyyarv_ivar_set(uintptr_t obj, uintptr_t id, uintptr_t val, int *state);
 
+/* Object-shape support for the ivar fast path in dispatch.py.
+ * rpyyarv_shape_iv_index answers 1 (found, *index set), 0 (this shape has no
+ * such ivar) or -1 (fast path not usable); it allocates nothing and raises
+ * nothing. rpyyarv_object_layout reports the RObject/flag layout the RPython
+ * side compiles in, so a drifting CRuby is caught at boot. */
+#define RPYYARV_LAYOUT_N 6
+int rpyyarv_shape_iv_index(unsigned int shape_id, uintptr_t id, int *index);
+void rpyyarv_object_layout(int *out);
+
 int rpyyarv_is_class(uintptr_t v);
 
 /* Pin a VALUE for the process lifetime; used for the classes RPyYARV made. */

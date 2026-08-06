@@ -11,7 +11,7 @@ import boot
 import gcroots
 import rubycall
 import value
-from rlib import elidable, dont_look_inside
+from rlib import elidable, dont_look_inside, promote, raw_word
 
 # Cycle guard: a superclass chain longer than this is a corrupt map.
 MAX_ANCESTORS = 64
@@ -116,14 +116,66 @@ def const_set(klass, mid, v):
     boot.const_set(klass, rubycall.rid(mid), v)
 
 
-@dont_look_inside
+class _Slots(object):
+    def __init__(self):
+        self.tab = {}       # (shape_id, CRuby ID) -> slot, -1 absent, -2 bail
+
+
+slots = _Slots()
+
+IV_UNKNOWN = -3
+
+
+@elidable
+def iv_slot(shape_id, rid):
+    """Which field slot a shape keeps an ivar in.
+
+    Elidable because a shape node never changes: gaining an ivar moves the
+    object to a *different* shape_id, and shape_id is this cache's key, so an
+    entry can only ever go unreachable, never stale."""
+    key = (shape_id, rid)
+    got = slots.tab.get(key, IV_UNKNOWN)
+    if got == IV_UNKNOWN:
+        got = boot.shape_iv_index(shape_id, rid)
+        slots.tab[key] = got
+    return got
+
+
 def ivar_get(obj, mid):
+    """T_OBJECT reads compile to a shape guard plus a raw field load; anything
+    else falls back to rb_ivar_get."""
+    if obj != 0 and (obj & value.IMMEDIATE_MASK) == 0:
+        flags = raw_word(obj, value.FLAGS_WORD)
+        if (flags & value.T_MASK) == value.T_OBJECT:
+            shape_id = promote((flags >> value.SHAPE_SHIFT) & value.SHAPE_MASK)
+            slot = iv_slot(shape_id, rubycall.const_rid(mid))
+            if slot >= 0:
+                if flags & value.ROBJECT_HEAP:
+                    return raw_word(raw_word(obj, value.FIELDS_WORD), slot)
+                return raw_word(obj, value.FIELDS_WORD + slot)
+            if slot == -1:
+                return value.Q_NIL
+    return _ivar_get_slow(obj, mid)
+
+
+@dont_look_inside
+def _ivar_get_slow(obj, mid):
     return boot.ivar_get(obj, rubycall.rid(mid))
 
 
 @dont_look_inside
 def ivar_set(obj, mid, v):
+    # Deliberately still a call: a raw store would skip CRuby's write barrier
+    # and leave an old->young reference unremembered by RGenGC.
     boot.ivar_set(obj, rubycall.rid(mid), v)
+
+
+def check_object_layout():
+    """The ivar fast path reads RObject by hand; refuse a CRuby it misreads."""
+    got = boot.object_layout()
+    want = [value.SHAPE_SHIFT, value.SHAPE_ID_BITS, value.ROBJECT_HEAP,
+            value.FIELDS_WORD, value.T_MASK, value.T_OBJECT]
+    return got == want
 
 
 def install():

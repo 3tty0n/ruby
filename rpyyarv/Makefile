@@ -5,7 +5,8 @@ ARCHDIR := $(patsubst %/ruby/config.h,%,\
 OS      := $(shell uname -s)
 
 CFLAGS  += -Wall -Wextra -g -O0
-CPPFLAGS+= -I$(TOP)/include -I$(ARCHDIR) -I$(CURDIR)
+# $(TOP) and $(BUILD) are on the path for shape.h and the generated id.h.
+CPPFLAGS+= -I$(TOP)/include -I$(ARCHDIR) -I$(CURDIR) -I$(TOP) -I$(BUILD)
 LDFLAGS += -L$(BUILD) -Wl,-rpath,$(BUILD)
 
 ifeq ($(OS),Darwin)

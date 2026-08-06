@@ -46,7 +46,9 @@ def _link_extra():
 
 eci = ExternalCompilationInfo(
     includes=['ruby.h', 'boot_shim.h'],
-    include_dirs=[os.path.join(_TOP, 'include'), _arch_include_dir(), _HERE],
+    # _TOP and _BUILD carry shape.h and the generated id.h it pulls in.
+    include_dirs=[os.path.join(_TOP, 'include'), _arch_include_dir(), _HERE,
+                  _TOP, _BUILD],
     separate_module_files=[os.path.join(_HERE, 'boot_shim.c')],
     libraries=[_libruby_name()],
     library_dirs=[_BUILD],
@@ -117,6 +119,9 @@ rb_const_set_ = _ext('rpyyarv_const_set', [VALUE, VALUE, VALUE, INTP],
 rb_ivar_get_ = _ext('rpyyarv_ivar_get', [VALUE, VALUE, INTP], VALUE)
 rb_ivar_set_ = _ext('rpyyarv_ivar_set', [VALUE, VALUE, VALUE, INTP],
                     lltype.Void)
+rb_shape_iv_index = _ext('rpyyarv_shape_iv_index',
+                         [rffi.UINT, VALUE, INTP], rffi.INT)
+rb_object_layout = _ext('rpyyarv_object_layout', [INTP], lltype.Void)
 rb_is_class = _ext('rpyyarv_is_class', [VALUE], rffi.INT)
 rb_gc_register = _ext('rpyyarv_gc_register_mark_object', [VALUE], lltype.Void)
 
@@ -379,6 +384,34 @@ def ivar_set(obj, rid, val):
         failed = rffi.cast(lltype.Signed, state[0]) != 0
     if failed:
         raise RubyError('instance_variable_set')
+
+
+LAYOUT_N = 6
+
+
+def object_layout():
+    out = [0] * LAYOUT_N
+    with lltype.scoped_alloc(INTP.TO, LAYOUT_N) as buf:
+        rb_object_layout(buf)
+        for i in range(LAYOUT_N):
+            out[i] = rffi.cast(lltype.Signed, buf[i])
+    return out
+
+
+def shape_iv_index(shape_id, rid):
+    """The field slot holding rid in shape_id: >= 0 found, -1 provably absent,
+    -2 when the fast path must not be used."""
+    with lltype.scoped_alloc(INTP.TO, 1) as idx:
+        idx[0] = rffi.cast(rffi.INT, -1)
+        found = rffi.cast(lltype.Signed,
+                          rb_shape_iv_index(rffi.cast(rffi.UINT, shape_id),
+                                            _v(rid), idx))
+        slot = rffi.cast(lltype.Signed, idx[0])
+    if found == 1:
+        return slot
+    if found == 0:
+        return -1
+    return -2
 
 
 def is_class(v):

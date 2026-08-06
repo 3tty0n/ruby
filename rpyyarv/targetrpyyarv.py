@@ -42,6 +42,11 @@ def entry_point(argv):
     if not _check_special_consts():
         return 1
 
+    if not dispatch.check_object_layout():
+        debug.note('libruby lays out RObject/shape ids differently than '
+                   'value.py assumes; the ivar fast path would misread it')
+        return 1
+
     dispatch.install()
 
     # RPYYARV_GC_NO_HOOK leaves the escaped VALUEs unreachable on purpose, so
@@ -49,7 +54,7 @@ def entry_point(argv):
     if os.environ.get('RPYYARV_GC_NO_HOOK') != '1':
         gcroots.install()
     if os.environ.get('RPYYARV_GC_STRESS') == '1':
-        rubycall.state.stress = True
+        rubycall.stress.flag = True
 
     try:
         w_iseq = loader.load(bootiseq.load(iseqw))

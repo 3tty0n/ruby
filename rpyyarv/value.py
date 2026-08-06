@@ -22,6 +22,17 @@ SYMBOL_FLAG = 0x0c
 # rbasic.h: flags then klass, one word each. RBASIC_SHAPE_ID_FIELD adds a
 # third word only when SIZEOF_VALUE < 8, which RPyYARV does not support.
 KLASS_WORD = 1
+FLAGS_WORD = 0
+
+# RObject layout for the ivar fast path; entry_point checks every one of these
+# against rpyyarv_object_layout, so a drifting CRuby fails at startup.
+SHAPE_SHIFT = 32                # shape.h: SHAPE_FLAG_SHIFT on 64-bit
+SHAPE_ID_BITS = 32
+SHAPE_MASK = (1 << SHAPE_ID_BITS) - 1
+ROBJECT_HEAP = 1 << 16          # RUBY_FL_USER4: ivars spilled to a heap buffer
+FIELDS_WORD = 2                 # struct RObject: as.ary / as.heap.fields
+T_MASK = 0x1f
+T_OBJECT = 0x01
 
 # Slots of the table rpyyarv_core_classes fills, in its order.
 C_OBJECT = 0
