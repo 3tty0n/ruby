@@ -43,7 +43,7 @@ PYTHON  ?= python3
 RPYTHON ?= python2 $(PYPY)/rpython/bin/rpython
 RUBY    ?= $(BUILD)/ruby
 
-.PHONY: all test build-interp build-jit link clean
+.PHONY: all test microbench build-interp build-jit link clean
 
 link: $(SHIM)
 
@@ -62,6 +62,9 @@ $(PROBE): test/probe.c
 test: $(SHIM)
 	RPYYARV_BUILD=$(BUILD) $(PYTHON) test/test_boot_ctypes.py $(SCRIPT)
 	RPYYARV_BUILD=$(BUILD) $(PYTHON) test/test_gc_ctypes.py
+
+microbench:
+	RPYYARV_BUILD=$(BUILD) $(PYTHON) scripts/microbench.py $(MICROBENCHFLAGS)
 
 build-interp: | $(PYPY)
 	RPYYARV_BUILD=$(BUILD) $(RPYTHON) --output=rpyyarv targetrpyyarv.py
