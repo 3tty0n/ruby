@@ -166,8 +166,12 @@ def parse(text):
             lead_num = _int(_field(fields, 1, 'lead_num'), 'lead_num')
             extra_params = fields[2] if len(fields) > 2 else ''
         elif kind == 'catch':
-            catch_types = ['?'] * _int(_field(fields, 1,
-                                              'catch table size'), 'catch')
+            catch_types = []
+            for _ in range(_int(_field(fields, 1, 'catch table size'),
+                                'catch')):
+                # The text dump reports only how many; an entry with no
+                # labels is one the loader must refuse.
+                catch_types.append(rawiseq.RawCatch('?'))
             if pending is None or nlocals < 0 or stack_max < 0:
                 raise LoadError('line %d: incomplete iseq header' % lineno)
             raw = rawiseq.RawISeq(_field(pending, 3, 'label'),

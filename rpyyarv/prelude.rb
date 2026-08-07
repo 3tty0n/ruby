@@ -20,6 +20,24 @@ class Integer
     self
   end
 
+  # Two positional arguments only; every other form (one argument, keywords,
+  # no block) fails loudly in the caller rather than silently differing.
+  def step(limit, step)
+    i = self
+    if step > 0
+      while i <= limit
+        yield i
+        i = i + step
+      end
+    else
+      while i >= limit
+        yield i
+        i = i + step
+      end
+    end
+    self
+  end
+
   def downto(n)
     i = self
     while i >= n

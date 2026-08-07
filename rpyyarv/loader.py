@@ -10,12 +10,18 @@ import rubycall
 import symbols
 import value
 from error import LoadError, UnsupportedOperation
-from iseq import W_CallInfo, W_ISeq, NO_BLOCK_ISEQ
+from iseq import (CATCH_ENSURE, CATCH_RESCUE, NO_BLOCK_ISEQ, W_Catch,
+                  W_CallInfo, W_ISeq)
 
 
 # break/next/redo are implemented by the throw instruction unwinding an
 # RPython exception, so their catch-table entries need no interpretation.
-HANDLED_CATCH_TYPES = ['break', 'next', 'redo']
+# retry is listed because the compiler emits an entry for it around every
+# rescue clause whether or not the source says `retry`; the entry is dropped
+# and `throw` with the retry tag is what refuses it.
+IGNORED_CATCH_TYPES = ['break', 'next', 'redo', 'retry']
+
+CATCH_KINDS = {'rescue': CATCH_RESCUE, 'ensure': CATCH_ENSURE}
 
 
 class ConstPool(object):
@@ -25,6 +31,7 @@ class ConstPool(object):
         self.consts = []
         self.iseqs = []
         self.callinfos = []
+        self.paths = []         # constant paths, one list of ids each
         self.fixnums = {}       # integer -> index
 
     def add(self, v):
@@ -38,6 +45,10 @@ class ConstPool(object):
     def add_callinfo(self, w_ci):
         self.callinfos.append(w_ci)
         return len(self.callinfos) - 1
+
+    def add_path(self, ids):
+        self.paths.append(ids)
+        return len(self.paths) - 1
 
     def add_fixnum(self, n):
         if n in self.fixnums:
@@ -146,11 +157,12 @@ class Loader(object):
             raise LoadError('iseq %d is not in the program' % index)
         raw = self.program.iseqs[index]
 
-        for kind in raw.catch_types:
-            if kind not in HANDLED_CATCH_TYPES:
+        for entry in raw.catches:
+            if entry.kind not in CATCH_KINDS and \
+                    entry.kind not in IGNORED_CATCH_TYPES:
                 raise UnsupportedOperation(
                     "'%s' has a %s catch-table entry, which RPyYARV does not "
-                    "support" % (raw.name, kind))
+                    "support" % (raw.name, entry.kind))
         if raw.lead_num > raw.nlocals:
             raise LoadError("'%s' takes %d parameter(s) but has %d local(s)"
                             % (raw.name, raw.lead_num, raw.nlocals))
@@ -193,10 +205,37 @@ class Loader(object):
         consts = [v for v in pool.consts]
         w_iseq = W_ISeq(raw.name, code, consts, [w for w in pool.iseqs],
                         [c for c in pool.callinfos], raw.nlocals,
-                        raw.stack_max, raw.lead_num, raw.extra_params == '')
+                        raw.stack_max, raw.lead_num, raw.extra_params == '',
+                        self.catches(raw, labels, parents),
+                        [p for p in pool.paths])
         gcroots.register_consts(consts)
         self.w_iseqs[index] = w_iseq
         return w_iseq
+
+    def catches(self, raw, labels, parents):
+        """A rescue/ensure ISeq reads the enclosing scope's locals at level 1,
+        so it is loaded with raw itself as its parent, the way a block is."""
+        out = []
+        for entry in raw.catches:
+            if entry.kind not in CATCH_KINDS:
+                continue
+            if entry.iseq_index < 0:
+                raise LoadError("a %s catch-table entry in '%s' has no ISeq"
+                                % (entry.kind, raw.name))
+            out.append(W_Catch(
+                CATCH_KINDS[entry.kind],
+                self.catch_label(entry.start, raw, labels),
+                self.catch_label(entry.end, raw, labels),
+                self.catch_label(entry.cont, raw, labels),
+                entry.sp,
+                self.load_iseq(entry.iseq_index, [raw] + parents)))
+        return out
+
+    def catch_label(self, name, raw, labels):
+        if name not in labels:
+            raise LoadError("a catch-table entry in '%s' names unknown label %s"
+                            % (raw.name, name))
+        return labels[name]
 
     def check_dropped(self, op, ops, raw):
         """Operand positions yarv_map.py does not emit, checked here."""
@@ -216,7 +255,8 @@ class Loader(object):
                     "not supported" % raw.name)
         elif op == insns.PUTSPECIALOBJECT:
             kind = self.int_of(ops[0], op, raw, 'object type')
-            if kind != optable.SPECIAL_OBJECT_CONST_BASE:
+            if kind < optable.SPECIAL_OBJECT_VMCORE or \
+                    kind > optable.SPECIAL_OBJECT_CONST_BASE:
                 raise UnsupportedOperation(
                     "putspecialobject %d in '%s' is not supported"
                     % (kind, raw.name))
@@ -251,7 +291,7 @@ class Loader(object):
                 rubycall.rid(mid)       # intern the ivar's CRuby ID once
             return mid
         if t == insns.T_IC:
-            return self.const_path(operand, op, raw)
+            return self.const_path(operand, op, raw, pool)
         if t == insns.T_ISEQ:
             if operand.kind == rawiseq.OP_NIL:
                 return NO_BLOCK_ISEQ      # no block at this call site
@@ -267,15 +307,19 @@ class Loader(object):
                         "yarv_map.py supports but the loader does not"
                         % (insns.NAMES[op], raw.name, insns.TYPE_NAMES[t]))
 
-    def const_path(self, operand, op, raw):
-        """An IC operand reaches to_a as the path's segments, one Symbol each."""
+    def const_path(self, operand, op, raw, pool):
+        """An IC operand reaches to_a as the path's segments, one Symbol each
+        (iseq.c:3503). An absolute `::Foo` has the empty name first."""
         if operand.kind != rawiseq.OP_ARRAY:
             raise LoadError("%s in '%s' wants a constant path, got %s"
                             % (insns.NAMES[op], raw.name, operand.describe()))
-        if len(operand.items) != 1:
-            raise UnsupportedOperation(
-                "a qualified constant path in '%s' is not supported" % raw.name)
-        return symbols.intern(self.sym_of(operand.items[0], op, raw))
+        if len(operand.items) == 0:
+            raise LoadError("%s in '%s' has an empty constant path"
+                            % (insns.NAMES[op], raw.name))
+        ids = []
+        for item in operand.items:
+            ids.append(symbols.intern(self.sym_of(item, op, raw)))
+        return pool.add_path(ids)
 
     def literal(self, operand, op, raw, pool):
         if operand.kind == rawiseq.OP_INT:

@@ -11,6 +11,7 @@ import boot
 import gcroots
 import rubycall
 import value
+from error import RubyException
 from rlib import elidable, dont_look_inside, promote, raw_word
 
 # Cycle guard: a superclass chain longer than this is a corrupt map.
@@ -54,6 +55,26 @@ def define(klass, mid, w_iseq, private):
         registry.methods[klass] = table
     table[mid] = MethodEntry(w_iseq, private, klass, mid)
     registry.version = Version()
+
+
+def undefine(klass, mid):
+    """Drop a method RPyYARV defined, so a later lookup falls through to
+    CRuby's. Answers whether there was one."""
+    table = registry.methods.get(klass, None)
+    if table is None or mid not in table:
+        return False
+    del table[mid]
+    registry.version = Version()
+    return True
+
+
+def own_lookup(klass, mid):
+    """The entry defined on klass itself, without walking the superclasses:
+    what an alias copies."""
+    table = registry.methods.get(klass, None)
+    if table is None:
+        return None
+    return table.get(mid, None)
 
 
 def record_class(klass, superklass):
@@ -122,7 +143,7 @@ def _reopened(cbase, rid):
     Integer that way is a superclass mismatch."""
     try:
         v = boot.const_get(cbase, rid)
-    except boot.RubyError:
+    except RubyException:
         return 0
     if value.is_immediate(v) or not boot.is_class(v):
         return 0

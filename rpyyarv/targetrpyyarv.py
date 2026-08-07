@@ -13,7 +13,7 @@ import loader
 import prelude
 import rubycall
 import value
-from error import RPyYarvError
+from error import RPyYarvError, RubyException
 
 
 def _check_special_consts():
@@ -68,6 +68,10 @@ def entry_point(argv):
         prelude.install()
         w_iseq = loader.load(bootiseq.load(iseqw))
         interp.run(w_iseq)
+    except RubyException, e:
+        # Nothing rescued it: hand it back so CRuby prints it and picks the
+        # exit status, exactly as an uncaught exception is reported.
+        return boot.cleanup_with_error(e.value)
     except RPyYarvError, e:
         print '[rpyyarv] %s' % e.msg
         return 1

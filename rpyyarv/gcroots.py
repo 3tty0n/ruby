@@ -19,6 +19,7 @@ class Registry(object):
         self.consts = []        # every loaded ISeq's constant pool
         self.pinned = []        # VALUEs built during load, before their pool
         self.classes = []       # classes RPyYARV defined, keys of the registry
+        self.held = []          # exception VALUEs parked outside any frame
 
 
 state = Registry()
@@ -41,6 +42,19 @@ def keepalive(v):
 
 def release_load_temporaries():
     state.pinned = []
+
+
+def hold(v):
+    """Keep a VALUE reachable while it waits in an RPython field no frame
+    covers: an exception a block callback could not raise into libruby."""
+    state.held.append(v)
+
+
+def release(v):
+    for i in range(len(state.held)):
+        if state.held[i] == v:
+            del state.held[i]
+            return
 
 
 def push_frame(frame):
@@ -79,6 +93,13 @@ def mark_roots():
     while k < len(klasses):
         boot.gc_mark_value(klasses[k])
         k += 1
+    held = state.held
+    k = 0
+    while k < len(held):
+        v = held[k]
+        if not value.is_immediate(v):
+            boot.gc_mark_value(v)
+        k += 1
     pools = state.consts
     i = 0
     while i < len(pools):
@@ -95,6 +116,9 @@ def mark_roots():
             boot.gc_mark_value(f.self_val)
         if not value.is_immediate(f.cref):
             boot.gc_mark_value(f.cref)
+        # The exception a rescue/ensure frame is unwinding under.
+        if not value.is_immediate(f.pending_value):
+            boot.gc_mark_value(f.pending_value)
         f = f.prev_frame
 
 

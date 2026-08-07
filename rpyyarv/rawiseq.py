@@ -54,9 +54,22 @@ class RawInsn(object):
         self.operands = operands    # in insns.def order
 
 
+class RawCatch(object):
+    """One catch-table entry, as iseq_data_to_ary spells it (iseq.c:3605):
+    [type, iseq, start, end, cont, sp]. The three pc fields arrive as label
+    names, the same ones a jump operand carries."""
+    def __init__(self, kind, iseq_index=-1, start='', end='', cont='', sp=0):
+        self.kind = kind        # 'rescue', 'ensure', 'break', ...
+        self.iseq_index = iseq_index    # -1 when the entry has no ISeq
+        self.start = start
+        self.end = end
+        self.cont = cont
+        self.sp = sp
+
+
 class RawISeq(object):
     def __init__(self, name, type_, nlocals, stack_max, lead_num,
-                 extra_params, catch_types):
+                 extra_params, catches):
         self.name = name
         self.type = type_
         self.nlocals = nlocals
@@ -64,9 +77,8 @@ class RawISeq(object):
         self.lead_num = lead_num
         # Names of the other parameter kinds CRuby reported, if any.
         self.extra_params = extra_params
-        # One name per catch-table entry ('break', 'rescue', ...): which
-        # kinds appear decides whether the loader can take the ISeq.
-        self.catch_types = catch_types
+        # One RawCatch per catch-table entry, in the order CRuby searches it.
+        self.catches = catches
         self.insns = []
         # label name -> index into insns; the loader turns it into a pc.
         self.labels = {}

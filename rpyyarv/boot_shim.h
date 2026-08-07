@@ -176,6 +176,43 @@ uintptr_t rpyyarv_call_with_block(uintptr_t recv, uintptr_t mid, int argc,
 
 int rpyyarv_is_class(uintptr_t v);
 
+/*
+ * The exception a failed rb_protect left behind, cleared on the way out.
+ *
+ * Every guarded call below reports failure through *state and leaves errinfo
+ * alone, so the RPython side can lift the exception VALUE into an interpreter
+ * exception of its own. It must be called on every non-zero *state, or the
+ * next raise inherits this one as its cause.
+ */
+uintptr_t rpyyarv_take_errinfo(void);
+
+/*
+ * Install errinfo and answer the previous one. RPyYARV pushes no CRuby
+ * frame, so rb_ec_get_errinfo (eval.c) finds no rescue frame to read `$!`
+ * from and falls back to ec->errinfo: a rescue body has to put it there for
+ * a bare `raise` and for `$!` to mean what Ruby says they mean.
+ */
+uintptr_t rpyyarv_swap_errinfo(uintptr_t v);
+
+/* rb_obj_is_kind_of, for checkmatch's rescue clause. */
+int rpyyarv_obj_is_kind_of(uintptr_t obj, uintptr_t klass, int *state);
+
+/* ruby_cleanup with an exception pending: CRuby prints it the way an
+   uncaught exception is printed, and answers the exit status. */
+int rpyyarv_cleanup_with_error(uintptr_t err);
+
+/* Hash literals: the ops themselves stay on the funcallv path. */
+uintptr_t rpyyarv_hash_new_capa(long capa, int *state);
+void rpyyarv_hash_aset(uintptr_t hash, uintptr_t key, uintptr_t val,
+                       int *state);
+uintptr_t rpyyarv_hash_resurrect(uintptr_t hash, int *state);
+
+/* splatarray: rb_check_to_array, then dup when the flag says so. */
+uintptr_t rpyyarv_splat_array(uintptr_t ary, int flag, int *state);
+
+/* rb_mRubyVMFrozenCore, the receiver putspecialobject 1 pushes. */
+uintptr_t rpyyarv_vm_core(void);
+
 /* Pin a VALUE for the process lifetime; used for the classes RPyYARV made. */
 void rpyyarv_gc_register_mark_object(uintptr_t v);
 

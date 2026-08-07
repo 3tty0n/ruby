@@ -32,6 +32,11 @@ EMIT = {
     'opt_reverse': [0],
     'newarray': [0],
     'duparray': [0],
+    'newhash': [0],
+    'duphash': [0],
+    'splatarray': [0],      # the flag is a Qtrue/Qfalse VALUE operand
+    'opt_and': [],          # CALL_DATA dropped
+    'opt_or': [],
     'newrange': [0],
     'getglobal': [0],
     'setglobal': [0],
@@ -73,6 +78,7 @@ EMIT = {
     'invokesuper': [0, 1],
     'invokeblock': [0],
     'throw': [0],
+    'checkmatch': [0],      # a rescue clause's class test, and case/when
     'leave': [],
 }
 
@@ -148,4 +154,25 @@ DEFINECLASS_FLAG_HAS_SUPERCLASS = 0x10
 
 # vm_core.h, enum vm_special_object_type. Only the cref's constant base,
 # which is what `class Foo` and a toplevel constant assignment emit.
+SPECIAL_OBJECT_VMCORE = 1
+SPECIAL_OBJECT_CBASE = 2
 SPECIAL_OBJECT_CONST_BASE = 3
+
+# vm_core.h, enum vm_check_match_type. WHEN answers the pattern itself, CASE
+# and RESCUE run `pattern === target`; ARRAY means the pattern is an Array of
+# them, which is what `rescue A, B` and a multi-value `when` compile to.
+CHECKMATCH_TYPE_MASK = 0x03
+CHECKMATCH_TYPE_WHEN = 1
+CHECKMATCH_TYPE_CASE = 2
+CHECKMATCH_TYPE_RESCUE = 3
+CHECKMATCH_ARRAY = 0x04
+
+# vm_core.h, enum ruby_tag_type. throw's operand is the tag, and tag 0 means
+# "continue the throw already in flight" rather than starting a new one.
+TAG_MASK = 0xf
+TAG_NONE = 0
+TAG_RETURN = 1
+TAG_BREAK = 2
+TAG_NEXT = 3
+TAG_RETRY = 4
+TAG_REDO = 5

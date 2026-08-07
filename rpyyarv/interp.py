@@ -9,9 +9,10 @@ import optable
 import rubycall
 import symbols
 import value
-from error import RPyYarvError, UnsupportedOperation
-from frame import Frame
-from iseq import NO_BLOCK_ISEQ
+from error import RPyYarvError, RubyException, UnsupportedOperation
+from frame import (Frame, PENDING_BREAK, PENDING_NEXT, PENDING_NONE,
+                   PENDING_RAISE)
+from iseq import CATCH_ENSURE, CATCH_RESCUE, NO_BLOCK_ISEQ
 from rlib import (JitDriver, always_inline, dont_look_inside, promote,
                   unroll_safe)
 
@@ -62,6 +63,16 @@ def invoke(frame, w_ci, w_block=None):
             if e.w_block is not w_block:
                 raise
             return e.value
+
+    if w_ci.mid == CORE_ALIAS or w_ci.mid == CORE_UNDEF:
+        return _core_method(frame, w_ci, recv, recv_at, argc)
+    if vm_core.value != 0 and recv == vm_core.value:
+        # The rest of RubyVM::FrozenCore is unimplemented. #lambda and #proc
+        # in particular would hand libruby a Proc over a block handle that
+        # only lives for the extent of the call, and crash later.
+        raise UnsupportedOperation(
+            "RubyVM::FrozenCore#%s is not supported"
+            % symbols.name_of(w_ci.mid))
 
     # Everything RPyYARV has not taken over goes back to CRuby, which is how
     # puts and every other builtin keeps working.
@@ -145,6 +156,48 @@ def invoke_super(frame, w_ci):
                   entry.mid)
 
 
+# vm.c defines these on RubyVM::FrozenCore; `alias` and `undef` compile to a
+# send of one of them. RPyYARV has to see them because its own method
+# registry would otherwise keep shadowing what they change in CRuby.
+CORE_ALIAS = symbols.intern('core#set_method_alias')
+CORE_UNDEF = symbols.intern('core#undef_method')
+
+
+def _core_method(frame, w_ci, recv, recv_at, argc):
+    if argc != 3 and w_ci.mid == CORE_ALIAS:
+        raise UnsupportedOperation('core#set_method_alias needs 3 arguments')
+    if argc != 2 and w_ci.mid == CORE_UNDEF:
+        raise UnsupportedOperation('core#undef_method needs 2 arguments')
+    cbase = frame.stack[recv_at + 1]
+    if value.is_immediate(cbase) or not boot.is_class(cbase):
+        raise UnsupportedOperation('alias or undef outside a class body')
+    name = _sym_mid(frame.stack[recv_at + 2])
+    if w_ci.mid == CORE_UNDEF:
+        dispatch.undefine(cbase, name)
+        args = [cbase, frame.stack[recv_at + 2]]
+        _drop(frame, recv_at)
+        return rubycall.call(recv, w_ci.mid, args)
+    old = _sym_mid(frame.stack[recv_at + 3])
+    entry = dispatch.own_lookup(cbase, old)
+    dispatch.undefine(cbase, name)
+    if entry is not None:
+        # An RPyYARV method: the alias is a second name for the same ISeq.
+        dispatch.define(cbase, name, entry.w_iseq, entry.private)
+        _drop(frame, recv_at)
+        return value.Q_NIL
+    args = [cbase, frame.stack[recv_at + 2], frame.stack[recv_at + 3]]
+    _drop(frame, recv_at)
+    return rubycall.call(recv, w_ci.mid, args)
+
+
+@dont_look_inside
+def _sym_mid(v):
+    if not boot.is_symbol(v):
+        raise UnsupportedOperation('alias or undef names something '
+                                   'that is not a Symbol')
+    return symbols.intern(boot.sym_of(v))
+
+
 class _Blocks(object):
     """The reverse-direction reference of the GC design, as a stack.
 
@@ -155,6 +208,7 @@ class _Blocks(object):
     def __init__(self):
         self.stack = []
         self.error = None       # an RPython error the callback could not raise
+        self.exc = None         # likewise, a Ruby exception
 
 
 blocks = _Blocks()
@@ -164,12 +218,19 @@ def block_callback(handle, argc, argv):
     """Called from C, inside rb_block_call. Must not let an RPython exception
     escape into libruby, so a failure is remembered and re-raised at the
     call site once rb_block_call has returned."""
-    if blocks.error is not None:
+    if blocks.error is not None or blocks.exc is not None:
         return boot.as_value(value.Q_NIL)
     w_block = blocks.stack[handle]
     args = boot.read_values(argv, argc)
     try:
         return boot.as_value(call_block(w_block, args))
+    except RubyException, e:
+        # It cannot be raised into libruby from here, so it waits until
+        # rb_block_call has returned. Held, because the RPython field the
+        # exception object lives in is not something CRuby's GC scans.
+        gcroots.hold(e.value)
+        blocks.exc = e
+        return boot.as_value(value.Q_NIL)
     except block_mod.BlockBreak:
         # Unwinding a break would have to longjmp out of rb_block_call's
         # frames; that protocol is not implemented.
@@ -189,6 +250,11 @@ def _call_with_block(recv, mid, args, w_block):
                                        len(blocks.stack) - 1)
     finally:
         blocks.stack.pop()
+    exc = blocks.exc
+    if exc is not None:
+        blocks.exc = None
+        gcroots.release(exc.value)
+        raise exc
     err = blocks.error
     if err is not None:
         blocks.error = None
@@ -253,23 +319,118 @@ def invoke_block(frame, w_ci):
     return call_block(w_block, args)
 
 
-# vm_core.h: throw_state's low bits are the RUBY_TAG_* value.
-TAG_MASK = 0xf
-TAG_BREAK = 2
-TAG_NEXT = 3
+class Throw(object):
+    """A throw in flight, in the shape vm_exec_handle_exception works with:
+    which tag, the value it carries, and (for a break) the block it escapes
+    to. Not an exception itself; _rethrow turns it back into one."""
+    def __init__(self, kind, value, w_block=None, name='raise'):
+        self.kind = kind
+        self.value = value
+        self.w_block = w_block
+        self.name = name
+
+
+def _rethrow(throw):
+    if throw.kind == PENDING_RAISE:
+        raise RubyException(throw.value, throw.name)
+    if throw.kind == PENDING_BREAK:
+        raise block_mod.BlockBreak(throw.w_block, throw.value)
+    raise block_mod.BlockNext(throw.value)
 
 
 def _throw(frame, throw_state, v):
-    tag = throw_state & TAG_MASK
-    if tag == TAG_NEXT:
+    tag = throw_state & optable.TAG_MASK
+    if tag == optable.TAG_NEXT:
         raise block_mod.BlockNext(v)
-    if tag == TAG_BREAK:
+    if tag == optable.TAG_BREAK:
         w_block = frame.own_block
         if w_block is None:
             raise UnsupportedOperation('break outside a block')
         raise block_mod.BlockBreak(w_block, v)
+    if tag == optable.TAG_NONE:
+        # vm_throw_continue: re-raise whatever this rescue/ensure ISeq is
+        # running under. Its `$!` local holds v, which is the same object.
+        if frame.pending_kind == PENDING_NONE:
+            raise UnsupportedOperation(
+                'throw 0 outside a rescue or ensure body')
+        _rethrow(Throw(frame.pending_kind, frame.pending_value,
+                       frame.pending_block))
+    if tag == optable.TAG_RETRY:
+        raise UnsupportedOperation('retry is not supported')
     raise UnsupportedOperation(
-        'throw with tag %d (return/retry/redo) is not supported' % tag)
+        'throw with tag %d (return/redo) is not supported' % tag)
+
+
+def _catch_for(iseq, epc, kind):
+    """The first catch-table entry covering epc, in CRuby's search order
+    (vm.c:2911). A raise takes a rescue or an ensure; a break or a next takes
+    only an ensure, since RPyYARV carries those as RPython exceptions."""
+    catches = iseq.catches
+    i = 0
+    while i < len(catches):
+        entry = catches[i]
+        if entry.start < epc and epc <= entry.end:
+            if entry.kind == CATCH_ENSURE or kind == PENDING_RAISE:
+                return entry
+        i += 1
+    return None
+
+
+def _run_catch(frame, entry, throw):
+    """A rescue/ensure ISeq runs in a frame of its own whose locals chain to
+    the raising one, the way vm.c:3014 pushes it with the previous EP."""
+    w_iseq = entry.w_iseq
+    callee = Frame(w_iseq, frame.self_val, frame.cref, frame.entry)
+    callee.defining_frame = frame
+    callee.block = frame.block
+    callee.own_block = frame.own_block
+    if len(callee.locals) > 0:
+        # Local 0 is `$!`; for a break or a next CRuby parks throw data there
+        # and nothing reads it.
+        callee.locals[0] = throw.value if throw.kind == PENDING_RAISE \
+            else value.Q_NIL
+    callee.pending_kind = throw.kind
+    callee.pending_value = throw.value
+    callee.pending_block = throw.w_block
+    return _run_with_errinfo(w_iseq, callee, callee.locals[0]
+                             if len(callee.locals) > 0 else value.Q_NIL)
+
+
+def _run_with_errinfo(w_iseq, callee, errinfo):
+    """`$!` and a bare `raise` read ec->errinfo here, since RPyYARV pushes no
+    CRuby rescue frame for rb_ec_get_errinfo to find. prev stays an RPython
+    local, which the conservative stack scan covers."""
+    prev = rubycall.swap_errinfo(errinfo)
+    try:
+        return execute(w_iseq, callee)
+    finally:
+        rubycall.swap_errinfo(prev)
+
+
+def _unwind(iseq, frame, throw, epc):
+    """Run the catch-table entries covering epc until one completes; answer
+    the pc to resume at. Re-raises when the frame handles nothing."""
+    while True:
+        entry = _catch_for(iseq, epc, throw.kind)
+        if entry is None:
+            _rethrow(throw)
+        frame.reset_sp(entry.sp)
+        frame.pc = entry.cont
+        try:
+            result = _run_catch(frame, entry, throw)
+        except RubyException, e:
+            throw = Throw(PENDING_RAISE, e.value, None, e.name)
+        except block_mod.BlockBreak, e:
+            throw = Throw(PENDING_BREAK, e.value, e.w_block)
+        except block_mod.BlockNext, e:
+            throw = Throw(PENDING_NEXT, e.value)
+        else:
+            frame.reset_sp(entry.sp)
+            frame.push(result)
+            return entry.cont
+        # The catch ISeq threw in turn -- its own `throw 0` continuing this
+        # one, or something new. cont is where the frame's pc now stands.
+        epc = entry.cont
 
 
 def install():
@@ -309,6 +470,22 @@ def _newarray(frame, n):
     v = rubycall.ary_new(values)
     _drop(frame, at)
     return v
+
+
+@unroll_safe
+def _newhash(frame, n):
+    """The stack holds n/2 key/value pairs; they stay in the marked frame
+    until each rb_hash_aset has copied them into the Hash."""
+    at = frame.sp - n
+    if at < 0 or n % 2 != 0:
+        raise UnsupportedOperation('newhash %d underflows the stack' % n)
+    h = rubycall.hash_new(n // 2)
+    i = 0
+    while i < n:
+        rubycall.hash_aset(h, frame.stack[at + i], frame.stack[at + i + 1])
+        i += 2
+    _drop(frame, at)
+    return h
 
 
 @unroll_safe
@@ -364,6 +541,44 @@ def _expand(frame, v, n):
         i -= 1
 
 
+class _VMCore(object):
+    # Quasi-immutable: fetched once, then folded into every trace that pushes
+    # it. A prebuilt instance with a plain immutable field would fold to 0.
+    _immutable_fields_ = ['value?']
+
+    def __init__(self):
+        self.value = 0
+
+
+vm_core = _VMCore()
+
+
+@dont_look_inside
+def _vm_core():
+    """RubyVM::FrozenCore, the receiver of the core# methods an alias or an
+    undef compiles to (vm_insnhelper.c:5668)."""
+    if vm_core.value == 0:
+        v = boot.vm_core()
+        boot.gc_register(v)
+        vm_core.value = v
+    return vm_core.value
+
+
+@unroll_safe
+def _const_path(frame, path):
+    """Walk the path segment by segment, the way vm_get_ev_const_chain does.
+    A leading empty segment is `::Foo`, which starts at Object."""
+    base = _const_base(frame)
+    i = 0
+    if symbols.name_of(path[0]) == '':
+        base = value.core_class(value.C_OBJECT)
+        i = 1
+    while i < len(path):
+        base = dispatch.const_get(base, path[i])
+        i += 1
+    return base
+
+
 def _const_base(frame):
     """The cref's constant base: the class a class body is defining into, and
     Object everywhere else. TODO: a nested cref chain, once modules land."""
@@ -388,6 +603,40 @@ def _opt_new_alloc(klass):
     return dispatch.alloc(klass)
 
 
+EQQ = symbols.intern('===')
+
+
+@dont_look_inside
+def _checkmatch(target, pattern, flag):
+    """vm_check_match, vm_insnhelper.c:5772."""
+    if flag & optable.CHECKMATCH_ARRAY:
+        if value.is_immediate(pattern) or not boot.is_array(pattern):
+            raise UnsupportedOperation(
+                'checkmatch with an array flag needs an Array of patterns')
+        n = boot.ary_len(pattern)
+        i = 0
+        while i < n:
+            if _match_one(target, boot.ary_entry(pattern, i), flag):
+                return value.Q_TRUE
+            i += 1
+        return value.Q_FALSE
+    return value.newbool(_match_one(target, pattern, flag))
+
+
+def _match_one(target, pattern, flag):
+    kind = flag & optable.CHECKMATCH_TYPE_MASK
+    if kind == optable.CHECKMATCH_TYPE_WHEN:
+        return value.is_true(pattern)
+    is_module = not value.is_immediate(pattern) and boot.is_class(pattern)
+    if kind == optable.CHECKMATCH_TYPE_RESCUE and not is_module:
+        raise UnsupportedOperation('class or module required for rescue clause')
+    if is_module:
+        # Module#=== is rb_obj_is_kind_of; going straight there skips a send.
+        # TODO: a subclass that redefines #=== is ignored, as in vm_opt_*.
+        return boot.obj_is_kind_of(target, pattern)
+    return value.is_true(rubycall.call1(pattern, EQQ, target))
+
+
 def get_printable_location(pc, iseq):
     return '%s@%d %s' % (iseq.name, pc, insns.NAMES[iseq.code[pc]])
 
@@ -397,18 +646,54 @@ jitdriver = JitDriver(greens=['pc', 'iseq'], reds=['frame'],
                       get_printable_location=get_printable_location)
 
 
+def _epc(iseq, pc):
+    """CRuby compares catch-table ranges against the pc *after* the raising
+    instruction, since vm_exec_core advances it before running the body."""
+    return pc + 1 + optable.NUM_OPERANDS[iseq.code[pc]]
+
+
 def execute(iseq, frame):
+    """Two shapes on purpose. An ISeq with no catch table cannot handle a
+    throw, so its call to the interpreter loop stays a plain tail call; the
+    handler shape below stops the JIT from inlining the call, and the common
+    method has no rescue in it. iseq is green, so the branch folds away."""
+    if len(iseq.catches) == 0:
+        gcroots.push_frame(frame)
+        try:
+            return _execute(iseq, frame, 0)
+        finally:
+            gcroots.pop_frame(frame)
+    return _execute_guarded(iseq, frame)
+
+
+def _execute_guarded(iseq, frame):
     gcroots.push_frame(frame)
     try:
-        return _execute(iseq, frame)
+        pc = 0
+        while True:
+            try:
+                return _execute(iseq, frame, pc)
+            except RubyException, e:
+                pc = _unwind(iseq, frame,
+                             Throw(PENDING_RAISE, e.value, None, e.name),
+                             _epc(iseq, frame.pc))
+            except block_mod.BlockBreak, e:
+                pc = _unwind(iseq, frame,
+                             Throw(PENDING_BREAK, e.value, e.w_block),
+                             _epc(iseq, frame.pc))
+            except block_mod.BlockNext, e:
+                pc = _unwind(iseq, frame, Throw(PENDING_NEXT, e.value),
+                             _epc(iseq, frame.pc))
     finally:
         gcroots.pop_frame(frame)
 
 
-def _execute(iseq, frame):
-    pc = 0
+def _execute(iseq, frame, pc):
     while True:
         jitdriver.jit_merge_point(iseq=iseq, pc=pc, frame=frame)
+        # Read back only when an exception has to find a catch-table entry;
+        # a store to a virtualizable field costs a trace nothing.
+        frame.pc = pc
         # rebound from the green iseq each iteration; hoisting it would leave a
         # live variable across the merge point that is neither green nor red
         code = iseq.code
@@ -538,13 +823,18 @@ def _execute(iseq, frame):
             pc += 1
             dispatch.ivar_set(frame.self_val, mid, frame.pop())
         elif opcode == insns.PUTSPECIALOBJECT:
-            # The loader has already refused every kind but CONST_BASE.
+            kind = code[pc]
             pc += 1
-            frame.push(_const_base(frame))
+            if kind == optable.SPECIAL_OBJECT_VMCORE:
+                frame.push(_vm_core())
+            else:
+                # CBASE and CONST_BASE differ only for a singleton class body,
+                # which the loader refuses anyway.
+                frame.push(_const_base(frame))
         elif opcode == insns.OPT_GETCONSTANT_PATH:
-            mid = code[pc]
+            idx = code[pc]
             pc += 1
-            frame.push(dispatch.const_get(_const_base(frame), mid))
+            frame.push(_const_path(frame, iseq.paths[idx]))
         elif opcode == insns.SETCONSTANT:
             mid = code[pc]
             pc += 1
@@ -634,6 +924,12 @@ def _execute(iseq, frame):
                 pc = target
                 if backward:
                     jitdriver.can_enter_jit(iseq=iseq, pc=pc, frame=frame)
+        elif opcode == insns.CHECKMATCH:
+            flag = code[pc]
+            pc += 1
+            pattern = frame.pop()
+            target = frame.pop()
+            frame.push(_checkmatch(target, pattern, flag))
         elif opcode == insns.THROW:
             throw_state = code[pc]
             pc += 1
@@ -677,6 +973,27 @@ def _execute(iseq, frame):
             pc += 1
             # The literal in the pool is shared; every evaluation gets a copy.
             frame.push(rubycall.ary_resurrect(iseq.consts[idx]))
+        elif opcode == insns.NEWHASH:
+            n = code[pc]
+            pc += 1
+            frame.push(_newhash(frame, n))
+        elif opcode == insns.DUPHASH:
+            idx = code[pc]
+            pc += 1
+            frame.push(rubycall.hash_resurrect(iseq.consts[idx]))
+        elif opcode == insns.SPLATARRAY:
+            idx = code[pc]
+            pc += 1
+            flag = value.is_true(iseq.consts[idx])
+            frame.push(rubycall.splat_array(frame.pop(), flag))
+        elif opcode == insns.OPT_AND:
+            b = frame.pop()
+            a = frame.pop()
+            frame.push(helpers.and_(a, b))
+        elif opcode == insns.OPT_OR:
+            b = frame.pop()
+            a = frame.pop()
+            frame.push(helpers.or_(a, b))
         elif opcode == insns.NEWRANGE:
             flag = code[pc]
             pc += 1

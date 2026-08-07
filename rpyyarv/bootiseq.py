@@ -85,9 +85,9 @@ def _read_iseq(program, pending, ary):
         boot.sym_of(boot.ary_entry(ary, I_TYPE)),
         boot.ary_len(boot.ary_entry(ary, I_LOCALS)),
         _int_or(boot.hash_aref(misc, 'stack_max'), 0),
-        _int_or(boot.hash_aref(params, 'lead_num'), 0),
+        _lead_num(misc, params),
         _extra_params(params),
-        _catch_types(boot.ary_entry(ary, I_CATCH)))
+        _catches(pending, boot.ary_entry(ary, I_CATCH)))
     program.add_iseq(raw)
 
     body = boot.ary_entry(ary, I_BODY)
@@ -155,21 +155,52 @@ def _operand(pending, v):
     return rawiseq.RawOperand(rawiseq.OP_VALUE, v, boot.inspect(v))
 
 
-def _catch_types(catch):
-    """iseq_data_to_ary spells each entry [type, iseq, start, end, cont, sp]."""
-    names = []
+def _catches(pending, catch):
+    """iseq_data_to_ary spells each entry [type, iseq, start, end, cont, sp]
+    (iseq.c:3605), the pcs as label names. An entry's ISeq joins the same
+    pending queue the nested ISeqs of the body use."""
+    out = []
     n = boot.ary_len(catch)
     i = 0
     while i < n:
         e = boot.ary_entry(catch, i)
-        name = '?'
-        if boot.is_array(e) and boot.ary_len(e) > 0:
-            t = boot.ary_entry(e, 0)
-            if boot.is_symbol(t):
-                name = boot.sym_of(t)
-        names.append(name)
+        if not boot.is_array(e) or boot.ary_len(e) != 6:
+            raise LoadError('a catch-table entry has %d element(s), expected '
+                            '6: %s' % (boot.ary_len(e), boot.inspect(e)))
+        kind = '?'
+        t = boot.ary_entry(e, 0)
+        if boot.is_symbol(t):
+            kind = boot.sym_of(t)
+        body = boot.ary_entry(e, 1)
+        index = -1
+        if not boot.is_nil(body):
+            pending.append(body)
+            index = len(pending) - 1
+        out.append(rawiseq.RawCatch(kind, index,
+                                    _label(boot.ary_entry(e, 2)),
+                                    _label(boot.ary_entry(e, 3)),
+                                    _label(boot.ary_entry(e, 4)),
+                                    _int_or(boot.ary_entry(e, 5), 0)))
         i += 1
-    return names
+    return out
+
+
+def _label(v):
+    if not boot.is_symbol(v):
+        raise LoadError('a catch-table entry names a pc that is not a label')
+    return boot.sym_of(v)
+
+
+def _lead_num(misc, params):
+    """How many positional parameters the ISeq takes.
+
+    iseq.c:3437 puts lead_num in the params hash only when flags.has_lead is
+    set, which a `for` loop's block parameter is not; arg_size counts it
+    either way, and with no other parameter kind present the two agree."""
+    lead = _int_or(boot.hash_aref(params, 'lead_num'), 0)
+    if lead == 0 and _extra_params(params) == '':
+        return _int_or(boot.hash_aref(misc, 'arg_size'), 0)
+    return lead
 
 
 def _int_or(v, default):

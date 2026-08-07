@@ -28,6 +28,8 @@ LENGTH = symbols.intern('length')
 SIZE = symbols.intern('size')
 EMPTY_P = symbols.intern('empty?')
 LTLT = symbols.intern('<<')
+AND = symbols.intern('&')
+OR = symbols.intern('|')
 
 
 def _from_int(n):
@@ -91,6 +93,19 @@ def neq(a, b):
     if value.is_fixnum(a) and value.is_fixnum(b):
         return value.newbool(a != b)
     return rubycall.call1(a, NEQ, b)
+
+
+def and_(a, b):
+    # The tag bits are the same in both operands, so they survive the mask.
+    if value.is_fixnum(a) and value.is_fixnum(b):
+        return a & b
+    return rubycall.call1(a, AND, b)
+
+
+def or_(a, b):
+    if value.is_fixnum(a) and value.is_fixnum(b):
+        return a | b
+    return rubycall.call1(a, OR, b)
 
 
 def _both_positive(a, b):

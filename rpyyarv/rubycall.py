@@ -79,6 +79,26 @@ def ary_new(values):
 
 
 @dont_look_inside
+def hash_new(capa):
+    return boot.hash_new(capa)
+
+
+@dont_look_inside
+def hash_aset(h, key, val):
+    return boot.hash_aset(h, key, val)
+
+
+@dont_look_inside
+def hash_resurrect(h):
+    return boot.hash_resurrect(h)
+
+
+@dont_look_inside
+def splat_array(ary, flag):
+    return boot.splat_array(ary, 1 if flag else 0)
+
+
+@dont_look_inside
 def range_new(low, high, excl):
     return boot.range_new(low, high, excl)
 
@@ -91,6 +111,11 @@ def gvar_get(mid):
 @dont_look_inside
 def gvar_set(mid, v):
     boot.gvar_set(symbols.name_of(mid), v)
+
+
+@dont_look_inside
+def swap_errinfo(v):
+    return boot.swap_errinfo(v)
 
 
 @dont_look_inside

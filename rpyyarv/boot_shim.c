@@ -121,10 +121,7 @@ rpyyarv_funcallv_id(uintptr_t recv, uintptr_t mid, int argc,
 
     *state = 0;
     VALUE r = rb_protect(funcallv_body, (VALUE)&a, state);
-    if (*state) {
-        rb_set_errinfo(Qnil);
-        return (uintptr_t)Qnil;
-    }
+    if (*state) return (uintptr_t)Qnil;
     return (uintptr_t)r;
 }
 
@@ -372,7 +369,7 @@ rpyyarv_define_class(uintptr_t cbase, uintptr_t id, uintptr_t super,
     a.id = (ID)id;
     *state = 0;
     VALUE r = rb_protect(define_class_body, (VALUE)&a, state);
-    if (*state) { rb_set_errinfo(Qnil); return (uintptr_t)Qnil; }
+    if (*state) return (uintptr_t)Qnil;
     return (uintptr_t)r;
 }
 
@@ -390,7 +387,7 @@ rpyyarv_class_superclass(uintptr_t klass, int *state)
     a.a = (VALUE)klass;
     *state = 0;
     VALUE r = rb_protect(class_superclass_body, (VALUE)&a, state);
-    if (*state) { rb_set_errinfo(Qnil); return (uintptr_t)Qnil; }
+    if (*state) return (uintptr_t)Qnil;
     return (uintptr_t)r;
 }
 
@@ -408,7 +405,7 @@ rpyyarv_obj_alloc(uintptr_t klass, int *state)
     a.a = (VALUE)klass;
     *state = 0;
     VALUE r = rb_protect(obj_alloc_body, (VALUE)&a, state);
-    if (*state) { rb_set_errinfo(Qnil); return (uintptr_t)Qnil; }
+    if (*state) return (uintptr_t)Qnil;
     return (uintptr_t)r;
 }
 
@@ -427,7 +424,7 @@ rpyyarv_const_get(uintptr_t klass, uintptr_t id, int *state)
     a.id = (ID)id;
     *state = 0;
     VALUE r = rb_protect(const_get_body, (VALUE)&a, state);
-    if (*state) { rb_set_errinfo(Qnil); return (uintptr_t)Qnil; }
+    if (*state) return (uintptr_t)Qnil;
     return (uintptr_t)r;
 }
 
@@ -448,7 +445,6 @@ rpyyarv_const_set(uintptr_t klass, uintptr_t id, uintptr_t val, int *state)
     a.id = (ID)id;
     *state = 0;
     rb_protect(const_set_body, (VALUE)&a, state);
-    if (*state) rb_set_errinfo(Qnil);
 }
 
 static VALUE
@@ -466,7 +462,7 @@ rpyyarv_ivar_get(uintptr_t obj, uintptr_t id, int *state)
     a.id = (ID)id;
     *state = 0;
     VALUE r = rb_protect(ivar_get_body, (VALUE)&a, state);
-    if (*state) { rb_set_errinfo(Qnil); return (uintptr_t)Qnil; }
+    if (*state) return (uintptr_t)Qnil;
     return (uintptr_t)r;
 }
 
@@ -487,7 +483,6 @@ rpyyarv_ivar_set(uintptr_t obj, uintptr_t id, uintptr_t val, int *state)
     a.id = (ID)id;
     *state = 0;
     rb_protect(ivar_set_body, (VALUE)&a, state);
-    if (*state) rb_set_errinfo(Qnil);
 }
 
 /* A corrupt shape tree would otherwise spin here forever. */
@@ -551,7 +546,7 @@ rpyyarv_ary_resurrect(uintptr_t ary, int *state)
     a.a = (VALUE)ary;
     *state = 0;
     VALUE r = rb_protect(ary_resurrect_body, (VALUE)&a, state);
-    if (*state) { rb_set_errinfo(Qnil); return (uintptr_t)Qnil; }
+    if (*state) return (uintptr_t)Qnil;
     return (uintptr_t)r;
 }
 
@@ -578,7 +573,6 @@ rpyyarv_ary_store(uintptr_t ary, long idx, uintptr_t val, int *state)
     a.idx = idx;
     *state = 0;
     rb_protect(ary_store_body, (VALUE)&a, state);
-    if (*state) rb_set_errinfo(Qnil);
 }
 
 static VALUE
@@ -595,7 +589,7 @@ rpyyarv_ary_new_capa(long capa, int *state)
     a.idx = capa;
     *state = 0;
     VALUE r = rb_protect(ary_new_capa_body, (VALUE)&a, state);
-    if (*state) { rb_set_errinfo(Qnil); return (uintptr_t)Qnil; }
+    if (*state) return (uintptr_t)Qnil;
     return (uintptr_t)r;
 }
 
@@ -627,7 +621,6 @@ rpyyarv_ary_cat(uintptr_t ary, int n, const uintptr_t *elems, int *state)
     a.n = n;
     *state = 0;
     rb_protect(ary_cat_body, (VALUE)&a, state);
-    if (*state) rb_set_errinfo(Qnil);
 }
 
 struct range_args {
@@ -652,7 +645,7 @@ rpyyarv_range_new(uintptr_t low, uintptr_t high, int excl, int *state)
     a.excl = excl;
     *state = 0;
     VALUE r = rb_protect(range_new_body, (VALUE)&a, state);
-    if (*state) { rb_set_errinfo(Qnil); return (uintptr_t)Qnil; }
+    if (*state) return (uintptr_t)Qnil;
     return (uintptr_t)r;
 }
 
@@ -675,7 +668,7 @@ rpyyarv_gvar_get(const char *name, int *state)
     a.name = name;
     *state = 0;
     VALUE r = rb_protect(gvar_get_body, (VALUE)&a, state);
-    if (*state) { rb_set_errinfo(Qnil); return (uintptr_t)Qnil; }
+    if (*state) return (uintptr_t)Qnil;
     return (uintptr_t)r;
 }
 
@@ -694,7 +687,6 @@ rpyyarv_gvar_set(const char *name, uintptr_t val, int *state)
     a.val = (VALUE)val;
     *state = 0;
     rb_protect(gvar_set_body, (VALUE)&a, state);
-    if (*state) rb_set_errinfo(Qnil);
 }
 
 static rpyyarv_block_fn block_callback;
@@ -761,7 +753,7 @@ rpyyarv_call_with_block(uintptr_t recv, uintptr_t mid, int argc,
 
     *state = 0;
     VALUE r = rb_protect(call_with_block_body, (VALUE)&a, state);
-    if (*state) { rb_set_errinfo(Qnil); return (uintptr_t)Qnil; }
+    if (*state) return (uintptr_t)Qnil;
     return (uintptr_t)r;
 }
 
@@ -778,6 +770,152 @@ rpyyarv_gc_register_mark_object(uintptr_t v)
 {
     if (SPECIAL_CONST_P((VALUE)v)) return;
     rb_gc_register_mark_object((VALUE)v);
+}
+
+uintptr_t
+rpyyarv_take_errinfo(void)
+{
+    VALUE e = rb_errinfo();
+    rb_set_errinfo(Qnil);
+    return (uintptr_t)e;
+}
+
+uintptr_t
+rpyyarv_swap_errinfo(uintptr_t v)
+{
+    VALUE prev = rb_errinfo();
+    rb_set_errinfo((VALUE)v);
+    return (uintptr_t)prev;
+}
+
+static VALUE
+obj_is_kind_of_body(VALUE argp)
+{
+    struct obj_args *p = (struct obj_args *)argp;
+    return rb_obj_is_kind_of(p->a, p->b);
+}
+
+int
+rpyyarv_obj_is_kind_of(uintptr_t obj, uintptr_t klass, int *state)
+{
+    struct obj_args a;
+    a.a = (VALUE)obj;
+    a.b = (VALUE)klass;
+    *state = 0;
+    VALUE r = rb_protect(obj_is_kind_of_body, (VALUE)&a, state);
+    if (*state) return 0;
+    return RTEST(r) ? 1 : 0;
+}
+
+int
+rpyyarv_cleanup_with_error(uintptr_t err)
+{
+    rb_set_errinfo((VALUE)err);
+    /* ruby_cleanup prints a pending exception the way an uncaught one is
+       printed and answers the exit status. RUBY_TAG_RAISE is 6. */
+    return ruby_cleanup(6);
+}
+
+struct hash_args {
+    VALUE hash;
+    VALUE key;
+    VALUE val;
+    long  capa;
+};
+
+static VALUE
+hash_new_capa_body(VALUE argp)
+{
+    struct hash_args *p = (struct hash_args *)argp;
+    return rb_hash_new_capa(p->capa);
+}
+
+uintptr_t
+rpyyarv_hash_new_capa(long capa, int *state)
+{
+    struct hash_args a;
+    a.capa = capa;
+    *state = 0;
+    VALUE r = rb_protect(hash_new_capa_body, (VALUE)&a, state);
+    if (*state) return (uintptr_t)Qnil;
+    return (uintptr_t)r;
+}
+
+static VALUE
+hash_aset_body(VALUE argp)
+{
+    struct hash_args *p = (struct hash_args *)argp;
+    return rb_hash_aset(p->hash, p->key, p->val);
+}
+
+void
+rpyyarv_hash_aset(uintptr_t hash, uintptr_t key, uintptr_t val, int *state)
+{
+    struct hash_args a;
+    a.hash = (VALUE)hash;
+    a.key = (VALUE)key;
+    a.val = (VALUE)val;
+    *state = 0;
+    rb_protect(hash_aset_body, (VALUE)&a, state);
+}
+
+static VALUE
+hash_resurrect_body(VALUE argp)
+{
+    struct hash_args *p = (struct hash_args *)argp;
+    return rb_hash_dup(p->hash);
+}
+
+uintptr_t
+rpyyarv_hash_resurrect(uintptr_t hash, int *state)
+{
+    struct hash_args a;
+    a.hash = (VALUE)hash;
+    *state = 0;
+    VALUE r = rb_protect(hash_resurrect_body, (VALUE)&a, state);
+    if (*state) return (uintptr_t)Qnil;
+    return (uintptr_t)r;
+}
+
+struct splat_args {
+    VALUE ary;
+    int   flag;
+};
+
+/* vm_splat_array in vm_insnhelper.c, minus the frozen-empty-array shortcut
+   the flag==0 case takes there. */
+static VALUE
+splat_array_body(VALUE argp)
+{
+    struct splat_args *p = (struct splat_args *)argp;
+    VALUE tmp;
+    if (NIL_P(p->ary)) return rb_ary_new();
+    tmp = rb_check_array_type(p->ary);
+    if (NIL_P(tmp)) return rb_ary_new3(1, p->ary);
+    if (p->flag) return rb_ary_dup(tmp);
+    return tmp;
+}
+
+uintptr_t
+rpyyarv_splat_array(uintptr_t ary, int flag, int *state)
+{
+    struct splat_args a;
+    a.ary = (VALUE)ary;
+    a.flag = flag;
+    *state = 0;
+    VALUE r = rb_protect(splat_array_body, (VALUE)&a, state);
+    if (*state) return (uintptr_t)Qnil;
+    return (uintptr_t)r;
+}
+
+/* vm.c:4274. FrozenCore is hidden: rb_set_class_path names it but defines no
+   constant, so rb_const_get cannot reach it. libruby exports the variable. */
+extern VALUE rb_mRubyVMFrozenCore;
+
+uintptr_t
+rpyyarv_vm_core(void)
+{
+    return (uintptr_t)rb_mRubyVMFrozenCore;
 }
 
 uintptr_t

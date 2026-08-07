@@ -7,6 +7,8 @@ import sys
 from rpython.rtyper.lltypesystem import lltype, rffi
 from rpython.translator.tool.cbuild import ExternalCompilationInfo
 
+from error import RubyException
+
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _TOP = os.path.dirname(_HERE)
 _BUILD = os.environ.get('RPYYARV_BUILD', os.path.join(_TOP, 'build'))
@@ -152,6 +154,18 @@ rb_gvar_set_ = _ext('rpyyarv_gvar_set', [rffi.CCHARP, VALUE, INTP],
                     lltype.Void, reenters=True)
 rb_is_class = _ext('rpyyarv_is_class', [VALUE], rffi.INT)
 rb_gc_register = _ext('rpyyarv_gc_register_mark_object', [VALUE], lltype.Void, reenters=True)
+rb_take_errinfo = _ext('rpyyarv_take_errinfo', [], VALUE)
+rb_swap_errinfo = _ext('rpyyarv_swap_errinfo', [VALUE], VALUE)
+rb_obj_is_kind_of = _ext('rpyyarv_obj_is_kind_of', [VALUE, VALUE, INTP],
+                         rffi.INT, reenters=True)
+rb_cleanup_with_error = _ext('rpyyarv_cleanup_with_error', [VALUE], rffi.INT,
+                             reenters=True)
+rb_hash_new_capa = _ext('rpyyarv_hash_new_capa', [rffi.LONG, INTP], VALUE, reenters=True)
+rb_hash_aset_ = _ext('rpyyarv_hash_aset', [VALUE, VALUE, VALUE, INTP],
+                     lltype.Void, reenters=True)
+rb_hash_resurrect = _ext('rpyyarv_hash_resurrect', [VALUE, INTP], VALUE, reenters=True)
+rb_splat_array = _ext('rpyyarv_splat_array', [VALUE, rffi.INT, INTP], VALUE, reenters=True)
+rb_vm_core = _ext('rpyyarv_vm_core', [], VALUE, reenters=True)
 
 NCLASS = 12
 
@@ -162,8 +176,18 @@ def _v(n):
 
 
 class RubyError(Exception):
+    # A call RPyYARV could not even make; a call that raised becomes a
+    # RubyException carrying the exception object.
     def __init__(self, mid):
         self.mid = mid
+
+
+def _failed(name):
+    """Turn a failed rb_protect into an RPython exception carrying the Ruby
+    one. The VALUE is only on the machine stack until the raise, which the
+    conservative scan covers."""
+    v = rffi.cast(lltype.Signed, rb_take_errinfo())
+    raise RubyException(v, name)
 
 
 def call0(recv, mid):
@@ -276,7 +300,7 @@ def funcallv(recv, rid, args, name):
             failed = rffi.cast(lltype.Signed, state[0]) != 0
             ret = rffi.cast(lltype.Signed, v)
     if failed:
-        raise RubyError(name)
+        _failed(name)
     return ret
 
 
@@ -305,7 +329,7 @@ def _ary_new_chunked(values):
                         rb_ary_new_capa(rffi.cast(rffi.LONG, n), state))
         failed = rffi.cast(lltype.Signed, state[0]) != 0
     if failed:
-        raise RubyError('Array.new')
+        _failed('Array.new')
     at = 0
     while at < n:
         count = n - at
@@ -322,7 +346,7 @@ def _ary_new_chunked(values):
                            buf, state)
                 failed = rffi.cast(lltype.Signed, state[0]) != 0
         if failed:
-            raise RubyError('Array#concat')
+            _failed('Array#concat')
         at += count
     return ary
 
@@ -346,7 +370,7 @@ def call_with_block(recv, rid, args, handle, name):
             failed = rffi.cast(lltype.Signed, state[0]) != 0
             ret = rffi.cast(lltype.Signed, v)
     if failed:
-        raise RubyError(name)
+        _failed(name)
     return ret
 
 
@@ -380,7 +404,7 @@ def ary_resurrect(ary):
         failed = rffi.cast(lltype.Signed, state[0]) != 0
         ret = rffi.cast(lltype.Signed, v)
     if failed:
-        raise RubyError('Array#dup')
+        _failed('Array#dup')
     return ret
 
 
@@ -390,7 +414,7 @@ def ary_store(ary, idx, val):
         rb_ary_store_(_v(ary), rffi.cast(rffi.LONG, idx), _v(val), state)
         failed = rffi.cast(lltype.Signed, state[0]) != 0
     if failed:
-        raise RubyError('Array#[]=')
+        _failed('Array#[]=')
 
 
 def range_new(low, high, excl):
@@ -400,7 +424,7 @@ def range_new(low, high, excl):
         failed = rffi.cast(lltype.Signed, state[0]) != 0
         ret = rffi.cast(lltype.Signed, v)
     if failed:
-        raise RubyError('Range.new')
+        _failed('Range.new')
     return ret
 
 
@@ -412,7 +436,7 @@ def gvar_get(name):
         failed = rffi.cast(lltype.Signed, state[0]) != 0
         ret = rffi.cast(lltype.Signed, v)
     if failed:
-        raise RubyError(name)
+        _failed(name)
     return ret
 
 
@@ -423,7 +447,7 @@ def gvar_set(name, val):
             rb_gvar_set_(c_name, _v(val), state)
         failed = rffi.cast(lltype.Signed, state[0]) != 0
     if failed:
-        raise RubyError(name)
+        _failed(name)
 
 
 def str_concat(parts):
@@ -481,7 +505,7 @@ def define_class(cbase, rid, super_v):
         failed = rffi.cast(lltype.Signed, state[0]) != 0
         ret = rffi.cast(lltype.Signed, v)
     if failed:
-        raise RubyError('Class.new')
+        _failed('Class.new')
     return ret
 
 
@@ -492,6 +516,7 @@ def class_superclass(klass):
         failed = rffi.cast(lltype.Signed, state[0]) != 0
         ret = rffi.cast(lltype.Signed, v)
     if failed:
+        rb_take_errinfo()
         return 0
     return ret
 
@@ -503,7 +528,7 @@ def obj_alloc(klass):
         failed = rffi.cast(lltype.Signed, state[0]) != 0
         ret = rffi.cast(lltype.Signed, v)
     if failed:
-        raise RubyError('allocate')
+        _failed('allocate')
     return ret
 
 
@@ -514,7 +539,7 @@ def const_get(klass, rid):
         failed = rffi.cast(lltype.Signed, state[0]) != 0
         ret = rffi.cast(lltype.Signed, v)
     if failed:
-        raise RubyError('const_get')
+        _failed('const_get')
     return ret
 
 
@@ -524,7 +549,7 @@ def const_set(klass, rid, val):
         rb_const_set_(_v(klass), _v(rid), _v(val), state)
         failed = rffi.cast(lltype.Signed, state[0]) != 0
     if failed:
-        raise RubyError('const_set')
+        _failed('const_set')
 
 
 def ivar_get(obj, rid):
@@ -534,7 +559,7 @@ def ivar_get(obj, rid):
         failed = rffi.cast(lltype.Signed, state[0]) != 0
         ret = rffi.cast(lltype.Signed, v)
     if failed:
-        raise RubyError('instance_variable_get')
+        _failed('instance_variable_get')
     return ret
 
 
@@ -544,7 +569,7 @@ def ivar_set(obj, rid, val):
         rb_ivar_set_(_v(obj), _v(rid), _v(val), state)
         failed = rffi.cast(lltype.Signed, state[0]) != 0
     if failed:
-        raise RubyError('instance_variable_set')
+        _failed('instance_variable_set')
 
 
 LAYOUT_N = 6
@@ -589,6 +614,71 @@ def shape_iv_index(shape_id, rid):
 
 def is_class(v):
     return rffi.cast(lltype.Signed, rb_is_class(_v(v))) != 0
+
+
+def obj_is_kind_of(obj, klass):
+    with lltype.scoped_alloc(INTP.TO, 1) as state:
+        state[0] = rffi.cast(rffi.INT, 0)
+        r = rffi.cast(lltype.Signed, rb_obj_is_kind_of(_v(obj), _v(klass),
+                                                       state))
+        failed = rffi.cast(lltype.Signed, state[0]) != 0
+    if failed:
+        _failed('kind_of?')
+    return r != 0
+
+
+def swap_errinfo(v):
+    return rffi.cast(lltype.Signed, rb_swap_errinfo(_v(v)))
+
+
+def cleanup_with_error(v):
+    return rffi.cast(lltype.Signed, rb_cleanup_with_error(_v(v)))
+
+
+def hash_new(capa):
+    with lltype.scoped_alloc(INTP.TO, 1) as state:
+        state[0] = rffi.cast(rffi.INT, 0)
+        v = rb_hash_new_capa(rffi.cast(rffi.LONG, capa), state)
+        failed = rffi.cast(lltype.Signed, state[0]) != 0
+        ret = rffi.cast(lltype.Signed, v)
+    if failed:
+        _failed('Hash.new')
+    return ret
+
+
+def hash_aset(hash_v, key, val):
+    with lltype.scoped_alloc(INTP.TO, 1) as state:
+        state[0] = rffi.cast(rffi.INT, 0)
+        rb_hash_aset_(_v(hash_v), _v(key), _v(val), state)
+        failed = rffi.cast(lltype.Signed, state[0]) != 0
+    if failed:
+        _failed('Hash#[]=')
+
+
+def hash_resurrect(hash_v):
+    with lltype.scoped_alloc(INTP.TO, 1) as state:
+        state[0] = rffi.cast(rffi.INT, 0)
+        v = rb_hash_resurrect(_v(hash_v), state)
+        failed = rffi.cast(lltype.Signed, state[0]) != 0
+        ret = rffi.cast(lltype.Signed, v)
+    if failed:
+        _failed('Hash#dup')
+    return ret
+
+
+def splat_array(ary, flag):
+    with lltype.scoped_alloc(INTP.TO, 1) as state:
+        state[0] = rffi.cast(rffi.INT, 0)
+        v = rb_splat_array(_v(ary), rffi.cast(rffi.INT, flag), state)
+        failed = rffi.cast(lltype.Signed, state[0]) != 0
+        ret = rffi.cast(lltype.Signed, v)
+    if failed:
+        _failed('to_a')
+    return ret
+
+
+def vm_core():
+    return rffi.cast(lltype.Signed, rb_vm_core())
 
 
 def gc_register(v):
