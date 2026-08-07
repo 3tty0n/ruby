@@ -77,6 +77,9 @@ def _ext(name, args, result, reenters=False):
     # callback: without it the root walker would keep live RPython objects
     # only in C locals across the call, and a minor collection inside the
     # callback would move them out from under it.
+    #
+    # Every call that can allocate qualifies, not just rb_block_call: an
+    # allocation can start a CRuby GC, whose mark hook is gcroots.mark_roots.
     return rffi.llexternal(name, args, result, compilation_info=eci,
                            releasegil=False,
                            random_effects_on_gcobjs=reenters)
@@ -85,11 +88,11 @@ def _ext(name, args, result, reenters=False):
 rb_boot = _ext('rpyyarv_boot', [rffi.INT, rffi.CCHARPP, INTP], VOIDP)
 rb_cleanup = _ext('rpyyarv_cleanup', [rffi.INT], rffi.INT)
 rb_iseqw_new = _ext('rpyyarv_iseqw_new', [VOIDP], VALUE)
-rb_call0 = _ext('rpyyarv_call0', [VALUE, rffi.CCHARP, INTP], VALUE)
-rb_cstr = _ext('rpyyarv_cstr', [VALUE], rffi.CCHARP)
-rb_inspect_cstr = _ext('rpyyarv_inspect_cstr', [VALUE], rffi.CCHARP)
+rb_call0 = _ext('rpyyarv_call0', [VALUE, rffi.CCHARP, INTP], VALUE, reenters=True)
+rb_cstr = _ext('rpyyarv_cstr', [VALUE], rffi.CCHARP, reenters=True)
+rb_inspect_cstr = _ext('rpyyarv_inspect_cstr', [VALUE], rffi.CCHARP, reenters=True)
 rb_ary_len = _ext('rpyyarv_ary_len', [VALUE], rffi.LONG)
-rb_ary_entry = _ext('rpyyarv_ary_entry', [VALUE, rffi.LONG], VALUE)
+rb_ary_entry = _ext('rpyyarv_ary_entry', [VALUE, rffi.LONG], VALUE, reenters=True)
 rb_is_array = _ext('rpyyarv_is_array', [VALUE], rffi.INT)
 rb_is_symbol = _ext('rpyyarv_is_symbol', [VALUE], rffi.INT)
 rb_is_fixnum = _ext('rpyyarv_is_fixnum', [VALUE], rffi.INT)
@@ -98,35 +101,35 @@ rb_is_hash = _ext('rpyyarv_is_hash', [VALUE], rffi.INT)
 rb_is_nil = _ext('rpyyarv_is_nil', [VALUE], rffi.INT)
 rb_is_true = _ext('rpyyarv_is_true', [VALUE], rffi.INT)
 rb_is_false = _ext('rpyyarv_is_false', [VALUE], rffi.INT)
-rb_num2long = _ext('rpyyarv_num2long', [VALUE], rffi.LONG)
-rb_hash_aref = _ext('rpyyarv_hash_aref', [VALUE, rffi.CCHARP], VALUE)
-rb_sym_cstr = _ext('rpyyarv_sym_cstr', [VALUE], rffi.CCHARP)
+rb_num2long = _ext('rpyyarv_num2long', [VALUE], rffi.LONG, reenters=True)
+rb_hash_aref = _ext('rpyyarv_hash_aref', [VALUE, rffi.CCHARP], VALUE, reenters=True)
+rb_sym_cstr = _ext('rpyyarv_sym_cstr', [VALUE], rffi.CCHARP, reenters=True)
 rb_intern_ = _ext('rpyyarv_intern', [rffi.CCHARP], VALUE)
-rb_sym_new = _ext('rpyyarv_sym_new', [rffi.CCHARP], VALUE)
+rb_sym_new = _ext('rpyyarv_sym_new', [rffi.CCHARP], VALUE, reenters=True)
 rb_funcallv_id = _ext('rpyyarv_funcallv_id',
-                      [VALUE, VALUE, rffi.INT, VALUEP, INTP], VALUE)
+                      [VALUE, VALUE, rffi.INT, VALUEP, INTP], VALUE, reenters=True)
 rb_top_self = _ext('rpyyarv_top_self', [], VALUE)
-rb_int2inum = _ext('rpyyarv_int2inum', [rffi.LONG], VALUE)
-rb_str_new = _ext('rpyyarv_str_new', [rffi.CCHARP], VALUE)
-rb_ary_new = _ext('rpyyarv_ary_new', [rffi.INT, VALUEP], VALUE)
-rb_str_concat = _ext('rpyyarv_str_concat', [rffi.INT, VALUEP], VALUE)
+rb_int2inum = _ext('rpyyarv_int2inum', [rffi.LONG], VALUE, reenters=True)
+rb_str_new = _ext('rpyyarv_str_new', [rffi.CCHARP], VALUE, reenters=True)
+rb_ary_new = _ext('rpyyarv_ary_new', [rffi.INT, VALUEP], VALUE, reenters=True)
+rb_str_concat = _ext('rpyyarv_str_concat', [rffi.INT, VALUEP], VALUE, reenters=True)
 rb_special_consts = _ext('rpyyarv_special_consts',
                          [VALUEP, VALUEP, VALUEP, VALUEP], lltype.Void)
 rb_gc_set_mark_hook = _ext('rpyyarv_gc_set_mark_hook', [MARK_HOOK],
                            lltype.Void)
 rb_gc_mark_value = _ext('rpyyarv_gc_mark_value', [VALUE], lltype.Void)
-rb_gc_start = _ext('rpyyarv_gc_start', [], lltype.Void)
+rb_gc_start = _ext('rpyyarv_gc_start', [], lltype.Void, reenters=True)
 rb_core_classes = _ext('rpyyarv_core_classes', [VALUEP], lltype.Void)
 rb_define_class_ = _ext('rpyyarv_define_class',
-                        [VALUE, VALUE, VALUE, INTP], VALUE)
-rb_class_superclass = _ext('rpyyarv_class_superclass', [VALUE, INTP], VALUE)
-rb_obj_alloc = _ext('rpyyarv_obj_alloc', [VALUE, INTP], VALUE)
-rb_const_get_ = _ext('rpyyarv_const_get', [VALUE, VALUE, INTP], VALUE)
+                        [VALUE, VALUE, VALUE, INTP], VALUE, reenters=True)
+rb_class_superclass = _ext('rpyyarv_class_superclass', [VALUE, INTP], VALUE, reenters=True)
+rb_obj_alloc = _ext('rpyyarv_obj_alloc', [VALUE, INTP], VALUE, reenters=True)
+rb_const_get_ = _ext('rpyyarv_const_get', [VALUE, VALUE, INTP], VALUE, reenters=True)
 rb_const_set_ = _ext('rpyyarv_const_set', [VALUE, VALUE, VALUE, INTP],
-                     lltype.Void)
-rb_ivar_get_ = _ext('rpyyarv_ivar_get', [VALUE, VALUE, INTP], VALUE)
+                     lltype.Void, reenters=True)
+rb_ivar_get_ = _ext('rpyyarv_ivar_get', [VALUE, VALUE, INTP], VALUE, reenters=True)
 rb_ivar_set_ = _ext('rpyyarv_ivar_set', [VALUE, VALUE, VALUE, INTP],
-                    lltype.Void)
+                    lltype.Void, reenters=True)
 rb_shape_iv_index = _ext('rpyyarv_shape_iv_index',
                          [rffi.UINT, VALUE, INTP], rffi.INT)
 rb_object_layout = _ext('rpyyarv_object_layout', [INTP], lltype.Void)
@@ -136,19 +139,19 @@ rb_call_with_block = _ext('rpyyarv_call_with_block',
                           [VALUE, VALUE, rffi.INT, VALUEP, rffi.LONG, INTP],
                           VALUE, reenters=True)
 rb_array_layout = _ext('rpyyarv_array_layout', [INTP], lltype.Void)
-rb_ary_resurrect = _ext('rpyyarv_ary_resurrect', [VALUE, INTP], VALUE)
+rb_ary_resurrect = _ext('rpyyarv_ary_resurrect', [VALUE, INTP], VALUE, reenters=True)
 rb_ary_store_ = _ext('rpyyarv_ary_store', [VALUE, rffi.LONG, VALUE, INTP],
-                     lltype.Void)
-rb_ary_new_capa = _ext('rpyyarv_ary_new_capa', [rffi.LONG, INTP], VALUE)
+                     lltype.Void, reenters=True)
+rb_ary_new_capa = _ext('rpyyarv_ary_new_capa', [rffi.LONG, INTP], VALUE, reenters=True)
 rb_ary_cat = _ext('rpyyarv_ary_cat', [VALUE, rffi.INT, VALUEP, INTP],
-                  lltype.Void)
+                  lltype.Void, reenters=True)
 rb_range_new_ = _ext('rpyyarv_range_new', [VALUE, VALUE, rffi.INT, INTP],
-                     VALUE)
-rb_gvar_get_ = _ext('rpyyarv_gvar_get', [rffi.CCHARP, INTP], VALUE)
+                     VALUE, reenters=True)
+rb_gvar_get_ = _ext('rpyyarv_gvar_get', [rffi.CCHARP, INTP], VALUE, reenters=True)
 rb_gvar_set_ = _ext('rpyyarv_gvar_set', [rffi.CCHARP, VALUE, INTP],
-                    lltype.Void)
+                    lltype.Void, reenters=True)
 rb_is_class = _ext('rpyyarv_is_class', [VALUE], rffi.INT)
-rb_gc_register = _ext('rpyyarv_gc_register_mark_object', [VALUE], lltype.Void)
+rb_gc_register = _ext('rpyyarv_gc_register_mark_object', [VALUE], lltype.Void, reenters=True)
 
 NCLASS = 12
 

@@ -10,6 +10,7 @@ import gcroots
 import helpers
 import interp
 import loader
+import prelude
 import rubycall
 import value
 from error import RPyYarvError
@@ -64,6 +65,7 @@ def entry_point(argv):
         rubycall.stress.flag = True
 
     try:
+        prelude.install()
         w_iseq = loader.load(bootiseq.load(iseqw))
         interp.run(w_iseq)
     except RPyYarvError, e:

@@ -116,11 +116,30 @@ def lookup_super(owner, mid):
 
 
 @dont_look_inside
+def _reopened(cbase, rid):
+    """An existing class of that name, or 0. A bodiless `class Foo` must not
+    reach rb_define_class_id_under with Object as the superclass: reopening
+    Integer that way is a superclass mismatch."""
+    try:
+        v = boot.const_get(cbase, rid)
+    except boot.RubyError:
+        return 0
+    if value.is_immediate(v) or not boot.is_class(v):
+        return 0
+    return v
+
+
+@dont_look_inside
 def define_class(cbase, mid, super_v):
     """defineclass's class half: create or find it, then remember its parent."""
+    rid = rubycall.rid(mid)
+    klass = 0
     if super_v == 0:
-        super_v = value.core_class(value.C_OBJECT)
-    klass = boot.define_class(cbase, rubycall.rid(mid), super_v)
+        klass = _reopened(cbase, rid)
+    if klass == 0:
+        if super_v == 0:
+            super_v = value.core_class(value.C_OBJECT)
+        klass = boot.define_class(cbase, rid, super_v)
     boot.gc_register(klass)
     parent = boot.class_superclass(klass)
     if parent == 0 or value.is_immediate(parent):
