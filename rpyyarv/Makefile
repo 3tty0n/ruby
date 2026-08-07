@@ -41,6 +41,8 @@ PROBE   := test/probe
 SHIM    := librpyyarv_boot.$(SOEXT)
 PYPY    ?= ./pypy
 PYTHON  ?= python3
+# The harness must not run on $(BUILD)/ruby: that is the system under test.
+RUBY_CMD ?= ruby
 RPYTHON ?= python2 $(PYPY)/rpython/bin/rpython
 RUBY    ?= $(BUILD)/ruby
 
@@ -70,7 +72,7 @@ test: $(SHIM)
 	RPYYARV_BUILD=$(BUILD) $(PYTHON) test/test_gc_ctypes.py
 
 microbench:
-	RPYYARV_BUILD=$(BUILD) $(PYTHON) scripts/microbench.py $(MICROBENCHFLAGS)
+	RPYYARV_BUILD=$(BUILD) $(RUBY_CMD) scripts/microbench.rb $(MICROBENCHFLAGS)
 
 # Compare stdout of both rpyyarv binaries against CRuby under a tight GC limit.
 gccheck:
@@ -79,6 +81,7 @@ gccheck:
 	 nolim() { ( perl -e 'alarm shift; exec @ARGV' $(GCTIMEOUT) "$$@" >/dev/null 2>&1 ) 2>/dev/null; }; \
 	 ok=0; skipped=0; failed=0; \
 	 for s in benchmark/*.rb test/exceptions.rb test/coverage.rb \
+	          test/requires.rb \
 	          $(TOP)/benchmark/app_*.rb $(TOP)/benchmark/so_*.rb; do \
 	   n=`basename $$s`; \
 	   jo=`lim ./rpyyarv-jit $$s`; jrc=$$?; \

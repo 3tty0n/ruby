@@ -11,6 +11,7 @@ import helpers
 import interp
 import loader
 import prelude
+import requires
 import rubycall
 import value
 from error import RPyYarvError, RubyException
@@ -72,17 +73,23 @@ def entry_point(argv):
 
     try:
         prelude.install()
-        result = loader.load(bootiseq.load(iseqw))
-        debug.report_iseqs(result.supported, result.total)
+        program = bootiseq.load(iseqw)
+        result = loader.load(program)
         if len(result.reasons) > 0:
             # No per-method granularity: a method body RPyYARV cannot run has
             # to be defined into CRuby, which needs the cref and the enclosing
-            # binding RPyYARV's frames do not carry.
+            # binding RPyYARV's frames do not carry. Per *file* there is, but
+            # only for the ones require pulls in; this is the main script.
+            debug.record_file(program.path, result.total, result.supported,
+                              result.reasons[0])
             debug.note('running under CRuby instead: %d unsupported iseq(s), '
                        'first %s' % (len(result.reasons), result.reasons[0]))
+            debug.report()
             return interp.run_in_cruby()
+        debug.record_file(program.path, result.total, result.supported, '')
+        requires.install(program.path)
         interp.run(result.w_iseq)
-        debug.report_sends()
+        debug.report()
     except RubyException, e:
         # Nothing rescued it: CRuby prints it and picks the exit status.
         return boot.cleanup_with_error(e.value)

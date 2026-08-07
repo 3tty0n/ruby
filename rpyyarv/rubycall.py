@@ -26,6 +26,28 @@ class _Stress(object):
 
 stress = _Stress()
 
+REQUIRE = symbols.intern('require')
+REQUIRE_RELATIVE = symbols.intern('require_relative')
+
+# No VALUE is negative, so this cannot collide with a Ruby answer.
+NOT_HANDLED = -1
+
+
+class RequireHook(object):
+    """Replaced by requires.install(); the base one hands every require back
+    to CRuby, which is what happens when the interception is turned off."""
+    def handle(self, mid, arg):
+        return NOT_HANDLED
+
+
+class _Hooks(object):
+    # A field, not a module global: RPython freezes module globals.
+    def __init__(self):
+        self.require = RequireHook()
+
+
+hooks = _Hooks()
+
 
 @dont_look_inside
 def rid(mid):
@@ -38,6 +60,10 @@ def rid(mid):
 
 @dont_look_inside
 def call(recv, mid, args):
+    if (mid == REQUIRE or mid == REQUIRE_RELATIVE) and len(args) == 1:
+        v = hooks.require.handle(mid, args[0])
+        if v != NOT_HANDLED:
+            return v
     debug.count_foreign()
     return boot.funcallv(recv, rid(mid), args, symbols.name_of(mid))
 

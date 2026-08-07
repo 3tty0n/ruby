@@ -18,9 +18,16 @@ class Registry(object):
         self.pinned = []        # VALUEs built during load, before their pool
         self.classes = []       # classes RPyYARV defined, keys of the registry
         self.held = []          # exception VALUEs parked outside any frame
+        self.blocks = None      # interp's handle table, once it exists
 
 
 state = Registry()
+
+
+def register_blocks(blocks):
+    """The blocks CRuby can reach through a handle. Their defining frames may
+    already have returned, so nothing else keeps their locals marked."""
+    state.blocks = blocks
 
 
 def register_class(v):
@@ -75,6 +82,42 @@ def _mark_array(a):
         i += 1
 
 
+def _mark_frame(f):
+    _mark_array(f.stack)
+    _mark_array(f.locals)
+    if not value.is_immediate(f.self_val):
+        boot.gc_mark_value(f.self_val)
+    if not value.is_immediate(f.cref):
+        boot.gc_mark_value(f.cref)
+    if not value.is_immediate(f.pending_value):
+        boot.gc_mark_value(f.pending_value)
+    _mark_block_procs(f.block)
+    _mark_block_procs(f.own_block)
+    _mark_block_procs(f.pending_block)
+
+
+def _mark_block_procs(w_block):
+    """A block whose frames something else already marks: only the Proc it may
+    carry is left. The chain is the enclosing blocks, so it terminates."""
+    while w_block is not None:
+        if not value.is_immediate(w_block.proc_value):
+            boot.gc_mark_value(w_block.proc_value)
+        w_block = w_block.outer
+
+
+def _mark_block_deep(w_block):
+    """A block only the handle table holds: its defining frames may have
+    returned, so their locals are reachable from nowhere else."""
+    while w_block is not None:
+        if not value.is_immediate(w_block.proc_value):
+            boot.gc_mark_value(w_block.proc_value)
+        f = w_block.frame
+        while f is not None:
+            _mark_frame(f)
+            f = f.defining_frame
+        w_block = w_block.outer
+
+
 @dont_look_inside
 def mark_roots():
     # Not _mark_array: this list is resized, the pools are not, and the
@@ -103,18 +146,18 @@ def mark_roots():
     while i < len(pools):
         _mark_array(pools[i])
         i += 1
+    b = state.blocks
+    if b is not None:
+        table = b.table
+        k = 0
+        while k < len(table):
+            _mark_block_deep(table[k])
+            k += 1
     # Reading a virtualizable's fields from here forces it, which jit-summary
     # counts as "virtualizables forced".
     f = state.top
     while f is not None:
-        _mark_array(f.stack)
-        _mark_array(f.locals)
-        if not value.is_immediate(f.self_val):
-            boot.gc_mark_value(f.self_val)
-        if not value.is_immediate(f.cref):
-            boot.gc_mark_value(f.cref)
-        if not value.is_immediate(f.pending_value):
-            boot.gc_mark_value(f.pending_value)
+        _mark_frame(f)
         f = f.prev_frame
 
 

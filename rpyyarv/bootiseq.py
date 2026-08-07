@@ -16,8 +16,11 @@ EVENT_PREFIX = 'RUBY_EVENT_'
 # path places. use_block is a hint CRuby sets on every method named
 # initialize (iseq.c:615), not a parameter.
 # ambiguous_param0 only turns block autosplat on, which RPyYARV never does.
+# block_start is placeable without the call path touching it: the slot stays
+# untouched until getblockparam/getblockparamproxy reads the frame's block.
 PLAIN_PARAM_KEYS = ['lead_num', 'use_block', 'opt', 'rest_start',
-                    'post_start', 'post_num', 'ambiguous_param0']
+                    'post_start', 'post_num', 'ambiguous_param0',
+                    'block_start']
 
 # Anything outside this means the ISeq declares real parameters, so arg_size
 # is not the lead count.

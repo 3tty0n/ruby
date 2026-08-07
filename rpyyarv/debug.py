@@ -53,6 +53,12 @@ class _Coverage(object):
         self.enabled = False
         self.native = 0         # sends RPyYARV ran itself
         self.foreign = 0        # sends that went out through rb_funcallv
+        # Every .rb file the program pulled in, main script included.
+        self.files_native = 0
+        self.files_cruby = 0
+        self.iseqs_total = 0
+        self.iseqs_native = 0
+        self.punted = []        # 'path: why RPyYARV would not run it'
 
 
 coverage = _Coverage()
@@ -74,17 +80,35 @@ def configure_coverage():
         coverage.enabled = True
 
 
-def report_iseqs(supported, total):
+def record_file(path, total, supported, reason):
+    """One .rb file's outcome. A non-empty reason means RPyYARV punted it to
+    CRuby, whose method definitions its own dispatch never sees."""
     if not coverage.enabled:
         return
-    percent = 100 * supported // total if total > 0 else 0
-    note('iseq coverage %d/%d (%d%%)' % (supported, total, percent))
+    coverage.iseqs_total += total
+    coverage.iseqs_native += supported
+    if reason == '':
+        coverage.files_native += 1
+    else:
+        coverage.files_cruby += 1
+        coverage.punted.append('%s: %s' % (path, reason))
 
 
-def report_sends():
+def report():
+    """What actually ran, not what could have: an iseq figure alone reads as
+    100% while every send goes out to CRuby."""
     if not coverage.enabled:
         return
     note('sends: rpyyarv %d, cruby %d' % (coverage.native, coverage.foreign))
+    note('files: rpyyarv %d, punted to cruby %d'
+         % (coverage.files_native, coverage.files_cruby))
+    percent = (100 * coverage.iseqs_native // coverage.iseqs_total
+               if coverage.iseqs_total > 0 else 0)
+    note('iseqs: %d/%d (%d%%) across %d file(s)'
+         % (coverage.iseqs_native, coverage.iseqs_total, percent,
+            coverage.files_native + coverage.files_cruby))
+    for i in range(len(coverage.punted)):
+        note('  punted to cruby: %s' % coverage.punted[i])
 
 
 def write(s):

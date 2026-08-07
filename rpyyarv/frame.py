@@ -13,6 +13,12 @@ class Frame(object):
     # One per ISeq invocation, so Ruby call depth is RPython recursion depth.
     _virtualizable_ = ['sp', 'pc', 'stack[*]', 'locals[*]']
 
+    # VM_FRAME_FLAG_MODIFIED_BLOCK_PARAM: once set, the `&blk` local slot holds
+    # the answer and self.block is no longer consulted for it (insns.def:111).
+    # Left to the rtyper's zero-initialisation, so a call that has no block
+    # parameter -- almost all of them -- does not pay a store for it.
+    block_param_set = False
+
     def __init__(self, iseq, self_val, cref=0, entry=None):
         self = hint(self, access_directly=True, fresh_virtualizable=True)
         self.stack = [0] * iseq.stack_max

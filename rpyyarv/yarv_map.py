@@ -18,6 +18,9 @@ EMIT = {
     'putchilledstring': [0],
     'getlocal': [0],        # level is packed into the slot, see LOCAL_*
     'setlocal': [0],
+    'getblockparam': [0],   # same packing; the level walks to the local env
+    'setblockparam': [0],
+    'getblockparamproxy': [0],
     'dup': [],
     'pop': [],
     'swap': [],
@@ -147,9 +150,12 @@ CALL_FLAG_TAILCALL = 0x80
 # invokesuper only; a bare `super` (ZSUPER) pushes the parameters the same way.
 CALL_FLAG_SUPER = 0x100
 CALL_FLAG_ZSUPER = 0x200
+# ARGS_BLOCKARG is in here because the arguments below it still arrive the
+# plain way; the block value on top of them is what W_CallInfo.blockarg names.
 SIMPLE_CALL_FLAGS = (CALL_FLAG_FCALL | CALL_FLAG_VCALL |
                      CALL_FLAG_ARGS_SIMPLE | CALL_FLAG_TAILCALL |
-                     CALL_FLAG_SUPER | CALL_FLAG_ZSUPER)
+                     CALL_FLAG_SUPER | CALL_FLAG_ZSUPER |
+                     CALL_FLAG_ARGS_BLOCKARG)
 
 # vm_core.h. Only a plain `class Foo`: no module, singleton class or A::B.
 DEFINECLASS_TYPE_MASK = 0x07

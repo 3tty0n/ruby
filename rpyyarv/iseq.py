@@ -38,13 +38,12 @@ class W_ISeq(object):
                           'callinfos[*]', 'nlocals', 'stack_max', 'nparams',
                           'simple_params', 'catches[*]', 'paths[*]',
                           'opt_table[*]', 'rest_start', 'post_start',
-                          'post_num', 'param_error', 'unsupported',
-                          'autosplat']
+                          'post_num', 'unsupported', 'autosplat']
 
     def __init__(self, name, code, consts, iseqs, callinfos, nlocals,
                  stack_max, nparams=0, simple_params=True, catches=None,
                  paths=None, opt_table=None, rest_start=-1, post_start=-1,
-                 post_num=0, param_error='', unsupported='', autosplat=False):
+                 post_num=0, unsupported='', autosplat=False):
         self.name = name
         self.code = code
         # VALUEs built at load time; gcroots keeps them reachable.
@@ -65,8 +64,6 @@ class W_ISeq(object):
         self.rest_start = rest_start
         self.post_start = post_start
         self.post_num = post_num
-        # Non-empty when the shape has a kind the call path cannot place.
-        self.param_error = param_error
         # Non-empty when the loader could not represent this ISeq at all.
         self.unsupported = unsupported
         # A single yielded Array spreads over these parameters (vm_args.c:855).
@@ -80,9 +77,14 @@ class W_ISeq(object):
 
 
 class W_CallInfo(object):
-    _immutable_fields_ = ['mid', 'argc', 'simple', 'fcall', 'is_super']
+    _immutable_fields_ = ['mid', 'argc', 'simple', 'fcall', 'is_super',
+                          'blockarg']
 
-    def __init__(self, mid, argc, simple=True, fcall=True, is_super=False):
+    def __init__(self, mid, argc, simple=True, fcall=True, is_super=False,
+                 blockarg=False):
+        # CALL_FLAG_ARGS_BLOCKARG: one more value above the arguments, which
+        # vm_caller_setup_arg_block pops first (vm_args.c:1119).
+        self.blockarg = blockarg
         # invokesuper's call data names no method: the running one is implied.
         self.is_super = is_super
         self.mid = mid

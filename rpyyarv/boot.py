@@ -149,6 +149,8 @@ rb_range_new_ = _ext('rpyyarv_range_new', [VALUE, VALUE, rffi.INT, INTP],
 rb_gvar_get_ = _ext('rpyyarv_gvar_get', [rffi.CCHARP, INTP], VALUE, reenters=True)
 rb_gvar_set_ = _ext('rpyyarv_gvar_set', [rffi.CCHARP, VALUE, INTP],
                     lltype.Void, reenters=True)
+rb_proc_new = _ext('rpyyarv_proc_new', [rffi.LONG, INTP], VALUE, reenters=True)
+rb_is_proc = _ext('rpyyarv_is_proc', [VALUE], rffi.INT)
 rb_is_class = _ext('rpyyarv_is_class', [VALUE], rffi.INT)
 rb_gc_register = _ext('rpyyarv_gc_register_mark_object', [VALUE], lltype.Void, reenters=True)
 rb_take_errinfo = _ext('rpyyarv_take_errinfo', [], VALUE)
@@ -167,6 +169,16 @@ rb_arity_error = _ext('rpyyarv_arity_error',
                       [rffi.INT, rffi.INT, rffi.INT, INTP], VALUE,
                       reenters=True)
 rb_bop_mask = _ext('rpyyarv_bop_mask', [], VALUE, reenters=True)
+rb_require_resolve = _ext('rpyyarv_require_resolve', [VALUE, VALUEP, INTP],
+                          rffi.INT, reenters=True)
+rb_provide_ = _ext('rpyyarv_provide', [VALUE, INTP], lltype.Void,
+                   reenters=True)
+rb_absolute_path = _ext('rpyyarv_absolute_path', [VALUE, VALUE, INTP], VALUE,
+                        reenters=True)
+
+REQ_LOADED = 0
+REQ_RB = 1
+REQ_FOREIGN = 2
 
 NCLASS = 12
 
@@ -608,6 +620,22 @@ def shape_iv_index(shape_id, rid):
     return -2
 
 
+def proc_new(handle):
+    """A Proc whose call re-enters RPyYARV through the block callback."""
+    with lltype.scoped_alloc(INTP.TO, 1) as state:
+        state[0] = rffi.cast(rffi.INT, 0)
+        v = rb_proc_new(rffi.cast(rffi.LONG, handle), state)
+        failed = rffi.cast(lltype.Signed, state[0]) != 0
+        ret = rffi.cast(lltype.Signed, v)
+    if failed:
+        _failed('Proc.new')
+    return ret
+
+
+def is_proc(v):
+    return rffi.cast(lltype.Signed, rb_is_proc(_v(v))) != 0
+
+
 def is_class(v):
     return rffi.cast(lltype.Signed, rb_is_class(_v(v))) != 0
 
@@ -698,6 +726,43 @@ def bop_mask():
     """(pair count, one bit per redefined pair) as the shim orders them."""
     v = rffi.cast(lltype.Signed, rb_bop_mask())
     return v >> BOP_COUNT_SHIFT, v & ((1 << BOP_COUNT_SHIFT) - 1)
+
+
+def require_resolve(fname):
+    """(REQ_*, expanded path VALUE); the path is 0 unless the answer is
+    REQ_RB."""
+    path = 0
+    kind = REQ_FOREIGN
+    with lltype.scoped_alloc(rffi.CArray(VALUE), 1) as out:
+        out[0] = rffi.cast(VALUE, 0)
+        with lltype.scoped_alloc(INTP.TO, 1) as state:
+            state[0] = rffi.cast(rffi.INT, 0)
+            kind = rffi.cast(lltype.Signed,
+                             rb_require_resolve(_v(fname), out, state))
+        path = rffi.cast(lltype.Signed, out[0])
+    if kind != REQ_RB:
+        return kind, 0
+    return kind, path
+
+
+def provide(path):
+    with lltype.scoped_alloc(INTP.TO, 1) as state:
+        state[0] = rffi.cast(rffi.INT, 0)
+        rb_provide_(_v(path), state)
+        failed = rffi.cast(lltype.Signed, state[0]) != 0
+    if failed:
+        _failed('$LOADED_FEATURES')
+
+
+def absolute_path(fname, base):
+    with lltype.scoped_alloc(INTP.TO, 1) as state:
+        state[0] = rffi.cast(rffi.INT, 0)
+        v = rb_absolute_path(_v(fname), _v(base), state)
+        failed = rffi.cast(lltype.Signed, state[0]) != 0
+        ret = rffi.cast(lltype.Signed, v)
+    if failed:
+        _failed('File.absolute_path')
+    return ret
 
 
 def gc_register(v):

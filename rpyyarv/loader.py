@@ -235,11 +235,14 @@ class Loader(object):
                 at += 1
 
         opt_table = self.opt_table(raw, labels)
-        param_error = ''
         if raw.extra_params != '':
-            param_error = ("'%s' takes %s parameter(s), which RPyYARV does "
-                           "not support" % (raw.name, raw.extra_params))
-        simple = (param_error == '' and len(opt_table) == 0
+            # Refused here, not at the send: a parameter shape the call path
+            # cannot place is one the whole program has to fall back for,
+            # rather than an error raised the first time it is called.
+            raise UnsupportedOperation(
+                "'%s' takes %s parameter(s), which RPyYARV does not support"
+                % (raw.name, raw.extra_params))
+        simple = (len(opt_table) == 0
                   and raw.rest_start < 0 and raw.post_num == 0)
         self.check_param_slots(raw, opt_table)
         opt_num = len(opt_table) - 1 if len(opt_table) > 0 else 0
@@ -252,8 +255,7 @@ class Loader(object):
                         raw.stack_max, raw.lead_num, simple,
                         self.catches(raw, labels, parents),
                         [p for p in pool.paths], opt_table, raw.rest_start,
-                        raw.post_start, raw.post_num, param_error, '',
-                        autosplat)
+                        raw.post_start, raw.post_num, '', autosplat)
         gcroots.register_consts(consts)
         return w_iseq
 
@@ -338,9 +340,13 @@ class Loader(object):
                             % (raw.name, name))
         return labels[name]
 
+    # Everything whose lindex_t operand carries a level yarv_map.py packs.
+    LOCAL_OPS = [insns.GETLOCAL, insns.SETLOCAL, insns.GETBLOCKPARAM,
+                 insns.SETBLOCKPARAM, insns.GETBLOCKPARAMPROXY]
+
     def check_dropped(self, op, ops, raw):
         """Operand positions yarv_map.py does not emit, checked here."""
-        if op == insns.GETLOCAL or op == insns.SETLOCAL:
+        if op in self.LOCAL_OPS:
             level = self.int_of(ops[1], op, raw, 'level')
             if level > optable.MAX_LOCAL_LEVEL:
                 raise UnsupportedOperation(
@@ -521,9 +527,12 @@ class Loader(object):
             raise UnsupportedOperation(
                 "the call to '%s' passes %s, which RPyYARV does not support"
                 % (operand.strval, self.call_flag_name(operand)))
+        blockarg = (flags & optable.CALL_FLAG_ARGS_BLOCKARG) != 0
+        if blockarg and (flags & optable.CALL_FLAG_SUPER) != 0:
+            raise UnsupportedOperation('super with a block is not supported')
         return W_CallInfo(symbols.intern(operand.strval), operand.intval,
                           simple, (flags & optable.CALL_FLAG_FCALL) != 0,
-                          (flags & optable.CALL_FLAG_SUPER) != 0)
+                          (flags & optable.CALL_FLAG_SUPER) != 0, blockarg)
 
     def call_flag_name(self, operand):
         for flag, name in optable.CALL_FLAG_NAMES:

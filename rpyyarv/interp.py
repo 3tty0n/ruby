@@ -31,6 +31,16 @@ def define_method(frame, mid, w_iseq):
 
 @unroll_safe
 def invoke(frame, w_ci, w_block=None):
+    if w_ci.blockarg:
+        # Above the arguments, and read before it is popped so the frame keeps
+        # it marked while _block_from_value may allocate (vm_args.c:1119).
+        top = frame.sp - 1
+        if top < 0:
+            raise UnsupportedOperation(
+                "call to '%s' passes a &block the stack does not hold"
+                % symbols.name_of(w_ci.mid))
+        w_block = _block_from_value(frame, frame.stack[top])
+        frame.pop()
     argc = w_ci.argc
     recv_at = frame.sp - argc - 1
     if recv_at < 0:
@@ -53,8 +63,10 @@ def invoke(frame, w_ci, w_block=None):
         callee_iseq = entry.w_iseq
 
     if callee_iseq is not None:
-        if w_block is None:
-            return _enter(frame, entry, recv, recv_at, argc, w_ci.mid, None)
+        if w_block is None or w_ci.blockarg:
+            # A break unwinds to the send the block was *written* at, not to
+            # one that only passed it on, so only that send catches it.
+            return _enter(frame, entry, recv, recv_at, argc, w_ci.mid, w_block)
         try:
             return _enter(frame, entry, recv, recv_at, argc, w_ci.mid,
                           w_block)
@@ -63,6 +75,13 @@ def invoke(frame, w_ci, w_block=None):
                 raise
             return e.value
 
+    if proxy.value != 0 and recv == proxy.value:
+        return _block_send(frame, w_ci, recv_at, argc, frame.block)
+    if len(blocks.by_proc) > 0 and _is_proxy_call(w_ci.mid) \
+            and recv in blocks.by_proc:
+        # A Proc RPyYARV made: run its block here instead of going out to
+        # CRuby and straight back in through the block callback.
+        return _block_send(frame, w_ci, recv_at, argc, blocks.by_proc[recv])
     if w_ci.mid == CORE_ALIAS or w_ci.mid == CORE_UNDEF:
         return _core_method(frame, w_ci, recv, recv_at, argc)
     if vm_core.value != 0 and recv == vm_core.value:
@@ -82,9 +101,14 @@ def invoke(frame, w_ci, w_block=None):
     if w_block is not None:
         return _call_with_block(recv, w_ci.mid, args, w_block)
     if not debug.state.enabled:
-        return rubycall.call(recv, w_ci.mid, args)
+        ret = rubycall.call(recv, w_ci.mid, args)
+        # The callee may have run a Proc of ours, which cannot raise through
+        # libruby's frames and parked its failure instead.
+        _check_block_error()
+        return ret
     debug.trace_enter(w_ci.mid, args)
     ret = rubycall.call(recv, w_ci.mid, args)
+    _check_block_error()
     debug.trace_leave(w_ci.mid, ret)
     return ret
 
@@ -133,8 +157,6 @@ def _refuse_iseq(w_iseq, mid):
         raise UnsupportedOperation("method '%s': %s"
                                    % (symbols.name_of(mid),
                                       w_iseq.unsupported))
-    if w_iseq.param_error != '':
-        raise UnsupportedOperation(w_iseq.param_error)
 
 
 @unroll_safe
@@ -315,10 +337,14 @@ def _sym_mid(v):
 
 
 class _Blocks(object):
-    """Blocks C refers to, by index only. One is alive exactly for the extent
-    of its rb_block_call, so a stack suffices."""
+    """Blocks C refers to, by integer handle only: RPython's GC moves its
+    objects, so no pointer may cross. A handle rb_block_call holds is given
+    back when that call returns; one a Proc was made over never is, since the
+    Proc outlives every frame that could tell when the last reference died."""
     def __init__(self):
-        self.stack = []
+        self.table = []         # handle -> W_Block, None for a free slot
+        self.free = []          # handles the transient path gave back
+        self.by_proc = {}       # a materialised Proc -> the block behind it
         self.error = None       # an RPython error the callback could not raise
         self.exc = None         # likewise, a Ruby exception
 
@@ -326,12 +352,48 @@ class _Blocks(object):
 blocks = _Blocks()
 
 
+def _alloc_handle(w_block):
+    if len(blocks.free) > 0:
+        h = blocks.free.pop()
+        blocks.table[h] = w_block
+        return h
+    blocks.table.append(w_block)
+    return len(blocks.table) - 1
+
+
+def _release_handle(h):
+    blocks.table[h] = None
+    blocks.free.append(h)
+
+
+class _Proxy(object):
+    # Quasi-immutable, so the compare below folds away; see value._Classes for
+    # why a prebuilt instance cannot use a plain immutable field.
+    _immutable_fields_ = ['value?']
+
+    def __init__(self):
+        self.value = 0
+
+
+# rb_block_param_proxy's stand-in: what getblockparamproxy pushes instead of
+# building a Proc (insns.def:144). A Symbol, so it needs no marking, and it
+# never leaves the three places the compiler emits that instruction for.
+proxy = _Proxy()
+
+PROXY_NAME = '__rpyyarv_block_param_proxy__'
+
+
 def block_callback(handle, argc, argv):
-    """Called from C, inside rb_block_call. No RPython exception may escape
-    into libruby, so a failure is re-raised once the call has returned."""
+    """Called from C, inside rb_block_call or a materialised Proc. No RPython
+    exception may escape into libruby, so a failure is re-raised once the call
+    has returned."""
     if blocks.error is not None or blocks.exc is not None:
         return boot.as_value(value.Q_NIL)
-    w_block = blocks.stack[handle]
+    w_block = blocks.table[handle]
+    if w_block is None:
+        blocks.error = UnsupportedOperation(
+            'a block was called after its handle was released')
+        return boot.as_value(value.Q_NIL)
     args = boot.read_values(argv, argc)
     try:
         return boot.as_value(call_block(w_block, args))
@@ -352,12 +414,17 @@ def block_callback(handle, argc, argv):
 
 @dont_look_inside
 def _call_with_block(recv, mid, args, w_block):
-    blocks.stack.append(w_block)
+    handle = _alloc_handle(w_block)
     try:
-        ret = rubycall.call_with_block(recv, mid, args,
-                                       len(blocks.stack) - 1)
+        ret = rubycall.call_with_block(recv, mid, args, handle)
     finally:
-        blocks.stack.pop()
+        _release_handle(handle)
+    _check_block_error()
+    return ret
+
+
+def _check_block_error():
+    """What a callback into RPyYARV could not raise through libruby's frames."""
     exc = blocks.exc
     if exc is not None:
         blocks.exc = None
@@ -367,12 +434,82 @@ def _call_with_block(recv, mid, args, w_block):
     if err is not None:
         blocks.error = None
         raise err
-    return ret
+
+
+@dont_look_inside
+def _to_proc(w_block):
+    """A real Proc for a block that is about to escape, as
+    rb_vm_bh_to_procval builds one (vm_insnhelper.c:543). Memoised, so a
+    block has one Proc identity; the handle it carries is never released."""
+    if w_block is None:
+        return value.Q_NIL
+    if w_block.proc_value != 0:
+        return w_block.proc_value
+    v = boot.proc_new(_alloc_handle(w_block))
+    w_block.proc_value = v
+    blocks.by_proc[v] = w_block
+    return v
+
+
+TO_PROC = symbols.intern('to_proc')
+CALL = symbols.intern('call')
+YIELD = symbols.intern('yield')
+AREF = symbols.intern('[]')
+EQQ_ = symbols.intern('===')
+
+
+def _is_proxy_call(mid):
+    """The proxy runs the block itself for these; anything else makes it
+    build the Proc first, as Proc#arity and friends need a real one."""
+    return mid == CALL or mid == YIELD or mid == AREF or mid == EQQ_
+
+
+@dont_look_inside
+def _block_from_value(frame, v):
+    """The block a `&arg` call site passes on, as vm_caller_setup_arg_block
+    reads it (vm_args.c:1116)."""
+    if v == value.Q_NIL:
+        return None
+    if v == proxy.value:
+        # The frame's own block, without ever having built a Proc for it.
+        return frame.block
+    if v in blocks.by_proc:
+        return blocks.by_proc[v]
+    if boot.is_symbol(v):
+        return block_mod.from_symbol(symbols.intern(boot.sym_of(v)))
+    if not value.is_immediate(v) and boot.is_proc(v):
+        return block_mod.from_proc(v)
+    # vm_to_proc, vm_args.c:1044.
+    p = rubycall.call0(v, TO_PROC)
+    if value.is_immediate(p) or not boot.is_proc(p):
+        raise UnsupportedOperation(
+            'a &block argument that is not a Proc, a Symbol or nil and whose '
+            '#to_proc did not answer a Proc is not supported')
+    return block_mod.from_proc(p)
+
+
+@unroll_safe
+def _block_send(frame, w_ci, recv_at, argc, w_block):
+    """A send whose receiver stands for a block RPyYARV holds: the block-param
+    proxy (compile.c:9564), or a Proc it materialised itself."""
+    args = [0] * argc
+    i = 0
+    while i < argc:
+        args[i] = frame.stack[recv_at + 1 + i]
+        i += 1
+    _drop(frame, recv_at)
+    if _is_proxy_call(w_ci.mid):
+        if w_block is None:
+            raise UnsupportedOperation('the block parameter is nil')
+        return call_block(w_block, args)
+    return rubycall.call(_to_proc(w_block), w_ci.mid, args)
 
 
 @unroll_safe
 def call_block(w_block, args):
     """Run a block's ISeq in a frame whose locals chain to the defining one."""
+    if w_block.kind != block_mod.KIND_ISEQ:
+        return _call_foreign_block(w_block, args)
     b_iseq = w_block.w_iseq
     outer = w_block.frame
     callee = Frame(b_iseq, outer.self_val, outer.cref, outer.entry)
@@ -396,6 +533,22 @@ def call_block(w_block, args):
         return execute(b_iseq, callee, pc)
     except block_mod.BlockNext, e:
         return e.value
+
+
+@dont_look_inside
+def _call_foreign_block(w_block, args):
+    """A block that is not RPyYARV's own: a Proc from CRuby, or `&:sym`
+    (rb_sym_to_proc, vm_insnhelper.c:552)."""
+    if w_block.kind == block_mod.KIND_PROC:
+        return rubycall.call(w_block.proc_value, CALL, args)
+    if len(args) == 0:
+        raise UnsupportedOperation('a &:symbol block needs a receiver')
+    rest = []
+    i = 1
+    while i < len(args):
+        rest.append(args[i])
+        i += 1
+    return rubycall.call(args[0], w_block.mid, rest)
 
 
 @dont_look_inside
@@ -558,6 +711,17 @@ def _unwind(iseq, frame, throw, epc):
 
 def install():
     boot.install_block_callback(block_callback)
+    gcroots.register_blocks(blocks)
+    # A Symbol, so it is an immediate no mark hook has to reach.
+    proxy.value = boot.sym_new(PROXY_NAME)
+
+
+@unroll_safe
+def _local_frame(frame, packed):
+    """The frame a packed getlocal-style operand names."""
+    if packed == (packed & optable.LOCAL_SLOT_MASK):
+        return frame
+    return _outer_frame(frame, packed >> optable.LOCAL_LEVEL_SHIFT)
 
 
 @unroll_safe
@@ -869,6 +1033,36 @@ def _execute(iseq, frame, pc):
             else:
                 level = packed >> optable.LOCAL_LEVEL_SHIFT
                 _outer_frame(frame, level).locals[idx] = frame.pop()
+        elif opcode == insns.GETBLOCKPARAMPROXY:
+            packed = code[pc]
+            pc += 1
+            idx = packed & optable.LOCAL_SLOT_MASK
+            assert idx >= 0
+            f = _local_frame(frame, packed)
+            if f.block_param_set:
+                frame.push(f.locals[idx])
+            elif f.block is None:
+                frame.push(value.Q_NIL)
+            else:
+                frame.push(proxy.value)
+        elif opcode == insns.GETBLOCKPARAM:
+            packed = code[pc]
+            pc += 1
+            idx = packed & optable.LOCAL_SLOT_MASK
+            assert idx >= 0
+            f = _local_frame(frame, packed)
+            if not f.block_param_set:
+                f.locals[idx] = _to_proc(f.block)
+                f.block_param_set = True
+            frame.push(f.locals[idx])
+        elif opcode == insns.SETBLOCKPARAM:
+            packed = code[pc]
+            pc += 1
+            idx = packed & optable.LOCAL_SLOT_MASK
+            assert idx >= 0
+            f = _local_frame(frame, packed)
+            f.locals[idx] = frame.pop()
+            f.block_param_set = True
         elif opcode == insns.DUP:
             v = frame.pop()
             frame.push(v)

@@ -761,6 +761,29 @@ rpyyarv_call_with_block(uintptr_t recv, uintptr_t mid, int argc,
     return (uintptr_t)r;
 }
 
+static VALUE
+proc_new_body(VALUE handle)
+{
+    /* An ifunc Proc: calling it reaches block_yielder with the same handle
+       LONG2FIX'd argument rb_block_call passes. */
+    return rb_proc_new(block_yielder, handle);
+}
+
+uintptr_t
+rpyyarv_proc_new(long handle, int *state)
+{
+    *state = 0;
+    VALUE r = rb_protect(proc_new_body, LONG2FIX(handle), state);
+    if (*state) return (uintptr_t)Qnil;
+    return (uintptr_t)r;
+}
+
+int
+rpyyarv_is_proc(uintptr_t v)
+{
+    return rb_obj_is_proc((VALUE)v) == Qtrue ? 1 : 0;
+}
+
 int
 rpyyarv_is_class(uintptr_t v)
 {
@@ -1012,4 +1035,98 @@ rpyyarv_str_concat(int n, const uintptr_t *parts)
     out = rb_str_new(0, 0);
     for (i = 0; i < n; i++) rb_str_append(out, buf[i]);
     return (uintptr_t)out;
+}
+
+/* Only .rb: an extension RPyYARV cannot compile itself stays CRuby's. */
+static const char *const rpyyarv_rb_ext[] = {".rb", NULL};
+
+struct require_args {
+    VALUE fname;
+    VALUE path;
+    int kind;
+};
+
+/* load.c:1067 search_required, restricted to the cases that answer 'r'. */
+static VALUE
+require_resolve_body(VALUE argp)
+{
+    struct require_args *a = (struct require_args *)argp;
+    VALUE fname = rb_get_path(a->fname);
+    const char *ftptr = RSTRING_PTR(fname);
+    const char *ext = strrchr(ftptr, '.');
+    const char *loading;
+    VALUE tmp;
+
+    a->kind = RPYYARV_REQ_FOREIGN;
+    if (ext && !strchr(ext, '/')) {
+        if (strcmp(ext, ".rb") != 0) return Qnil;
+        if (rb_feature_provided(ftptr, &loading)) {
+            a->kind = RPYYARV_REQ_LOADED;
+            return Qnil;
+        }
+        tmp = rb_find_file(fname);
+        if (!tmp) return Qnil;
+    }
+    else {
+        if (rb_feature_provided(ftptr, &loading)) {
+            a->kind = RPYYARV_REQ_LOADED;
+            return Qnil;
+        }
+        tmp = fname;
+        if (!rb_find_file_ext(&tmp, rpyyarv_rb_ext)) return Qnil;
+    }
+    if (rb_feature_provided(RSTRING_PTR(tmp), &loading)) {
+        a->kind = RPYYARV_REQ_LOADED;
+        return Qnil;
+    }
+    a->path = tmp;
+    a->kind = RPYYARV_REQ_RB;
+    return Qnil;
+}
+
+int
+rpyyarv_require_resolve(uintptr_t fname, uintptr_t *path_out, int *state)
+{
+    struct require_args a;
+    a.fname = (VALUE)fname;
+    a.path = Qnil;
+    a.kind = RPYYARV_REQ_FOREIGN;
+    *state = 0;
+    rb_protect(require_resolve_body, (VALUE)&a, state);
+    if (*state) return RPYYARV_REQ_FOREIGN;
+    *path_out = (uintptr_t)a.path;
+    return a.kind;
+}
+
+static VALUE
+provide_body(VALUE argp)
+{
+    rb_provide(RSTRING_PTR(rb_get_path((VALUE)argp)));
+    return Qnil;
+}
+
+void
+rpyyarv_provide(uintptr_t path, int *state)
+{
+    *state = 0;
+    rb_protect(provide_body, (VALUE)path, state);
+}
+
+static VALUE
+absolute_path_body(VALUE argp)
+{
+    struct obj_args *p = (struct obj_args *)argp;
+    return rb_file_absolute_path(p->a, p->b);
+}
+
+uintptr_t
+rpyyarv_absolute_path(uintptr_t fname, uintptr_t base, int *state)
+{
+    struct obj_args a;
+    a.a = (VALUE)fname;
+    a.b = (VALUE)base;
+    *state = 0;
+    VALUE r = rb_protect(absolute_path_body, (VALUE)&a, state);
+    if (*state) return (uintptr_t)Qnil;
+    return (uintptr_t)r;
 }

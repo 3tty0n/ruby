@@ -157,6 +157,14 @@ uintptr_t rpyyarv_call_with_block(uintptr_t recv, uintptr_t mid, int argc,
                                   const uintptr_t *argv, long handle,
                                   int *state);
 
+/*
+ * A Proc over the same handle, for a block that outlives its call. The handle
+ * must stay valid for as long as the Proc can be reached, so RPyYARV's handle
+ * table never releases one of these.
+ */
+uintptr_t rpyyarv_proc_new(long handle, int *state);
+int rpyyarv_is_proc(uintptr_t v);
+
 int rpyyarv_is_class(uintptr_t v);
 
 /*
@@ -206,6 +214,23 @@ uintptr_t rpyyarv_arity_error(int given, int min, int max, int *state);
  */
 #define RPYYARV_BOP_COUNT_SHIFT 32
 uintptr_t rpyyarv_bop_mask(void);
+
+/*
+ * require, resolved the way load.c's search_required does but with the public
+ * API only: $LOAD_PATH search, the .rb extension, and the $LOADED_FEATURES
+ * index. *path_out is the expanded path on RPYYARV_REQ_RB.
+ */
+#define RPYYARV_REQ_LOADED   0  /* $LOADED_FEATURES already has it */
+#define RPYYARV_REQ_RB       1  /* a .rb file RPyYARV may compile itself */
+#define RPYYARV_REQ_FOREIGN  2  /* .so/.bundle, or nowhere on $LOAD_PATH */
+int rpyyarv_require_resolve(uintptr_t fname, uintptr_t *path_out, int *state);
+
+/* rb_provide, so a later CRuby require of the same feature is a no-op. */
+void rpyyarv_provide(uintptr_t path, int *state);
+
+/* rb_file_absolute_path, for require_relative: RPyYARV pushes no CRuby frame,
+   so rb_current_realfilepath cannot name the requiring file. */
+uintptr_t rpyyarv_absolute_path(uintptr_t fname, uintptr_t base, int *state);
 
 #ifdef __cplusplus
 }
