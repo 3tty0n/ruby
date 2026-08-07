@@ -72,6 +72,7 @@ EMIT = {
     'branchif': [0],
     'branchunless': [0],
     'definemethod': [0, 1],
+    'definesmethod': [0, 1],
     'opt_send_without_block': [0],
     'send': [0, 1],         # blockiseq is iseq.NO_BLOCK_ISEQ when absent
     'invokesuper': [0, 1],
@@ -160,6 +161,7 @@ SIMPLE_CALL_FLAGS = (CALL_FLAG_FCALL | CALL_FLAG_VCALL |
 # vm_core.h. Only a plain `class Foo`: no module, singleton class or A::B.
 DEFINECLASS_TYPE_MASK = 0x07
 DEFINECLASS_TYPE_CLASS = 0x00
+DEFINECLASS_TYPE_SINGLETON_CLASS = 0x01
 DEFINECLASS_FLAG_SCOPED = 0x08
 DEFINECLASS_FLAG_HAS_SUPERCLASS = 0x10
 

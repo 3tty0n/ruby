@@ -38,12 +38,14 @@ class W_ISeq(object):
                           'callinfos[*]', 'nlocals', 'stack_max', 'nparams',
                           'simple_params', 'catches[*]', 'paths[*]',
                           'opt_table[*]', 'rest_start', 'post_start',
-                          'post_num', 'unsupported', 'autosplat']
+                          'post_num', 'unsupported', 'autosplat',
+                          'has_return_throw', 'catches_return']
 
     def __init__(self, name, code, consts, iseqs, callinfos, nlocals,
                  stack_max, nparams=0, simple_params=True, catches=None,
                  paths=None, opt_table=None, rest_start=-1, post_start=-1,
-                 post_num=0, unsupported='', autosplat=False):
+                 post_num=0, unsupported='', autosplat=False,
+                 has_return_throw=False, catches_return=False):
         self.name = name
         self.code = code
         # VALUEs built at load time; gcroots keeps them reachable.
@@ -68,6 +70,11 @@ class W_ISeq(object):
         self.unsupported = unsupported
         # A single yielded Array spreads over these parameters (vm_args.c:855).
         self.autosplat = autosplat
+        # This ISeq or one nested in it says `return` from a block.
+        self.has_return_throw = has_return_throw
+        # ...and this one is the method (or toplevel) such a return names, so
+        # execute() has to catch it. Green, so the check folds away.
+        self.catches_return = catches_return
         # rescue/ensure entries in CRuby's search order; the first match wins.
         self.catches = catches if catches is not None else []
         self.paths = paths if paths is not None else []

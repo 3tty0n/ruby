@@ -5,6 +5,7 @@ try:
         JitDriver, elidable, promote, unroll_safe, dont_look_inside, hint)
     from rpython.rlib.objectmodel import always_inline
     from rpython.rlib.rarithmetic import LONG_BIT, ovfcheck
+    from rpython.rlib.rstackovf import StackOverflow, check_stack_overflow
     from rpython.rtyper.lltypesystem import lltype, rffi
 
     _WORDP = rffi.CArrayPtr(rffi.LONG)
@@ -27,6 +28,11 @@ except ImportError:
 
     def ovfcheck(x):
         return x
+
+    StackOverflow = RuntimeError
+
+    def check_stack_overflow():
+        pass
 
     class JitDriver(object):
         def __init__(self, **kwargs):

@@ -10,7 +10,7 @@ import boot
 import gcroots
 import rubycall
 import value
-from error import RubyException
+from error import RubyException, UnsupportedOperation
 from rlib import elidable, dont_look_inside, promote, raw_word
 
 # Cycle guard: a superclass chain longer than this is a corrupt map.
@@ -22,10 +22,14 @@ class Version(object):
 
 
 class MethodEntry(object):
-    _immutable_fields_ = ['w_iseq', 'private', 'owner', 'mid']
+    _immutable_fields_ = ['w_iseq', 'private', 'owner', 'mid', 'cref']
 
-    def __init__(self, w_iseq, private, owner=0, mid=0):
+    def __init__(self, w_iseq, private, owner=0, mid=0, cref=0):
         self.w_iseq = w_iseq
+        # The class the `def` was written in, which a constant in the body
+        # resolves against; not owner, since `def self.x` lands on the
+        # singleton class but reads constants of the class itself.
+        self.cref = cref
         # Toplevel defs land on Object as private: only an fcall may reach one.
         self.private = private
         # The class the def landed on, and under which name; invokesuper
@@ -73,14 +77,45 @@ def _install_trampoline(klass, mid, private):
     boot.define_method_entry(klass, rubycall.rid(mid), private)
 
 
-def define(klass, mid, w_iseq, private):
+def define(klass, mid, w_iseq, private, cref=0):
     table = registry.methods.get(klass, None)
     if table is None:
         table = {}
         registry.methods[klass] = table
-    table[mid] = MethodEntry(w_iseq, private, klass, mid)
+    table[mid] = MethodEntry(w_iseq, private, klass, mid, cref)
     registry.version = Version()
     _install_trampoline(klass, mid, private)
+
+
+@dont_look_inside
+def define_singleton(obj, mid, w_iseq, cref=0):
+    """definesmethod: the target is the receiver's singleton class and the
+    visibility is always public (vm_insnhelper.c:6034)."""
+    klass = boot.singleton_class(obj)
+    if klass == 0 or value.is_immediate(klass):
+        raise UnsupportedOperation(
+            "'%s' cannot be given a singleton method" % value.repr_of(obj))
+    if klass not in registry.supers:
+        _record_ancestry(klass)
+    define(klass, mid, w_iseq, False, cref)
+
+
+@dont_look_inside
+def _record_ancestry(klass):
+    """CRuby's superclass chain above klass, copied into the map so lookup
+    walks it without leaving RPython. A singleton class is created by CRuby,
+    never by define_class, so nothing else would put it there."""
+    k = klass
+    n = 0
+    while k != 0 and not value.is_immediate(k) and n < MAX_ANCESTORS:
+        if k in registry.supers:
+            return
+        parent = boot.class_superclass(k)
+        if parent == 0 or value.is_immediate(parent):
+            return
+        record_class(k, parent)
+        k = parent
+        n += 1
 
 
 @dont_look_inside
@@ -228,6 +263,10 @@ def define_class(cbase, mid, super_v):
     if parent == 0 or value.is_immediate(parent):
         parent = value.core_class(value.C_OBJECT)
     record_class(klass, parent)
+    # The metaclass chain beside it: class_of(Bar) is meta(Bar), so a
+    # singleton method inherited from Foo is only found natively once
+    # meta(Bar) -> meta(Foo) is in the map.
+    _record_ancestry(boot.singleton_class(klass))
     return klass
 
 

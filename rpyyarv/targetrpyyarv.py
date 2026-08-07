@@ -15,6 +15,7 @@ import requires
 import rubycall
 import value
 from error import RPyYarvError, RubyException
+from rlib import StackOverflow, check_stack_overflow
 
 
 def _check_special_consts():
@@ -99,6 +100,10 @@ def entry_point(argv):
         return 1
     except boot.RubyError, e:
         print '[rpyyarv] Ruby exception in %s' % e.mid
+        return 1
+    except StackOverflow:
+        check_stack_overflow()
+        print '[rpyyarv] %s' % interp.STACK_TOO_DEEP
         return 1
 
     return boot.cleanup(0)

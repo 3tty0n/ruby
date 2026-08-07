@@ -128,6 +128,7 @@ rb_core_classes = _ext('rpyyarv_core_classes', [VALUEP], lltype.Void)
 rb_define_class_ = _ext('rpyyarv_define_class',
                         [VALUE, VALUE, VALUE, INTP], VALUE, reenters=True)
 rb_class_superclass = _ext('rpyyarv_class_superclass', [VALUE, INTP], VALUE, reenters=True)
+rb_singleton_class = _ext('rpyyarv_singleton_class', [VALUE, INTP], VALUE, reenters=True)
 rb_obj_alloc = _ext('rpyyarv_obj_alloc', [VALUE, INTP], VALUE, reenters=True)
 rb_const_get_ = _ext('rpyyarv_const_get', [VALUE, VALUE, INTP], VALUE, reenters=True)
 rb_const_set_ = _ext('rpyyarv_const_set', [VALUE, VALUE, VALUE, INTP],
@@ -179,6 +180,10 @@ rb_vm_core = _ext('rpyyarv_vm_core', [], VALUE, reenters=True)
 rb_arity_error = _ext('rpyyarv_arity_error',
                       [rffi.INT, rffi.INT, rffi.INT, INTP], VALUE,
                       reenters=True)
+rb_local_jump_error = _ext('rpyyarv_local_jump_error',
+                           [rffi.CCHARP, VALUE, rffi.INT, INTP], VALUE,
+                           reenters=True)
+rb_set_block_unwind = _ext('rpyyarv_set_block_unwind', [], lltype.Void)
 rb_bop_mask = _ext('rpyyarv_bop_mask', [], VALUE, reenters=True)
 rb_require_resolve = _ext('rpyyarv_require_resolve', [VALUE, VALUEP, INTP],
                           rffi.INT, reenters=True)
@@ -577,6 +582,17 @@ def class_superclass(klass):
     return ret
 
 
+def singleton_class(obj):
+    with lltype.scoped_alloc(INTP.TO, 1) as state:
+        state[0] = rffi.cast(rffi.INT, 0)
+        v = rb_singleton_class(_v(obj), state)
+        failed = rffi.cast(lltype.Signed, state[0]) != 0
+        ret = rffi.cast(lltype.Signed, v)
+    if failed:
+        _failed('singleton_class')
+    return ret
+
+
 def obj_alloc(klass):
     with lltype.scoped_alloc(INTP.TO, 1) as state:
         state[0] = rffi.cast(rffi.INT, 0)
@@ -765,6 +781,25 @@ def arity_error(given, min_argc, max_argc):
     if failed:
         _failed('ArgumentError')
     return ret
+
+
+def local_jump_error(mesg, val, reason):
+    """The LocalJumpError VALUE; reason is a ruby_tag_type."""
+    with lltype.scoped_alloc(INTP.TO, 1) as state:
+        state[0] = rffi.cast(rffi.INT, 0)
+        with rffi.scoped_str2charp(mesg) as c_mesg:
+            v = rb_local_jump_error(c_mesg, _v(val),
+                                    rffi.cast(rffi.INT, reason), state)
+        failed = rffi.cast(lltype.Signed, state[0]) != 0
+        ret = rffi.cast(lltype.Signed, v)
+    if failed:
+        _failed('LocalJumpError')
+    return ret
+
+
+def set_block_unwind():
+    """Tell the shim the block it is running left early; see boot_shim.h."""
+    rb_set_block_unwind()
 
 
 BOP_COUNT_SHIFT = 32

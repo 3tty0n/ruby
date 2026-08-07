@@ -249,15 +249,39 @@ class Loader(object):
         autosplat = (not raw.ambiguous_param0
                      and (raw.lead_num + raw.post_num > 0 or opt_num > 1))
 
+        catches = self.catches(raw, labels, parents)
+        returns = self.throws_return(opcodes, operands, raw, pool, catches)
         consts = [v for v in pool.consts]
         w_iseq = W_ISeq(raw.name, code, consts, [w for w in pool.iseqs],
                         [c for c in pool.callinfos], raw.nlocals,
                         raw.stack_max, raw.lead_num, simple,
-                        self.catches(raw, labels, parents),
+                        catches,
                         [p for p in pool.paths], opt_table, raw.rest_start,
-                        raw.post_start, raw.post_num, '', autosplat)
+                        raw.post_start, raw.post_num, '', autosplat,
+                        returns, returns and raw.type in self.RETURN_TARGETS)
         gcroots.register_consts(consts)
         return w_iseq
+
+    # The ISeq types a non-local return may name; a class body gets a
+    # LocalJumpError instead (vm_insnhelper.c:1893).
+    RETURN_TARGETS = ['method', 'top', 'main']
+
+    def throws_return(self, opcodes, operands, raw, pool, catches):
+        """Whether a `return` from a block can reach here: this ISeq throws
+        one, or something nested in it does."""
+        for i in range(len(opcodes)):
+            if opcodes[i] != insns.THROW:
+                continue
+            if self.int_of(operands[i][0], opcodes[i], raw, 'throw state') & \
+                    optable.TAG_MASK == optable.TAG_RETURN:
+                return True
+        for w_child in pool.iseqs:
+            if w_child.has_return_throw:
+                return True
+        for entry in catches:
+            if entry.w_iseq.has_return_throw:
+                return True
+        return False
 
     # Everything the compiler may push between the FrozenCore receiver and
     # the send that consumes it, for `alias` and `undef`.
@@ -365,9 +389,8 @@ class Loader(object):
                 optable.TAG_MASK
             if tag == optable.TAG_RETRY:
                 raise UnsupportedOperation('retry is not supported')
-            if tag == optable.TAG_RETURN or tag == optable.TAG_REDO:
-                raise UnsupportedOperation(
-                    'throw with tag %d (return/redo) is not supported' % tag)
+            if tag == optable.TAG_REDO:
+                raise UnsupportedOperation('redo is not supported')
         elif op == insns.INVOKESUPER:
             if ops[1].kind != rawiseq.OP_NIL:
                 raise UnsupportedOperation(
@@ -381,11 +404,18 @@ class Loader(object):
                     % (kind, raw.name))
         elif op == insns.DEFINECLASS:
             flags = self.int_of(ops[2], op, raw, 'flags')
-            if flags & optable.DEFINECLASS_TYPE_MASK != \
-                    optable.DEFINECLASS_TYPE_CLASS:
+            kind = flags & optable.DEFINECLASS_TYPE_MASK
+            if kind == optable.DEFINECLASS_TYPE_SINGLETON_CLASS:
+                # `def self.x` is definesmethod, which RPyYARV runs; a
+                # `class << self` body needs the singleton class as a cref,
+                # which its frames do not carry.
                 raise UnsupportedOperation(
-                    "'%s' defines a module or a singleton class, which "
-                    "RPyYARV does not support" % raw.name)
+                    "'%s' opens a singleton class body, which RPyYARV does "
+                    "not support" % raw.name)
+            if kind != optable.DEFINECLASS_TYPE_CLASS:
+                raise UnsupportedOperation(
+                    "'%s' defines a module, which RPyYARV does not support"
+                    % raw.name)
             if flags & optable.DEFINECLASS_FLAG_SCOPED:
                 raise UnsupportedOperation(
                     "'%s' defines a class under an explicit scope, which "

@@ -11,6 +11,42 @@
 struct rb_iseq_struct;
 VALUE rb_iseqw_new(const struct rb_iseq_struct *iseq);
 
+static int block_unwind;
+
+/* RPyYARV::Unwind, the carrier a parked unwind rides across libruby's C
+   frames. Under Exception so no bare `rescue` in between can eat it. */
+static VALUE
+unwind_class(void)
+{
+    static VALUE klass = Qundef;
+    if (klass == Qundef) {
+        VALUE mod = rb_define_module("RPyYARV");
+        klass = rb_define_class_under(mod, "Unwind", rb_eException);
+        rb_gc_register_mark_object(klass);
+    }
+    return klass;
+}
+
+void
+rpyyarv_set_block_unwind(void)
+{
+    block_unwind = 1;
+}
+
+/* A failed rb_protect whose exception is the carrier: the RPython side holds
+   the real unwind, so report success and let it re-raise. */
+static void
+absorb_unwind(int *state)
+{
+    VALUE err;
+    if (!*state) return;
+    err = rb_errinfo();
+    if (!NIL_P(err) && rb_obj_is_kind_of(err, unwind_class())) {
+        rb_set_errinfo(Qnil);
+        *state = 0;
+    }
+}
+
 void *
 rpyyarv_boot(int argc, char **argv, int *status_out)
 {
@@ -69,6 +105,7 @@ rpyyarv_call0(uintptr_t recv, const char *mid, int *state)
 
     *state = 0;
     VALUE r = rb_protect(call0_body, (VALUE)&a, state);
+    absorb_unwind(state);
     if (*state) {
         /* Clear it, or the next call re-raises. */
         rb_set_errinfo(Qnil);
@@ -126,6 +163,7 @@ rpyyarv_funcallv_id(uintptr_t recv, uintptr_t mid, int argc,
 
     *state = 0;
     VALUE r = rb_protect(funcallv_body, (VALUE)&a, state);
+    absorb_unwind(state);
     if (*state) return (uintptr_t)Qnil;
     return (uintptr_t)r;
 }
@@ -161,6 +199,7 @@ rpyyarv_funcallv_public_id(uintptr_t recv, uintptr_t mid, int argc,
 
     *state = 0;
     VALUE r = rb_protect(funcallv_public_body, (VALUE)&a, state);
+    absorb_unwind(state);
     if (*state) return (uintptr_t)Qnil;
     return (uintptr_t)r;
 }
@@ -426,6 +465,26 @@ rpyyarv_class_superclass(uintptr_t klass, int *state)
     a.a = (VALUE)klass;
     *state = 0;
     VALUE r = rb_protect(class_superclass_body, (VALUE)&a, state);
+    if (*state) return (uintptr_t)Qnil;
+    return (uintptr_t)r;
+}
+
+static VALUE
+singleton_class_body(VALUE argp)
+{
+    struct obj_args *p = (struct obj_args *)argp;
+    /* Checks the receiver may have one, and that it is not frozen
+       (vm_insnhelper.c:6035). */
+    return rb_singleton_class(p->a);
+}
+
+uintptr_t
+rpyyarv_singleton_class(uintptr_t obj, int *state)
+{
+    struct obj_args a;
+    a.a = (VALUE)obj;
+    *state = 0;
+    VALUE r = rb_protect(singleton_class_body, (VALUE)&a, state);
     if (*state) return (uintptr_t)Qnil;
     return (uintptr_t)r;
 }
@@ -743,6 +802,7 @@ block_yielder(RB_BLOCK_CALL_FUNC_ARGLIST(yielded, callback_arg))
        RPython side has copied them into a frame the mark hook reaches. */
     VALUE buf[RPYYARV_MAX_ARGC];
     int i, n = argc;
+    VALUE r;
 
     (void)yielded;
     (void)blockarg;
@@ -750,8 +810,15 @@ block_yielder(RB_BLOCK_CALL_FUNC_ARGLIST(yielded, callback_arg))
     if (n < 0) n = 0;
     if (n > RPYYARV_MAX_ARGC) n = RPYYARV_MAX_ARGC;
     for (i = 0; i < n; i++) buf[i] = argv[i];
-    return (VALUE)block_callback((long)FIX2LONG(callback_arg), n,
-                                 (uintptr_t *)buf);
+    r = (VALUE)block_callback((long)FIX2LONG(callback_arg), n,
+                              (uintptr_t *)buf);
+    /* The block left early and parked why; abort the CRuby method running it
+       instead of letting it iterate on. */
+    if (block_unwind) {
+        block_unwind = 0;
+        rb_raise(unwind_class(), "rpyyarv: non-local exit from a block");
+    }
+    return r;
 }
 
 struct blockcall_args {
@@ -792,6 +859,7 @@ rpyyarv_call_with_block(uintptr_t recv, uintptr_t mid, int argc,
 
     *state = 0;
     VALUE r = rb_protect(call_with_block_body, (VALUE)&a, state);
+    absorb_unwind(state);
     if (*state) return (uintptr_t)Qnil;
     return (uintptr_t)r;
 }
@@ -824,6 +892,9 @@ rpyyarv_trampoline(int argc, VALUE *argv, VALUE self)
     /* Raised here, not on the RPython side: unwinding an RPython exception
        through this C frame back into libruby is undefined. */
     if (status == RPYYARV_TRAMP_RAISE) rb_exc_raise(err);
+    if (status == RPYYARV_TRAMP_UNWIND) {
+        rb_raise(unwind_class(), "rpyyarv: non-local exit from a method");
+    }
     if (status != RPYYARV_TRAMP_OK) {
         rb_exc_raise(rb_exc_new_str(rb_eNotImpError, err));
     }
@@ -1067,6 +1138,46 @@ arity_error_body(VALUE argp)
     }
     rb_str_cat_cstr(mesg, ")");
     return rb_exc_new_str(rb_eArgError, mesg);
+}
+
+struct localjump_args {
+    const char *mesg;
+    VALUE value;
+    int reason;
+};
+
+/* make_localjump_error (vm.c:2175), which is static there. */
+static VALUE
+local_jump_error_body(VALUE argp)
+{
+    struct localjump_args *p = (struct localjump_args *)argp;
+    VALUE exc = rb_exc_new2(rb_eLocalJumpError, p->mesg);
+    const char *reason = "noreason";
+    switch (p->reason) {
+      case 1: reason = "return"; break;
+      case 2: reason = "break";  break;
+      case 3: reason = "next";   break;
+      case 4: reason = "retry";  break;
+      case 5: reason = "redo";   break;
+      default: break;
+    }
+    rb_iv_set(exc, "@exit_value", p->value);
+    rb_iv_set(exc, "@reason", ID2SYM(rb_intern(reason)));
+    return exc;
+}
+
+uintptr_t
+rpyyarv_local_jump_error(const char *mesg, uintptr_t value, int reason,
+                         int *state)
+{
+    struct localjump_args a;
+    a.mesg = mesg;
+    a.value = (VALUE)value;
+    a.reason = reason;
+    *state = 0;
+    VALUE r = rb_protect(local_jump_error_body, (VALUE)&a, state);
+    if (*state) return (uintptr_t)Qnil;
+    return (uintptr_t)r;
 }
 
 uintptr_t

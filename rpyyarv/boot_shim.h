@@ -115,6 +115,7 @@ void rpyyarv_core_classes(uintptr_t *out);
 uintptr_t rpyyarv_define_class(uintptr_t cbase, uintptr_t id, uintptr_t super,
                                int *state);
 uintptr_t rpyyarv_class_superclass(uintptr_t klass, int *state);
+uintptr_t rpyyarv_singleton_class(uintptr_t obj, int *state);
 uintptr_t rpyyarv_obj_alloc(uintptr_t klass, int *state);
 uintptr_t rpyyarv_const_get(uintptr_t klass, uintptr_t id, int *state);
 void rpyyarv_const_set(uintptr_t klass, uintptr_t id, uintptr_t val,
@@ -162,6 +163,20 @@ uintptr_t rpyyarv_call_with_block(uintptr_t recv, uintptr_t mid, int argc,
                                   int *state);
 
 /*
+ * A block that ran inside a CRuby method and has to leave it early -- a
+ * non-local return, a break, a raise -- cannot unwind as an RPython exception
+ * through libruby's frames. It parks the unwind on the RPython side, calls
+ * this, and the block yielder raises RPyYARV::Unwind on its behalf; that is
+ * the only unwinding an extension may do across C frames, and it stands in
+ * for the EC_JUMP_TAG a throw uses inside CRuby (vm_insnhelper.c:1929).
+ * Every rb_protect boundary below swallows that one exception and leaves
+ * *state zero, so the RPython side re-raises the real unwind itself.
+ * Descends from Exception, not StandardError, so a bare `rescue` in
+ * intervening Ruby code cannot eat it.
+ */
+void rpyyarv_set_block_unwind(void);
+
+/*
  * The other direction: a method entry in CRuby's own tables that re-enters
  * RPyYARV, so a core method calling back -- to_s, <=>, hash, each -- reaches
  * the definition RPyYARV holds rather than the one CRuby never got.
@@ -176,6 +191,7 @@ uintptr_t rpyyarv_call_with_block(uintptr_t recv, uintptr_t mid, int argc,
 #define RPYYARV_TRAMP_OK          0
 #define RPYYARV_TRAMP_RAISE       1   /* *errval is the exception to re-raise */
 #define RPYYARV_TRAMP_UNSUPPORTED 2   /* *errval is the message String */
+#define RPYYARV_TRAMP_UNWIND      3   /* an unwind parked on the RPython side */
 
 typedef uintptr_t (*rpyyarv_tramp_fn)(uintptr_t self, uintptr_t mid, int argc,
                                       uintptr_t *argv, uintptr_t blockproc,
@@ -207,6 +223,10 @@ uintptr_t rpyyarv_take_errinfo(void);
  * to put `$!` there for a bare `raise` to mean what Ruby says it means.
  */
 uintptr_t rpyyarv_swap_errinfo(uintptr_t v);
+
+/* make_localjump_error (vm.c:2175); reason is a ruby_tag_type. */
+uintptr_t rpyyarv_local_jump_error(const char *mesg, uintptr_t value,
+                                   int reason, int *state);
 
 /* rb_obj_is_kind_of, for checkmatch's rescue clause. */
 int rpyyarv_obj_is_kind_of(uintptr_t obj, uintptr_t klass, int *state);

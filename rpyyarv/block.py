@@ -41,9 +41,25 @@ class BlockNext(Exception):
         self.value = value
 
 
-class BlockBreak(Exception):
+class BlockJump(Exception):
+    """An unwind out of a block towards a frame further out, as vm_throw
+    starts one. Not an error, so it may park and be re-raised."""
+    def __init__(self, value):
+        self.value = value
+
+
+class BlockReturn(BlockJump):
+    """A non-local `return`: the tag is the frame of the method the block was
+    written in, which vm_throw_start finds as the block's local EP
+    (vm_insnhelper.c:1827)."""
+    def __init__(self, frame, value):
+        BlockJump.__init__(self, value)
+        self.frame = frame
+
+
+class BlockBreak(BlockJump):
     """`break`: the block itself is the tag, so it unwinds to the send that
     passed this exact one."""
     def __init__(self, w_block, value):
+        BlockJump.__init__(self, value)
         self.w_block = w_block
-        self.value = value

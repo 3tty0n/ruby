@@ -7,6 +7,7 @@ PENDING_NONE = 0
 PENDING_RAISE = 1
 PENDING_BREAK = 2
 PENDING_NEXT = 3
+PENDING_RETURN = 4
 
 
 class Frame(object):
@@ -19,8 +20,14 @@ class Frame(object):
     # parameter -- almost all of them -- does not pay a store for it.
     block_param_set = False
 
+    # Set on the way out of execute(), and only for an ISeq a non-local return
+    # can name: a `return` whose target frame is already gone is the orphaned
+    # Proc that vm_throw_start answers with a LocalJumpError.
+    dead = False
+
     def __init__(self, iseq, self_val, cref=0, entry=None):
         self = hint(self, access_directly=True, fresh_virtualizable=True)
+        self.w_iseq = iseq
         self.stack = [0] * iseq.stack_max
         self.sp = 0
         # The pc of the running instruction, for finding a catch-table entry.
@@ -42,6 +49,8 @@ class Frame(object):
         self.pending_kind = PENDING_NONE
         self.pending_value = 0
         self.pending_block = None
+        # For a pending non-local return, the frame it is aimed at.
+        self.pending_frame = None
 
     def push(self, v):
         sp = self.sp

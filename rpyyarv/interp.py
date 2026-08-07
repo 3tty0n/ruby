@@ -11,10 +11,10 @@ import symbols
 import value
 from error import RPyYarvError, RubyException, UnsupportedOperation
 from frame import (Frame, PENDING_BREAK, PENDING_NEXT, PENDING_NONE,
-                   PENDING_RAISE)
+                   PENDING_RAISE, PENDING_RETURN)
 from iseq import CATCH_ENSURE, CATCH_RESCUE, NO_BLOCK_ISEQ
-from rlib import (JitDriver, always_inline, dont_look_inside, promote,
-                  unroll_safe)
+from rlib import (JitDriver, StackOverflow, always_inline, check_stack_overflow,
+                  dont_look_inside, promote, unroll_safe)
 
 TO_S = symbols.intern('to_s')
 DUP = symbols.intern('dup')
@@ -26,7 +26,7 @@ def define_method(frame, mid, w_iseq):
     if klass == 0:
         dispatch.define(value.core_class(value.C_OBJECT), mid, w_iseq, True)
     else:
-        dispatch.define(klass, mid, w_iseq, False)
+        dispatch.define(klass, mid, w_iseq, False, klass)
 
 
 @unroll_safe
@@ -75,6 +75,16 @@ def invoke(frame, w_ci, w_block=None):
                 raise
             return e.value
 
+    if w_ci.mid == BLOCK_GIVEN and w_ci.fcall and argc == 0:
+        # rb_f_block_given_p reads the *caller's* frame (vm.c:1862); out
+        # through rb_funcallv it would find a CRuby frame instead.
+        _drop(frame, recv_at)
+        return value.newbool(frame.block is not None)
+    if w_block is not None and w_ci.mid == NEW \
+            and dispatch.is_known_class(recv):
+        entry = dispatch.lookup(promote(recv), INITIALIZE)
+        if entry is not None:
+            return _new_with_block(frame, entry, recv, recv_at, argc, w_block)
     if proxy.value != 0 and recv == proxy.value:
         return _block_send(frame, w_ci, recv_at, argc, frame.block)
     if len(blocks.by_proc) > 0 and _is_proxy_call(w_ci.mid) \
@@ -99,7 +109,15 @@ def invoke(frame, w_ci, w_block=None):
         i += 1
     _drop(frame, recv_at)
     if w_block is not None:
-        return _call_with_block(recv, w_ci.mid, args, w_block)
+        if w_ci.blockarg:
+            return _call_with_block(recv, w_ci.mid, args, w_block)
+        try:
+            return _call_with_block(recv, w_ci.mid, args, w_block)
+        except block_mod.BlockBreak, e:
+            # As above: only the send the block was written at catches it.
+            if e.w_block is not w_block:
+                raise
+            return e.value
     # An entry survived here only by being private to a receiverless call, and
     # rb_funcallv would reach the trampoline for it anyway (CALL_FCALL).
     public_only = entry is not None and not w_ci.fcall
@@ -114,6 +132,23 @@ def invoke(frame, w_ci, w_block=None):
     _check_block_error()
     debug.trace_leave(w_ci.mid, ret)
     return ret
+
+
+NEW = symbols.intern('new')
+INITIALIZE = symbols.intern('initialize')
+BLOCK_GIVEN = symbols.intern('block_given?')
+
+
+def _new_with_block(frame, entry, klass, recv_at, argc, w_block):
+    """`Klass.new { }` run here rather than through CRuby's Class#new, which
+    is what opt_new already does for the blockless form. Going out would hand
+    initialize a Proc over a block handle that dies when Class#new returns."""
+    obj = dispatch.alloc(klass)
+    # In the caller's marked slot, since _enter drops it only once the
+    # arguments are placed.
+    frame.stack[recv_at] = obj
+    _enter(frame, entry, obj, recv_at, argc, INITIALIZE, w_block)
+    return obj
 
 
 @unroll_safe
@@ -350,6 +385,7 @@ class _Blocks(object):
         self.by_proc = {}       # a materialised Proc -> the block behind it
         self.error = None       # an RPython error the callback could not raise
         self.exc = None         # likewise, a Ruby exception
+        self.jump = None        # likewise, a break or a non-local return
 
 
 blocks = _Blocks()
@@ -390,7 +426,8 @@ def block_callback(handle, argc, argv):
     """Called from C, inside rb_block_call or a materialised Proc. No RPython
     exception may escape into libruby, so a failure is re-raised once the call
     has returned."""
-    if blocks.error is not None or blocks.exc is not None:
+    if blocks.error is not None or blocks.exc is not None \
+            or blocks.jump is not None:
         return boot.as_value(value.Q_NIL)
     w_block = blocks.table[handle]
     if w_block is None:
@@ -404,20 +441,38 @@ def block_callback(handle, argc, argv):
         # Held: the RPython field it waits in is not something CRuby scans.
         gcroots.hold(e.value)
         blocks.exc = e
-        return boot.as_value(value.Q_NIL)
-    except block_mod.BlockBreak:
-        # Unwinding would have to longjmp out of rb_block_call's frames.
-        blocks.error = UnsupportedOperation(
-            'break out of a block passed to a CRuby method is not supported')
-        return boot.as_value(value.Q_NIL)
+        return _park_unwind()
+    except block_mod.BlockJump, e:
+        gcroots.hold(e.value)
+        blocks.jump = e
+        return _park_unwind()
     except RPyYarvError, e:
         blocks.error = e
-        return boot.as_value(value.Q_NIL)
+        return _park_unwind()
+    except StackOverflow:
+        # Parked like the rest: returning normally would let the CRuby method
+        # call the block again, one exhausted stack later.
+        check_stack_overflow()
+        blocks.error = UnsupportedOperation(STACK_TOO_DEEP)
+        return _park_unwind()
+
+
+STACK_TOO_DEEP = 'the call is nested too deeply for RPyYARV\'s stack'
+
+
+@dont_look_inside
+def _park_unwind():
+    """The block has to leave the CRuby method running it, and an RPython
+    exception cannot cross libruby's frames; the shim raises on its behalf
+    and the rb_protect boundary hands control back here."""
+    boot.set_block_unwind()
+    return boot.as_value(value.Q_NIL)
 
 
 TRAMP_OK = 0
 TRAMP_RAISE = 1
 TRAMP_UNSUPPORTED = 2
+TRAMP_UNWIND = 3
 
 
 def trampoline_callback(self_v, rid, argc, argv, blockv, statusp, errp):
@@ -440,10 +495,13 @@ def trampoline_callback(self_v, rid, argc, argv, blockv, statusp, errp):
     except RubyException, e:
         boot.store_int(statusp, TRAMP_RAISE)
         boot.store_value(errp, e.value)
-    except block_mod.BlockBreak:
-        _tramp_failed(statusp, errp,
-                      'break out of a method RPyYARV ran for CRuby is not '
-                      'supported')
+    except block_mod.BlockJump, e:
+        # Aimed past this call, at a frame CRuby's own frames now sit under;
+        # the shim raises so libruby unwinds them, and the rb_protect the
+        # RPyYARV caller is under hands control back.
+        gcroots.hold(e.value)
+        blocks.jump = e
+        boot.store_int(statusp, TRAMP_UNWIND)
     except block_mod.BlockNext:
         _tramp_failed(statusp, errp,
                       'next out of a method RPyYARV ran for CRuby is not '
@@ -452,6 +510,9 @@ def trampoline_callback(self_v, rid, argc, argv, blockv, statusp, errp):
         _tramp_failed(statusp, errp, "a call to '%s' failed" % e.mid)
     except RPyYarvError, e:
         _tramp_failed(statusp, errp, e.msg)
+    except StackOverflow:
+        check_stack_overflow()
+        _tramp_failed(statusp, errp, STACK_TOO_DEEP)
     return boot.as_value(value.Q_NIL)
 
 
@@ -494,8 +555,15 @@ def _from_cruby(recv, mid, args, w_block):
 @dont_look_inside
 def _call_with_block(recv, mid, args, w_block):
     handle = _alloc_handle(w_block)
+    ret = value.Q_NIL
     try:
-        ret = rubycall.call_with_block(recv, mid, args, handle)
+        try:
+            ret = rubycall.call_with_block(recv, mid, args, handle)
+        except RubyException:
+            # The CRuby method failed; whatever the block parked before that
+            # is the reason, and takes precedence.
+            _check_block_error()
+            raise
     finally:
         _release_handle(handle)
     _check_block_error()
@@ -503,12 +571,18 @@ def _call_with_block(recv, mid, args, w_block):
 
 
 def _check_block_error():
-    """What a callback into RPyYARV could not raise through libruby's frames."""
+    """What a callback into RPyYARV could not raise through libruby's frames,
+    now that the shim's RPyYARV::Unwind has brought control back."""
     exc = blocks.exc
     if exc is not None:
         blocks.exc = None
         gcroots.release(exc.value)
         raise exc
+    jump = blocks.jump
+    if jump is not None:
+        blocks.jump = None
+        gcroots.release(jump.value)
+        raise jump
     err = blocks.error
     if err is not None:
         blocks.error = None
@@ -683,10 +757,13 @@ def invoke_block(frame, w_ci):
 class Throw(object):
     """A throw in flight, as vm_exec_handle_exception takes it. Not an
     exception itself; _rethrow turns it back into one."""
-    def __init__(self, kind, value, w_block=None, name='raise'):
+    def __init__(self, kind, value, w_block=None, name='raise',
+                 target=None):
         self.kind = kind
         self.value = value
         self.w_block = w_block
+        # PENDING_RETURN: the frame the return is aimed at.
+        self.target = target
         self.name = name
 
 
@@ -695,7 +772,40 @@ def _rethrow(throw):
         raise RubyException(throw.value, throw.name)
     if throw.kind == PENDING_BREAK:
         raise block_mod.BlockBreak(throw.w_block, throw.value)
+    if throw.kind == PENDING_RETURN:
+        raise block_mod.BlockReturn(throw.target, throw.value)
     raise block_mod.BlockNext(throw.value)
+
+
+# A defining-frame chain longer than this is a corrupt one; the walk has to
+# terminate for the tracer.
+MAX_SCOPES = 256
+
+
+def _return_target(frame):
+    """The frame a non-local return leaves: the outermost of the chain the
+    block was written in, which is CRuby's local EP (vm_insnhelper.c:1834)."""
+    f = frame
+    n = 0
+    while f.defining_frame is not None and n < MAX_SCOPES:
+        f = f.defining_frame
+        n += 1
+    return f
+
+
+@dont_look_inside
+def _local_jump_error(mesg, v, reason):
+    return RubyException(boot.local_jump_error(mesg, v, reason), 'return')
+
+
+def _return(frame, v):
+    """`return` from a block. The target has to still be running, and has to
+    be a method or the toplevel; anything else is the orphaned-Proc case
+    vm_throw_start answers with a LocalJumpError (vm_insnhelper.c:1926)."""
+    target = _return_target(frame)
+    if target.dead or not target.w_iseq.catches_return:
+        raise _local_jump_error('unexpected return', v, optable.TAG_RETURN)
+    raise block_mod.BlockReturn(target, v)
 
 
 def _throw(frame, throw_state, v):
@@ -707,17 +817,19 @@ def _throw(frame, throw_state, v):
         if w_block is None:
             raise UnsupportedOperation('break outside a block')
         raise block_mod.BlockBreak(w_block, v)
+    if tag == optable.TAG_RETURN:
+        _return(frame, v)
     if tag == optable.TAG_NONE:
         # vm_throw_continue: re-raise what this catch ISeq runs under.
         if frame.pending_kind == PENDING_NONE:
             raise UnsupportedOperation(
                 'throw 0 outside a rescue or ensure body')
         _rethrow(Throw(frame.pending_kind, frame.pending_value,
-                       frame.pending_block))
+                       frame.pending_block, 'raise', frame.pending_frame))
     if tag == optable.TAG_RETRY:
         raise UnsupportedOperation('retry is not supported')
     raise UnsupportedOperation(
-        'throw with tag %d (return/redo) is not supported' % tag)
+        'throw with tag %d (redo) is not supported' % tag)
 
 
 def _catch_for(iseq, epc, kind):
@@ -749,6 +861,7 @@ def _run_catch(frame, entry, throw):
     callee.pending_kind = throw.kind
     callee.pending_value = throw.value
     callee.pending_block = throw.w_block
+    callee.pending_frame = throw.target
     return _run_with_errinfo(w_iseq, callee, callee.locals[0]
                              if len(callee.locals) > 0 else value.Q_NIL)
 
@@ -778,6 +891,8 @@ def _unwind(iseq, frame, throw, epc):
             throw = Throw(PENDING_RAISE, e.value, None, e.name)
         except block_mod.BlockBreak, e:
             throw = Throw(PENDING_BREAK, e.value, e.w_block)
+        except block_mod.BlockReturn, e:
+            throw = Throw(PENDING_RETURN, e.value, None, 'return', e.frame)
         except block_mod.BlockNext, e:
             throw = Throw(PENDING_NEXT, e.value)
         else:
@@ -946,9 +1061,15 @@ def _const_path(frame, path):
 
 
 def _const_base(frame):
-    """The cref's constant base. TODO: a nested cref chain, once modules land."""
+    """The cref's constant base. In a method body that is the class the def
+    was written in, which rb_const_get then searches with its ancestors.
+    TODO: a nested cref chain, so `class A; X=1; class B; def f; X; end` finds
+    A's constant the way a lexical scope walk would."""
     if frame.cref != 0:
         return frame.cref
+    entry = frame.entry
+    if entry is not None and entry.cref != 0:
+        return entry.cref
     return value.core_class(value.C_OBJECT)
 
 
@@ -1034,6 +1155,8 @@ def execute(iseq, frame, pc=0):
     """Two shapes on purpose: the handler shape below stops the JIT inlining
     the call, so an ISeq with no catch table keeps a plain tail call instead.
     iseq is green, so the branch folds away."""
+    if iseq.catches_return:
+        return _execute_returnable(iseq, frame, pc)
     if len(iseq.catches) == 0:
         gcroots.push_frame(frame)
         try:
@@ -1041,6 +1164,27 @@ def execute(iseq, frame, pc=0):
         finally:
             gcroots.pop_frame(frame)
     return _execute_guarded(iseq, frame, pc)
+
+
+def _execute_returnable(iseq, frame, pc):
+    """A frame a `return` inside one of its blocks names. The unwinding has
+    run this frame's own ensure entries by the time it gets here; what is
+    left is to answer the value, as vm_throw_start's valid_return does."""
+    try:
+        try:
+            if len(iseq.catches) == 0:
+                gcroots.push_frame(frame)
+                try:
+                    return _execute(iseq, frame, pc)
+                finally:
+                    gcroots.pop_frame(frame)
+            return _execute_guarded(iseq, frame, pc)
+        except block_mod.BlockReturn, e:
+            if e.frame is not frame:
+                raise
+            return e.value
+    finally:
+        frame.dead = True
 
 
 def _execute_guarded(iseq, frame, pc):
@@ -1056,6 +1200,11 @@ def _execute_guarded(iseq, frame, pc):
             except block_mod.BlockBreak, e:
                 pc = _unwind(iseq, frame,
                              Throw(PENDING_BREAK, e.value, e.w_block),
+                             _epc(iseq, frame.pc))
+            except block_mod.BlockReturn, e:
+                pc = _unwind(iseq, frame,
+                             Throw(PENDING_RETURN, e.value, None, 'return',
+                                   e.frame),
                              _epc(iseq, frame.pc))
             except block_mod.BlockNext, e:
                 pc = _unwind(iseq, frame, Throw(PENDING_NEXT, e.value),
@@ -1302,6 +1451,11 @@ def _execute(iseq, frame, pc):
             w_body = iseq.iseqs[code[pc + 1]]
             pc += 2
             define_method(frame, mid, w_body)
+        elif opcode == insns.DEFINESMETHOD:
+            mid = code[pc]
+            w_body = iseq.iseqs[code[pc + 1]]
+            pc += 2
+            dispatch.define_singleton(frame.pop(), mid, w_body, frame.cref)
         elif opcode == insns.OPT_SEND_WITHOUT_BLOCK:
             idx = code[pc]
             pc += 1
