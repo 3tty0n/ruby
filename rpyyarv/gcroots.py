@@ -11,7 +11,6 @@ the shim's mark hook.
 import boot
 import value
 from rlib import dont_look_inside
-from rpython.rtyper.annlowlevel import llhelper
 
 
 class Registry(object):
@@ -100,4 +99,6 @@ def mark_roots():
 
 
 def install():
-    boot.set_mark_hook(llhelper(boot.MARK_HOOK, mark_roots))
+    # Passed as a function, not an llhelper pointer, so rffi wraps it in the
+    # enter-RPython-from-C prologue. See boot.install_block_callback.
+    boot.set_mark_hook(mark_roots)

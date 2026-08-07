@@ -3,6 +3,7 @@ import os
 try:
     from rpython.rlib.jit import (
         JitDriver, elidable, promote, unroll_safe, dont_look_inside, hint)
+    from rpython.rlib.objectmodel import always_inline
     from rpython.rlib.rarithmetic import LONG_BIT, ovfcheck
     from rpython.rtyper.lltypesystem import lltype, rffi
 
@@ -46,6 +47,9 @@ except ImportError:
 
     def hint(x, **kwds):
         return x
+
+    def always_inline(func):
+        return func
 
     def raw_word(addr, index):
         raise NotImplementedError('raw_word needs the RPython backend')

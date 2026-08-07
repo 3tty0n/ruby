@@ -52,6 +52,48 @@ def call0(recv, mid):
 
 
 @dont_look_inside
+def call2(recv, mid, a, b):
+    return boot.funcallv(recv, rid(mid), [a, b], symbols.name_of(mid))
+
+
+@dont_look_inside
+def call_with_block(recv, mid, args, handle):
+    return boot.call_with_block(recv, rid(mid), args, handle,
+                                symbols.name_of(mid))
+
+
+@dont_look_inside
+def ary_resurrect(ary):
+    return boot.ary_resurrect(ary)
+
+
+@dont_look_inside
+def ary_store(ary, idx, val):
+    # A call, not a raw store: rb_ary_store runs the write barrier.
+    boot.ary_store(ary, idx, val)
+
+
+@dont_look_inside
+def ary_new(values):
+    return boot.ary_new(values)
+
+
+@dont_look_inside
+def range_new(low, high, excl):
+    return boot.range_new(low, high, excl)
+
+
+@dont_look_inside
+def gvar_get(mid):
+    return boot.gvar_get(symbols.name_of(mid))
+
+
+@dont_look_inside
+def gvar_set(mid, v):
+    boot.gvar_set(symbols.name_of(mid), v)
+
+
+@dont_look_inside
 def to_bignum(n):
     return boot.int2inum(n)
 

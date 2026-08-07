@@ -186,7 +186,11 @@ def _operand(w_iseq, op, pos, val):
     if t == insns.T_ID or t == insns.T_IC:
         return symbols.name_of(val)
     if t == insns.T_LINDEX_T:
-        return 'local[%d]' % val
+        slot = val & optable.LOCAL_SLOT_MASK
+        level = val >> optable.LOCAL_LEVEL_SHIFT
+        if level == 0:
+            return 'local[%d]' % slot
+        return 'local[%d]^%d' % (slot, level)
     if t == insns.T_OFFSET:
         return '-> %d' % val
     return str(val)

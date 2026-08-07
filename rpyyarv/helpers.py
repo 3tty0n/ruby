@@ -1,6 +1,11 @@
-"""The opt_* arithmetic: a fixnum fast path that touches no rb_* API, and a
-CRuby dispatch for everything else."""
+"""The opt_* instructions: a fixnum or Array fast path that touches no rb_*
+API, and a CRuby dispatch for everything else.
 
+TODO: none of these consult CRuby's BOP redefinition flags, so reopening
+Integer#+ or Array#[] is not observed. Same gap as opt_not.
+"""
+
+import boot
 import rubycall
 import symbols
 import value
@@ -17,6 +22,12 @@ EQ = symbols.intern('==')
 NEQ = symbols.intern('!=')
 DIV = symbols.intern('/')
 MOD = symbols.intern('%')
+AREF = symbols.intern('[]')
+ASET = symbols.intern('[]=')
+LENGTH = symbols.intern('length')
+SIZE = symbols.intern('size')
+EMPTY_P = symbols.intern('empty?')
+LTLT = symbols.intern('<<')
 
 
 def _from_int(n):
@@ -99,3 +110,61 @@ def mod(a, b):
     if _both_positive(a, b):
         return value.int2fix(value.fix2int(a) % value.fix2int(b))
     return rubycall.call1(a, MOD, b)
+
+
+def aref(recv, idx):
+    """Array[Fixnum] reads the elements in place; Hash and everything else
+    goes through rb_funcallv."""
+    if value.is_plain_array(recv) and value.is_fixnum(idx):
+        i = value.fix2int(idx)
+        n = value.ary_len(recv)
+        if i < 0:
+            i += n
+        if i >= 0 and i < n:
+            return value.ary_at(recv, i)
+        return value.Q_NIL
+    return rubycall.call1(recv, AREF, idx)
+
+
+def aset(recv, idx, val):
+    if value.is_plain_array(recv) and value.is_fixnum(idx):
+        rubycall.ary_store(recv, value.fix2int(idx), val)
+        return val
+    return rubycall.call2(recv, ASET, idx, val)
+
+
+def length(recv):
+    if value.is_plain_array(recv):
+        return value.int2fix(value.ary_len(recv))
+    return rubycall.call0(recv, LENGTH)
+
+
+def size(recv):
+    if value.is_plain_array(recv):
+        return value.int2fix(value.ary_len(recv))
+    return rubycall.call0(recv, SIZE)
+
+
+def empty_p(recv):
+    if value.is_plain_array(recv):
+        return value.newbool(value.ary_len(recv) == 0)
+    return rubycall.call0(recv, EMPTY_P)
+
+
+def ltlt(recv, obj):
+    return rubycall.call1(recv, LTLT, obj)
+
+
+def opt_not(recv):
+    # TODO: CRuby also checks that #! is still Object#not; a redefined one
+    # would be ignored here.
+    return value.newbool(not value.is_true(recv))
+
+
+def check_array_layout():
+    """The Array fast paths read RArray by hand; refuse a CRuby they misread."""
+    got = boot.array_layout()
+    want = [value.ARY_EMBED_FLAG, value.ARY_EMBED_LEN_SHIFT,
+            value.ARY_EMBED_LEN_MASK, value.ARY_HEAP_LEN_WORD,
+            value.ARY_HEAP_PTR_WORD, value.ARY_EMBED_WORD]
+    return got == want

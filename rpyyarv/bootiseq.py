@@ -87,7 +87,7 @@ def _read_iseq(program, pending, ary):
         _int_or(boot.hash_aref(misc, 'stack_max'), 0),
         _int_or(boot.hash_aref(params, 'lead_num'), 0),
         _extra_params(params),
-        boot.ary_len(boot.ary_entry(ary, I_CATCH)))
+        _catch_types(boot.ary_entry(ary, I_CATCH)))
     program.add_iseq(raw)
 
     body = boot.ary_entry(ary, I_BODY)
@@ -141,12 +141,35 @@ def _operand(pending, v):
     if boot.is_hash(v):
         mid = boot.hash_aref(v, 'mid')
         argc = boot.hash_aref(v, 'orig_argc')
-        if boot.is_symbol(mid) and not boot.is_nil(argc):
+        if not boot.is_nil(argc):
+            # invokesuper's call data names no method: the running one is.
+            name = ''
+            if boot.is_symbol(mid):
+                name = boot.sym_of(mid)
             return rawiseq.RawOperand(
-                rawiseq.OP_CALL, boot.num2long(argc), boot.sym_of(mid),
+                rawiseq.OP_CALL, boot.num2long(argc), name,
                 _int_or(boot.hash_aref(v, 'flag'), 0),
                 not boot.is_nil(boot.hash_aref(v, 'kw_arg')))
-    return rawiseq.RawOperand(rawiseq.OP_OTHER, 0, boot.inspect(v))
+    # Anything else -- Float, Range, Regexp -- crosses as the VALUE itself;
+    # the loader pins it and puts it straight into the constant pool.
+    return rawiseq.RawOperand(rawiseq.OP_VALUE, v, boot.inspect(v))
+
+
+def _catch_types(catch):
+    """iseq_data_to_ary spells each entry [type, iseq, start, end, cont, sp]."""
+    names = []
+    n = boot.ary_len(catch)
+    i = 0
+    while i < n:
+        e = boot.ary_entry(catch, i)
+        name = '?'
+        if boot.is_array(e) and boot.ary_len(e) > 0:
+            t = boot.ary_entry(e, 0)
+            if boot.is_symbol(t):
+                name = boot.sym_of(t)
+        names.append(name)
+        i += 1
+    return names
 
 
 def _int_or(v, default):

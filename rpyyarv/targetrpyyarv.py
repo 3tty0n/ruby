@@ -7,6 +7,7 @@ import bootiseq
 import debug
 import dispatch
 import gcroots
+import helpers
 import interp
 import loader
 import rubycall
@@ -47,7 +48,13 @@ def entry_point(argv):
                    'value.py assumes; the ivar fast path would misread it')
         return 1
 
+    if not helpers.check_array_layout():
+        debug.note('libruby lays out RArray differently than value.py '
+                   'assumes; the Array fast paths would misread it')
+        return 1
+
     dispatch.install()
+    interp.install()
 
     # RPYYARV_GC_NO_HOOK leaves the escaped VALUEs unreachable on purpose, so
     # the stress run can show what the hook is buying.

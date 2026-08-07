@@ -17,9 +17,10 @@ OP_ISEQ = 6     # intval indexes RawProgram.iseqs
 OP_CALL = 7     # intval=orig_argc, flag=flags, strval=mid
 OP_OTHER = 8
 OP_ARRAY = 9    # items holds the elements
+OP_VALUE = 10   # intval is a live CRuby VALUE the front end handed over
 
 KIND_NAMES = ['Integer', 'nil', 'true', 'false', 'Symbol', 'String',
-              'ISeq', 'call data', 'object', 'Array']
+              'ISeq', 'call data', 'object', 'Array', 'object']
 
 
 class RawOperand(object):
@@ -38,7 +39,7 @@ class RawOperand(object):
         if self.kind == OP_INT or self.kind == OP_ISEQ:
             return '%s %d' % (KIND_NAMES[self.kind], self.intval)
         if self.kind == OP_SYM or self.kind == OP_STR or \
-                self.kind == OP_OTHER:
+                self.kind == OP_OTHER or self.kind == OP_VALUE:
             return '%s %s' % (KIND_NAMES[self.kind], self.strval)
         return KIND_NAMES[self.kind]
 
@@ -55,7 +56,7 @@ class RawInsn(object):
 
 class RawISeq(object):
     def __init__(self, name, type_, nlocals, stack_max, lead_num,
-                 extra_params, catch_size):
+                 extra_params, catch_types):
         self.name = name
         self.type = type_
         self.nlocals = nlocals
@@ -63,7 +64,9 @@ class RawISeq(object):
         self.lead_num = lead_num
         # Names of the other parameter kinds CRuby reported, if any.
         self.extra_params = extra_params
-        self.catch_size = catch_size
+        # One name per catch-table entry ('break', 'rescue', ...): which
+        # kinds appear decides whether the loader can take the ISeq.
+        self.catch_types = catch_types
         self.insns = []
         # label name -> index into insns; the loader turns it into a pc.
         self.labels = {}

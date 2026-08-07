@@ -526,6 +526,245 @@ rpyyarv_object_layout(int *out)
     out[5] = (int)RUBY_T_OBJECT;
 }
 
+void
+rpyyarv_array_layout(int *out)
+{
+    out[0] = (int)RARRAY_EMBED_FLAG;
+    out[1] = (int)RARRAY_EMBED_LEN_SHIFT;
+    out[2] = (int)RARRAY_EMBED_LEN_MASK;
+    out[3] = (int)(offsetof(struct RArray, as.heap.len) / SIZEOF_VALUE);
+    out[4] = (int)(offsetof(struct RArray, as.heap.ptr) / SIZEOF_VALUE);
+    out[5] = (int)(offsetof(struct RArray, as.ary) / SIZEOF_VALUE);
+}
+
+static VALUE
+ary_resurrect_body(VALUE argp)
+{
+    struct obj_args *p = (struct obj_args *)argp;
+    return rb_ary_resurrect(p->a);
+}
+
+uintptr_t
+rpyyarv_ary_resurrect(uintptr_t ary, int *state)
+{
+    struct obj_args a;
+    a.a = (VALUE)ary;
+    *state = 0;
+    VALUE r = rb_protect(ary_resurrect_body, (VALUE)&a, state);
+    if (*state) { rb_set_errinfo(Qnil); return (uintptr_t)Qnil; }
+    return (uintptr_t)r;
+}
+
+struct ary_store_args {
+    VALUE ary;
+    VALUE val;
+    long  idx;
+};
+
+static VALUE
+ary_store_body(VALUE argp)
+{
+    struct ary_store_args *p = (struct ary_store_args *)argp;
+    rb_ary_store(p->ary, p->idx, p->val);
+    return Qnil;
+}
+
+void
+rpyyarv_ary_store(uintptr_t ary, long idx, uintptr_t val, int *state)
+{
+    struct ary_store_args a;
+    a.ary = (VALUE)ary;
+    a.val = (VALUE)val;
+    a.idx = idx;
+    *state = 0;
+    rb_protect(ary_store_body, (VALUE)&a, state);
+    if (*state) rb_set_errinfo(Qnil);
+}
+
+static VALUE
+ary_new_capa_body(VALUE argp)
+{
+    struct ary_store_args *p = (struct ary_store_args *)argp;
+    return rb_ary_new_capa(p->idx);
+}
+
+uintptr_t
+rpyyarv_ary_new_capa(long capa, int *state)
+{
+    struct ary_store_args a;
+    a.idx = capa;
+    *state = 0;
+    VALUE r = rb_protect(ary_new_capa_body, (VALUE)&a, state);
+    if (*state) { rb_set_errinfo(Qnil); return (uintptr_t)Qnil; }
+    return (uintptr_t)r;
+}
+
+struct ary_cat_args {
+    VALUE ary;
+    const VALUE *elems;
+    long n;
+};
+
+static VALUE
+ary_cat_body(VALUE argp)
+{
+    struct ary_cat_args *p = (struct ary_cat_args *)argp;
+    return rb_ary_cat(p->ary, p->elems, p->n);
+}
+
+void
+rpyyarv_ary_cat(uintptr_t ary, int n, const uintptr_t *elems, int *state)
+{
+    VALUE buf[RPYYARV_MAX_ARGC];
+    struct ary_cat_args a;
+    int i;
+
+    if (n < 0 || n > RPYYARV_MAX_ARGC) { *state = -1; return; }
+    for (i = 0; i < n; i++) buf[i] = (VALUE)elems[i];
+
+    a.ary = (VALUE)ary;
+    a.elems = buf;
+    a.n = n;
+    *state = 0;
+    rb_protect(ary_cat_body, (VALUE)&a, state);
+    if (*state) rb_set_errinfo(Qnil);
+}
+
+struct range_args {
+    VALUE low;
+    VALUE high;
+    int   excl;
+};
+
+static VALUE
+range_new_body(VALUE argp)
+{
+    struct range_args *p = (struct range_args *)argp;
+    return rb_range_new(p->low, p->high, p->excl);
+}
+
+uintptr_t
+rpyyarv_range_new(uintptr_t low, uintptr_t high, int excl, int *state)
+{
+    struct range_args a;
+    a.low = (VALUE)low;
+    a.high = (VALUE)high;
+    a.excl = excl;
+    *state = 0;
+    VALUE r = rb_protect(range_new_body, (VALUE)&a, state);
+    if (*state) { rb_set_errinfo(Qnil); return (uintptr_t)Qnil; }
+    return (uintptr_t)r;
+}
+
+struct gvar_args {
+    const char *name;
+    VALUE val;
+};
+
+static VALUE
+gvar_get_body(VALUE argp)
+{
+    struct gvar_args *p = (struct gvar_args *)argp;
+    return rb_gv_get(p->name);
+}
+
+uintptr_t
+rpyyarv_gvar_get(const char *name, int *state)
+{
+    struct gvar_args a;
+    a.name = name;
+    *state = 0;
+    VALUE r = rb_protect(gvar_get_body, (VALUE)&a, state);
+    if (*state) { rb_set_errinfo(Qnil); return (uintptr_t)Qnil; }
+    return (uintptr_t)r;
+}
+
+static VALUE
+gvar_set_body(VALUE argp)
+{
+    struct gvar_args *p = (struct gvar_args *)argp;
+    return rb_gv_set(p->name, p->val);
+}
+
+void
+rpyyarv_gvar_set(const char *name, uintptr_t val, int *state)
+{
+    struct gvar_args a;
+    a.name = name;
+    a.val = (VALUE)val;
+    *state = 0;
+    rb_protect(gvar_set_body, (VALUE)&a, state);
+    if (*state) rb_set_errinfo(Qnil);
+}
+
+static rpyyarv_block_fn block_callback;
+
+void
+rpyyarv_set_block_callback(rpyyarv_block_fn fn)
+{
+    block_callback = fn;
+}
+
+static VALUE
+block_yielder(RB_BLOCK_CALL_FUNC_ARGLIST(yielded, callback_arg))
+{
+    /* On the machine stack, so the yielded values stay scannable while the
+       RPython side copies them into a frame the mark hook reaches. */
+    VALUE buf[RPYYARV_MAX_ARGC];
+    int i, n = argc;
+
+    (void)yielded;
+    (void)blockarg;
+    if (!block_callback) return Qnil;
+    if (n < 0) n = 0;
+    if (n > RPYYARV_MAX_ARGC) n = RPYYARV_MAX_ARGC;
+    for (i = 0; i < n; i++) buf[i] = argv[i];
+    return (VALUE)block_callback((long)FIX2LONG(callback_arg), n,
+                                 (uintptr_t *)buf);
+}
+
+struct blockcall_args {
+    VALUE recv;
+    ID    mid;
+    int   argc;
+    const VALUE *argv;
+    long  handle;
+};
+
+static VALUE
+call_with_block_body(VALUE argp)
+{
+    struct blockcall_args *a = (struct blockcall_args *)argp;
+    return rb_block_call(a->recv, a->mid, a->argc, a->argv, block_yielder,
+                         LONG2FIX(a->handle));
+}
+
+uintptr_t
+rpyyarv_call_with_block(uintptr_t recv, uintptr_t mid, int argc,
+                        const uintptr_t *argv, long handle, int *state)
+{
+    VALUE buf[RPYYARV_MAX_ARGC];
+    struct blockcall_args a;
+    int i;
+
+    if (argc < 0 || argc > RPYYARV_MAX_ARGC) {
+        *state = -1;
+        return (uintptr_t)Qnil;
+    }
+    for (i = 0; i < argc; i++) buf[i] = (VALUE)argv[i];
+
+    a.recv = (VALUE)recv;
+    a.mid = (ID)mid;
+    a.argc = argc;
+    a.argv = buf;
+    a.handle = handle;
+
+    *state = 0;
+    VALUE r = rb_protect(call_with_block_body, (VALUE)&a, state);
+    if (*state) { rb_set_errinfo(Qnil); return (uintptr_t)Qnil; }
+    return (uintptr_t)r;
+}
+
 int
 rpyyarv_is_class(uintptr_t v)
 {

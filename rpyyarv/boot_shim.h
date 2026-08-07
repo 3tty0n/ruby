@@ -138,6 +138,42 @@ void rpyyarv_ivar_set(uintptr_t obj, uintptr_t id, uintptr_t val, int *state);
 int rpyyarv_shape_iv_index(unsigned int shape_id, uintptr_t id, int *index);
 void rpyyarv_object_layout(int *out);
 
+/* RArray layout for the opt_aref/opt_length fast paths, checked at boot the
+ * way rpyyarv_object_layout is: embedded and heap arrays both. */
+#define RPYYARV_ARRAY_LAYOUT_N 6
+void rpyyarv_array_layout(int *out);
+
+/* Array and Range operations, each guarded by rb_protect. */
+uintptr_t rpyyarv_ary_resurrect(uintptr_t ary, int *state);
+void rpyyarv_ary_store(uintptr_t ary, long idx, uintptr_t val, int *state);
+uintptr_t rpyyarv_ary_new_capa(long capa, int *state);
+/* Copies elems onto the machine stack first, as funcallv does. */
+void rpyyarv_ary_cat(uintptr_t ary, int n, const uintptr_t *elems, int *state);
+uintptr_t rpyyarv_range_new(uintptr_t low, uintptr_t high, int excl,
+                            int *state);
+
+/* By name, not by ID: libruby exports rb_gv_get/rb_gv_set but not the
+ * rb_gvar_* pair the getglobal/setglobal instructions use. */
+uintptr_t rpyyarv_gvar_get(const char *name, int *state);
+void rpyyarv_gvar_set(const char *name, uintptr_t val, int *state);
+
+/*
+ * Calling a CRuby method with a block RPyYARV holds.
+ *
+ * This is the one place a CRuby object refers back into RPyYARV, and it does
+ * so through an integer handle only: RPython's GC moves objects, so a raw
+ * RPython pointer must never reach C. rb_block_call gets the handle as a
+ * Fixnum, and the yielder hands it straight back to the RPython callback
+ * along with the yielded values, copied onto the machine stack first.
+ * The handle is valid only for the extent of the call.
+ */
+typedef uintptr_t (*rpyyarv_block_fn)(long handle, int argc,
+                                      uintptr_t *argv);
+void rpyyarv_set_block_callback(rpyyarv_block_fn fn);
+uintptr_t rpyyarv_call_with_block(uintptr_t recv, uintptr_t mid, int argc,
+                                  const uintptr_t *argv, long handle,
+                                  int *state);
+
 int rpyyarv_is_class(uintptr_t v);
 
 /* Pin a VALUE for the process lifetime; used for the classes RPyYARV made. */

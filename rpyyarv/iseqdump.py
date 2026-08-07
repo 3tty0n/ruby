@@ -123,7 +123,7 @@ def parse(text):
     extra_params = ''
     nlocals = -1
     stack_max = -1
-    catch_size = 0
+    catch_types = []
     pending = None
     lineno = 0
 
@@ -156,7 +156,7 @@ def parse(text):
             stack_max = -1
             lead_num = 0
             extra_params = ''
-            catch_size = 0
+            catch_types = []
             raw = None
         elif kind == 'locals':
             nlocals = _int(_field(fields, 1, 'local count'), 'locals')
@@ -166,13 +166,14 @@ def parse(text):
             lead_num = _int(_field(fields, 1, 'lead_num'), 'lead_num')
             extra_params = fields[2] if len(fields) > 2 else ''
         elif kind == 'catch':
-            catch_size = _int(_field(fields, 1, 'catch table size'), 'catch')
+            catch_types = ['?'] * _int(_field(fields, 1,
+                                              'catch table size'), 'catch')
             if pending is None or nlocals < 0 or stack_max < 0:
                 raise LoadError('line %d: incomplete iseq header' % lineno)
             raw = rawiseq.RawISeq(_field(pending, 3, 'label'),
                                   _field(pending, 2, 'type'),
                                   nlocals, stack_max, lead_num,
-                                  extra_params, catch_size)
+                                  extra_params, catch_types)
             program.add_iseq(raw)
             pending = None
         elif kind == 'insn':

@@ -22,12 +22,16 @@ class Version(object):
 
 
 class MethodEntry(object):
-    _immutable_fields_ = ['w_iseq', 'private']
+    _immutable_fields_ = ['w_iseq', 'private', 'owner', 'mid']
 
-    def __init__(self, w_iseq, private):
+    def __init__(self, w_iseq, private, owner=0, mid=0):
         self.w_iseq = w_iseq
         # Toplevel defs land on Object as private: only an fcall may reach one.
         self.private = private
+        # The class the def landed on, and under which name: invokesuper
+        # resumes the lookup above them.
+        self.owner = owner
+        self.mid = mid
 
 
 class Registry(object):
@@ -48,7 +52,7 @@ def define(klass, mid, w_iseq, private):
     if table is None:
         table = {}
         registry.methods[klass] = table
-    table[mid] = MethodEntry(w_iseq, private)
+    table[mid] = MethodEntry(w_iseq, private, klass, mid)
     registry.version = Version()
 
 
@@ -85,6 +89,30 @@ def _lookup(klass, mid, version):
 
 def lookup(klass, mid):
     return _lookup(klass, mid, registry.version)
+
+
+@elidable
+def _lookup_super(owner, mid, version):
+    """Like _lookup, but starting above owner. No Object fallback beyond what
+    the superclass chain itself reaches, or super would find an unrelated
+    toplevel def."""
+    supers = registry.supers
+    methods = registry.methods
+    k = supers.get(owner, 0)
+    n = 0
+    while k != 0 and n < MAX_ANCESTORS:
+        table = methods.get(k, None)
+        if table is not None:
+            entry = table.get(mid, None)
+            if entry is not None:
+                return entry
+        k = supers.get(k, 0)
+        n += 1
+    return None
+
+
+def lookup_super(owner, mid):
+    return _lookup_super(owner, mid, registry.version)
 
 
 @dont_look_inside

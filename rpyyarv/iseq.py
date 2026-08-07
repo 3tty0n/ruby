@@ -40,9 +40,11 @@ class W_ISeq(object):
 
 
 class W_CallInfo(object):
-    _immutable_fields_ = ['mid', 'argc', 'simple', 'fcall']
+    _immutable_fields_ = ['mid', 'argc', 'simple', 'fcall', 'is_super']
 
-    def __init__(self, mid, argc, simple=True, fcall=True):
+    def __init__(self, mid, argc, simple=True, fcall=True, is_super=False):
+        # invokesuper's call data names no method: the running one is implied.
+        self.is_super = is_super
         self.mid = mid
         self.argc = argc
         # False once the loader saw call flags outside SIMPLE_CALL_FLAGS.

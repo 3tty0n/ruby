@@ -61,17 +61,25 @@ VALUEP = rffi.CArrayPtr(VALUE)
 INTP = rffi.INTP
 VOIDP = rffi.VOIDP
 MARK_HOOK = lltype.Ptr(lltype.FuncType([], lltype.Void))
+BLOCK_HOOK = lltype.Ptr(lltype.FuncType([lltype.Signed, rffi.INT, VALUEP],
+                                        VALUE))
 
 # RPython side a VALUE is a plain signed word: FIX2LONG is an arithmetic
 # right shift, which only a signed type gets right.
 MAX_ARGC = 32
 
 
-def _ext(name, args, result):
+def _ext(name, args, result, reenters=False):
     # releasegil=False: every call runs on the main Ruby thread holding the
     # GVL, and the mark hook re-enters RPython from inside one of them.
+    #
+    # reenters=True marks a call that runs RPython code again through a
+    # callback: without it the root walker would keep live RPython objects
+    # only in C locals across the call, and a minor collection inside the
+    # callback would move them out from under it.
     return rffi.llexternal(name, args, result, compilation_info=eci,
-                           releasegil=False)
+                           releasegil=False,
+                           random_effects_on_gcobjs=reenters)
 
 
 rb_boot = _ext('rpyyarv_boot', [rffi.INT, rffi.CCHARPP, INTP], VOIDP)
@@ -122,6 +130,23 @@ rb_ivar_set_ = _ext('rpyyarv_ivar_set', [VALUE, VALUE, VALUE, INTP],
 rb_shape_iv_index = _ext('rpyyarv_shape_iv_index',
                          [rffi.UINT, VALUE, INTP], rffi.INT)
 rb_object_layout = _ext('rpyyarv_object_layout', [INTP], lltype.Void)
+rb_set_block_callback = _ext('rpyyarv_set_block_callback', [BLOCK_HOOK],
+                             lltype.Void)
+rb_call_with_block = _ext('rpyyarv_call_with_block',
+                          [VALUE, VALUE, rffi.INT, VALUEP, rffi.LONG, INTP],
+                          VALUE, reenters=True)
+rb_array_layout = _ext('rpyyarv_array_layout', [INTP], lltype.Void)
+rb_ary_resurrect = _ext('rpyyarv_ary_resurrect', [VALUE, INTP], VALUE)
+rb_ary_store_ = _ext('rpyyarv_ary_store', [VALUE, rffi.LONG, VALUE, INTP],
+                     lltype.Void)
+rb_ary_new_capa = _ext('rpyyarv_ary_new_capa', [rffi.LONG, INTP], VALUE)
+rb_ary_cat = _ext('rpyyarv_ary_cat', [VALUE, rffi.INT, VALUEP, INTP],
+                  lltype.Void)
+rb_range_new_ = _ext('rpyyarv_range_new', [VALUE, VALUE, rffi.INT, INTP],
+                     VALUE)
+rb_gvar_get_ = _ext('rpyyarv_gvar_get', [rffi.CCHARP, INTP], VALUE)
+rb_gvar_set_ = _ext('rpyyarv_gvar_set', [rffi.CCHARP, VALUE, INTP],
+                    lltype.Void)
 rb_is_class = _ext('rpyyarv_is_class', [VALUE], rffi.INT)
 rb_gc_register = _ext('rpyyarv_gc_register_mark_object', [VALUE], lltype.Void)
 
@@ -255,7 +280,7 @@ def funcallv(recv, rid, args, name):
 def ary_new(values):
     n = len(values)
     if n > MAX_ARGC:
-        raise RubyError('Array')
+        return _ary_new_chunked(values)
     with lltype.scoped_alloc(rffi.CArray(VALUE), n + 1) as buf:
         i = 0
         while i < n:
@@ -263,6 +288,139 @@ def ary_new(values):
             i += 1
         return rffi.cast(lltype.Signed,
                          rb_ary_new(rffi.cast(rffi.INT, n), buf))
+
+
+def _ary_new_chunked(values):
+    """More elements than one machine-stack buffer holds. `ary` stays an
+    RPython local, so the conservative stack scan covers it between chunks;
+    the elements themselves are still in the caller's marked frame."""
+    n = len(values)
+    ary = 0
+    with lltype.scoped_alloc(INTP.TO, 1) as state:
+        state[0] = rffi.cast(rffi.INT, 0)
+        ary = rffi.cast(lltype.Signed,
+                        rb_ary_new_capa(rffi.cast(rffi.LONG, n), state))
+        failed = rffi.cast(lltype.Signed, state[0]) != 0
+    if failed:
+        raise RubyError('Array.new')
+    at = 0
+    while at < n:
+        count = n - at
+        if count > MAX_ARGC:
+            count = MAX_ARGC
+        with lltype.scoped_alloc(rffi.CArray(VALUE), count + 1) as buf:
+            i = 0
+            while i < count:
+                buf[i] = rffi.cast(VALUE, values[at + i])
+                i += 1
+            with lltype.scoped_alloc(INTP.TO, 1) as state:
+                state[0] = rffi.cast(rffi.INT, 0)
+                rb_ary_cat(rffi.cast(VALUE, ary), rffi.cast(rffi.INT, count),
+                           buf, state)
+                failed = rffi.cast(lltype.Signed, state[0]) != 0
+        if failed:
+            raise RubyError('Array#concat')
+        at += count
+    return ary
+
+
+def call_with_block(recv, rid, args, handle, name):
+    argc = len(args)
+    if argc > MAX_ARGC:
+        raise RubyError(name)
+    ret = 0
+    failed = False
+    with lltype.scoped_alloc(rffi.CArray(VALUE), argc + 1) as argv:
+        i = 0
+        while i < argc:
+            argv[i] = rffi.cast(VALUE, args[i])
+            i += 1
+        with lltype.scoped_alloc(INTP.TO, 1) as state:
+            state[0] = rffi.cast(rffi.INT, 0)
+            v = rb_call_with_block(_v(recv), _v(rid),
+                                   rffi.cast(rffi.INT, argc), argv,
+                                   rffi.cast(rffi.LONG, handle), state)
+            failed = rffi.cast(lltype.Signed, state[0]) != 0
+            ret = rffi.cast(lltype.Signed, v)
+    if failed:
+        raise RubyError(name)
+    return ret
+
+
+def install_block_callback(fn):
+    """Deliberately a plain function, not an llhelper pointer: rffi only
+    builds the enter-RPython-from-C wrapper (gc_stack_bottom, exception
+    guard) when the callback crosses as a function."""
+    rb_set_block_callback(fn)
+
+
+def read_values(argv, argc):
+    """The yielded values out of the shim's machine-stack buffer."""
+    n = rffi.cast(lltype.Signed, argc)
+    out = [0] * n
+    i = 0
+    while i < n:
+        out[i] = rffi.cast(lltype.Signed, argv[i])
+        i += 1
+    return out
+
+
+def as_value(n):
+    """A signed RPython word back out to C as a VALUE."""
+    return rffi.cast(VALUE, n)
+
+
+def ary_resurrect(ary):
+    with lltype.scoped_alloc(INTP.TO, 1) as state:
+        state[0] = rffi.cast(rffi.INT, 0)
+        v = rb_ary_resurrect(_v(ary), state)
+        failed = rffi.cast(lltype.Signed, state[0]) != 0
+        ret = rffi.cast(lltype.Signed, v)
+    if failed:
+        raise RubyError('Array#dup')
+    return ret
+
+
+def ary_store(ary, idx, val):
+    with lltype.scoped_alloc(INTP.TO, 1) as state:
+        state[0] = rffi.cast(rffi.INT, 0)
+        rb_ary_store_(_v(ary), rffi.cast(rffi.LONG, idx), _v(val), state)
+        failed = rffi.cast(lltype.Signed, state[0]) != 0
+    if failed:
+        raise RubyError('Array#[]=')
+
+
+def range_new(low, high, excl):
+    with lltype.scoped_alloc(INTP.TO, 1) as state:
+        state[0] = rffi.cast(rffi.INT, 0)
+        v = rb_range_new_(_v(low), _v(high), rffi.cast(rffi.INT, excl), state)
+        failed = rffi.cast(lltype.Signed, state[0]) != 0
+        ret = rffi.cast(lltype.Signed, v)
+    if failed:
+        raise RubyError('Range.new')
+    return ret
+
+
+def gvar_get(name):
+    with lltype.scoped_alloc(INTP.TO, 1) as state:
+        state[0] = rffi.cast(rffi.INT, 0)
+        with rffi.scoped_str2charp(name) as c_name:
+            v = rb_gvar_get_(c_name, state)
+        failed = rffi.cast(lltype.Signed, state[0]) != 0
+        ret = rffi.cast(lltype.Signed, v)
+    if failed:
+        raise RubyError(name)
+    return ret
+
+
+def gvar_set(name, val):
+    with lltype.scoped_alloc(INTP.TO, 1) as state:
+        state[0] = rffi.cast(rffi.INT, 0)
+        with rffi.scoped_str2charp(name) as c_name:
+            rb_gvar_set_(c_name, _v(val), state)
+        failed = rffi.cast(lltype.Signed, state[0]) != 0
+    if failed:
+        raise RubyError(name)
 
 
 def str_concat(parts):
@@ -394,6 +552,18 @@ def object_layout():
     with lltype.scoped_alloc(INTP.TO, LAYOUT_N) as buf:
         rb_object_layout(buf)
         for i in range(LAYOUT_N):
+            out[i] = rffi.cast(lltype.Signed, buf[i])
+    return out
+
+
+ARRAY_LAYOUT_N = 6
+
+
+def array_layout():
+    out = [0] * ARRAY_LAYOUT_N
+    with lltype.scoped_alloc(INTP.TO, ARRAY_LAYOUT_N) as buf:
+        rb_array_layout(buf)
+        for i in range(ARRAY_LAYOUT_N):
             out[i] = rffi.cast(lltype.Signed, buf[i])
     return out
 

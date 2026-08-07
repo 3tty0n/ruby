@@ -13,6 +13,11 @@ from error import LoadError, UnsupportedOperation
 from iseq import W_CallInfo, W_ISeq, NO_BLOCK_ISEQ
 
 
+# break/next/redo are implemented by the throw instruction unwinding an
+# RPython exception, so their catch-table entries need no interpretation.
+HANDLED_CATCH_TYPES = ['break', 'next', 'redo']
+
+
 class ConstPool(object):
     # Three pools, one per operand type: VALUEs are ints and cannot share a
     # list with W_ISeq or W_CallInfo.
@@ -53,7 +58,7 @@ class Loader(object):
         self.scan()
         if len(self.missing_names) > 0:
             raise UnsupportedOperation(self.report())
-        w_iseq = self.load_iseq(0)
+        w_iseq = self.load_iseq(0, [])
         gcroots.release_load_temporaries()
         return w_iseq
 
@@ -132,17 +137,20 @@ class Loader(object):
                             % (insn.name, raw.name, len(given) - taken))
         return operands
 
-    def load_iseq(self, index):
+    def load_iseq(self, index, parents):
+        """parents[0] is the enclosing ISeq, parents[1] its own, and so on:
+        a getlocal at level N names a local of parents[N-1]."""
         if index in self.w_iseqs:
             return self.w_iseqs[index]
         if index < 0 or index >= len(self.program.iseqs):
             raise LoadError('iseq %d is not in the program' % index)
         raw = self.program.iseqs[index]
 
-        if raw.catch_size > 0:
-            raise UnsupportedOperation(
-                "'%s' has a catch table (rescue/ensure/retry/next/break), "
-                "which RPyYARV does not support" % raw.name)
+        for kind in raw.catch_types:
+            if kind not in HANDLED_CATCH_TYPES:
+                raise UnsupportedOperation(
+                    "'%s' has a %s catch-table entry, which RPyYARV does not "
+                    "support" % (raw.name, kind))
         if raw.lead_num > raw.nlocals:
             raise LoadError("'%s' takes %d parameter(s) but has %d local(s)"
                             % (raw.name, raw.lead_num, raw.nlocals))
@@ -178,7 +186,8 @@ class Loader(object):
             code[at] = op
             at += 1
             for pos in optable.EMIT_POSITIONS[op]:
-                code[at] = self.operand(op, pos, ops[pos], raw, pool, labels)
+                code[at] = self.operand(op, pos, ops, raw, pool,
+                                        labels, parents)
                 at += 1
 
         consts = [v for v in pool.consts]
@@ -195,9 +204,10 @@ class Loader(object):
             level = self.int_of(ops[1], op, raw, 'level')
             if level > optable.MAX_LOCAL_LEVEL:
                 raise UnsupportedOperation(
-                    "%s at level %d in '%s' reaches an enclosing scope, which "
-                    "RPyYARV does not support"
-                    % (insns.NAMES[op], level, raw.name))
+                    "%s at level %d in '%s' reaches further out than the %d "
+                    "scope(s) RPyYARV walks"
+                    % (insns.NAMES[op], level, raw.name,
+                       optable.MAX_LOCAL_LEVEL))
         elif op == insns.EXPANDARRAY:
             flag = self.int_of(ops[1], op, raw, 'flag')
             if flag != 0:
@@ -222,12 +232,14 @@ class Loader(object):
                     "'%s' defines a class under an explicit scope, which "
                     "RPyYARV does not support" % raw.name)
 
-    def operand(self, op, pos, operand, raw, pool, labels):
+    def operand(self, op, pos, ops, raw, pool, labels, parents):
+        operand = ops[pos]
         t = insns.OPERAND_TYPES[op][pos]
         if t == insns.T_VALUE:
             return self.literal(operand, op, raw, pool)
         if t == insns.T_LINDEX_T:
-            return self.local_slot(operand, op, raw)
+            level = self.int_of(ops[1], op, raw, 'level')
+            return self.local_slot(operand, op, raw, parents, level)
         if t == insns.T_RB_NUM_T:
             return self.int_of(operand, op, raw, 'operand')
         if t == insns.T_OFFSET:
@@ -247,7 +259,8 @@ class Loader(object):
                 raise LoadError("%s in '%s' wants an ISeq, got %s"
                                 % (insns.NAMES[op], raw.name,
                                    operand.describe()))
-            return pool.add_iseq(self.load_iseq(operand.intval))
+            return pool.add_iseq(
+                self.load_iseq(operand.intval, [raw] + parents))
         if t == insns.T_CALL_DATA:
             return pool.add_callinfo(self.callinfo(operand, op, raw))
         raise LoadError("%s in '%s' has an operand of type %s, which "
@@ -293,6 +306,8 @@ class Loader(object):
             return boot.str_new(operand.strval)
         if kind == rawiseq.OP_SYM:
             return boot.sym_new(operand.strval)
+        if kind == rawiseq.OP_VALUE:
+            return operand.intval
         if kind == rawiseq.OP_ARRAY:
             items = []
             for item in operand.items:
@@ -302,14 +317,28 @@ class Loader(object):
             "%s of %s in '%s': RPyYARV has no such object yet"
             % (insns.NAMES[op], operand.describe(), raw.name))
 
-    def local_slot(self, operand, op, raw):
+    def local_slot(self, operand, op, raw, parents, level):
         idx = self.int_of(operand, op, raw, 'local index')
-        slot = raw.nlocals - idx + optable.ENV_DATA_SIZE - 1
-        if slot < 0 or slot >= raw.nlocals:
-            raise LoadError("%s in '%s' names local index %d, outside its %d "
-                            "local(s)"
-                            % (insns.NAMES[op], raw.name, idx, raw.nlocals))
-        return slot
+        # The index counts down from the top of the *naming* scope's
+        # environment, which for a non-zero level is an enclosing ISeq.
+        owner = raw
+        if level > 0:
+            if level > len(parents):
+                raise LoadError("%s in '%s' reaches %d scope(s) out, past the "
+                                "outermost one"
+                                % (insns.NAMES[op], raw.name,
+                                   level))
+            owner = parents[level - 1]
+        slot = owner.nlocals - idx + optable.ENV_DATA_SIZE - 1
+        if slot < 0 or slot >= owner.nlocals:
+            raise LoadError("%s in '%s' names local index %d, outside the %d "
+                            "local(s) of '%s'"
+                            % (insns.NAMES[op], raw.name, idx, owner.nlocals,
+                               owner.name))
+        if slot > optable.LOCAL_SLOT_MASK:
+            raise LoadError("'%s' has more locals than one operand encodes"
+                            % owner.name)
+        return slot | (level << optable.LOCAL_LEVEL_SHIFT)
 
     def label(self, operand, op, raw, labels):
         if operand.kind != rawiseq.OP_SYM:
@@ -326,11 +355,14 @@ class Loader(object):
             raise LoadError("%s in '%s' wants call data, got %s"
                             % (insns.NAMES[op], raw.name, operand.describe()))
         flags = operand.flag
+        # Not ARGS_SIMPLE itself: CRuby clears it whenever a block ISeq is
+        # attached, and every other reason it can be clear (splat, block
+        # argument, keywords, forwarding) has its own bit outside this mask.
         simple = (not operand.has_kwarg
-                  and (flags & ~optable.SIMPLE_CALL_FLAGS) == 0
-                  and (flags & optable.CALL_FLAG_ARGS_SIMPLE) != 0)
+                  and (flags & ~optable.SIMPLE_CALL_FLAGS) == 0)
         return W_CallInfo(symbols.intern(operand.strval), operand.intval,
-                          simple, (flags & optable.CALL_FLAG_FCALL) != 0)
+                          simple, (flags & optable.CALL_FLAG_FCALL) != 0,
+                          (flags & optable.CALL_FLAG_SUPER) != 0)
 
     def int_of(self, operand, op, raw, what):
         if operand.kind != rawiseq.OP_INT:

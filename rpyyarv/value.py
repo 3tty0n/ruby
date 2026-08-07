@@ -34,6 +34,17 @@ FIELDS_WORD = 2                 # struct RObject: as.ary / as.heap.fields
 T_MASK = 0x1f
 T_OBJECT = 0x01
 
+# RArray layout for the opt_aref/opt_length fast paths; entry_point checks
+# every one of these against rpyyarv_array_layout. A short array keeps its
+# elements in the object (ARY_EMBED_FLAG, length in the flags word); a longer
+# one keeps a length and a pointer instead.
+ARY_EMBED_FLAG = 1 << 13         # RUBY_FL_USER1
+ARY_EMBED_LEN_SHIFT = 15         # RUBY_FL_USHIFT + 3
+ARY_EMBED_LEN_MASK = 0x7f << ARY_EMBED_LEN_SHIFT
+ARY_HEAP_LEN_WORD = 2
+ARY_HEAP_PTR_WORD = 4
+ARY_EMBED_WORD = 2
+
 # Slots of the table rpyyarv_core_classes fills, in its order.
 C_OBJECT = 0
 C_INTEGER = 1
@@ -125,6 +136,28 @@ def class_of(v):
     if v == Q_TRUE:
         return core_class(C_TRUECLASS)
     return 0            # Qundef, or an immediate this build invented
+
+
+def is_plain_array(v):
+    """A direct Array instance, the way vm_opt_aref tests it: an Array
+    subclass may have redefined #[] and must not take the fast path."""
+    return (v != 0 and (v & IMMEDIATE_MASK) == 0
+            and raw_word(v, KLASS_WORD) == core_class(C_ARRAY))
+
+
+def ary_len(v):
+    flags = raw_word(v, FLAGS_WORD)
+    if flags & ARY_EMBED_FLAG:
+        return (flags & ARY_EMBED_LEN_MASK) >> ARY_EMBED_LEN_SHIFT
+    return raw_word(v, ARY_HEAP_LEN_WORD)
+
+
+def ary_at(v, i):
+    """Caller has checked 0 <= i < ary_len(v)."""
+    flags = raw_word(v, FLAGS_WORD)
+    if flags & ARY_EMBED_FLAG:
+        return raw_word(v, ARY_EMBED_WORD + i)
+    return raw_word(raw_word(v, ARY_HEAP_PTR_WORD), i)
 
 
 def repr_of(v):
