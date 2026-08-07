@@ -6,7 +6,8 @@ rb_funcallv. Here the path is resolved the way load.c does, the file is
 compiled by the embedded CRuby, and its toplevel ISeq runs in RPyYARV with
 self = main, which puts its `def`s where dispatch.lookup can find them.
 A file RPyYARV cannot represent is handed to CRuby on its own, not the whole
-program -- but the file that required it has to follow it there; see _punt.
+program: its `def`s land in CRuby's tables, and a call from there into a class
+RPyYARV defined comes back through the trampoline dispatch.py installs.
 """
 
 import os
@@ -23,11 +24,6 @@ from error import RubyException
 from frame import Frame
 
 COMPILE_FILE = 'compile_file'
-
-
-class _PuntChain(Exception):
-    """A require inside a natively running file went to CRuby, so that file
-    must go too. Unwinds its toplevel ISeq."""
 
 
 class _Files(object):
@@ -106,17 +102,11 @@ def _load_rb(fname, path):
 
     files.loading[name] = True
     files.stack.append(name)
-    punted = False
     try:
         interp.execute(result.w_iseq, Frame(result.w_iseq, boot.top_self()))
-    except _PuntChain:
-        punted = True
     finally:
         files.stack.pop()
         del files.loading[name]
-    if punted:
-        return _punt(fname, name, result.total, result.supported,
-                     'it requires a file only CRuby can load')
     debug.count_native()
     debug.record_file(name, result.total, result.supported, '')
     # After the body, as CRuby does (load.c:1379): a file that raised is not
@@ -140,18 +130,15 @@ def _compile(path):
 
 
 def _punt(fname, name, total, supported, reason):
-    """This one file to CRuby; the rest of the program stays on RPyYARV.
+    """This one file to CRuby; the file that required it stays on RPyYARV.
 
-    Its `def`s land in CRuby's method tables, so a subclass RPyYARV defined
-    could no longer override a method CRuby dispatches: the file that
-    required it has to go to CRuby too. That file is re-run from the top,
-    which is only sound because a require sits above the definitions.
+    Its `def`s land in CRuby's method tables and RPyYARV's registry never sees
+    them, which a send out through rb_funcallv covers; the other direction --
+    CRuby dispatching to a class RPyYARV defined -- is what the trampoline
+    dispatch.define installs is for.
     """
     debug.record_file(name, total, supported, reason)
-    v = _delegate(fname)
-    if len(files.stack) > 1:
-        raise _PuntChain()
-    return v
+    return _delegate(fname)
 
 
 def _delegate(fname):

@@ -64,6 +64,9 @@ VOIDP = rffi.VOIDP
 MARK_HOOK = lltype.Ptr(lltype.FuncType([], lltype.Void))
 BLOCK_HOOK = lltype.Ptr(lltype.FuncType([lltype.Signed, rffi.INT, VALUEP],
                                         VALUE))
+# (self, mid, argc, argv, blockproc, status, errval) -> result
+TRAMP_HOOK = lltype.Ptr(lltype.FuncType(
+    [VALUE, VALUE, rffi.INT, VALUEP, VALUE, INTP, VALUEP], VALUE))
 
 MAX_ARGC = 32
 
@@ -107,6 +110,9 @@ rb_intern_ = _ext('rpyyarv_intern', [rffi.CCHARP], VALUE)
 rb_sym_new = _ext('rpyyarv_sym_new', [rffi.CCHARP], VALUE, reenters=True)
 rb_funcallv_id = _ext('rpyyarv_funcallv_id',
                       [VALUE, VALUE, rffi.INT, VALUEP, INTP], VALUE, reenters=True)
+rb_funcallv_public_id = _ext('rpyyarv_funcallv_public_id',
+                             [VALUE, VALUE, rffi.INT, VALUEP, INTP], VALUE,
+                             reenters=True)
 rb_top_self = _ext('rpyyarv_top_self', [], VALUE)
 rb_int2inum = _ext('rpyyarv_int2inum', [rffi.LONG], VALUE, reenters=True)
 rb_str_new = _ext('rpyyarv_str_new', [rffi.CCHARP], VALUE, reenters=True)
@@ -137,6 +143,11 @@ rb_set_block_callback = _ext('rpyyarv_set_block_callback', [BLOCK_HOOK],
 rb_call_with_block = _ext('rpyyarv_call_with_block',
                           [VALUE, VALUE, rffi.INT, VALUEP, rffi.LONG, INTP],
                           VALUE, reenters=True)
+rb_set_trampoline_callback = _ext('rpyyarv_set_trampoline_callback',
+                                  [TRAMP_HOOK], lltype.Void)
+rb_define_method_id = _ext('rpyyarv_define_method',
+                           [VALUE, VALUE, rffi.INT, INTP], lltype.Void,
+                           reenters=True)
 rb_array_layout = _ext('rpyyarv_array_layout', [INTP], lltype.Void)
 rb_ary_resurrect = _ext('rpyyarv_ary_resurrect', [VALUE, INTP], VALUE, reenters=True)
 rb_ary_store_ = _ext('rpyyarv_ary_store', [VALUE, rffi.LONG, VALUE, INTP],
@@ -291,8 +302,9 @@ def sym_new(name):
         return rffi.cast(lltype.Signed, rb_sym_new(c_name))
 
 
-def funcallv(recv, rid, args, name):
-    """rb_funcallv on signed VALUEs; RubyError when the callee raised."""
+def funcallv(recv, rid, args, name, public_only=False):
+    """rb_funcallv on signed VALUEs; RubyError when the callee raised.
+    public_only picks rb_funcallv_public, which honours visibility."""
     argc = len(args)
     if argc > MAX_ARGC:
         raise RubyError(name)
@@ -305,8 +317,14 @@ def funcallv(recv, rid, args, name):
             i += 1
         with lltype.scoped_alloc(INTP.TO, 1) as state:
             state[0] = rffi.cast(rffi.INT, 0)
-            v = rb_funcallv_id(rffi.cast(VALUE, recv), rffi.cast(VALUE, rid),
-                               rffi.cast(rffi.INT, argc), argv, state)
+            if public_only:
+                v = rb_funcallv_public_id(
+                    rffi.cast(VALUE, recv), rffi.cast(VALUE, rid),
+                    rffi.cast(rffi.INT, argc), argv, state)
+            else:
+                v = rb_funcallv_id(
+                    rffi.cast(VALUE, recv), rffi.cast(VALUE, rid),
+                    rffi.cast(rffi.INT, argc), argv, state)
             failed = rffi.cast(lltype.Signed, state[0]) != 0
             ret = rffi.cast(lltype.Signed, v)
     if failed:
@@ -387,6 +405,36 @@ def install_block_callback(fn):
     """A plain function, not an llhelper pointer: rffi only builds the
     enter-RPython-from-C wrapper when the callback crosses as a function."""
     rb_set_block_callback(fn)
+
+
+def install_trampoline_callback(fn):
+    """As install_block_callback: a plain function, so rffi builds the
+    enter-RPython-from-C wrapper for it."""
+    rb_set_trampoline_callback(fn)
+
+
+def define_method_entry(klass, rid, private):
+    """A CRuby method entry over the generic trampoline."""
+    with lltype.scoped_alloc(INTP.TO, 1) as state:
+        state[0] = rffi.cast(rffi.INT, 0)
+        rb_define_method_id(_v(klass), _v(rid),
+                            rffi.cast(rffi.INT, 1 if private else 0), state)
+        failed = rffi.cast(lltype.Signed, state[0]) != 0
+    if failed:
+        _failed('define_method')
+
+
+def as_signed(v):
+    """A VALUE the C boundary handed in, as an RPython word."""
+    return rffi.cast(lltype.Signed, v)
+
+
+def store_int(p, n):
+    p[0] = rffi.cast(rffi.INT, n)
+
+
+def store_value(p, v):
+    p[0] = rffi.cast(VALUE, v)
 
 
 def read_values(argv, argc):

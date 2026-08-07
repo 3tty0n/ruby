@@ -100,14 +100,17 @@ def invoke(frame, w_ci, w_block=None):
     _drop(frame, recv_at)
     if w_block is not None:
         return _call_with_block(recv, w_ci.mid, args, w_block)
+    # An entry survived here only by being private to a receiverless call, and
+    # rb_funcallv would reach the trampoline for it anyway (CALL_FCALL).
+    public_only = entry is not None and not w_ci.fcall
     if not debug.state.enabled:
-        ret = rubycall.call(recv, w_ci.mid, args)
+        ret = rubycall.call(recv, w_ci.mid, args, public_only)
         # The callee may have run a Proc of ours, which cannot raise through
         # libruby's frames and parked its failure instead.
         _check_block_error()
         return ret
     debug.trace_enter(w_ci.mid, args)
-    ret = rubycall.call(recv, w_ci.mid, args)
+    ret = rubycall.call(recv, w_ci.mid, args, public_only)
     _check_block_error()
     debug.trace_leave(w_ci.mid, ret)
     return ret
@@ -412,6 +415,82 @@ def block_callback(handle, argc, argv):
         return boot.as_value(value.Q_NIL)
 
 
+TRAMP_OK = 0
+TRAMP_RAISE = 1
+TRAMP_UNSUPPORTED = 2
+
+
+def trampoline_callback(self_v, rid, argc, argv, blockv, statusp, errp):
+    """Called from C when CRuby dispatched a send to a method RPyYARV defined.
+    No RPython exception may reach libruby, so a failure leaves through
+    statusp/errp and the shim raises it as a Ruby one."""
+    boot.store_int(statusp, TRAMP_OK)
+    boot.store_value(errp, value.Q_NIL)
+    recv = boot.as_signed(self_v)
+    mid = rubycall.mid_of_rid(boot.as_signed(rid))
+    # argv still lives on CRuby's VM stack for the whole call, so the copy
+    # below needs no root of its own until it lands in the callee's frame.
+    args = boot.read_values(argv, argc)
+    w_block = None
+    proc_v = boot.as_signed(blockv)
+    if proc_v != value.Q_NIL:
+        w_block = block_mod.from_proc(proc_v)
+    try:
+        return boot.as_value(_from_cruby(recv, mid, args, w_block))
+    except RubyException, e:
+        boot.store_int(statusp, TRAMP_RAISE)
+        boot.store_value(errp, e.value)
+    except block_mod.BlockBreak:
+        _tramp_failed(statusp, errp,
+                      'break out of a method RPyYARV ran for CRuby is not '
+                      'supported')
+    except block_mod.BlockNext:
+        _tramp_failed(statusp, errp,
+                      'next out of a method RPyYARV ran for CRuby is not '
+                      'supported')
+    except boot.RubyError, e:
+        _tramp_failed(statusp, errp, "a call to '%s' failed" % e.mid)
+    except RPyYarvError, e:
+        _tramp_failed(statusp, errp, e.msg)
+    return boot.as_value(value.Q_NIL)
+
+
+@dont_look_inside
+def _tramp_failed(statusp, errp, msg):
+    boot.store_int(statusp, TRAMP_UNSUPPORTED)
+    boot.store_value(errp, boot.str_new('[rpyyarv] %s' % msg))
+
+
+def _from_cruby(recv, mid, args, w_block):
+    """The send half of the trampoline: the registry's own lookup and frame
+    setup, with the arguments CRuby already parsed."""
+    if mid == rubycall.NO_MID:
+        raise UnsupportedOperation(
+            'CRuby dispatched a method name RPyYARV never interned')
+    entry = dispatch.lookup_from_cruby(value.class_of(recv), mid)
+    if entry is None:
+        raise UnsupportedOperation(
+            "CRuby dispatched '%s' to RPyYARV, which no longer defines it"
+            % symbols.name_of(mid))
+    callee_iseq = entry.w_iseq
+    callee = Frame(callee_iseq, recv, 0, entry)
+    callee.block = w_block
+    pc = 0
+    argc = len(args)
+    if callee_iseq.simple_params:
+        if argc != callee_iseq.nparams:
+            _arity_error(argc, callee_iseq.nparams, callee_iseq.nparams)
+        i = 0
+        while i < argc:
+            callee.locals[i] = args[i]
+            i += 1
+    else:
+        _refuse_iseq(callee_iseq, mid)
+        pc = setup_params(callee_iseq, callee, args, False)
+    debug.count_native()
+    return execute(callee_iseq, callee, pc)
+
+
 @dont_look_inside
 def _call_with_block(recv, mid, args, w_block):
     handle = _alloc_handle(w_block)
@@ -711,6 +790,7 @@ def _unwind(iseq, frame, throw, epc):
 
 def install():
     boot.install_block_callback(block_callback)
+    boot.install_trampoline_callback(trampoline_callback)
     gcroots.register_blocks(blocks)
     # A Symbol, so it is an immediate no mark hook has to reach.
     proxy.value = boot.sym_new(PROXY_NAME)

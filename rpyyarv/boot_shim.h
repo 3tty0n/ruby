@@ -48,6 +48,10 @@ uintptr_t rpyyarv_funcallv_id(uintptr_t recv, uintptr_t mid, int argc,
 uintptr_t rpyyarv_funcallv(uintptr_t recv, const char *mid, int argc,
                            const uintptr_t *argv, int *state);
 
+/* The same under rb_funcallv_public, for a send with an explicit receiver. */
+uintptr_t rpyyarv_funcallv_public_id(uintptr_t recv, uintptr_t mid, int argc,
+                                     const uintptr_t *argv, int *state);
+
 /* The toplevel `main`, pinned on first use. */
 uintptr_t rpyyarv_top_self(void);
 
@@ -156,6 +160,29 @@ void rpyyarv_set_block_callback(rpyyarv_block_fn fn);
 uintptr_t rpyyarv_call_with_block(uintptr_t recv, uintptr_t mid, int argc,
                                   const uintptr_t *argv, long handle,
                                   int *state);
+
+/*
+ * The other direction: a method entry in CRuby's own tables that re-enters
+ * RPyYARV, so a core method calling back -- to_s, <=>, hash, each -- reaches
+ * the definition RPyYARV holds rather than the one CRuby never got.
+ *
+ * One generic trampoline stands for every such method: it recovers the name
+ * with rb_frame_this_func and lets RPyYARV's registry do the lookup, which
+ * also keeps redefinition and inheritance right, since nothing is resolved
+ * until the call happens. An RPython exception must never cross back into
+ * libruby, so a failure comes out through *status and *errval and the shim
+ * turns it into a CRuby raise.
+ */
+#define RPYYARV_TRAMP_OK          0
+#define RPYYARV_TRAMP_RAISE       1   /* *errval is the exception to re-raise */
+#define RPYYARV_TRAMP_UNSUPPORTED 2   /* *errval is the message String */
+
+typedef uintptr_t (*rpyyarv_tramp_fn)(uintptr_t self, uintptr_t mid, int argc,
+                                      uintptr_t *argv, uintptr_t blockproc,
+                                      int *status, uintptr_t *errval);
+void rpyyarv_set_trampoline_callback(rpyyarv_tramp_fn fn);
+void rpyyarv_define_method(uintptr_t klass, uintptr_t mid, int is_private,
+                           int *state);
 
 /*
  * A Proc over the same handle, for a block that outlives its call. The handle

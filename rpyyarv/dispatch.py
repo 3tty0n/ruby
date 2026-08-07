@@ -47,6 +47,32 @@ class Registry(object):
 registry = Registry()
 
 
+class _Trampoline(object):
+    def __init__(self):
+        self.enabled = False
+
+
+trampoline = _Trampoline()
+
+
+def enable_trampolines():
+    """Turned on after the prelude: its Integer#times and Array#each
+    reimplement methods CRuby already has, and must not replace them for
+    CRuby's own callers."""
+    trampoline.enabled = True
+
+
+@dont_look_inside
+def _install_trampoline(klass, mid, private):
+    """A CRuby method entry beside the registry one, so a core method calling
+    back reaches the definition RPyYARV holds. Nothing is bound here: the
+    entry resolves through lookup at call time, so a later redefinition or an
+    undef needs no second visit."""
+    if not trampoline.enabled:
+        return
+    boot.define_method_entry(klass, rubycall.rid(mid), private)
+
+
 def define(klass, mid, w_iseq, private):
     table = registry.methods.get(klass, None)
     if table is None:
@@ -54,6 +80,23 @@ def define(klass, mid, w_iseq, private):
         registry.methods[klass] = table
     table[mid] = MethodEntry(w_iseq, private, klass, mid)
     registry.version = Version()
+    _install_trampoline(klass, mid, private)
+
+
+@dont_look_inside
+def lookup_from_cruby(klass, mid):
+    """lookup for a call that came in through the trampoline: walks CRuby's
+    own superclass chain, since a class only CRuby created is absent from the
+    registry's map. No Object fallback -- CRuby resolved the entry already."""
+    k = klass
+    n = 0
+    while k != 0 and not value.is_immediate(k) and n < MAX_ANCESTORS:
+        entry = own_lookup(k, mid)
+        if entry is not None:
+            return entry
+        k = boot.class_superclass(k)
+        n += 1
+    return None
 
 
 def undefine(klass, mid):

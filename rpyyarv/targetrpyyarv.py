@@ -73,6 +73,7 @@ def entry_point(argv):
 
     try:
         prelude.install()
+        dispatch.enable_trampolines()
         program = bootiseq.load(iseqw)
         result = loader.load(program)
         if len(result.reasons) > 0:

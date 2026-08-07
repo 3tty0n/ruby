@@ -130,6 +130,41 @@ rpyyarv_funcallv_id(uintptr_t recv, uintptr_t mid, int argc,
     return (uintptr_t)r;
 }
 
+static VALUE
+funcallv_public_body(VALUE argp)
+{
+    struct funcallv_args *a = (struct funcallv_args *)argp;
+    return rb_funcallv_public(a->recv, a->mid, a->argc, a->argv);
+}
+
+/* rb_funcallv is CALL_FCALL and reaches a private method; a send with an
+   explicit receiver has to be refused one, now that a toplevel def leaves a
+   private trampoline on Object. */
+uintptr_t
+rpyyarv_funcallv_public_id(uintptr_t recv, uintptr_t mid, int argc,
+                           const uintptr_t *argv, int *state)
+{
+    VALUE buf[RPYYARV_MAX_ARGC];
+    struct funcallv_args a;
+    int i;
+
+    if (argc < 0 || argc > RPYYARV_MAX_ARGC) {
+        *state = -1;
+        return (uintptr_t)Qnil;
+    }
+    for (i = 0; i < argc; i++) buf[i] = (VALUE)argv[i];
+
+    a.recv = (VALUE)recv;
+    a.mid  = (ID)mid;
+    a.argc = argc;
+    a.argv = buf;
+
+    *state = 0;
+    VALUE r = rb_protect(funcallv_public_body, (VALUE)&a, state);
+    if (*state) return (uintptr_t)Qnil;
+    return (uintptr_t)r;
+}
+
 uintptr_t
 rpyyarv_funcallv(uintptr_t recv, const char *mid, int argc,
                  const uintptr_t *argv, int *state)
@@ -759,6 +794,72 @@ rpyyarv_call_with_block(uintptr_t recv, uintptr_t mid, int argc,
     VALUE r = rb_protect(call_with_block_body, (VALUE)&a, state);
     if (*state) return (uintptr_t)Qnil;
     return (uintptr_t)r;
+}
+
+static rpyyarv_tramp_fn tramp_callback;
+
+void
+rpyyarv_set_trampoline_callback(rpyyarv_tramp_fn fn)
+{
+    tramp_callback = fn;
+}
+
+static VALUE
+rpyyarv_trampoline(int argc, VALUE *argv, VALUE self)
+{
+    /* argv points into CRuby's own VM stack, which rb_execution_context_mark
+       already covers for the extent of the call; no second root here. */
+    ID mid = rb_frame_this_func();
+    VALUE blockproc = rb_block_given_p() ? rb_block_proc() : Qnil;
+    int status = RPYYARV_TRAMP_OK;
+    VALUE err = Qnil;
+    VALUE r;
+
+    if (!tramp_callback) {
+        rb_raise(rb_eRuntimeError, "rpyyarv: no trampoline callback");
+    }
+    r = (VALUE)tramp_callback((uintptr_t)self, (uintptr_t)mid, argc,
+                              (uintptr_t *)argv, (uintptr_t)blockproc,
+                              &status, (uintptr_t *)&err);
+    /* Raised here, not on the RPython side: unwinding an RPython exception
+       through this C frame back into libruby is undefined. */
+    if (status == RPYYARV_TRAMP_RAISE) rb_exc_raise(err);
+    if (status != RPYYARV_TRAMP_OK) {
+        rb_exc_raise(rb_exc_new_str(rb_eNotImpError, err));
+    }
+    return r;
+}
+
+struct defmeth_args {
+    VALUE klass;
+    ID    mid;
+    int   is_private;
+};
+
+static VALUE
+define_method_body(VALUE argp)
+{
+    struct defmeth_args *p = (struct defmeth_args *)argp;
+    rb_define_method_id(p->klass, p->mid,
+                        RUBY_METHOD_FUNC(rpyyarv_trampoline), -1);
+    if (p->is_private) {
+        /* A toplevel def lands on Object as private, and no ID-taking
+           rb_define_private_method exists. */
+        rb_funcall(p->klass, rb_intern("private"), 1, ID2SYM(p->mid));
+    }
+    return Qnil;
+}
+
+void
+rpyyarv_define_method(uintptr_t klass, uintptr_t mid, int is_private,
+                      int *state)
+{
+    struct defmeth_args a;
+    a.klass = (VALUE)klass;
+    a.mid = (ID)mid;
+    a.is_private = is_private;
+    *state = 0;
+    rb_protect(define_method_body, (VALUE)&a, state);
 }
 
 static VALUE

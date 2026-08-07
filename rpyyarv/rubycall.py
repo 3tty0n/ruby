@@ -10,6 +10,7 @@ from rlib import dont_look_inside, elidable
 class _State(object):
     def __init__(self):
         self.rids = {}      # rpyyarv symbol id -> CRuby ID
+        self.mids = {}      # CRuby ID -> rpyyarv symbol id
 
 
 state = _State()
@@ -55,17 +56,29 @@ def rid(mid):
         return state.rids[mid]
     r = boot.intern(symbols.name_of(mid))
     state.rids[mid] = r
+    state.mids[r] = mid
     return r
 
 
+NO_MID = -1
+
+
 @dont_look_inside
-def call(recv, mid, args):
+def mid_of_rid(r):
+    """The trampoline's rb_frame_this_func ID back to the id the registry is
+    keyed on; every trampolined method went through rid() to get installed."""
+    return state.mids.get(r, NO_MID)
+
+
+@dont_look_inside
+def call(recv, mid, args, public_only=False):
     if (mid == REQUIRE or mid == REQUIRE_RELATIVE) and len(args) == 1:
         v = hooks.require.handle(mid, args[0])
         if v != NOT_HANDLED:
             return v
     debug.count_foreign()
-    return boot.funcallv(recv, rid(mid), args, symbols.name_of(mid))
+    return boot.funcallv(recv, rid(mid), args, symbols.name_of(mid),
+                         public_only)
 
 
 @dont_look_inside
