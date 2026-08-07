@@ -1,11 +1,9 @@
-"""Layer (b) of the VALUE-direct GC design: the VALUEs that escaped into the
-RPython heap.
+"""The VALUEs that escaped into the RPython heap.
 
-CRuby's conservative stack scan already covers VALUEs living in machine
-registers and C/JIT stack frames. What it cannot see are the frame stacks,
-the frame locals and the per-ISeq constant pools, all of which are RPython
-objects. This module keeps them enumerable and hands them to CRuby through
-the shim's mark hook.
+CRuby's conservative stack scan covers VALUEs in machine registers and C/JIT
+stack frames, but not the frame stacks, frame locals and per-ISeq constant
+pools, which are RPython objects. This module keeps those enumerable and
+hands them to CRuby through the shim's mark hook.
 """
 
 import boot
@@ -46,7 +44,7 @@ def release_load_temporaries():
 
 def hold(v):
     """Keep a VALUE reachable while it waits in an RPython field no frame
-    covers: an exception a block callback could not raise into libruby."""
+    covers."""
     state.held.append(v)
 
 
@@ -79,8 +77,8 @@ def _mark_array(a):
 
 @dont_look_inside
 def mark_roots():
-    # Kept apart from _mark_array: this one is resized, the pools are not,
-    # and the annotator will not merge the two list kinds.
+    # Not _mark_array: this list is resized, the pools are not, and the
+    # annotator will not merge the two list kinds.
     pinned = state.pinned
     k = 0
     while k < len(pinned):
@@ -105,9 +103,8 @@ def mark_roots():
     while i < len(pools):
         _mark_array(pools[i])
         i += 1
-    # Reading a virtualizable's fields from here forces it; the design doc
-    # accepts that for now and jit-summary's "virtualizables forced" measures
-    # what it costs.
+    # Reading a virtualizable's fields from here forces it, which jit-summary
+    # counts as "virtualizables forced".
     f = state.top
     while f is not None:
         _mark_array(f.stack)
@@ -116,13 +113,12 @@ def mark_roots():
             boot.gc_mark_value(f.self_val)
         if not value.is_immediate(f.cref):
             boot.gc_mark_value(f.cref)
-        # The exception a rescue/ensure frame is unwinding under.
         if not value.is_immediate(f.pending_value):
             boot.gc_mark_value(f.pending_value)
         f = f.prev_frame
 
 
 def install():
-    # Passed as a function, not an llhelper pointer, so rffi wraps it in the
+    # A plain function, not an llhelper pointer, so rffi wraps it in the
     # enter-RPython-from-C prologue. See boot.install_block_callback.
     boot.set_mark_hook(mark_roots)

@@ -3,8 +3,7 @@ from objects.klass import w_string_class
 
 
 class W_String(W_Root):
-    # Immutable: nothing mutates a string yet, so frozen, chilled and
-    # ordinary literals are all the same object here.
+    # Immutable, so frozen, chilled and ordinary literals are the same here.
     def __init__(self, strval):
         self.strval = strval
 

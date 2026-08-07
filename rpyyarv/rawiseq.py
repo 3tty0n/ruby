@@ -5,8 +5,8 @@ without knowing which ran. Nested ISeqs sit in one flat table addressed by
 index, so no reader has to recurse.
 """
 
-# Flat kinds rather than a class hierarchy: the loader picks the meaning from
-# the operand's declared type in insns.def and never downcasts.
+# Flat kinds, not a class hierarchy: the loader takes the meaning from the
+# operand's declared type in insns.def and never downcasts.
 OP_INT = 0
 OP_NIL = 1
 OP_TRUE = 2
@@ -55,9 +55,8 @@ class RawInsn(object):
 
 
 class RawCatch(object):
-    """One catch-table entry, as iseq_data_to_ary spells it (iseq.c:3605):
-    [type, iseq, start, end, cont, sp]. The three pc fields arrive as label
-    names, the same ones a jump operand carries."""
+    """[type, iseq, start, end, cont, sp], as iseq_data_to_ary spells it
+    (iseq.c:3605); the three pc fields arrive as label names."""
     def __init__(self, kind, iseq_index=-1, start='', end='', cont='', sp=0):
         self.kind = kind        # 'rescue', 'ensure', 'break', ...
         self.iseq_index = iseq_index    # -1 when the entry has no ISeq
@@ -77,7 +76,6 @@ class RawISeq(object):
         self.lead_num = lead_num
         # Names of the other parameter kinds CRuby reported, if any.
         self.extra_params = extra_params
-        # One RawCatch per catch-table entry, in the order CRuby searches it.
         self.catches = catches
         self.insns = []
         # label name -> index into insns; the loader turns it into a pc.

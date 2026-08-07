@@ -34,8 +34,7 @@ CHANNELS = 'insn, stack, call, iseq, summary, all'
 
 class _State(object):
     def __init__(self):
-        # The dispatch loop reads `enabled` once per instruction, so it is
-        # kept apart from `channels` rather than derived on the spot.
+        # Kept apart from `channels`: the dispatch loop reads it per insn.
         self.enabled = False
         self.channels = 0
         self.depth = 0

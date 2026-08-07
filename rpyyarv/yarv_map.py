@@ -1,18 +1,14 @@
 """Which YARV instructions RPyYARV implements, and how it encodes them.
 
-Hand-written on purpose: insns.py holds facts derived from insns.def, this
-file holds the decisions. rpyvmgen/verify.rb cross-checks the two and
-optable.py joins them. Anything absent from EMIT is unsupported, and the
-loader must fail loudly rather than skip, so the missing-instruction counter
-drives what to implement next.
+insns.py holds the facts derived from insns.def, this file the decisions;
+rpyvmgen/verify.rb cross-checks the two and optable.py joins them. Anything
+absent from EMIT is unsupported, and the loader fails loudly, never skips.
 """
 
-# YARV name -> the operand positions the loader emits, in order. Positions
-# left out are consumed at load time: checked, folded into another operand,
-# or dropped. Every emitted position becomes exactly one int in W_ISeq.code,
-# so the length is the instruction's width; an operand carrying more than an
-# int (VALUE, ISEQ, CALL_DATA) goes into the constant pool and the code
-# stream holds its index.
+# YARV name -> the operand positions the loader emits, one int each in
+# W_ISeq.code; positions left out are consumed at load time. An operand
+# carrying more than an int goes into the constant pool and the code stream
+# holds its index.
 EMIT = {
     'nop': [],
     'putnil': [],
@@ -82,20 +78,17 @@ EMIT = {
     'leave': [],
 }
 
-# Operand types the loader knows how to transform. Any other type in an
-# implemented instruction means it would silently mis-decode it.
-#
+# Operand types the loader knows how to transform; any other type in an
+# implemented instruction would be silently mis-decoded.
 #   VALUE      -> constant pool index
 #   lindex_t   -> EP-relative index to a 0-based local slot
 #   OFFSET     -> label to an absolute pc
 #   rb_num_t   -> plain integer
 #   ID         -> interned id (symbols.py)
 #   ISEQ       -> nested iseq loaded recursively, constant pool index
-#   CALL_DATA  -> W_CallInfo(mid, orig_argc) in the constant pool, index
-#                 emitted. Flags outside SIMPLE_CALL_FLAGS must clear
-#                 W_CallInfo.simple so the call fails loudly.
-#   IC         -> iseq_data_to_ary spells it as the constant path segments;
-#                 a one-segment path becomes an interned id.
+#   CALL_DATA  -> W_CallInfo in the constant pool; flags outside
+#                 SIMPLE_CALL_FLAGS must clear W_CallInfo.simple
+#   IC         -> the constant path's segments (iseq.c)
 SUPPORTED_OPERAND_TYPES = frozenset([
     'VALUE',
     'lindex_t',
@@ -107,22 +100,18 @@ SUPPORTED_OPERAND_TYPES = frozenset([
     'IC',
 ])
 
-# Operands the loader drops: CRuby's inline caches, which the meta-tracing
-# JIT is meant to rediscover.
+# CRuby's inline caches, which the meta-tracing JIT rediscovers instead.
 DISCARDED_OPERAND_TYPES = frozenset([
     'IVC',
     'ICVARC',
     'ISE',
 ])
 
-# A non-zero level reaches an enclosing scope: the interpreter walks that many
-# steps up the block chain. Deeper than this is a corrupt operand, not real
-# code, and the walk must stay bounded for the tracer to unroll it.
+# The block-chain walk must stay bounded for the tracer to unroll it.
 MAX_LOCAL_LEVEL = 16
 
-# getlocal/setlocal carry slot and level in one operand: a second int would
-# cost a load in the interpreter's hottest instructions, and level 0 is then
-# just "the operand equals its own slot bits". No scope has 2**20 locals.
+# getlocal/setlocal pack slot and level into one operand, so level 0 is just
+# "the operand equals its own slot bits". No scope has 2**20 locals.
 LOCAL_LEVEL_SHIFT = 20
 LOCAL_SLOT_MASK = (1 << LOCAL_LEVEL_SHIFT) - 1
 
@@ -130,45 +119,39 @@ LOCAL_SLOT_MASK = (1 << LOCAL_LEVEL_SHIFT) - 1
 #     slot = nlocals - operand + ENV_DATA_SIZE - 1
 ENV_DATA_SIZE = 3
 
-# vm_callinfo.h. Outside this mask (splat, block argument, keywords, super,
-# forwarding) the arguments reach the callee differently; ARGS_SIMPLE is
-# CRuby's own statement that none of them apply.
+# vm_callinfo.h. Outside this mask (splat, block argument, keywords,
+# forwarding) the arguments reach the callee differently.
 CALL_FLAG_FCALL = 0x04
 CALL_FLAG_VCALL = 0x08
 CALL_FLAG_ARGS_SIMPLE = 0x10
 CALL_FLAG_TAILCALL = 0x80
-# invokesuper only. A bare `super` (ZSUPER) still pushes the parameters the
-# way an explicit one does, so both reach the callee identically.
+# invokesuper only; a bare `super` (ZSUPER) pushes the parameters the same way.
 CALL_FLAG_SUPER = 0x100
 CALL_FLAG_ZSUPER = 0x200
 SIMPLE_CALL_FLAGS = (CALL_FLAG_FCALL | CALL_FLAG_VCALL |
                      CALL_FLAG_ARGS_SIMPLE | CALL_FLAG_TAILCALL |
                      CALL_FLAG_SUPER | CALL_FLAG_ZSUPER)
 
-# vm_core.h. Only a plain `class Foo` is supported: no module, no singleton
-# class, no `class A::B`.
+# vm_core.h. Only a plain `class Foo`: no module, singleton class or A::B.
 DEFINECLASS_TYPE_MASK = 0x07
 DEFINECLASS_TYPE_CLASS = 0x00
 DEFINECLASS_FLAG_SCOPED = 0x08
 DEFINECLASS_FLAG_HAS_SUPERCLASS = 0x10
 
-# vm_core.h, enum vm_special_object_type. Only the cref's constant base,
-# which is what `class Foo` and a toplevel constant assignment emit.
+# vm_core.h, enum vm_special_object_type.
 SPECIAL_OBJECT_VMCORE = 1
 SPECIAL_OBJECT_CBASE = 2
 SPECIAL_OBJECT_CONST_BASE = 3
 
 # vm_core.h, enum vm_check_match_type. WHEN answers the pattern itself, CASE
-# and RESCUE run `pattern === target`; ARRAY means the pattern is an Array of
-# them, which is what `rescue A, B` and a multi-value `when` compile to.
+# and RESCUE run `pattern === target`; ARRAY means an Array of patterns.
 CHECKMATCH_TYPE_MASK = 0x03
 CHECKMATCH_TYPE_WHEN = 1
 CHECKMATCH_TYPE_CASE = 2
 CHECKMATCH_TYPE_RESCUE = 3
 CHECKMATCH_ARRAY = 0x04
 
-# vm_core.h, enum ruby_tag_type. throw's operand is the tag, and tag 0 means
-# "continue the throw already in flight" rather than starting a new one.
+# vm_core.h, enum ruby_tag_type. Tag 0 continues the throw already in flight.
 TAG_MASK = 0xf
 TAG_NONE = 0
 TAG_RETURN = 1

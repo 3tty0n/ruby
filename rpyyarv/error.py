@@ -8,13 +8,11 @@ class UnsupportedOperation(RPyYarvError):
 
 
 class RubyException(Exception):
-    """A Ruby exception in flight, carrying the exception object itself.
-
-    Kept apart from RPyYarvError: this one is Ruby's to catch. The VALUE is
-    reachable for CRuby's GC through whichever catch frame or gcroots slot
-    holds it while the unwinding runs.
-    """
+    """A Ruby exception in flight, carrying the exception object; apart from
+    RPyYarvError because this one is Ruby's to catch."""
     def __init__(self, value, name):
+        # Marked through the catch frame or gcroots slot holding it while the
+        # unwinding runs.
         self.value = value
         # The call that raised, for the message when nothing rescues it.
         self.name = name

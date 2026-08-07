@@ -10,8 +10,7 @@ class W_Main(W_Root):
     def getclass(self):
         return w_object_class
 
-    # CRuby defines a toplevel `def` as a private method on Object, not on a
-    # singleton class of main.
+    # A toplevel `def` is private on Object, not on a singleton class of main.
     def defines_private(self):
         return True
 

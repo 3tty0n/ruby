@@ -2,7 +2,7 @@
 API, and a CRuby dispatch for everything else.
 
 TODO: none of these consult CRuby's BOP redefinition flags, so reopening
-Integer#+ or Array#[] is not observed. Same gap as opt_not.
+Integer#+ or Array#[] is not observed.
 """
 
 import boot
@@ -109,8 +109,8 @@ def or_(a, b):
 
 
 def _both_positive(a, b):
-    # Ruby's / and % floor; RPython's truncate. Rather than reimplement the
-    # correction, the fast path takes only the operands where they agree.
+    # Ruby's / and % floor, RPython's truncate: only take operands where the
+    # two agree.
     return (value.is_fixnum(a) and value.is_fixnum(b)
             and value.fix2int(a) >= 0 and value.fix2int(b) > 0)
 
@@ -128,8 +128,7 @@ def mod(a, b):
 
 
 def aref(recv, idx):
-    """Array[Fixnum] reads the elements in place; Hash and everything else
-    goes through rb_funcallv."""
+    """Array[Fixnum] reads the elements in place."""
     if value.is_plain_array(recv) and value.is_fixnum(idx):
         i = value.fix2int(idx)
         n = value.ary_len(recv)
@@ -171,8 +170,7 @@ def ltlt(recv, obj):
 
 
 def opt_not(recv):
-    # TODO: CRuby also checks that #! is still Object#not; a redefined one
-    # would be ignored here.
+    # TODO: a redefined Object#! is ignored, unlike in CRuby.
     return value.newbool(not value.is_true(recv))
 
 

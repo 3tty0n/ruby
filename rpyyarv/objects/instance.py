@@ -2,8 +2,6 @@ from objects.base import W_Root
 
 
 class W_Object(W_Root):
-    # No instance variables yet
-    # because getinstancevariable is not implemented
     def __init__(self, w_class):
         self.w_class = w_class
 

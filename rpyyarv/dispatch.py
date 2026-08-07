@@ -1,10 +1,9 @@
 """Receiver-class-aware method dispatch: RPyYARV's inline cache.
 
-Methods live in a (klass VALUE -> mid -> entry) registry alongside an
-RPython-side superclass map, and lookup is elidable in (klass, mid,
-version). A send promotes class_of(recv), so a trace compiles the lookup
-away behind one guard_value on the receiver's class word -- a monomorphic
-inline cache, with a bridge per extra class at a polymorphic site.
+Methods live in a (klass VALUE -> mid -> entry) registry alongside a
+superclass map, and lookup is elidable in (klass, mid, version). A send
+promotes class_of(recv), so the lookup compiles away behind one guard_value
+on the receiver's class word, with a bridge per extra class.
 """
 
 import boot
@@ -29,7 +28,7 @@ class MethodEntry(object):
         self.w_iseq = w_iseq
         # Toplevel defs land on Object as private: only an fcall may reach one.
         self.private = private
-        # The class the def landed on, and under which name: invokesuper
+        # The class the def landed on, and under which name; invokesuper
         # resumes the lookup above them.
         self.owner = owner
         self.mid = mid
@@ -59,7 +58,7 @@ def define(klass, mid, w_iseq, private):
 
 def undefine(klass, mid):
     """Drop a method RPyYARV defined, so a later lookup falls through to
-    CRuby's. Answers whether there was one."""
+    CRuby's."""
     table = registry.methods.get(klass, None)
     if table is None or mid not in table:
         return False
@@ -69,8 +68,7 @@ def undefine(klass, mid):
 
 
 def own_lookup(klass, mid):
-    """The entry defined on klass itself, without walking the superclasses:
-    what an alias copies."""
+    """The entry defined on klass itself, which is what an alias copies."""
     table = registry.methods.get(klass, None)
     if table is None:
         return None
@@ -114,9 +112,8 @@ def lookup(klass, mid):
 
 @elidable
 def _lookup_super(owner, mid, version):
-    """Like _lookup, but starting above owner. No Object fallback beyond what
-    the superclass chain itself reaches, or super would find an unrelated
-    toplevel def."""
+    """_lookup starting above owner. No Object fallback, or super would find
+    an unrelated toplevel def."""
     supers = registry.supers
     methods = registry.methods
     k = supers.get(owner, 0)
@@ -138,9 +135,8 @@ def lookup_super(owner, mid):
 
 @dont_look_inside
 def _reopened(cbase, rid):
-    """An existing class of that name, or 0. A bodiless `class Foo` must not
-    reach rb_define_class_id_under with Object as the superclass: reopening
-    Integer that way is a superclass mismatch."""
+    """An existing class of that name, or 0: reopening Integer through
+    rb_define_class_id_under with Object as super is a superclass mismatch."""
     try:
         v = boot.const_get(cbase, rid)
     except RubyException:
@@ -196,11 +192,9 @@ IV_UNKNOWN = -3
 
 @elidable
 def iv_slot(shape_id, rid):
-    """Which field slot a shape keeps an ivar in.
-
-    Elidable because a shape node never changes: gaining an ivar moves the
-    object to a *different* shape_id, and shape_id is this cache's key, so an
-    entry can only ever go unreachable, never stale."""
+    """Which field slot a shape keeps an ivar in. Elidable because a shape
+    node never changes: gaining an ivar moves the object to a different
+    shape_id, this cache's key, so an entry goes unreachable, never stale."""
     key = (shape_id, rid)
     got = slots.tab.get(key, IV_UNKNOWN)
     if got == IV_UNKNOWN:
@@ -210,8 +204,7 @@ def iv_slot(shape_id, rid):
 
 
 def ivar_get(obj, mid):
-    """T_OBJECT reads compile to a shape guard plus a raw field load; anything
-    else falls back to rb_ivar_get."""
+    """T_OBJECT reads compile to a shape guard plus a raw field load."""
     if obj != 0 and (obj & value.IMMEDIATE_MASK) == 0:
         flags = raw_word(obj, value.FLAGS_WORD)
         if (flags & value.T_MASK) == value.T_OBJECT:
@@ -233,8 +226,8 @@ def _ivar_get_slow(obj, mid):
 
 @dont_look_inside
 def ivar_set(obj, mid, v):
-    # Deliberately still a call: a raw store would skip CRuby's write barrier
-    # and leave an old->young reference unremembered by RGenGC.
+    # Still a call: a raw store would skip CRuby's write barrier and leave an
+    # old->young reference unremembered by RGenGC.
     boot.ivar_set(obj, rubycall.rid(mid), v)
 
 

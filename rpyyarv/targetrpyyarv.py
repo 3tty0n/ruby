@@ -57,8 +57,7 @@ def entry_point(argv):
     dispatch.install()
     interp.install()
 
-    # RPYYARV_GC_NO_HOOK leaves the escaped VALUEs unreachable on purpose, so
-    # the stress run can show what the hook is buying.
+    # RPYYARV_GC_NO_HOOK leaves the escaped VALUEs unreachable on purpose.
     if os.environ.get('RPYYARV_GC_NO_HOOK') != '1':
         gcroots.install()
     if os.environ.get('RPYYARV_GC_STRESS') == '1':
@@ -69,8 +68,7 @@ def entry_point(argv):
         w_iseq = loader.load(bootiseq.load(iseqw))
         interp.run(w_iseq)
     except RubyException, e:
-        # Nothing rescued it: hand it back so CRuby prints it and picks the
-        # exit status, exactly as an uncaught exception is reported.
+        # Nothing rescued it: CRuby prints it and picks the exit status.
         return boot.cleanup_with_error(e.value)
     except RPyYarvError, e:
         print '[rpyyarv] %s' % e.msg

@@ -2,22 +2,20 @@
 #include <stddef.h>
 #include <ruby.h>
 
-/* In-tree headers: the shim is built against this CRuby checkout, so the
-   object-shape API is reachable even though libruby does not export it. */
+/* In-tree, so the object-shape API libruby does not export is still reachable. */
 #include "shape.h"
 
 #include "boot_shim.h"
 
-/* Declared in the internal header iseq.h; forward-declared to avoid
-   pulling in vm_core.h. */
+/* From the internal iseq.h, redeclared to avoid pulling in vm_core.h. */
 struct rb_iseq_struct;
 VALUE rb_iseqw_new(const struct rb_iseq_struct *iseq);
 
 void *
 rpyyarv_boot(int argc, char **argv, int *status_out)
 {
-    /* Must live on the machine stack: ruby_init_stack records its address
-       as the lower bound of the conservative GC scan. */
+    /* On the machine stack: ruby_init_stack records its address as the lower
+       bound of the conservative GC scan. */
     VALUE variable_in_this_stack_frame;
 
     ruby_sysinit(&argc, &argv);
@@ -26,8 +24,7 @@ rpyyarv_boot(int argc, char **argv, int *status_out)
 
     void *n = ruby_options(argc, argv);
 
-    /* ruby_options returns Qtrue/Qfalse/Fixnum instead of an ISeq for
-       --version, --help and syntax errors. */
+    /* --version, --help and syntax errors answer a VALUE, not an ISeq. */
     int status = 0;
     if (!ruby_executable_node(n, &status)) {
         *status_out = status;
@@ -170,9 +167,8 @@ uintptr_t
 rpyyarv_iseqw_new(void *iseq)
 {
     VALUE v = rb_iseqw_new((const struct rb_iseq_struct *)iseq);
-    /* The wrapper is held only in FFI-side memory, which the GC never
-       scans. Pin it (it also marks the wrapped iseq). Boot-once, so the
-       permanent registration is fine. */
+    /* Held only in FFI-side memory the GC never scans; pinning it also marks
+       the wrapped iseq, and this runs once at boot. */
     rb_gc_register_mark_object(v);
     return (uintptr_t)v;
 }
@@ -700,8 +696,8 @@ rpyyarv_set_block_callback(rpyyarv_block_fn fn)
 static VALUE
 block_yielder(RB_BLOCK_CALL_FUNC_ARGLIST(yielded, callback_arg))
 {
-    /* On the machine stack, so the yielded values stay scannable while the
-       RPython side copies them into a frame the mark hook reaches. */
+    /* On the machine stack, so the yielded values stay scannable until the
+       RPython side has copied them into a frame the mark hook reaches. */
     VALUE buf[RPYYARV_MAX_ARGC];
     int i, n = argc;
 
@@ -811,9 +807,7 @@ int
 rpyyarv_cleanup_with_error(uintptr_t err)
 {
     rb_set_errinfo((VALUE)err);
-    /* ruby_cleanup prints a pending exception the way an uncaught one is
-       printed and answers the exit status. RUBY_TAG_RAISE is 6. */
-    return ruby_cleanup(6);
+    return ruby_cleanup(6);      /* RUBY_TAG_RAISE */
 }
 
 struct hash_args {
@@ -882,8 +876,7 @@ struct splat_args {
     int   flag;
 };
 
-/* vm_splat_array in vm_insnhelper.c, minus the frozen-empty-array shortcut
-   the flag==0 case takes there. */
+/* vm_splat_array, minus the frozen-empty-array shortcut it takes at flag==0. */
 static VALUE
 splat_array_body(VALUE argp)
 {
@@ -908,8 +901,8 @@ rpyyarv_splat_array(uintptr_t ary, int flag, int *state)
     return (uintptr_t)r;
 }
 
-/* vm.c:4274. FrozenCore is hidden: rb_set_class_path names it but defines no
-   constant, so rb_const_get cannot reach it. libruby exports the variable. */
+/* FrozenCore is hidden: rb_set_class_path names it but defines no constant
+   (vm.c:4274), so only the exported variable reaches it. */
 extern VALUE rb_mRubyVMFrozenCore;
 
 uintptr_t

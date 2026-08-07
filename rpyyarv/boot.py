@@ -1,5 +1,4 @@
-"""CRuby boot and ISeq handoff
-"""
+"""CRuby boot and ISeq handoff."""
 
 import os
 import sys
@@ -66,22 +65,16 @@ MARK_HOOK = lltype.Ptr(lltype.FuncType([], lltype.Void))
 BLOCK_HOOK = lltype.Ptr(lltype.FuncType([lltype.Signed, rffi.INT, VALUEP],
                                         VALUE))
 
-# RPython side a VALUE is a plain signed word: FIX2LONG is an arithmetic
-# right shift, which only a signed type gets right.
 MAX_ARGC = 32
 
 
 def _ext(name, args, result, reenters=False):
     # releasegil=False: every call runs on the main Ruby thread holding the
     # GVL, and the mark hook re-enters RPython from inside one of them.
-    #
     # reenters=True marks a call that runs RPython code again through a
-    # callback: without it the root walker would keep live RPython objects
-    # only in C locals across the call, and a minor collection inside the
-    # callback would move them out from under it.
-    #
-    # Every call that can allocate qualifies, not just rb_block_call: an
-    # allocation can start a CRuby GC, whose mark hook is gcroots.mark_roots.
+    # callback; without it a minor collection inside the callback would move
+    # live objects out from under the C locals holding them. Every call that
+    # can allocate qualifies, since an allocation can start a CRuby GC.
     return rffi.llexternal(name, args, result, compilation_info=eci,
                            releasegil=False,
                            random_effects_on_gcobjs=reenters)
@@ -106,6 +99,9 @@ rb_is_false = _ext('rpyyarv_is_false', [VALUE], rffi.INT)
 rb_num2long = _ext('rpyyarv_num2long', [VALUE], rffi.LONG, reenters=True)
 rb_hash_aref = _ext('rpyyarv_hash_aref', [VALUE, rffi.CCHARP], VALUE, reenters=True)
 rb_sym_cstr = _ext('rpyyarv_sym_cstr', [VALUE], rffi.CCHARP, reenters=True)
+# No reenters: reached from an elidable, which the codewriter rejects. Safe --
+# neither this nor rb_shape_iv_index allocates, and elidable calls never
+# survive into an optimized trace.
 rb_intern_ = _ext('rpyyarv_intern', [rffi.CCHARP], VALUE)
 rb_sym_new = _ext('rpyyarv_sym_new', [rffi.CCHARP], VALUE, reenters=True)
 rb_funcallv_id = _ext('rpyyarv_funcallv_id',
@@ -132,7 +128,7 @@ rb_const_set_ = _ext('rpyyarv_const_set', [VALUE, VALUE, VALUE, INTP],
 rb_ivar_get_ = _ext('rpyyarv_ivar_get', [VALUE, VALUE, INTP], VALUE, reenters=True)
 rb_ivar_set_ = _ext('rpyyarv_ivar_set', [VALUE, VALUE, VALUE, INTP],
                     lltype.Void, reenters=True)
-rb_shape_iv_index = _ext('rpyyarv_shape_iv_index',
+rb_shape_iv_index = _ext('rpyyarv_shape_iv_index',   # no reenters: see rb_intern_
                          [rffi.UINT, VALUE, INTP], rffi.INT)
 rb_object_layout = _ext('rpyyarv_object_layout', [INTP], lltype.Void)
 rb_set_block_callback = _ext('rpyyarv_set_block_callback', [BLOCK_HOOK],
@@ -176,16 +172,13 @@ def _v(n):
 
 
 class RubyError(Exception):
-    # A call RPyYARV could not even make; a call that raised becomes a
-    # RubyException carrying the exception object.
+    # A call RPyYARV could not make; one that raised becomes a RubyException.
     def __init__(self, mid):
         self.mid = mid
 
 
 def _failed(name):
-    """Turn a failed rb_protect into an RPython exception carrying the Ruby
-    one. The VALUE is only on the machine stack until the raise, which the
-    conservative scan covers."""
+    """A failed rb_protect as an RPython exception carrying the Ruby one."""
     v = rffi.cast(lltype.Signed, rb_take_errinfo())
     raise RubyException(v, name)
 
@@ -318,9 +311,8 @@ def ary_new(values):
 
 
 def _ary_new_chunked(values):
-    """More elements than one machine-stack buffer holds. `ary` stays an
-    RPython local, so the conservative stack scan covers it between chunks;
-    the elements themselves are still in the caller's marked frame."""
+    """More elements than one machine-stack buffer holds; `ary` stays an
+    RPython local, which the conservative stack scan covers between chunks."""
     n = len(values)
     ary = 0
     with lltype.scoped_alloc(INTP.TO, 1) as state:
@@ -375,9 +367,8 @@ def call_with_block(recv, rid, args, handle, name):
 
 
 def install_block_callback(fn):
-    """Deliberately a plain function, not an llhelper pointer: rffi only
-    builds the enter-RPython-from-C wrapper (gc_stack_bottom, exception
-    guard) when the callback crosses as a function."""
+    """A plain function, not an llhelper pointer: rffi only builds the
+    enter-RPython-from-C wrapper when the callback crosses as a function."""
     rb_set_block_callback(fn)
 
 
@@ -699,8 +690,8 @@ def set_mark_hook(fn):
 
 def boot(argv):
     """Return (iseqw, status). iseqw is 0 when there is no ISeq to run."""
-    # Never freed: ruby_sysinit stores this pointer in origarg (ruby.c)
-    # and uses it for the process lifetime ($0, dladdr checks).
+    # Never freed: ruby_sysinit keeps this pointer in origarg (ruby.c) for
+    # the process lifetime.
     c_argv = rffi.liststr2charpp(argv)
     with lltype.scoped_alloc(INTP.TO, 1) as status:
         status[0] = rffi.cast(rffi.INT, 0)

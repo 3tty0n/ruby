@@ -2,8 +2,7 @@
 
 Signed is deliberate: FIX2LONG is an arithmetic right shift, which only a
 signed type gets right. The tags below are compiled in; entry_point checks
-them against rpyyarv_special_consts so a libruby with other tags fails at
-startup instead of mis-decoding every VALUE.
+them against rpyyarv_special_consts so a drifting libruby fails at startup.
 """
 
 from rlib import LONG_BIT, elidable, raw_word
@@ -19,13 +18,11 @@ FLONUM_FLAG = 0x02
 SYMBOL_MASK = 0xff
 SYMBOL_FLAG = 0x0c
 
-# rbasic.h: flags then klass, one word each. RBASIC_SHAPE_ID_FIELD adds a
-# third word only when SIZEOF_VALUE < 8, which RPyYARV does not support.
+# rbasic.h: flags then klass, one word each (SIZEOF_VALUE == 8 only).
 KLASS_WORD = 1
 FLAGS_WORD = 0
 
-# RObject layout for the ivar fast path; entry_point checks every one of these
-# against rpyyarv_object_layout, so a drifting CRuby fails at startup.
+# RObject layout for the ivar fast path, checked against rpyyarv_object_layout.
 SHAPE_SHIFT = 32                # shape.h: SHAPE_FLAG_SHIFT on 64-bit
 SHAPE_ID_BITS = 32
 SHAPE_MASK = (1 << SHAPE_ID_BITS) - 1
@@ -34,10 +31,9 @@ FIELDS_WORD = 2                 # struct RObject: as.ary / as.heap.fields
 T_MASK = 0x1f
 T_OBJECT = 0x01
 
-# RArray layout for the opt_aref/opt_length fast paths; entry_point checks
-# every one of these against rpyyarv_array_layout. A short array keeps its
-# elements in the object (ARY_EMBED_FLAG, length in the flags word); a longer
-# one keeps a length and a pointer instead.
+# RArray layout for the opt_aref/opt_length fast paths, checked against
+# rpyyarv_array_layout. A short array embeds its elements, a longer one does
+# not; ARY_EMBED_FLAG says which, and an embedded length lives in the flags.
 ARY_EMBED_FLAG = 1 << 13         # RUBY_FL_USER1
 ARY_EMBED_LEN_SHIFT = 15         # RUBY_FL_USHIFT + 3
 ARY_EMBED_LEN_MASK = 0x7f << ARY_EMBED_LEN_SHIFT
@@ -96,8 +92,8 @@ def is_immediate(v):
 
 
 class _Classes(object):
-    # Not _immutable_fields_: on a prebuilt instance the rtyper would fold
-    # every read to the zeros this list holds before boot fills it.
+    # Not _immutable_fields_: the rtyper would fold every read of this
+    # prebuilt instance to the zeros the list holds before boot fills it.
     def __init__(self):
         self.tab = [0] * NCLASS
 
@@ -116,11 +112,8 @@ def core_class(i):
 
 
 def class_of(v):
-    """The receiver's class VALUE. Immediates answer from the boot table, a
-    heap object from its RBasic->klass word; neither costs an rb_* call.
-
-    Heap objects are tested first: one guard, not the whole tag ladder, in
-    front of the guard_value that makes a send site an inline cache."""
+    """The receiver's class VALUE, without an rb_* call. Heap objects are
+    tested first: one guard in front of the send site's guard_value."""
     if v != 0 and (v & IMMEDIATE_MASK) == 0:
         return raw_word(v, KLASS_WORD)
     if (v & FIXNUM_FLAG) != 0:
@@ -139,8 +132,7 @@ def class_of(v):
 
 
 def is_plain_array(v):
-    """A direct Array instance, the way vm_opt_aref tests it: an Array
-    subclass may have redefined #[] and must not take the fast path."""
+    """A direct Array instance: a subclass may have redefined #[]."""
     return (v != 0 and (v & IMMEDIATE_MASK) == 0
             and raw_word(v, KLASS_WORD) == core_class(C_ARRAY))
 

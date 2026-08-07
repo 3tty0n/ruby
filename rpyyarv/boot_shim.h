@@ -1,8 +1,6 @@
 /*
- * Thin C layer over CRuby APIs that cannot be called through an FFI:
- * macros (RUBY_INIT_STACK, RARRAY_LEN, RB_TYPE_P), the variadic rb_funcall,
- * and anything that may longjmp past the caller's frame.
- *
+ * Thin C layer over CRuby APIs an FFI cannot call: macros, the variadic
+ * rb_funcall, and anything that may longjmp past the caller's frame.
  * Shared by boot.py (rffi) and test/test_boot_ctypes.py (ctypes).
  */
 #ifndef RPYYARV_BOOT_SHIM_H
@@ -15,15 +13,10 @@ extern "C" {
 #endif
 
 /*
- * Boot CRuby and return the compiled ISeq of the main script, unexecuted.
- * Runs ruby_sysinit -> ruby_init_stack -> ruby_init -> ruby_options, but
- * never ruby_run_node, so CRuby does not execute the script.
- *
- * ruby_init_stack needs an address on the machine stack; passing a heap
- * address breaks the conservative GC scan range. Hence this wrapper.
- *
- * Returns NULL when ruby_options yields no ISeq (--version, syntax error);
- * *status_out then holds the exit status.
+ * Boot CRuby and return the main script's compiled ISeq, unexecuted: no
+ * ruby_run_node. A wrapper because ruby_init_stack needs an address on the
+ * machine stack, or the conservative GC scan range is wrong.
+ * NULL when ruby_options yields no ISeq; *status_out is then the exit status.
  */
 void *rpyyarv_boot(int argc, char **argv, int *status_out);
 
@@ -44,7 +37,7 @@ uintptr_t rpyyarv_sym_new(const char *name);
 /*
  * rb_funcallv guarded by rb_protect; *state is non-zero on raise, -1 when
  * argc exceeds RPYYARV_MAX_ARGC. argv may live in memory CRuby never scans,
- * so it is copied to the machine stack before the call.
+ * so it is copied to the machine stack first.
  */
 uintptr_t rpyyarv_funcallv_id(uintptr_t recv, uintptr_t mid, int argc,
                               const uintptr_t *argv, int *state);
@@ -57,11 +50,7 @@ uintptr_t rpyyarv_top_self(void);
 /* Bignum-safe long -> Integer, for fixnum overflow. */
 uintptr_t rpyyarv_int2inum(long n);
 
-/*
- * Immediate tags are compiled into the interpreter; this reports the ones
- * this libruby actually uses so a mismatch fails at startup instead of
- * silently mis-decoding every VALUE.
- */
+/* The immediate tags this libruby uses, checked against the compiled-in ones. */
 void rpyyarv_special_consts(uintptr_t *qfalse, uintptr_t *qnil,
                             uintptr_t *qtrue, uintptr_t *fixnum_flag);
 
@@ -92,10 +81,9 @@ uintptr_t rpyyarv_hash_aref(uintptr_t hash, const char *key);
 const char *rpyyarv_sym_cstr(uintptr_t sym);
 
 /*
- * VALUEs escaped into a foreign heap (ctypes lists here, RPython objects
- * later) are invisible to CRuby's conservative stack scan. The hook is a
- * TypedData object registered as a GC root whose dmark calls fn; fn marks
- * the escaped VALUEs with rpyyarv_gc_mark_value. NULL disables the hook.
+ * VALUEs escaped into a foreign heap are invisible to the conservative stack
+ * scan. The hook is a GC-rooted TypedData whose dmark calls fn, which marks
+ * them with rpyyarv_gc_mark_value. NULL disables it.
  */
 void rpyyarv_gc_set_mark_hook(void (*fn)(void));
 
@@ -110,11 +98,8 @@ uintptr_t rpyyarv_str_new(const char *s);
 uintptr_t rpyyarv_ary_new(int n, const uintptr_t *elems);
 uintptr_t rpyyarv_str_concat(int n, const uintptr_t *parts);
 
-/*
- * The classes of the immediates, fetched once at boot so class_of() can
- * answer for a Fixnum without any rb_* call. Slot order is value.py's
- * C_* constants; RPYYARV_NCLASS is the length rpyyarv_core_classes fills.
- */
+/* The immediates' classes, fetched once at boot so class_of() needs no rb_*
+   call. Slot order is value.py's C_* constants. */
 #define RPYYARV_NCLASS 12
 void rpyyarv_core_classes(uintptr_t *out);
 
@@ -129,17 +114,15 @@ void rpyyarv_const_set(uintptr_t klass, uintptr_t id, uintptr_t val,
 uintptr_t rpyyarv_ivar_get(uintptr_t obj, uintptr_t id, int *state);
 void rpyyarv_ivar_set(uintptr_t obj, uintptr_t id, uintptr_t val, int *state);
 
-/* Object-shape support for the ivar fast path in dispatch.py.
- * rpyyarv_shape_iv_index answers 1 (found, *index set), 0 (this shape has no
- * such ivar) or -1 (fast path not usable); it allocates nothing and raises
- * nothing. rpyyarv_object_layout reports the RObject/flag layout the RPython
- * side compiles in, so a drifting CRuby is caught at boot. */
+/* Object-shape support for dispatch.py's ivar fast path. shape_iv_index
+ * answers 1 (found, *index set), 0 (no such ivar) or -1 (fast path unusable),
+ * allocating and raising nothing; object_layout reports the RObject layout the
+ * RPython side compiles in, so a drifting CRuby is caught at boot. */
 #define RPYYARV_LAYOUT_N 6
 int rpyyarv_shape_iv_index(unsigned int shape_id, uintptr_t id, int *index);
 void rpyyarv_object_layout(int *out);
 
-/* RArray layout for the opt_aref/opt_length fast paths, checked at boot the
- * way rpyyarv_object_layout is: embedded and heap arrays both. */
+/* Likewise RArray, for the opt_aref/opt_length fast paths. */
 #define RPYYARV_ARRAY_LAYOUT_N 6
 void rpyyarv_array_layout(int *out);
 
@@ -158,14 +141,10 @@ uintptr_t rpyyarv_gvar_get(const char *name, int *state);
 void rpyyarv_gvar_set(const char *name, uintptr_t val, int *state);
 
 /*
- * Calling a CRuby method with a block RPyYARV holds.
- *
- * This is the one place a CRuby object refers back into RPyYARV, and it does
- * so through an integer handle only: RPython's GC moves objects, so a raw
- * RPython pointer must never reach C. rb_block_call gets the handle as a
- * Fixnum, and the yielder hands it straight back to the RPython callback
- * along with the yielded values, copied onto the machine stack first.
- * The handle is valid only for the extent of the call.
+ * Calling a CRuby method with a block RPyYARV holds: the one place a CRuby
+ * object refers back into RPyYARV, and only through an integer handle, since
+ * RPython's GC moves objects and a raw pointer must never reach C. The handle
+ * is valid only for the extent of the call.
  */
 typedef uintptr_t (*rpyyarv_block_fn)(long handle, int argc,
                                       uintptr_t *argv);
@@ -177,28 +156,24 @@ uintptr_t rpyyarv_call_with_block(uintptr_t recv, uintptr_t mid, int argc,
 int rpyyarv_is_class(uintptr_t v);
 
 /*
- * The exception a failed rb_protect left behind, cleared on the way out.
- *
- * Every guarded call below reports failure through *state and leaves errinfo
- * alone, so the RPython side can lift the exception VALUE into an interpreter
- * exception of its own. It must be called on every non-zero *state, or the
- * next raise inherits this one as its cause.
+ * The exception a failed rb_protect left behind, cleared on the way out. Must
+ * be called on every non-zero *state, or the next raise inherits this one as
+ * its cause.
  */
 uintptr_t rpyyarv_take_errinfo(void);
 
 /*
- * Install errinfo and answer the previous one. RPyYARV pushes no CRuby
- * frame, so rb_ec_get_errinfo (eval.c) finds no rescue frame to read `$!`
- * from and falls back to ec->errinfo: a rescue body has to put it there for
- * a bare `raise` and for `$!` to mean what Ruby says they mean.
+ * Install errinfo and answer the previous one. RPyYARV pushes no CRuby frame,
+ * so rb_ec_get_errinfo (eval.c) falls back to ec->errinfo; a rescue body has
+ * to put `$!` there for a bare `raise` to mean what Ruby says it means.
  */
 uintptr_t rpyyarv_swap_errinfo(uintptr_t v);
 
 /* rb_obj_is_kind_of, for checkmatch's rescue clause. */
 int rpyyarv_obj_is_kind_of(uintptr_t obj, uintptr_t klass, int *state);
 
-/* ruby_cleanup with an exception pending: CRuby prints it the way an
-   uncaught exception is printed, and answers the exit status. */
+/* ruby_cleanup with an exception pending: CRuby prints it and answers the
+   exit status. */
 int rpyyarv_cleanup_with_error(uintptr_t err);
 
 /* Hash literals: the ops themselves stay on the funcallv path. */

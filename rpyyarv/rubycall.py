@@ -15,9 +15,8 @@ state = _State()
 
 
 class _Stress(object):
-    # Quasi-immutable, not plain immutable: the rtyper would fold a prebuilt
-    # instance's immutable field to its pre-boot value forever. With '?' the
-    # JIT constant-folds the check and entry_point's write invalidates it.
+    # Quasi-immutable, so the check folds away but entry_point's write to a
+    # prebuilt instance still invalidates it. See value._Classes.
     _immutable_fields_ = ['flag?']
 
     def __init__(self):
@@ -140,7 +139,6 @@ def _gc_start():
 
 
 def gc_stress_point():
-    """RPYYARV_GC_STRESS=1: a full GC at every dispatch, to shake out
-    VALUEs the mark hook cannot reach."""
+    """RPYYARV_GC_STRESS=1: a full GC at every dispatch."""
     if stress.flag:
         _gc_start()

@@ -14,19 +14,17 @@ from iseq import (CATCH_ENSURE, CATCH_RESCUE, NO_BLOCK_ISEQ, W_Catch,
                   W_CallInfo, W_ISeq)
 
 
-# break/next/redo are implemented by the throw instruction unwinding an
-# RPython exception, so their catch-table entries need no interpretation.
-# retry is listed because the compiler emits an entry for it around every
-# rescue clause whether or not the source says `retry`; the entry is dropped
-# and `throw` with the retry tag is what refuses it.
+# break/next/redo unwind as RPython exceptions instead. retry is here because
+# the compiler emits an entry around every rescue clause whether the source
+# says `retry` or not; `throw` with the retry tag is what refuses it.
 IGNORED_CATCH_TYPES = ['break', 'next', 'redo', 'retry']
 
 CATCH_KINDS = {'rescue': CATCH_RESCUE, 'ensure': CATCH_ENSURE}
 
 
 class ConstPool(object):
-    # Three pools, one per operand type: VALUEs are ints and cannot share a
-    # list with W_ISeq or W_CallInfo.
+    # One pool per operand type: consts holds raw VALUEs, and an RPython list
+    # of ints cannot also hold W_ISeq or W_CallInfo.
     def __init__(self):
         self.consts = []
         self.iseqs = []
@@ -149,8 +147,7 @@ class Loader(object):
         return operands
 
     def load_iseq(self, index, parents):
-        """parents[0] is the enclosing ISeq, parents[1] its own, and so on:
-        a getlocal at level N names a local of parents[N-1]."""
+        """A getlocal at level N names a local of parents[N-1]."""
         if index in self.w_iseqs:
             return self.w_iseqs[index]
         if index < 0 or index >= len(self.program.iseqs):
@@ -186,8 +183,8 @@ class Loader(object):
             at = raw.labels[name]
             labels[name] = pc if at >= len(starts) else starts[at]
 
-        # W_ISeq declares code and consts immutable, so both have to reach it
-        # as lists that were never resized: pc already holds the final length.
+        # W_ISeq declares code and consts immutable, so neither may ever have
+        # been resized; pc already holds the final length.
         pool = ConstPool()
         code = [0] * pc
         at = 0
@@ -213,8 +210,8 @@ class Loader(object):
         return w_iseq
 
     def catches(self, raw, labels, parents):
-        """A rescue/ensure ISeq reads the enclosing scope's locals at level 1,
-        so it is loaded with raw itself as its parent, the way a block is."""
+        """A catch ISeq reads the enclosing locals at level 1, so raw itself
+        is its parent, the way a block's is."""
         out = []
         for entry in raw.catches:
             if entry.kind not in CATCH_KINDS:
@@ -308,8 +305,8 @@ class Loader(object):
                         % (insns.NAMES[op], raw.name, insns.TYPE_NAMES[t]))
 
     def const_path(self, operand, op, raw, pool):
-        """An IC operand reaches to_a as the path's segments, one Symbol each
-        (iseq.c:3503). An absolute `::Foo` has the empty name first."""
+        """An IC reaches to_a as one Symbol per path segment (iseq.c:3503);
+        an absolute `::Foo` has the empty name first."""
         if operand.kind != rawiseq.OP_ARRAY:
             raise LoadError("%s in '%s' wants a constant path, got %s"
                             % (insns.NAMES[op], raw.name, operand.describe()))
@@ -328,8 +325,7 @@ class Loader(object):
 
     def literal_value(self, operand, op, raw):
         """A real CRuby VALUE, built once at load time. Until its pool is
-        registered it is reachable from nothing CRuby scans, so keepalive
-        holds it across the rb_* calls the rest of the load makes."""
+        registered nothing CRuby scans reaches it, hence the keepalive."""
         v = self._literal_value(operand, op, raw)
         gcroots.keepalive(v)
         return v
@@ -364,7 +360,7 @@ class Loader(object):
     def local_slot(self, operand, op, raw, parents, level):
         idx = self.int_of(operand, op, raw, 'local index')
         # The index counts down from the top of the *naming* scope's
-        # environment, which for a non-zero level is an enclosing ISeq.
+        # environment, an enclosing ISeq when level is non-zero.
         owner = raw
         if level > 0:
             if level > len(parents):
@@ -400,8 +396,7 @@ class Loader(object):
                             % (insns.NAMES[op], raw.name, operand.describe()))
         flags = operand.flag
         # Not ARGS_SIMPLE itself: CRuby clears it whenever a block ISeq is
-        # attached, and every other reason it can be clear (splat, block
-        # argument, keywords, forwarding) has its own bit outside this mask.
+        # attached, and every other reason has its own bit outside this mask.
         simple = (not operand.has_kwarg
                   and (flags & ~optable.SIMPLE_CALL_FLAGS) == 0)
         return W_CallInfo(symbols.intern(operand.strval), operand.intval,

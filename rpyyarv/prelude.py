@@ -1,7 +1,6 @@
 """prelude.rb, compiled by the embedded CRuby and run before the main script.
 
-Reading the file happens at import time, so translation bakes the source into
-the binary and the running executable needs no prelude.rb on disk.
+Read at import time, so translation bakes the source into the binary.
 """
 
 import os

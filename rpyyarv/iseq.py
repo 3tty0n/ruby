@@ -1,9 +1,9 @@
 """Loaded code: W_ISeq.code is a flat list of ints.
 
 Operands that are already ints (local slots, branch targets, interned ids)
-sit in it directly; everything else goes into one of three pools and the code
-stream carries the index. The pools are split by type because `consts` now
-holds raw VALUEs -- an RPython list of ints cannot also hold objects.
+sit in it directly; everything else goes into a pool and the code stream
+carries the index. The pools are split by type because `consts` holds raw
+VALUEs, and an RPython list of ints cannot also hold objects.
 """
 
 import symbols
@@ -11,16 +11,14 @@ import symbols
 # A `send` whose call site has no block. Pool indices are >= 0.
 NO_BLOCK_ISEQ = -1
 
-# The catch-table entry kinds RPyYARV interprets. break/next/redo are carried
-# by RPython exceptions instead, and retry is refused at the throw.
+# The catch-table entry kinds RPyYARV interprets; see loader.py for the rest.
 CATCH_RESCUE = 1
 CATCH_ENSURE = 2
 
 
 class W_Catch(object):
-    """One catch-table entry. The pc range is CRuby's: an entry covers a pc
-    when start < epc <= end, with epc the pc *after* the raising instruction
-    (vm.c:2911)."""
+    """One catch-table entry; it covers a pc when start < epc <= end, epc
+    being the pc *after* the raising instruction (vm.c:2911)."""
     _immutable_fields_ = ['kind', 'start', 'end', 'cont', 'sp', 'w_iseq']
 
     def __init__(self, kind, start, end, cont, sp, w_iseq):
@@ -28,14 +26,14 @@ class W_Catch(object):
         self.start = start
         self.end = end
         self.cont = cont
-        # The frame's sp when the catch ISeq's result lands, from the entry.
+        # The frame's sp when the catch ISeq's result lands.
         self.sp = sp
         self.w_iseq = w_iseq
 
 
 class W_ISeq(object):
-    # The loader hands over finished lists; nothing appends afterwards, so the
-    # JIT may fold code[pc] and consts[idx] away when pc and iseq are green.
+    # Nothing appends after the loader, so the JIT may fold code[pc] and
+    # consts[idx] away when pc and iseq are green.
     _immutable_fields_ = ['name', 'code[*]', 'consts[*]', 'iseqs[*]',
                           'callinfos[*]', 'nlocals', 'stack_max', 'nparams',
                           'simple_params', 'catches[*]', 'paths[*]']
@@ -53,12 +51,11 @@ class W_ISeq(object):
         self.stack_max = stack_max
         # Required parameters, which YARV puts in locals[0:nparams] in order.
         self.nparams = nparams
-        # False once the loader saw optional/rest/post/keyword/block
-        # parameters; the call path refuses those rather than guessing.
+        # False once the loader saw any other parameter kind; the call path
+        # refuses those rather than guessing.
         self.simple_params = simple_params
         # rescue/ensure entries in CRuby's search order; the first match wins.
         self.catches = catches if catches is not None else []
-        # opt_getconstant_path's segments, one interned id per segment.
         self.paths = paths if paths is not None else []
 
     def repr(self):

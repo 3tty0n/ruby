@@ -1,5 +1,5 @@
-# Hot iterators as Ruby, so their loop is RPyYARV frames the JIT can trace
-# rather than a CRuby rb_block_call the tracer cannot see a back edge in.
+# Hot iterators as Ruby, so their back edge is one the JIT can trace rather
+# than a CRuby rb_block_call it cannot see into.
 
 class Integer
   def times
@@ -20,8 +20,7 @@ class Integer
     self
   end
 
-  # Two positional arguments only; every other form (one argument, keywords,
-  # no block) fails loudly in the caller rather than silently differing.
+  # Two positional arguments only; every other form fails loudly in the caller.
   def step(limit, step)
     i = self
     if step > 0
@@ -67,8 +66,8 @@ class Array
     self
   end
 
-  # Not an iterator, but the funcallv it replaces is what keeps so_matrix's
-  # innermost each from tracing.
+  # Not an iterator: the funcallv it replaces kept so_matrix's innermost each
+  # from tracing.
   def at(i)
     self[i]
   end

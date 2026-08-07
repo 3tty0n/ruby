@@ -1,14 +1,14 @@
 """Interned names: an ID is an index into this table, as in CRuby."""
 
 _ids = {}
-# Keyed by ID rather than a list: len() of a prebuilt list folds to its
-# translation-time length, so appends made at run time went unseen.
+# A dict, not a list: len() of a prebuilt container folds to its
+# translation-time size, so run-time appends went unseen.
 _names = {}
 
 
 class _Next(object):
-    # len(_ids) folds to the translation-time size of the prebuilt dict, so
-    # every ID interned at run time aliased one interned at import time.
+    # Likewise: len(_ids) would fold, and every run-time ID would alias one
+    # interned at import time.
     def __init__(self):
         self.mid = 0
 

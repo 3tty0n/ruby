@@ -1,7 +1,7 @@
 """Front end over an embedded CRuby: iseqw.to_a -> rawiseq objects."""
 
-# Only this module and boot.py import rpython; the loader, the interpreter
-# and their tests stay importable on plain CPython.
+# Only this module and boot.py import rpython; the rest stays importable on
+# plain CPython.
 
 import boot
 import rawiseq
@@ -150,15 +150,13 @@ def _operand(pending, v):
                 rawiseq.OP_CALL, boot.num2long(argc), name,
                 _int_or(boot.hash_aref(v, 'flag'), 0),
                 not boot.is_nil(boot.hash_aref(v, 'kw_arg')))
-    # Anything else -- Float, Range, Regexp -- crosses as the VALUE itself;
-    # the loader pins it and puts it straight into the constant pool.
+    # Float, Range, Regexp and the rest cross as the VALUE itself.
     return rawiseq.RawOperand(rawiseq.OP_VALUE, v, boot.inspect(v))
 
 
 def _catches(pending, catch):
-    """iseq_data_to_ary spells each entry [type, iseq, start, end, cont, sp]
-    (iseq.c:3605), the pcs as label names. An entry's ISeq joins the same
-    pending queue the nested ISeqs of the body use."""
+    """An entry's ISeq joins the same pending queue the body's nested ISeqs
+    use; see rawiseq.RawCatch for the layout."""
     out = []
     n = boot.ary_len(catch)
     i = 0
@@ -192,11 +190,9 @@ def _label(v):
 
 
 def _lead_num(misc, params):
-    """How many positional parameters the ISeq takes.
-
-    iseq.c:3437 puts lead_num in the params hash only when flags.has_lead is
-    set, which a `for` loop's block parameter is not; arg_size counts it
-    either way, and with no other parameter kind present the two agree."""
+    """How many positional parameters the ISeq takes. iseq.c:3437 omits
+    lead_num unless flags.has_lead is set, which a `for` loop's block
+    parameter is not; arg_size counts it either way."""
     lead = _int_or(boot.hash_aref(params, 'lead_num'), 0)
     if lead == 0 and _extra_params(params) == '':
         return _int_or(boot.hash_aref(misc, 'arg_size'), 0)
