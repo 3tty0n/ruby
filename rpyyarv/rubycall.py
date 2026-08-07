@@ -1,6 +1,7 @@
 """The one door from RPython into CRuby's method dispatch."""
 
 import boot
+import debug
 import symbols
 import value
 from rlib import dont_look_inside, elidable
@@ -37,26 +38,31 @@ def rid(mid):
 
 @dont_look_inside
 def call(recv, mid, args):
+    debug.count_foreign()
     return boot.funcallv(recv, rid(mid), args, symbols.name_of(mid))
 
 
 @dont_look_inside
 def call1(recv, mid, arg):
+    debug.count_foreign()
     return boot.funcallv(recv, rid(mid), [arg], symbols.name_of(mid))
 
 
 @dont_look_inside
 def call0(recv, mid):
+    debug.count_foreign()
     return boot.funcallv(recv, rid(mid), [], symbols.name_of(mid))
 
 
 @dont_look_inside
 def call2(recv, mid, a, b):
+    debug.count_foreign()
     return boot.funcallv(recv, rid(mid), [a, b], symbols.name_of(mid))
 
 
 @dont_look_inside
 def call_with_block(recv, mid, args, handle):
+    debug.count_foreign()
     return boot.call_with_block(recv, rid(mid), args, handle,
                                 symbols.name_of(mid))
 

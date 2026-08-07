@@ -22,9 +22,13 @@ LIBVAR = "DYLD_LIBRARY_PATH" if platform.system() == "Darwin" else "LD_LIBRARY_P
 
 ENGINES = [
     ("cruby", [os.path.join(BUILD, "ruby"), "--disable-gems"]),
+    ("cruby+yjit", [os.path.join(BUILD, "ruby"), "--yjit", "--disable-gems"]),
+    ("cruby+zjit", [os.path.join(BUILD, "ruby"), "--zjit", "--disable-gems"]),
     ("rpyyarv", [os.path.join(ROOT, "rpyyarv")]),
     ("rpyyarv-jit", [os.path.join(ROOT, "rpyyarv-jit")]),
 ]
+
+CRUBY_ENGINES = ("cruby", "cruby+yjit", "cruby+zjit")
 
 
 def env_for_run():
@@ -46,6 +50,13 @@ def run_once(argv, script, env):
     return proc.stdout.decode("utf-8", "replace").strip(), elapsed, None
 
 
+def flags_supported(argv, env):
+    """A JIT flag the build lacks makes ruby exit nonzero before running anything."""
+    proc = subprocess.run(argv + ["-e", ""], stdout=subprocess.DEVNULL,
+                          stderr=subprocess.DEVNULL, env=env)
+    return proc.returncode == 0
+
+
 def fmt(value):
     return "%.3f" % value if value is not None else "-"
 
@@ -63,17 +74,19 @@ def main():
         print("no benchmarks matched", file=sys.stderr)
         return 1
 
+    env = env_for_run()
     engines = []
     for name, argv in ENGINES:
-        if os.path.exists(argv[0]) and os.access(argv[0], os.X_OK):
-            engines.append((name, argv))
-        else:
+        if not (os.path.exists(argv[0]) and os.access(argv[0], os.X_OK)):
             print("note: skipping %s (%s not found)" % (name, argv[0]))
+        elif not flags_supported(argv, env):
+            print("note: skipping %s (flags unsupported by this build)" % name)
+        else:
+            engines.append((name, argv))
     if not engines:
         print("no engines available", file=sys.stderr)
         return 1
 
-    env = env_for_run()
     rows = []
     failed = False
 
@@ -108,12 +121,14 @@ def main():
                                            "  [" + " | ".join(notes) + "]" if notes else ""))
 
     print()
-    headers = ["benchmark"] + [e for e, _ in engines] + ["jit/cruby"]
+    headers = ["benchmark"] + [e for e, _ in engines] + ["jit/cruby*"]
     table = []
     for name, checksum, times, _ in rows:
         cells = [name] + [fmt(times.get(e)) for e, _ in engines]
-        c, j = times.get("cruby"), times.get("rpyyarv-jit")
-        cells.append("%.2fx" % (j / c) if c and j else "-")
+        # Ratio is against the fastest CRuby variant, whichever engine that is.
+        best_c = min([times[e] for e in CRUBY_ENGINES if times.get(e)] or [None])
+        j = times.get("rpyyarv-jit")
+        cells.append("%.2fx" % (j / best_c) if best_c and j else "-")
         table.append(cells)
 
     widths = [max(len(r[i]) for r in [headers] + table) for i in range(len(headers))]
@@ -123,7 +138,7 @@ def main():
     print("  ".join("-" * w for w in widths))
     for r in table:
         print(line(r))
-    print("\nbest of %d reps, seconds" % args.reps)
+    print("\nbest of %d reps, seconds; cruby* = fastest CRuby variant per row" % args.reps)
 
     if failed:
         print("\nFAILED: see notes above", file=sys.stderr)

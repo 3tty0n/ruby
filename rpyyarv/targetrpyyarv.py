@@ -54,7 +54,14 @@ def entry_point(argv):
                    'assumes; the Array fast paths would misread it')
         return 1
 
+    debug.configure_coverage()
     dispatch.install()
+
+    if not helpers.refresh():
+        debug.note('boot_shim.c watches a different set of basic operators '
+                   'than helpers.py names; a redefined operator would go '
+                   'unnoticed')
+        return 1
     interp.install()
 
     # RPYYARV_GC_NO_HOOK leaves the escaped VALUEs unreachable on purpose.
@@ -65,8 +72,17 @@ def entry_point(argv):
 
     try:
         prelude.install()
-        w_iseq = loader.load(bootiseq.load(iseqw))
-        interp.run(w_iseq)
+        result = loader.load(bootiseq.load(iseqw))
+        debug.report_iseqs(result.supported, result.total)
+        if len(result.reasons) > 0:
+            # No per-method granularity: a method body RPyYARV cannot run has
+            # to be defined into CRuby, which needs the cref and the enclosing
+            # binding RPyYARV's frames do not carry.
+            debug.note('running under CRuby instead: %d unsupported iseq(s), '
+                       'first %s' % (len(result.reasons), result.reasons[0]))
+            return interp.run_in_cruby()
+        interp.run(result.w_iseq)
+        debug.report_sends()
     except RubyException, e:
         # Nothing rescued it: CRuby prints it and picks the exit status.
         return boot.cleanup_with_error(e.value)

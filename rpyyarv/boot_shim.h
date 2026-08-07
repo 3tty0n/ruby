@@ -22,6 +22,10 @@ void *rpyyarv_boot(int argc, char **argv, int *status_out);
 
 int rpyyarv_cleanup(int status);
 
+/* ruby_run_node on the node rpyyarv_boot returned: runs the script under
+   CRuby and cleans up, answering the exit status. */
+int rpyyarv_run_node(void *n);
+
 /* Zero-arg method call guarded by rb_protect. *state is non-zero on raise. */
 uintptr_t rpyyarv_call0(uintptr_t recv, const char *mid, int *state);
 
@@ -190,6 +194,18 @@ uintptr_t rpyyarv_vm_core(void);
 
 /* Pin a VALUE for the process lifetime; used for the classes RPyYARV made. */
 void rpyyarv_gc_register_mark_object(uintptr_t v);
+
+/* An ArgumentError worded exactly as rb_arity_error_new does; max < 0 is
+   CRuby's UNLIMITED_ARGUMENTS. */
+uintptr_t rpyyarv_arity_error(int given, int min, int max, int *state);
+
+/*
+ * One bit per (class, basic operator) pair whose fast path RPyYARV takes,
+ * set when the pair is no longer CRuby's own definition. The pair count is
+ * returned above the bits so a caller can refuse a shim it disagrees with.
+ */
+#define RPYYARV_BOP_COUNT_SHIFT 32
+uintptr_t rpyyarv_bop_mask(void);
 
 #ifdef __cplusplus
 }

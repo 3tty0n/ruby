@@ -40,6 +40,14 @@ rpyyarv_cleanup(int status)
     return ruby_cleanup(status);
 }
 
+/* The whole script back to CRuby: the node rpyyarv_boot held back is
+   ISEQ_TYPE_MAIN, which vm_set_top_stack (vm.c:888) refuses to eval. */
+int
+rpyyarv_run_node(void *n)
+{
+    return ruby_run_node(n);
+}
+
 struct call0_args {
     VALUE recv;
     ID    mid;
@@ -909,6 +917,88 @@ uintptr_t
 rpyyarv_vm_core(void)
 {
     return (uintptr_t)rb_mRubyVMFrozenCore;
+}
+
+struct arity_args {
+    int given;
+    int min;
+    int max;
+};
+
+/* rb_arity_error_new (vm_insnhelper.c:487), which is static there. */
+static VALUE
+arity_error_body(VALUE argp)
+{
+    struct arity_args *p = (struct arity_args *)argp;
+    VALUE mesg = rb_sprintf("wrong number of arguments (given %d, expected %d",
+                            p->given, p->min);
+    if (p->min == p->max) {
+        /* max is not needed */
+    }
+    else if (p->max < 0) {
+        rb_str_cat_cstr(mesg, "+");
+    }
+    else {
+        rb_str_catf(mesg, "..%d", p->max);
+    }
+    rb_str_cat_cstr(mesg, ")");
+    return rb_exc_new_str(rb_eArgError, mesg);
+}
+
+uintptr_t
+rpyyarv_arity_error(int given, int min, int max, int *state)
+{
+    struct arity_args a;
+    a.given = given;
+    a.min = min;
+    a.max = max;
+    *state = 0;
+    VALUE r = rb_protect(arity_error_body, (VALUE)&a, state);
+    if (*state) return (uintptr_t)Qnil;
+    return (uintptr_t)r;
+}
+
+/*
+ * ruby_vm_redefined_flag itself is hidden in libruby (nm reports it private
+ * external), so BASIC_OP_UNREDEFINED_P is unreachable from here. This asks
+ * the same question one method entry at a time: rb_method_basic_definition_p
+ * is false exactly when the entry is no longer the one CRuby booted with,
+ * which is what vm_redefinition_check_method_type gates on (vm.c:2341).
+ * One bit per (class, operator) pair, in the order helpers.py names them.
+ */
+uintptr_t
+rpyyarv_bop_mask(void)
+{
+    uintptr_t mask = 0;
+    int i = 0;
+
+#define BOP(klass, name)                                              \
+    do {                                                              \
+        if (!rb_method_basic_definition_p((klass), rb_intern(name)))  \
+            mask |= ((uintptr_t)1 << i);                              \
+        i++;                                                          \
+    } while (0)
+
+    BOP(rb_cInteger, "+");
+    BOP(rb_cInteger, "-");
+    BOP(rb_cInteger, "*");
+    BOP(rb_cInteger, "/");
+    BOP(rb_cInteger, "%");
+    BOP(rb_cInteger, "==");
+    BOP(rb_cInteger, "<");
+    BOP(rb_cInteger, "<=");
+    BOP(rb_cInteger, ">");
+    BOP(rb_cInteger, ">=");
+    BOP(rb_cInteger, "&");
+    BOP(rb_cInteger, "|");
+    BOP(rb_cArray, "[]");
+    BOP(rb_cArray, "[]=");
+    BOP(rb_cArray, "length");
+    BOP(rb_cArray, "size");
+    BOP(rb_cArray, "empty?");
+#undef BOP
+
+    return (uintptr_t)i << RPYYARV_BOP_COUNT_SHIFT | mask;
 }
 
 uintptr_t

@@ -56,38 +56,60 @@ class ConstPool(object):
         return idx
 
 
+class LoadResult(object):
+    """What one program's load produced: the root ISeq, how much of the
+    program RPyYARV could represent, and why the rest it could not."""
+    def __init__(self, w_iseq, total, supported, reasons):
+        self.w_iseq = w_iseq
+        self.total = total
+        self.supported = supported
+        self.reasons = reasons
+
+
 class Loader(object):
     def __init__(self, program):
         self.program = program
-        self.missing = {}           # unimplemented name -> occurrences
-        self.missing_names = []     # first seen first, for a stable report
         self.w_iseqs = {}           # program index -> W_ISeq
+        self.reasons = []           # one per ISeq the loader gave up on
 
     def load(self):
-        self.scan()
-        if len(self.missing_names) > 0:
-            raise UnsupportedOperation(self.report())
         w_iseq = self.load_iseq(0, [])
+        self.account_for_the_rest()
         gcroots.release_load_temporaries()
-        return w_iseq
+        supported = 0
+        for index in self.w_iseqs:
+            if self.w_iseqs[index].unsupported == '':
+                supported += 1
+        return LoadResult(w_iseq, len(self.program.iseqs), supported,
+                          self.reasons)
 
-    def scan(self):
-        for raw in self.program.iseqs:
-            for insn in raw.insns:
-                self.opcode_of(insn, raw)
+    def account_for_the_rest(self):
+        """An ISeq the loader gave up on never reached the ones nested in it,
+        so the coverage figure would read as one big failure. Load them too;
+        only a program that is already falling back gets here."""
+        if len(self.reasons) == 0:
+            return
+        for index in range(len(self.program.iseqs)):
+            if index in self.w_iseqs:
+                continue
+            try:
+                self.load_iseq(index, self.parents_of(index))
+            except LoadError, e:
+                self.w_iseqs[index] = self.stub(self.program.iseqs[index],
+                                                e.msg)
 
-    def report(self):
-        parts = []
-        total = 0
-        for name in self.missing_names:
-            count = self.missing[name]
-            total += count
-            parts.append('%s x%d' % (name, count))
-        return ('%d unimplemented instruction(s) in %d occurrence(s): %s'
-                % (len(self.missing_names), total, ', '.join(parts)))
+    def parents_of(self, index):
+        """The naming scopes around an ISeq, innermost first. Empty for a
+        front end that did not record them; see rawiseq.RawISeq.parent."""
+        out = []
+        at = self.program.iseqs[index].parent
+        while at >= 0 and len(out) <= optable.MAX_LOCAL_LEVEL:
+            out.append(self.program.iseqs[at])
+            at = self.program.iseqs[at].parent
+        return out
 
     def opcode_of(self, insn, raw):
-        """The base opcode, or -1 once the name is counted as missing."""
+        """The base opcode, or -1 when RPyYARV does not implement it."""
         name = insn.name
         if name.startswith(insns.TRACE_PREFIX):
             raise UnsupportedOperation(
@@ -103,11 +125,6 @@ class Loader(object):
                 "and insns.py come from different rubies"
                 % (name, raw.name))
         if not optable.IMPLEMENTED[op]:
-            if name in self.missing:
-                self.missing[name] = self.missing[name] + 1
-            else:
-                self.missing[name] = 1
-                self.missing_names.append(name)
             return -1
         return op
 
@@ -147,13 +164,28 @@ class Loader(object):
         return operands
 
     def load_iseq(self, index, parents):
-        """A getlocal at level N names a local of parents[N-1]."""
+        """A getlocal at level N names a local of parents[N-1]. An ISeq
+        RPyYARV cannot represent becomes a stub instead of a failed load, so
+        the rest of the program still loads and the driver can hand the whole
+        script to CRuby."""
         if index in self.w_iseqs:
             return self.w_iseqs[index]
         if index < 0 or index >= len(self.program.iseqs):
             raise LoadError('iseq %d is not in the program' % index)
         raw = self.program.iseqs[index]
+        try:
+            w_iseq = self.build_iseq(raw, parents)
+        except UnsupportedOperation, e:
+            w_iseq = self.stub(raw, e.msg)
+        self.w_iseqs[index] = w_iseq
+        return w_iseq
 
+    def stub(self, raw, reason):
+        self.reasons.append("'%s': %s" % (raw.name, reason))
+        return W_ISeq(raw.name, [insns.LEAVE], [], [], [], raw.nlocals,
+                      raw.stack_max, simple_params=False, unsupported=reason)
+
+    def build_iseq(self, raw, parents):
         for entry in raw.catches:
             if entry.kind not in CATCH_KINDS and \
                     entry.kind not in IGNORED_CATCH_TYPES:
@@ -172,11 +204,14 @@ class Loader(object):
         for insn in raw.insns:
             op = self.opcode_of(insn, raw)
             if op < 0:
-                raise UnsupportedOperation(self.report())
+                raise UnsupportedOperation("'%s' is not implemented"
+                                           % insn.name)
             opcodes.append(op)
             operands.append(self.operands_of(insn, op, raw))
             starts.append(pc)
             pc += 1 + optable.NUM_OPERANDS[op]
+
+        self.check_vmcore(opcodes, operands, raw)
 
         labels = {}
         for name in raw.labels:
@@ -199,15 +234,84 @@ class Loader(object):
                                         labels, parents)
                 at += 1
 
+        opt_table = self.opt_table(raw, labels)
+        param_error = ''
+        if raw.extra_params != '':
+            param_error = ("'%s' takes %s parameter(s), which RPyYARV does "
+                           "not support" % (raw.name, raw.extra_params))
+        simple = (param_error == '' and len(opt_table) == 0
+                  and raw.rest_start < 0 and raw.post_num == 0)
+        self.check_param_slots(raw, opt_table)
+        opt_num = len(opt_table) - 1 if len(opt_table) > 0 else 0
+        autosplat = (not raw.ambiguous_param0
+                     and (raw.lead_num + raw.post_num > 0 or opt_num > 1))
+
         consts = [v for v in pool.consts]
         w_iseq = W_ISeq(raw.name, code, consts, [w for w in pool.iseqs],
                         [c for c in pool.callinfos], raw.nlocals,
-                        raw.stack_max, raw.lead_num, raw.extra_params == '',
+                        raw.stack_max, raw.lead_num, simple,
                         self.catches(raw, labels, parents),
-                        [p for p in pool.paths])
+                        [p for p in pool.paths], opt_table, raw.rest_start,
+                        raw.post_start, raw.post_num, param_error, '',
+                        autosplat)
         gcroots.register_consts(consts)
-        self.w_iseqs[index] = w_iseq
         return w_iseq
+
+    # Everything the compiler may push between the FrozenCore receiver and
+    # the send that consumes it, for `alias` and `undef`.
+    VMCORE_PUSHES = [insns.PUTSPECIALOBJECT, insns.PUTOBJECT, insns.PUTNIL,
+                     insns.PUTSELF]
+    VMCORE_SENDS = ['core#set_method_alias', 'core#undef_method']
+
+    def check_vmcore(self, opcodes, operands, raw):
+        """RubyVM::FrozenCore is the receiver of `alias`, `undef`, `lambda`
+        and `proc` alike (vm.c:4274); only the first two reach a method
+        RPyYARV implements, so the send that takes it has to be one of them.
+        """
+        for i in range(len(opcodes)):
+            if opcodes[i] != insns.PUTSPECIALOBJECT:
+                continue
+            if self.int_of(operands[i][0], opcodes[i], raw, 'object type') != \
+                    optable.SPECIAL_OBJECT_VMCORE:
+                continue
+            j = i + 1
+            while j < len(opcodes) and opcodes[j] in self.VMCORE_PUSHES:
+                j += 1
+            mid = ''
+            if j < len(opcodes) and (opcodes[j] == insns.SEND or
+                                     opcodes[j] == insns.OPT_SEND_WITHOUT_BLOCK):
+                mid = operands[j][0].strval
+            if mid not in self.VMCORE_SENDS:
+                raise UnsupportedOperation(
+                    "RubyVM::FrozenCore#%s is not supported"
+                    % (mid if mid != '' else '<unknown>'))
+
+    def opt_table(self, raw, labels):
+        """iseq.c:3425 writes opt_num+1 labels; anything shorter is not a
+        table vm_args.c:906 could index."""
+        if len(raw.opt_labels) == 0:
+            return []
+        if len(raw.opt_labels) < 2:
+            raise LoadError("'%s' has a %d-entry opt table"
+                            % (raw.name, len(raw.opt_labels)))
+        out = []
+        for name in raw.opt_labels:
+            if name not in labels:
+                raise LoadError("the opt table of '%s' names unknown label %s"
+                                % (raw.name, name))
+            out.append(labels[name])
+        return out
+
+    def check_param_slots(self, raw, opt_table):
+        opt_num = len(opt_table) - 1 if len(opt_table) > 0 else 0
+        top = raw.lead_num + opt_num
+        if raw.rest_start >= 0:
+            top = raw.rest_start + 1
+        if raw.post_num > 0:
+            top = raw.post_start + raw.post_num
+        if top > raw.nlocals:
+            raise LoadError("'%s' takes %d parameter(s) but has %d local(s)"
+                            % (raw.name, top, raw.nlocals))
 
     def catches(self, raw, labels, parents):
         """A catch ISeq reads the enclosing locals at level 1, so raw itself
@@ -250,6 +354,18 @@ class Loader(object):
                 raise UnsupportedOperation(
                     "expandarray with a splat or post arguments in '%s' is "
                     "not supported" % raw.name)
+        elif op == insns.THROW:
+            tag = self.int_of(ops[0], op, raw, 'throw state') & \
+                optable.TAG_MASK
+            if tag == optable.TAG_RETRY:
+                raise UnsupportedOperation('retry is not supported')
+            if tag == optable.TAG_RETURN or tag == optable.TAG_REDO:
+                raise UnsupportedOperation(
+                    'throw with tag %d (return/redo) is not supported' % tag)
+        elif op == insns.INVOKESUPER:
+            if ops[1].kind != rawiseq.OP_NIL:
+                raise UnsupportedOperation(
+                    'super with a block is not supported')
         elif op == insns.PUTSPECIALOBJECT:
             kind = self.int_of(ops[0], op, raw, 'object type')
             if kind < optable.SPECIAL_OBJECT_VMCORE or \
@@ -399,9 +515,23 @@ class Loader(object):
         # attached, and every other reason has its own bit outside this mask.
         simple = (not operand.has_kwarg
                   and (flags & ~optable.SIMPLE_CALL_FLAGS) == 0)
+        if not simple:
+            # Refused here, not at the send: an ISeq holding a call site the
+            # interpreter cannot make is one it cannot finish running.
+            raise UnsupportedOperation(
+                "the call to '%s' passes %s, which RPyYARV does not support"
+                % (operand.strval, self.call_flag_name(operand)))
         return W_CallInfo(symbols.intern(operand.strval), operand.intval,
                           simple, (flags & optable.CALL_FLAG_FCALL) != 0,
                           (flags & optable.CALL_FLAG_SUPER) != 0)
+
+    def call_flag_name(self, operand):
+        for flag, name in optable.CALL_FLAG_NAMES:
+            if operand.flag & flag:
+                return name
+        if operand.has_kwarg:
+            return 'keyword'
+        return 'arguments'
 
     def int_of(self, operand, op, raw, what):
         if operand.kind != rawiseq.OP_INT:
@@ -421,6 +551,15 @@ def load(program):
     return Loader(program).load()
 
 
+def load_strict(program):
+    """RPyYARV's own code, which it must be able to run: no CRuby fallback."""
+    result = load(program)
+    if len(result.reasons) > 0:
+        raise UnsupportedOperation('; '.join(result.reasons))
+    return result.w_iseq
+
+
 def load_dump(text):
-    """The only format-aware entry point; the boot path calls load()."""
-    return load(iseqdump.parse(text))
+    """The only format-aware entry point; the boot path calls load(). No
+    CRuby to fall back to here, so this one refuses what it cannot load."""
+    return load_strict(iseqdump.parse(text))

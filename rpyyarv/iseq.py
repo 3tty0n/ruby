@@ -36,11 +36,15 @@ class W_ISeq(object):
     # consts[idx] away when pc and iseq are green.
     _immutable_fields_ = ['name', 'code[*]', 'consts[*]', 'iseqs[*]',
                           'callinfos[*]', 'nlocals', 'stack_max', 'nparams',
-                          'simple_params', 'catches[*]', 'paths[*]']
+                          'simple_params', 'catches[*]', 'paths[*]',
+                          'opt_table[*]', 'rest_start', 'post_start',
+                          'post_num', 'param_error', 'unsupported',
+                          'autosplat']
 
     def __init__(self, name, code, consts, iseqs, callinfos, nlocals,
                  stack_max, nparams=0, simple_params=True, catches=None,
-                 paths=None):
+                 paths=None, opt_table=None, rest_start=-1, post_start=-1,
+                 post_num=0, param_error='', unsupported='', autosplat=False):
         self.name = name
         self.code = code
         # VALUEs built at load time; gcroots keeps them reachable.
@@ -49,11 +53,24 @@ class W_ISeq(object):
         self.callinfos = callinfos
         self.nlocals = nlocals
         self.stack_max = stack_max
-        # Required parameters, which YARV puts in locals[0:nparams] in order.
+        # Leading required parameters, which YARV puts in locals[0:nparams].
         self.nparams = nparams
-        # False once the loader saw any other parameter kind; the call path
-        # refuses those rather than guessing.
+        # False once the loader saw anything but leading required parameters;
+        # the call path then walks the full shape below.
         self.simple_params = simple_params
+        # One start pc per number of optionals given (vm_args.c:906), empty
+        # when the ISeq takes none.
+        self.opt_table = opt_table if opt_table is not None else []
+        # Local slots for *rest and the post parameters; -1 when absent.
+        self.rest_start = rest_start
+        self.post_start = post_start
+        self.post_num = post_num
+        # Non-empty when the shape has a kind the call path cannot place.
+        self.param_error = param_error
+        # Non-empty when the loader could not represent this ISeq at all.
+        self.unsupported = unsupported
+        # A single yielded Array spreads over these parameters (vm_args.c:855).
+        self.autosplat = autosplat
         # rescue/ensure entries in CRuby's search order; the first match wins.
         self.catches = catches if catches is not None else []
         self.paths = paths if paths is not None else []

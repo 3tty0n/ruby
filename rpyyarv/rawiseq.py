@@ -68,7 +68,8 @@ class RawCatch(object):
 
 class RawISeq(object):
     def __init__(self, name, type_, nlocals, stack_max, lead_num,
-                 extra_params, catches):
+                 extra_params, catches, opt_labels=None, rest_start=-1,
+                 post_start=-1, post_num=0, ambiguous_param0=False):
         self.name = name
         self.type = type_
         self.nlocals = nlocals
@@ -77,9 +78,20 @@ class RawISeq(object):
         # Names of the other parameter kinds CRuby reported, if any.
         self.extra_params = extra_params
         self.catches = catches
+        # iseq.c:3425 writes one label per optional plus one for "all given".
+        self.opt_labels = opt_labels if opt_labels is not None else []
+        # Local slots, as iseq.c:3438 spells them; -1 when the kind is absent.
+        self.rest_start = rest_start
+        self.post_start = post_start
+        self.post_num = post_num
+        # `{|a| }`, whose single parameter takes a yielded Array whole.
+        self.ambiguous_param0 = ambiguous_param0
         self.insns = []
         # label name -> index into insns; the loader turns it into a pc.
         self.labels = {}
+        # Enclosing ISeq, -1 for the outermost; the naming scope a getlocal at
+        # level 1 reaches. Only bootiseq.py fills it in.
+        self.parent = -1
 
     def add_insn(self, insn):
         self.insns.append(insn)

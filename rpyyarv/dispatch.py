@@ -111,6 +111,29 @@ def lookup(klass, mid):
 
 
 @elidable
+def _lookup_core(klass, mid, version):
+    """_lookup without the Object fallback, so a toplevel `def +` does not
+    read as a redefinition of Integer#+."""
+    methods = registry.methods
+    supers = registry.supers
+    k = klass
+    n = 0
+    while k != 0 and n < MAX_ANCESTORS:
+        table = methods.get(k, None)
+        if table is not None:
+            entry = table.get(mid, None)
+            if entry is not None:
+                return entry
+        k = supers.get(k, 0)
+        n += 1
+    return None
+
+
+def lookup_core(klass, mid):
+    return _lookup_core(klass, mid, registry.version)
+
+
+@elidable
 def _lookup_super(owner, mid, version):
     """_lookup starting above owner. No Object fallback, or super would find
     an unrelated toplevel def."""

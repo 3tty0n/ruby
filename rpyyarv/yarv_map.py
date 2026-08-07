@@ -119,8 +119,27 @@ LOCAL_SLOT_MASK = (1 << LOCAL_LEVEL_SHIFT) - 1
 #     slot = nlocals - operand + ENV_DATA_SIZE - 1
 ENV_DATA_SIZE = 3
 
-# vm_callinfo.h. Outside this mask (splat, block argument, keywords,
-# forwarding) the arguments reach the callee differently.
+# vm_callinfo.h, enum vm_call_flag_bits. Outside SIMPLE_CALL_FLAGS the
+# arguments reach the callee differently.
+CALL_FLAG_ARGS_SPLAT = 0x01
+CALL_FLAG_ARGS_BLOCKARG = 0x02
+CALL_FLAG_KWARG = 0x20
+CALL_FLAG_KW_SPLAT = 0x40
+CALL_FLAG_OPT_SEND = 0x400
+CALL_FLAG_KW_SPLAT_MUT = 0x800
+CALL_FLAG_ARGS_SPLAT_MUT = 0x1000
+CALL_FLAG_FORWARDING = 0x2000
+
+# Which unsupported flag a call site carries, most informative first.
+CALL_FLAG_NAMES = [
+    (CALL_FLAG_FORWARDING, '...'),
+    (CALL_FLAG_ARGS_SPLAT, '*splat'),
+    (CALL_FLAG_ARGS_BLOCKARG, '&block'),
+    (CALL_FLAG_KWARG, 'keyword'),
+    (CALL_FLAG_KW_SPLAT, '**keyword splat'),
+    (CALL_FLAG_OPT_SEND, 'send'),
+]
+
 CALL_FLAG_FCALL = 0x04
 CALL_FLAG_VCALL = 0x08
 CALL_FLAG_ARGS_SIMPLE = 0x10

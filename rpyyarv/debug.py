@@ -44,6 +44,49 @@ class _State(object):
 state = _State()
 
 
+class _Coverage(object):
+    # Quasi-immutable, so the count in the send path folds away when it is
+    # off; see rubycall._Stress.
+    _immutable_fields_ = ['enabled?']
+
+    def __init__(self):
+        self.enabled = False
+        self.native = 0         # sends RPyYARV ran itself
+        self.foreign = 0        # sends that went out through rb_funcallv
+
+
+coverage = _Coverage()
+
+
+def count_native():
+    if coverage.enabled:
+        coverage.native += 1
+
+
+@dont_look_inside
+def count_foreign():
+    if coverage.enabled:
+        coverage.foreign += 1
+
+
+def configure_coverage():
+    if os.environ.get('RPYYARV_COVERAGE') == '1':
+        coverage.enabled = True
+
+
+def report_iseqs(supported, total):
+    if not coverage.enabled:
+        return
+    percent = 100 * supported // total if total > 0 else 0
+    note('iseq coverage %d/%d (%d%%)' % (supported, total, percent))
+
+
+def report_sends():
+    if not coverage.enabled:
+        return
+    note('sends: rpyyarv %d, cruby %d' % (coverage.native, coverage.foreign))
+
+
 def write(s):
     oswrite(2, s)
 

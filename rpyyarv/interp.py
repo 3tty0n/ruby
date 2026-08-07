@@ -93,32 +93,151 @@ def invoke(frame, w_ci, w_block=None):
 def _enter(frame, entry, recv, recv_at, argc, mid, w_block=None):
     """Move argc arguments into a fresh frame and run it; also invokesuper."""
     callee_iseq = entry.w_iseq
-    if not callee_iseq.simple_params:
-        raise UnsupportedOperation(
-            "method '%s' has parameters RPyYARV does not support"
-            % symbols.name_of(mid))
-    if argc != callee_iseq.nparams:
-        raise UnsupportedOperation(
-            "wrong number of arguments to '%s' (given %d, expected %d)"
-            % (symbols.name_of(mid), argc, callee_iseq.nparams))
     callee = Frame(callee_iseq, recv, 0, entry)
     callee.block = w_block
-    i = 0
-    while i < argc:
-        callee.locals[i] = frame.stack[recv_at + 1 + i]
-        i += 1
+    pc = 0
+    if callee_iseq.simple_params:
+        if argc != callee_iseq.nparams:
+            _arity_error(argc, callee_iseq.nparams, callee_iseq.nparams)
+        i = 0
+        while i < argc:
+            callee.locals[i] = frame.stack[recv_at + 1 + i]
+            i += 1
+    else:
+        _refuse_iseq(callee_iseq, mid)
+        # Copied out first: the codewriter refuses a virtualizable array
+        # passed on, and the caller's frame keeps the values marked.
+        given = [0] * argc
+        i = 0
+        while i < argc:
+            given[i] = frame.stack[recv_at + 1 + i]
+            i += 1
+        pc = setup_params(callee_iseq, callee, given, False)
     _drop(frame, recv_at)
+    debug.count_native()
     if not debug.state.enabled:
-        return execute(callee_iseq, callee)
+        return execute(callee_iseq, callee, pc)
     args = []
     i = 0
     while i < argc:
         args.append(callee.locals[i])
         i += 1
     debug.trace_enter(mid, args)
-    ret = execute(callee_iseq, callee)
+    ret = execute(callee_iseq, callee, pc)
     debug.trace_leave(mid, ret)
     return ret
+
+
+def _refuse_iseq(w_iseq, mid):
+    if w_iseq.unsupported != '':
+        raise UnsupportedOperation("method '%s': %s"
+                                   % (symbols.name_of(mid),
+                                      w_iseq.unsupported))
+    if w_iseq.param_error != '':
+        raise UnsupportedOperation(w_iseq.param_error)
+
+
+@unroll_safe
+def setup_params(w_iseq, callee, args, is_block):
+    """vm_args.c setup_parameters_complex for positional arguments only:
+    lead, then post off the tail, then optionals, then the rest Array.
+    Answers the pc the opt table names (vm_args.c:906)."""
+    lead = w_iseq.nparams
+    opt_num = len(w_iseq.opt_table) - 1
+    if opt_num < 0:
+        opt_num = 0
+    post_num = w_iseq.post_num
+    rest = w_iseq.rest_start
+    post_start = w_iseq.post_start
+    # The loader checked all of these against nlocals; restated so the
+    # codewriter sees every index into the virtualizable as non-negative.
+    assert lead >= 0
+    assert post_num >= 0
+    # vm_args.c:594; a rest parameter makes the maximum unlimited.
+    min_argc = lead + post_num
+    max_argc = -1 if rest >= 0 else min_argc + opt_num
+    n = len(args)
+    if n < min_argc:
+        if not is_block:
+            _arity_error(n, min_argc, max_argc)
+    elif max_argc >= 0 and n > max_argc:
+        if not is_block:
+            _arity_error(n, min_argc, max_argc)
+        # arg_setup_block truncates instead of raising (vm_args.c:884).
+        n = max_argc
+
+    i = 0
+    while i < lead:
+        if i < n:
+            callee.locals[i] = args[i]
+        else:
+            callee.locals[i] = value.Q_NIL
+        i += 1
+
+    given = n - min_argc
+    if given < 0:
+        given = 0
+    filled = given if given < opt_num else opt_num
+    i = 0
+    while i < filled:
+        callee.locals[lead + i] = args[lead + i]
+        i += 1
+
+    if rest >= 0:
+        count = given - filled
+        values = [0] * count
+        i = 0
+        while i < count:
+            values[i] = args[lead + filled + i]
+            i += 1
+        # The caller's frame still holds these while the shim copies them
+        # onto the machine stack.
+        ary = rubycall.ary_new(values)
+        assert rest >= 0
+        callee.locals[rest] = ary
+
+    if post_num > 0:
+        assert post_start >= 0
+        i = 0
+        while i < post_num:
+            take = n - post_num + i
+            if take >= 0 and take < n:
+                callee.locals[post_start + i] = args[take]
+            else:
+                callee.locals[post_start + i] = value.Q_NIL
+            i += 1
+
+    if opt_num > 0:
+        return w_iseq.opt_table[filled]
+    return 0
+
+
+@dont_look_inside
+def _arity_error(given, min_argc, max_argc):
+    raise RubyException(boot.arity_error(given, min_argc, max_argc),
+                        'ArgumentError')
+
+
+@unroll_safe
+def _opt_send(frame, mid, argc):
+    """The send an opt_* instruction falls through to when its fast path
+    answered Qundef, as vm_insnhelper.c's CALL_SIMPLE_METHOD does. The
+    operands are still on the frame's stack, so they stay marked."""
+    recv_at = frame.sp - argc - 1
+    assert recv_at >= 0
+    rubycall.gc_stress_point()
+    recv = frame.stack[recv_at]
+    klass = promote(value.class_of(recv))
+    entry = dispatch.lookup(klass, mid)
+    if entry is not None and not entry.private:
+        return _enter(frame, entry, recv, recv_at, argc, mid, None)
+    args = []
+    i = 0
+    while i < argc:
+        args.append(frame.stack[recv_at + 1 + i])
+        i += 1
+    _drop(frame, recv_at)
+    return rubycall.call(recv, mid, args)
 
 
 @unroll_safe
@@ -169,7 +288,9 @@ def _core_method(frame, w_ci, recv, recv_at, argc):
         dispatch.undefine(cbase, name)
         args = [cbase, frame.stack[recv_at + 2]]
         _drop(frame, recv_at)
-        return rubycall.call(recv, w_ci.mid, args)
+        ret = rubycall.call(recv, w_ci.mid, args)
+        helpers.refresh()
+        return ret
     old = _sym_mid(frame.stack[recv_at + 3])
     entry = dispatch.own_lookup(cbase, old)
     dispatch.undefine(cbase, name)
@@ -180,7 +301,9 @@ def _core_method(frame, w_ci, recv, recv_at, argc):
         return value.Q_NIL
     args = [cbase, frame.stack[recv_at + 2], frame.stack[recv_at + 3]]
     _drop(frame, recv_at)
-    return rubycall.call(recv, w_ci.mid, args)
+    ret = rubycall.call(recv, w_ci.mid, args)
+    helpers.refresh()
+    return ret
 
 
 @dont_look_inside
@@ -256,17 +379,39 @@ def call_block(w_block, args):
     callee.defining_frame = outer
     callee.block = w_block.outer
     callee.own_block = w_block
-    n = len(args)
-    if n > b_iseq.nparams:
-        n = b_iseq.nparams
-    i = 0
-    while i < n:
-        callee.locals[i] = args[i]
-        i += 1
+    if b_iseq.autosplat and len(args) == 1:
+        args = _autosplat(args)
+    pc = 0
+    if b_iseq.simple_params:
+        n = len(args)
+        if n > b_iseq.nparams:
+            n = b_iseq.nparams
+        i = 0
+        while i < n:
+            callee.locals[i] = args[i]
+            i += 1
+    else:
+        pc = setup_params(b_iseq, callee, args, True)
     try:
-        return execute(b_iseq, callee)
+        return execute(b_iseq, callee, pc)
     except block_mod.BlockNext, e:
         return e.value
+
+
+@dont_look_inside
+def _autosplat(args):
+    """One yielded value spread over several block parameters. TODO: CRuby
+    asks for to_ary (vm_args.c:863), this only takes a real Array."""
+    v = args[0]
+    if value.is_immediate(v) or not boot.is_array(v):
+        return args
+    n = boot.ary_len(v)
+    out = [0] * n
+    i = 0
+    while i < n:
+        out[i] = boot.ary_entry(v, i)
+        i += 1
+    return out
 
 
 @unroll_safe
@@ -565,7 +710,10 @@ def _const_base(frame):
 
 def _defineclass(mid, w_body, cbase, super_v):
     klass = dispatch.define_class(cbase, mid, super_v)
-    return execute(w_body, Frame(w_body, klass, klass))
+    ret = execute(w_body, Frame(w_body, klass, klass))
+    # Reopening a class is where CRuby-side operator redefinitions show up.
+    helpers.refresh()
+    return ret
 
 
 @dont_look_inside
@@ -611,6 +759,19 @@ def _match_one(target, pattern, flag):
     return value.is_true(rubycall.call1(pattern, EQQ, target))
 
 
+def _binop(frame, recv, arg, mid):
+    """Both operands back on the stack, where the mark hook reaches them,
+    before the send that may allocate."""
+    frame.push(recv)
+    frame.push(arg)
+    return _opt_send(frame, mid, 1)
+
+
+def _unop(frame, recv, mid):
+    frame.push(recv)
+    return _opt_send(frame, mid, 0)
+
+
 def get_printable_location(pc, iseq):
     return '%s@%d %s' % (iseq.name, pc, insns.NAMES[iseq.code[pc]])
 
@@ -625,23 +786,22 @@ def _epc(iseq, pc):
     return pc + 1 + optable.NUM_OPERANDS[iseq.code[pc]]
 
 
-def execute(iseq, frame):
+def execute(iseq, frame, pc=0):
     """Two shapes on purpose: the handler shape below stops the JIT inlining
     the call, so an ISeq with no catch table keeps a plain tail call instead.
     iseq is green, so the branch folds away."""
     if len(iseq.catches) == 0:
         gcroots.push_frame(frame)
         try:
-            return _execute(iseq, frame, 0)
+            return _execute(iseq, frame, pc)
         finally:
             gcroots.pop_frame(frame)
-    return _execute_guarded(iseq, frame)
+    return _execute_guarded(iseq, frame, pc)
 
 
-def _execute_guarded(iseq, frame):
+def _execute_guarded(iseq, frame, pc):
     gcroots.push_frame(frame)
     try:
-        pc = 0
         while True:
             try:
                 return _execute(iseq, frame, pc)
@@ -727,35 +887,51 @@ def _execute(iseq, frame, pc):
         elif opcode == insns.OPT_PLUS:
             b = frame.pop()
             a = frame.pop()
-            frame.push(helpers.add(a, b))
+            v = helpers.add(a, b)
+            frame.push(v if v != value.Q_UNDEF
+                       else _binop(frame, a, b, helpers.PLUS))
         elif opcode == insns.OPT_MINUS:
             b = frame.pop()
             a = frame.pop()
-            frame.push(helpers.sub(a, b))
+            v = helpers.sub(a, b)
+            frame.push(v if v != value.Q_UNDEF
+                       else _binop(frame, a, b, helpers.MINUS))
         elif opcode == insns.OPT_MULT:
             b = frame.pop()
             a = frame.pop()
-            frame.push(helpers.mul(a, b))
+            v = helpers.mul(a, b)
+            frame.push(v if v != value.Q_UNDEF
+                       else _binop(frame, a, b, helpers.MULT))
         elif opcode == insns.OPT_LT:
             b = frame.pop()
             a = frame.pop()
-            frame.push(helpers.lt(a, b))
+            v = helpers.lt(a, b)
+            frame.push(v if v != value.Q_UNDEF
+                       else _binop(frame, a, b, helpers.LT))
         elif opcode == insns.OPT_GT:
             b = frame.pop()
             a = frame.pop()
-            frame.push(helpers.gt(a, b))
+            v = helpers.gt(a, b)
+            frame.push(v if v != value.Q_UNDEF
+                       else _binop(frame, a, b, helpers.GT))
         elif opcode == insns.OPT_LE:
             b = frame.pop()
             a = frame.pop()
-            frame.push(helpers.le(a, b))
+            v = helpers.le(a, b)
+            frame.push(v if v != value.Q_UNDEF
+                       else _binop(frame, a, b, helpers.LE))
         elif opcode == insns.OPT_GE:
             b = frame.pop()
             a = frame.pop()
-            frame.push(helpers.ge(a, b))
+            v = helpers.ge(a, b)
+            frame.push(v if v != value.Q_UNDEF
+                       else _binop(frame, a, b, helpers.GE))
         elif opcode == insns.OPT_EQ:
             b = frame.pop()
             a = frame.pop()
-            frame.push(helpers.eq(a, b))
+            v = helpers.eq(a, b)
+            frame.push(v if v != value.Q_UNDEF
+                       else _binop(frame, a, b, helpers.EQ))
         elif opcode == insns.OBJTOSTRING:
             frame.push(_to_s(frame.pop()))
         elif opcode == insns.ANYTOSTRING:
@@ -777,15 +953,21 @@ def _execute(iseq, frame, pc):
         elif opcode == insns.OPT_DIV:
             b = frame.pop()
             a = frame.pop()
-            frame.push(helpers.div(a, b))
+            v = helpers.div(a, b)
+            frame.push(v if v != value.Q_UNDEF
+                       else _binop(frame, a, b, helpers.DIV))
         elif opcode == insns.OPT_MOD:
             b = frame.pop()
             a = frame.pop()
-            frame.push(helpers.mod(a, b))
+            v = helpers.mod(a, b)
+            frame.push(v if v != value.Q_UNDEF
+                       else _binop(frame, a, b, helpers.MOD))
         elif opcode == insns.OPT_NEQ:
             b = frame.pop()
             a = frame.pop()
-            frame.push(helpers.neq(a, b))
+            v = helpers.neq(a, b)
+            frame.push(v if v != value.Q_UNDEF
+                       else _binop(frame, a, b, helpers.NEQ))
         elif opcode == insns.GETINSTANCEVARIABLE:
             mid = code[pc]
             pc += 1
@@ -960,11 +1142,15 @@ def _execute(iseq, frame, pc):
         elif opcode == insns.OPT_AND:
             b = frame.pop()
             a = frame.pop()
-            frame.push(helpers.and_(a, b))
+            v = helpers.and_(a, b)
+            frame.push(v if v != value.Q_UNDEF
+                       else _binop(frame, a, b, helpers.AND))
         elif opcode == insns.OPT_OR:
             b = frame.pop()
             a = frame.pop()
-            frame.push(helpers.or_(a, b))
+            v = helpers.or_(a, b)
+            frame.push(v if v != value.Q_UNDEF
+                       else _binop(frame, a, b, helpers.OR))
         elif opcode == insns.NEWRANGE:
             flag = code[pc]
             pc += 1
@@ -982,24 +1168,41 @@ def _execute(iseq, frame, pc):
         elif opcode == insns.OPT_AREF:
             idx = frame.pop()
             recv = frame.pop()
-            frame.push(helpers.aref(recv, idx))
+            v = helpers.aref(recv, idx)
+            frame.push(v if v != value.Q_UNDEF
+                       else _binop(frame, recv, idx, helpers.AREF))
         elif opcode == insns.OPT_ASET:
             val = frame.pop()
             idx = frame.pop()
             recv = frame.pop()
-            frame.push(helpers.aset(recv, idx, val))
+            v = helpers.aset(recv, idx, val)
+            if v == value.Q_UNDEF:
+                frame.push(recv)
+                frame.push(idx)
+                frame.push(val)
+                v = _opt_send(frame, helpers.ASET, 2)
+            frame.push(v)
         elif opcode == insns.OPT_LENGTH:
-            frame.push(helpers.length(frame.pop()))
+            recv = frame.pop()
+            v = helpers.length(recv)
+            frame.push(v if v != value.Q_UNDEF
+                       else _unop(frame, recv, helpers.LENGTH))
         elif opcode == insns.OPT_SIZE:
-            frame.push(helpers.size(frame.pop()))
+            recv = frame.pop()
+            v = helpers.size(recv)
+            frame.push(v if v != value.Q_UNDEF
+                       else _unop(frame, recv, helpers.SIZE))
         elif opcode == insns.OPT_EMPTY_P:
-            frame.push(helpers.empty_p(frame.pop()))
+            recv = frame.pop()
+            v = helpers.empty_p(recv)
+            frame.push(v if v != value.Q_UNDEF
+                       else _unop(frame, recv, helpers.EMPTY_P))
         elif opcode == insns.OPT_NOT:
             frame.push(helpers.opt_not(frame.pop()))
         elif opcode == insns.OPT_LTLT:
             b = frame.pop()
             a = frame.pop()
-            frame.push(helpers.ltlt(a, b))
+            frame.push(_binop(frame, a, b, helpers.LTLT))
         else:
             raise UnsupportedOperation('unknown opcode %d' % opcode)
 
@@ -1009,3 +1212,9 @@ def run(iseq):
     ret = execute(iseq, Frame(iseq, boot.top_self()))
     debug.summary()
     return ret
+
+
+def run_in_cruby():
+    """The whole script, handed back because some ISeq in it is one RPyYARV
+    cannot represent. Cleans up too, so its answer is the exit status."""
+    return boot.run_node()

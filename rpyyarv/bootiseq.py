@@ -12,9 +12,16 @@ from to_a_layout import (I_BODY, I_CATCH, I_LABEL, I_LOCALS, I_MAGIC, I_MISC,
 
 EVENT_PREFIX = 'RUBY_EVENT_'
 
-# Keys of the params hash that leave the argument layout alone. use_block is
-# a hint CRuby sets on every method named initialize (iseq.c:615).
-PLAIN_PARAM_KEYS = ['lead_num', 'use_block']
+# Keys of the params hash (iseq.c:3425-3462) whose argument layout the call
+# path places. use_block is a hint CRuby sets on every method named
+# initialize (iseq.c:615), not a parameter.
+# ambiguous_param0 only turns block autosplat on, which RPyYARV never does.
+PLAIN_PARAM_KEYS = ['lead_num', 'use_block', 'opt', 'rest_start',
+                    'post_start', 'post_num', 'ambiguous_param0']
+
+# Anything outside this means the ISeq declares real parameters, so arg_size
+# is not the lead count.
+NO_PARAM_KEYS = ['use_block', 'ambiguous_param0']
 
 
 def is_iseq(v):
@@ -62,9 +69,10 @@ def load(iseqw):
     """A RawProgram whose iseq 0 is iseqw."""
     program = rawiseq.RawProgram('', _path(iseqw))
     pending = [boot.call0(iseqw, 'to_a')]
+    owners = [-1]
     i = 0
     while i < len(pending):
-        _read_iseq(program, pending, pending[i])
+        _read_iseq(program, pending, owners, pending[i], owners[i])
         i += 1
     return program
 
@@ -76,7 +84,7 @@ def _path(iseqw):
     return ''
 
 
-def _read_iseq(program, pending, ary):
+def _read_iseq(program, pending, owners, ary, parent):
     check(ary)
     misc = boot.ary_entry(ary, I_MISC)
     params = boot.ary_entry(ary, I_PARAMS)
@@ -87,9 +95,17 @@ def _read_iseq(program, pending, ary):
         _int_or(boot.hash_aref(misc, 'stack_max'), 0),
         _lead_num(misc, params),
         _extra_params(params),
-        _catches(pending, boot.ary_entry(ary, I_CATCH)))
+        _catches(pending, owners, boot.ary_entry(ary, I_CATCH),
+                 len(program.iseqs)),
+        _opt_labels(params),
+        _int_or(boot.hash_aref(params, 'rest_start'), -1),
+        _int_or(boot.hash_aref(params, 'post_start'), -1),
+        _int_or(boot.hash_aref(params, 'post_num'), 0),
+        not boot.is_nil(boot.hash_aref(params, 'ambiguous_param0')))
+    raw.parent = parent
     program.add_iseq(raw)
 
+    me = len(program.iseqs) - 1
     body = boot.ary_entry(ary, I_BODY)
     n = boot.ary_len(body)
     i = 0
@@ -97,24 +113,25 @@ def _read_iseq(program, pending, ary):
         e = boot.ary_entry(body, i)
         i += 1
         if boot.is_array(e):
-            raw.add_insn(_insn(pending, e))
+            raw.add_insn(_insn(pending, owners, e, me))
         elif boot.is_symbol(e):
             name = boot.sym_of(e)
             if not name.startswith(EVENT_PREFIX):
                 raw.add_label(name)
 
 
-def _insn(pending, e):
+def _insn(pending, owners, e, me):
     operands = []
     n = boot.ary_len(e)
     i = 1
     while i < n:
-        operands.append(_operand(pending, boot.ary_entry(e, i)))
+        operands.append(_operand(pending, owners,
+                                 boot.ary_entry(e, i), me))
         i += 1
     return rawiseq.RawInsn(boot.sym_of(boot.ary_entry(e, 0)), operands)
 
 
-def _operand(pending, v):
+def _operand(pending, owners, v, me):
     if boot.is_fixnum(v):
         return rawiseq.int_operand(boot.num2long(v))
     if boot.is_nil(v):
@@ -130,12 +147,14 @@ def _operand(pending, v):
     if boot.is_array(v):
         if is_iseq(v):
             pending.append(v)
+            owners.append(me)
             return rawiseq.RawOperand(rawiseq.OP_ISEQ, len(pending) - 1)
         items = []
         n = boot.ary_len(v)
         i = 0
         while i < n:
-            items.append(_operand(pending, boot.ary_entry(v, i)))
+            items.append(_operand(pending, owners,
+                                  boot.ary_entry(v, i), me))
             i += 1
         return rawiseq.RawOperand(rawiseq.OP_ARRAY, 0, '', 0, False, items)
     if boot.is_hash(v):
@@ -154,7 +173,7 @@ def _operand(pending, v):
     return rawiseq.RawOperand(rawiseq.OP_VALUE, v, boot.inspect(v))
 
 
-def _catches(pending, catch):
+def _catches(pending, owners, catch, me):
     """An entry's ISeq joins the same pending queue the body's nested ISeqs
     use; see rawiseq.RawCatch for the layout."""
     out = []
@@ -173,6 +192,7 @@ def _catches(pending, catch):
         index = -1
         if not boot.is_nil(body):
             pending.append(body)
+            owners.append(me)
             index = len(pending) - 1
         out.append(rawiseq.RawCatch(kind, index,
                                     _label(boot.ary_entry(e, 2)),
@@ -190,13 +210,30 @@ def _label(v):
 
 
 def _lead_num(misc, params):
-    """How many positional parameters the ISeq takes. iseq.c:3437 omits
+    """How many leading required parameters the ISeq takes. iseq.c:3437 omits
     lead_num unless flags.has_lead is set, which a `for` loop's block
     parameter is not; arg_size counts it either way."""
-    lead = _int_or(boot.hash_aref(params, 'lead_num'), 0)
-    if lead == 0 and _extra_params(params) == '':
+    if len(_param_keys(params, NO_PARAM_KEYS)) == 0:
         return _int_or(boot.hash_aref(misc, 'arg_size'), 0)
-    return lead
+    return _int_or(boot.hash_aref(params, 'lead_num'), 0)
+
+
+def _opt_labels(params):
+    """The opt table as label names; entry i starts the body with i optionals
+    filled (vm_args.c:906)."""
+    v = boot.hash_aref(params, 'opt')
+    if boot.is_nil(v):
+        return []
+    out = []
+    n = boot.ary_len(v)
+    i = 0
+    while i < n:
+        e = boot.ary_entry(v, i)
+        if not boot.is_symbol(e):
+            raise LoadError('an opt table entry is not a label')
+        out.append(boot.sym_of(e))
+        i += 1
+    return out
 
 
 def _int_or(v, default):
@@ -206,13 +243,19 @@ def _int_or(v, default):
 
 
 def _extra_params(params):
+    """The parameter kinds RPyYARV cannot place: keyword, kwrest, block and
+    the block-only ambiguous_param0."""
+    return ','.join(_param_keys(params, PLAIN_PARAM_KEYS))
+
+
+def _param_keys(params, known):
     names = []
     keys = boot.call0(params, 'keys')
     n = boot.ary_len(keys)
     i = 0
     while i < n:
         name = boot.sym_of(boot.ary_entry(keys, i))
-        if name not in PLAIN_PARAM_KEYS:
+        if name not in known:
             names.append(name)
         i += 1
-    return ','.join(names)
+    return names

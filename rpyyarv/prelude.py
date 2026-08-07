@@ -34,5 +34,5 @@ def _compile(source):
 def install():
     if os.environ.get('RPYYARV_NO_PRELUDE') == '1':
         return
-    w_iseq = loader.load(bootiseq.load(_compile(SOURCE)))
+    w_iseq = loader.load_strict(bootiseq.load(_compile(SOURCE)))
     interp.execute(w_iseq, Frame(w_iseq, boot.top_self()))

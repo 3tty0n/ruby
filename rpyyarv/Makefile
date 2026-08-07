@@ -44,7 +44,12 @@ PYTHON  ?= python3
 RPYTHON ?= python2 $(PYPY)/rpython/bin/rpython
 RUBY    ?= $(BUILD)/ruby
 
-.PHONY: all test microbench build-interp build-jit link clean
+# A tight malloc limit fires real GCs inside compiled traces; GC_STRESS cannot,
+# it escapes the vable and aborts tracing.
+GCLIMIT   ?= 16384
+GCTIMEOUT ?= 60
+
+.PHONY: all test microbench gccheck build-interp build-jit link clean
 
 link: $(SHIM)
 
@@ -66,6 +71,45 @@ test: $(SHIM)
 
 microbench:
 	RPYYARV_BUILD=$(BUILD) $(PYTHON) scripts/microbench.py $(MICROBENCHFLAGS)
+
+# Compare stdout of both rpyyarv binaries against CRuby under a tight GC limit.
+gccheck:
+	@export $(LIBPATH); \
+	 lim() { RUBY_GC_MALLOC_LIMIT=$(GCLIMIT) perl -e 'alarm shift; exec @ARGV' $(GCTIMEOUT) "$$@" 2>/dev/null; }; \
+	 nolim() { ( perl -e 'alarm shift; exec @ARGV' $(GCTIMEOUT) "$$@" >/dev/null 2>&1 ) 2>/dev/null; }; \
+	 ok=0; skipped=0; failed=0; \
+	 for s in benchmark/*.rb test/exceptions.rb test/coverage.rb \
+	          $(TOP)/benchmark/app_*.rb $(TOP)/benchmark/so_*.rb; do \
+	   n=`basename $$s`; \
+	   jo=`lim ./rpyyarv-jit $$s`; jrc=$$?; \
+	   io=`lim ./rpyyarv $$s`; irc=$$?; \
+	   jpre=0; ipre=0; \
+	   [ $$jrc -eq 0 ] || { nolim ./rpyyarv-jit $$s || jpre=1; }; \
+	   [ $$irc -eq 0 ] || { nolim ./rpyyarv $$s || ipre=1; }; \
+	   if [ $$jrc -ne 0 ] && [ $$irc -ne 0 ] && [ $$jpre -eq 1 ] && [ $$ipre -eq 1 ]; then \
+	     echo "SKIP  $$n (does not run without the GC limit either)"; \
+	     skipped=`expr $$skipped + 1`; continue; \
+	   fi; \
+	   co=`lim $(RUBY) --disable-gems $$s`; crc=$$?; \
+	   if [ $$crc -ne 0 ]; then \
+	     echo "SKIP  $$n (cruby reference exits $$crc)"; \
+	     skipped=`expr $$skipped + 1`; continue; \
+	   fi; \
+	   bad=0; \
+	   for e in jit interp; do \
+	     if [ $$e = jit ]; then rc=$$jrc; out=$$jo; pre=$$jpre; else rc=$$irc; out=$$io; pre=$$ipre; fi; \
+	     if [ $$rc -ne 0 ]; then \
+	       if [ $$pre -eq 1 ]; then echo "  skip  $$n rpyyarv-$$e (pre-existing, not GC)"; \
+	       else echo "FAIL  $$n rpyyarv-$$e CRASHED under GC limit (exit $$rc)"; bad=1; fi; \
+	     elif [ "$$out" != "$$co" ]; then \
+	       echo "FAIL  $$n rpyyarv-$$e OUTPUT MISMATCH vs cruby"; bad=1; \
+	     fi; \
+	   done; \
+	   if [ $$bad -eq 1 ]; then failed=`expr $$failed + 1`; \
+	   else echo "ok    $$n"; ok=`expr $$ok + 1`; fi; \
+	 done; \
+	 echo; echo "gccheck: $$ok ok, $$skipped skipped, $$failed failed (RUBY_GC_MALLOC_LIMIT=$(GCLIMIT))"; \
+	 [ $$failed -eq 0 ] || { echo "GCCHECK FAILED"; exit 1; }
 
 build-interp: | $(PYPY)
 	RPYYARV_BUILD=$(BUILD) $(RPYTHON) --output=rpyyarv targetrpyyarv.py

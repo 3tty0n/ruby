@@ -82,6 +82,7 @@ def _ext(name, args, result, reenters=False):
 
 rb_boot = _ext('rpyyarv_boot', [rffi.INT, rffi.CCHARPP, INTP], VOIDP)
 rb_cleanup = _ext('rpyyarv_cleanup', [rffi.INT], rffi.INT)
+rb_run_node = _ext('rpyyarv_run_node', [VOIDP], rffi.INT, reenters=True)
 rb_iseqw_new = _ext('rpyyarv_iseqw_new', [VOIDP], VALUE)
 rb_call0 = _ext('rpyyarv_call0', [VALUE, rffi.CCHARP, INTP], VALUE, reenters=True)
 rb_cstr = _ext('rpyyarv_cstr', [VALUE], rffi.CCHARP, reenters=True)
@@ -162,6 +163,10 @@ rb_hash_aset_ = _ext('rpyyarv_hash_aset', [VALUE, VALUE, VALUE, INTP],
 rb_hash_resurrect = _ext('rpyyarv_hash_resurrect', [VALUE, INTP], VALUE, reenters=True)
 rb_splat_array = _ext('rpyyarv_splat_array', [VALUE, rffi.INT, INTP], VALUE, reenters=True)
 rb_vm_core = _ext('rpyyarv_vm_core', [], VALUE, reenters=True)
+rb_arity_error = _ext('rpyyarv_arity_error',
+                      [rffi.INT, rffi.INT, rffi.INT, INTP], VALUE,
+                      reenters=True)
+rb_bop_mask = _ext('rpyyarv_bop_mask', [], VALUE, reenters=True)
 
 NCLASS = 12
 
@@ -672,6 +677,29 @@ def vm_core():
     return rffi.cast(lltype.Signed, rb_vm_core())
 
 
+def arity_error(given, min_argc, max_argc):
+    """The ArgumentError VALUE; -1 for max_argc means unlimited."""
+    with lltype.scoped_alloc(INTP.TO, 1) as state:
+        state[0] = rffi.cast(rffi.INT, 0)
+        v = rb_arity_error(rffi.cast(rffi.INT, given),
+                           rffi.cast(rffi.INT, min_argc),
+                           rffi.cast(rffi.INT, max_argc), state)
+        failed = rffi.cast(lltype.Signed, state[0]) != 0
+        ret = rffi.cast(lltype.Signed, v)
+    if failed:
+        _failed('ArgumentError')
+    return ret
+
+
+BOP_COUNT_SHIFT = 32
+
+
+def bop_mask():
+    """(pair count, one bit per redefined pair) as the shim orders them."""
+    v = rffi.cast(lltype.Signed, rb_bop_mask())
+    return v >> BOP_COUNT_SHIFT, v & ((1 << BOP_COUNT_SHIFT) - 1)
+
+
 def gc_register(v):
     rb_gc_register(_v(v))
 
@@ -688,6 +716,15 @@ def set_mark_hook(fn):
     rb_gc_set_mark_hook(fn)
 
 
+class _Node(object):
+    # The compiled main script, kept so run_node() can hand it back to CRuby.
+    def __init__(self):
+        self.ptr = lltype.nullptr(VOIDP.TO)
+
+
+node = _Node()
+
+
 def boot(argv):
     """Return (iseqw, status). iseqw is 0 when there is no ISeq to run."""
     # Never freed: ruby_sysinit keeps this pointer in origarg (ruby.c) for
@@ -698,7 +735,13 @@ def boot(argv):
         n = rb_boot(rffi.cast(rffi.INT, len(argv)), c_argv, status)
         if not n:
             return 0, rffi.cast(lltype.Signed, status[0])
+        node.ptr = n
         return rffi.cast(lltype.Signed, rb_iseqw_new(n)), 0
+
+
+def run_node():
+    """Runs the script and cleans up; the answer is the process exit status."""
+    return rffi.cast(lltype.Signed, rb_run_node(node.ptr))
 
 
 def cleanup(status):
