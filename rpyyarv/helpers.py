@@ -13,7 +13,7 @@ import dispatch
 import rubycall
 import symbols
 import value
-from rlib import ovfcheck, promote
+from rlib import LONG_BIT, ovfcheck, promote
 
 PLUS = symbols.intern('+')
 MINUS = symbols.intern('-')
@@ -35,6 +35,11 @@ EMPTY_P = symbols.intern('empty?')
 LTLT = symbols.intern('<<')
 AND = symbols.intern('&')
 OR = symbols.intern('|')
+XOR = symbols.intern('^')
+RSHIFT = symbols.intern('>>')
+BEGIN = symbols.intern('begin')
+END = symbols.intern('end')
+EXCLUDE_END_P = symbols.intern('exclude_end?')
 
 # One bit per (class, operator) pair, in the order boot_shim.c's
 # rpyyarv_bop_mask sets them.
@@ -50,15 +55,23 @@ B_INT_GT = 8
 B_INT_GE = 9
 B_INT_AND = 10
 B_INT_OR = 11
-B_ARY_AREF = 12
-B_ARY_ASET = 13
-B_ARY_LENGTH = 14
-B_ARY_SIZE = 15
-B_ARY_EMPTY_P = 16
-B_COUNT = 17
+B_INT_XOR = 12
+B_INT_RSHIFT = 13
+B_ARY_AREF = 14
+B_ARY_ASET = 15
+B_ARY_LENGTH = 16
+B_ARY_SIZE = 17
+B_ARY_EMPTY_P = 18
+B_SYM_EQ = 19
+B_RNG_BEGIN = 20
+B_RNG_END = 21
+B_RNG_EXCL = 22
+B_COUNT = 23
 
-_INT_MID = [PLUS, MINUS, MULT, DIV, MOD, EQ, LT, LE, GT, GE, AND, OR]
+_INT_MID = [PLUS, MINUS, MULT, DIV, MOD, EQ, LT, LE, GT, GE, AND, OR, XOR,
+            RSHIFT]
 _ARY_MID = [AREF, ASET, LENGTH, SIZE, EMPTY_P]
+_SYM_MID = [EQ]
 
 
 class _Bops(object):
@@ -106,6 +119,12 @@ def _ary_op(bit):
     return (_cruby_owns(bit)
             and dispatch.lookup_core(value.core_class(value.C_ARRAY),
                                      _ARY_MID[bit - B_ARY_AREF]) is None)
+
+
+def _sym_op(bit):
+    return (_cruby_owns(bit)
+            and dispatch.lookup_core(value.core_class(value.C_SYMBOL),
+                                     _SYM_MID[bit - B_SYM_EQ]) is None)
 
 
 def _from_int(n):
@@ -163,6 +182,18 @@ def ge(a, b):
     return value.Q_UNDEF
 
 
+def _sym_eq(a, mid):
+    """Symbol#== is rb_obj_equal (string.c:12227) and a name has exactly one
+    Symbol VALUE, so a word compare answers it."""
+    if value.class_of(a) != value.core_class(value.C_SYMBOL):
+        return False
+    if not _sym_op(B_SYM_EQ):
+        return False
+    if mid == NEQ:
+        return dispatch.owns_identity(value.core_class(value.C_SYMBOL), NEQ)
+    return True
+
+
 def identity_op(recv, mid):
     """vm_opt_equality's second half: the receiver still resolves the operator
     to BasicObject's, so comparing is comparing the words."""
@@ -177,10 +208,17 @@ def identity_op(recv, mid):
     return dispatch.owns_identity(klass, mid)
 
 
+def identity_send(recv, mid):
+    """==, != or equal? that comes down to comparing the two words."""
+    if mid != EQUAL_P and _sym_eq(recv, mid):
+        return True
+    return identity_op(recv, mid)
+
+
 def eq(a, b):
     if _fix2(a, b, B_INT_EQ):
         return value.newbool(a == b)
-    if identity_op(a, EQ):
+    if identity_send(a, EQ):
         return value.newbool(a == b)
     return value.Q_UNDEF
 
@@ -190,7 +228,7 @@ def neq(a, b):
     # and then asks opt_equality, so Integer#== is the definition that counts.
     if _fix2(a, b, B_INT_EQ):
         return value.newbool(a != b)
-    if identity_op(a, NEQ):
+    if identity_send(a, NEQ):
         return value.newbool(a != b)
     return value.Q_UNDEF
 
@@ -205,6 +243,43 @@ def and_(a, b):
 def or_(a, b):
     if _fix2(a, b, B_INT_OR):
         return a | b
+    return value.Q_UNDEF
+
+
+def xor(a, b):
+    # Both tag bits are set, so the xor clears one that has to be put back.
+    if _fix2(a, b, B_INT_XOR):
+        return (a ^ b) | value.FIXNUM_FLAG
+    return value.Q_UNDEF
+
+
+def rshift(a, b):
+    """Integer#>> for a non-negative fixnum shift; a negative one is a left
+    shift that CRuby may widen to a Bignum, so it goes back to CRuby."""
+    if _fix2(a, b, B_INT_RSHIFT):
+        n = value.fix2int(a)
+        s = value.fix2int(b)
+        if s >= 0:
+            # A fixnum is under 63 bits, so any wider shift is already the
+            # sign; RPython leaves a shift of the full word width undefined.
+            if s >= LONG_BIT - 1:
+                s = LONG_BIT - 1
+            return value.int2fix(n >> s)
+    return value.Q_UNDEF
+
+
+def range_part(recv, mid):
+    """Range#begin, #end and #exclude_end? read straight off the Range. The
+    shim answers Qundef for anything but a direct Range instance, and the
+    caller has already found no RPyYARV definition of the name."""
+    if value.is_immediate(recv):
+        return value.Q_UNDEF
+    if mid == BEGIN and _cruby_owns(B_RNG_BEGIN):
+        return boot.range_part(recv, boot.RANGE_BEG)
+    if mid == END and _cruby_owns(B_RNG_END):
+        return boot.range_part(recv, boot.RANGE_END)
+    if mid == EXCLUDE_END_P and _cruby_owns(B_RNG_EXCL):
+        return boot.range_part(recv, boot.RANGE_EXCL)
     return value.Q_UNDEF
 
 

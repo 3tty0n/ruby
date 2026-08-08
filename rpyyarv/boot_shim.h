@@ -266,6 +266,12 @@ uintptr_t rpyyarv_arity_error(int given, int min, int max, int *state);
 #define RPYYARV_BOP_COUNT_SHIFT 32
 uintptr_t rpyyarv_bop_mask(void);
 
+/* One field of a direct Range instance, or Qundef for anything else. */
+#define RPYYARV_RANGE_BEG  0
+#define RPYYARV_RANGE_END  1
+#define RPYYARV_RANGE_EXCL 2
+uintptr_t rpyyarv_range_part(uintptr_t range, int which);
+
 /*
  * require, resolved the way load.c's search_required does but with the public
  * API only: $LOAD_PATH search, the .rb extension, and the $LOADED_FEATURES

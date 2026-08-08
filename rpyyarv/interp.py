@@ -77,14 +77,16 @@ def invoke(frame, w_ci, w_block=None):
                 raise
             return e.value
 
-    if entry is None and argc == 1 and _is_identity_mid(w_ci.mid) \
-            and helpers.identity_op(recv, w_ci.mid):
-        same = recv == frame.stack[recv_at + 1]
-        if w_ci.mid == helpers.NEQ:
-            same = not same
-        _drop(frame, recv_at)
-        debug.count_native()
-        return value.newbool(same)
+    if entry is None and argc <= 1:
+        # A send an opt_* instruction would have caught if YARV had one for it.
+        if argc == 1:
+            v = _native_binop(recv, frame.stack[recv_at + 1], w_ci.mid)
+        else:
+            v = helpers.range_part(recv, w_ci.mid)
+        if v != value.Q_UNDEF:
+            _drop(frame, recv_at)
+            debug.count_native()
+            return v
     if _is_attr_mid(w_ci.mid) and argc > 0 \
             and not value.is_immediate(recv) and dispatch.is_known_class(recv):
         return _define_attrs(frame, w_ci, recv, recv_at, argc)
@@ -160,9 +162,19 @@ def _is_attr_mid(mid):
             or mid == ATTR_ACCESSOR)
 
 
-def _is_identity_mid(mid):
-    return (mid == helpers.EQ or mid == helpers.NEQ
-            or mid == helpers.EQUAL_P)
+def _native_binop(recv, arg, mid):
+    """A one-argument send RPyYARV answers itself, or Qundef."""
+    if mid == helpers.XOR:
+        return helpers.xor(recv, arg)
+    if mid == helpers.RSHIFT:
+        return helpers.rshift(recv, arg)
+    if (mid == helpers.EQ or mid == helpers.NEQ or mid == helpers.EQUAL_P) \
+            and helpers.identity_send(recv, mid):
+        same = recv == arg
+        if mid == helpers.NEQ:
+            same = not same
+        return value.newbool(same)
+    return value.Q_UNDEF
 
 
 def _attr_send(frame, entry, recv, recv_at, argc):

@@ -193,6 +193,8 @@ rb_absolute_path = _ext('rpyyarv_absolute_path', [VALUE, VALUE, INTP], VALUE,
                         reenters=True)
 rb_method_owner = _ext('rpyyarv_method_owner', [VALUE, VALUE], VALUE,
                        reenters=True)
+# No reenters: reads two struct fields after a type test, allocating nothing.
+rb_range_part = _ext('rpyyarv_range_part', [VALUE, rffi.INT], VALUE)
 
 REQ_LOADED = 0
 REQ_RB = 1
@@ -559,6 +561,17 @@ def core_classes():
             result[i] = rffi.cast(lltype.Signed, out[i])
             i += 1
         return result
+
+
+RANGE_BEG = 0
+RANGE_END = 1
+RANGE_EXCL = 2
+
+
+def range_part(v, which):
+    """One Range field, or Qundef when v is not a direct Range."""
+    return rffi.cast(lltype.Signed,
+                     rb_range_part(_v(v), rffi.cast(rffi.INT, which)))
 
 
 def method_owner(klass, rid):

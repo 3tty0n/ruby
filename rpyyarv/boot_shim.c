@@ -4,6 +4,7 @@
 
 /* In-tree, so the object-shape API libruby does not export is still reachable. */
 #include "shape.h"
+#include "internal/range.h"
 
 #include "boot_shim.h"
 
@@ -1258,14 +1259,40 @@ rpyyarv_bop_mask(void)
     BOP(rb_cInteger, ">=");
     BOP(rb_cInteger, "&");
     BOP(rb_cInteger, "|");
+    BOP(rb_cInteger, "^");
+    BOP(rb_cInteger, ">>");
     BOP(rb_cArray, "[]");
     BOP(rb_cArray, "[]=");
     BOP(rb_cArray, "length");
     BOP(rb_cArray, "size");
     BOP(rb_cArray, "empty?");
+    BOP(rb_cSymbol, "==");
+    BOP(rb_cRange, "begin");
+    BOP(rb_cRange, "end");
+    BOP(rb_cRange, "exclude_end?");
 #undef BOP
 
     return (uintptr_t)i << RPYYARV_BOP_COUNT_SHIFT | mask;
+}
+
+/*
+ * Range#begin, #end and #exclude_end? without a send. Qundef for anything but
+ * a direct Range instance, so a subclass that overrode one of them is left to
+ * the normal dispatch. The fields are read through internal/range.h, not by
+ * hand, so no RRange layout is compiled into the RPython side.
+ */
+uintptr_t
+rpyyarv_range_part(uintptr_t range, int which)
+{
+    VALUE r = (VALUE)range;
+    if (SPECIAL_CONST_P(r) || !RB_TYPE_P(r, T_STRUCT)) return (uintptr_t)Qundef;
+    if (rb_obj_class(r) != rb_cRange) return (uintptr_t)Qundef;
+    switch (which) {
+      case RPYYARV_RANGE_BEG:  return (uintptr_t)RANGE_BEG(r);
+      case RPYYARV_RANGE_END:  return (uintptr_t)RANGE_END(r);
+      case RPYYARV_RANGE_EXCL: return (uintptr_t)RANGE_EXCL(r);
+      default: return (uintptr_t)Qundef;
+    }
 }
 
 uintptr_t
