@@ -155,6 +155,36 @@ puts read_mixed
 Host1.include(Math)
 puts read_mixed
 
+# ---- one site, two receivers: the cbase is the defining class either way ----
+
+SHARED = 'toplevel'
+
+class ReaderBase
+  SHARED = 'base'
+  def read_shared
+    SHARED
+  end
+end
+
+class Left < ReaderBase
+  SHARED = 'left'
+end
+
+class Right < ReaderBase
+  SHARED = 'right'
+end
+
+l = Left.new
+r = Right.new
+i = 0
+while i < 300
+  l.read_shared
+  r.read_shared
+  i += 1
+end
+puts l.read_shared
+puts r.read_shared
+
 # ---- NameError for a missing constant ----
 
 begin

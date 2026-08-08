@@ -1,6 +1,7 @@
 """Load raw ISeqs into W_ISeqs, transforming operands by their insns.def type."""
 
 import boot
+import dispatch
 import gcroots
 import insns
 import iseqdump
@@ -244,7 +245,8 @@ class Loader(object):
                         catches,
                         [p for p in pool.paths], opt_table, raw.rest_start,
                         raw.post_start, raw.post_num, '', autosplat,
-                        returns, returns and raw.type in self.RETURN_TARGETS)
+                        returns, returns and raw.type in self.RETURN_TARGETS,
+                        [dispatch.new_const_site() for _ in pool.paths])
         gcroots.register_consts(consts)
         return w_iseq
 

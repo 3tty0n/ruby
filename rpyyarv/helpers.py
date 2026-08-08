@@ -35,6 +35,7 @@ BEGIN = symbols.intern('begin')
 END = symbols.intern('end')
 EXCLUDE_END_P = symbols.intern('exclude_end?')
 SQRT = symbols.intern('sqrt')
+INITIALIZE = symbols.intern('initialize')
 
 # One bit per (class, operator) pair, in the order boot_shim.c's rpyyarv_bop_mask sets them.
 B_INT_PLUS = 0
@@ -70,7 +71,9 @@ B_FLT_GT = 29
 B_FLT_GE = 30
 B_FLT_EQ = 31
 B_MATH_SQRT = 32
-B_COUNT = 33
+B_ARY_NEW = 33
+B_ARY_INITIALIZE = 34
+B_COUNT = 35
 
 _INT_MID = [PLUS, MINUS, MULT, DIV, MOD, EQ, LT, LE, GT, GE, AND, OR, XOR,
             RSHIFT]
@@ -432,6 +435,13 @@ def empty_p(recv):
     if value.is_plain_array(recv) and _ary_op(B_ARY_EMPTY_P):
         return value.newbool(value.ary_len(recv) == 0)
     return value.Q_UNDEF
+
+
+def ary_new_pristine(recv):
+    """A direct Array whose Array.new and Array#initialize are still CRuby's own, on both sides, so RPyYARV may build the array itself."""
+    return (recv == value.core_class(value.C_ARRAY)
+            and _cruby_owns(B_ARY_NEW) and _cruby_owns(B_ARY_INITIALIZE)
+            and dispatch.lookup_core(recv, INITIALIZE) is None)
 
 
 def opt_not(recv):

@@ -90,7 +90,7 @@ gccheck:
 	          test/definesmethod.rb test/nonlocal_return.rb \
 	          test/attrs.rb test/fastops.rb test/floats.rb test/ivars.rb \
 	          test/aset.rb \
-	          test/consts.rb \
+	          test/consts.rb test/arynew.rb \
 	          $(TOP)/benchmark/app_*.rb $(TOP)/benchmark/so_*.rb; do \
 	   n=`basename $$s`; \
 	   jo=`lim ./rpyyarv-jit $$s`; jrc=$$?; \

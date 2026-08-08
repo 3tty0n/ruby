@@ -151,6 +151,8 @@ rb_ary_resurrect = _ext('rpyyarv_ary_resurrect', [VALUE, INTP], VALUE, reenters=
 rb_ary_store_ = _ext('rpyyarv_ary_store', [VALUE, rffi.LONG, VALUE, INTP],
                      lltype.Void, reenters=True)
 rb_ary_new_capa = _ext('rpyyarv_ary_new_capa', [rffi.LONG, INTP], VALUE, reenters=True)
+rb_ary_new_filled = _ext('rpyyarv_ary_new_filled', [rffi.LONG, VALUE, INTP],
+                         VALUE, reenters=True)
 rb_ary_cat = _ext('rpyyarv_ary_cat', [VALUE, rffi.INT, VALUEP, INTP],
                   lltype.Void, reenters=True)
 rb_range_new_ = _ext('rpyyarv_range_new', [VALUE, VALUE, rffi.INT, INTP],
@@ -472,6 +474,28 @@ def ary_store(ary, idx, val):
         failed = rffi.cast(lltype.Signed, state[0]) != 0
     if failed:
         _failed('Array#[]=')
+
+
+def ary_new_capa(capa):
+    with lltype.scoped_alloc(INTP.TO, 1) as state:
+        state[0] = rffi.cast(rffi.INT, 0)
+        v = rb_ary_new_capa(rffi.cast(rffi.LONG, capa), state)
+        failed = rffi.cast(lltype.Signed, state[0]) != 0
+        ret = rffi.cast(lltype.Signed, v)
+    if failed:
+        _failed('Array.new')
+    return ret
+
+
+def ary_new_filled(n, val):
+    with lltype.scoped_alloc(INTP.TO, 1) as state:
+        state[0] = rffi.cast(rffi.INT, 0)
+        v = rb_ary_new_filled(rffi.cast(rffi.LONG, n), _v(val), state)
+        failed = rffi.cast(lltype.Signed, state[0]) != 0
+        ret = rffi.cast(lltype.Signed, v)
+    if failed:
+        _failed('Array.new')
+    return ret
 
 
 def range_new(low, high, excl):

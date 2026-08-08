@@ -93,6 +93,11 @@ def invoke(frame, w_ci, w_block=None):
         # rb_f_block_given_p reads the *caller's* frame (vm.c:1862); through rb_funcallv it would find a CRuby one.
         _drop(frame, recv_at)
         return value.newbool(frame.block is not None)
+    if w_ci.mid == NEW and helpers.ary_new_pristine(recv):
+        v = _array_new(frame, recv_at, argc, w_block)
+        if v != value.Q_UNDEF:
+            debug.count_native()
+            return v
     if w_block is not None and w_ci.mid == NEW \
             and dispatch.is_known_class(recv):
         entry = dispatch.lookup(promote(recv), INITIALIZE)
@@ -140,6 +145,52 @@ def invoke(frame, w_ci, w_block=None):
     _check_block_error()
     debug.trace_leave(w_ci.mid, ret)
     return ret
+
+
+# Above this the block form goes back to CRuby: the loop below is traced, not a jitdriver, so a long one would blow the trace.
+ARY_NEW_BLOCK_MAX = 64
+
+# rb_ary_resize is the only public way to set the length, and it nil-fills; above this that second pass costs more than the dispatch a native fill saves.
+ARY_NEW_FILL_MAX = 128
+
+
+def _array_new(frame, recv_at, argc, w_block):
+    """rb_ary_s_new for a direct Array (array.c:1071); Qundef for every argument shape rb_ary_initialize treats specially."""
+    if argc > 2:
+        return value.Q_UNDEF
+    if argc == 0:
+        if w_block is not None:
+            # rb_warning("given block not used"), which only $VERBOSE prints.
+            return value.Q_UNDEF
+        _drop(frame, recv_at)
+        return rubycall.ary_new_capa(0)
+    size = frame.stack[recv_at + 1]
+    # FIXNUM_P, as rb_ary_s_new tests it: to_int, to_ary and a Bignum all take rb_ary_initialize's slow paths.
+    if not value.is_fixnum(size):
+        return value.Q_UNDEF
+    n = value.fix2int(size)
+    if n < 0:
+        return value.Q_UNDEF
+    if w_block is None:
+        if argc == 2 and n > ARY_NEW_FILL_MAX:
+            return value.Q_UNDEF
+        fill = value.Q_NIL if argc == 1 else frame.stack[recv_at + 2]
+        _drop(frame, recv_at)
+        return rubycall.ary_new_filled(n, fill)
+    if argc != 1 or n > ARY_NEW_BLOCK_MAX:
+        # argc == 2 warns "block supersedes default value argument".
+        return value.Q_UNDEF
+    ary = rubycall.ary_new_capa(n)
+    # Into the receiver's slot, which the caller's frame marks: the block runs arbitrary Ruby and nothing else holds the array.
+    frame.stack[recv_at] = ary
+    i = 0
+    while i < n:
+        v = call_block(w_block, [value.int2fix(i)])
+        # rb_ary_store, so a block that raises leaves the length CRuby would.
+        rubycall.ary_store(ary, i, v)
+        i += 1
+    _drop(frame, recv_at)
+    return ary
 
 
 NEW = symbols.intern('new')
@@ -1106,10 +1157,24 @@ def _vm_core():
     return vm_core.value
 
 
-@unroll_safe
-def _const_path(frame, path):
-    """vm_get_ev_const_chain; a leading empty segment is `::Foo`."""
+def _const_path(frame, iseq, idx):
+    """A per-site memo of _const_walk, keyed on the cbase it was filled with; the global cache below it stays the fallback."""
     base = _const_base(frame)
+    entry = dispatch.const_site(iseq.path_sites[idx], dispatch.consts.version)
+    if entry is not None and entry.base == base:
+        return entry.value
+    return _const_path_miss(iseq.path_sites[idx], base, iseq.paths[idx])
+
+
+@dont_look_inside
+def _const_path_miss(site, base, path):
+    v = _const_walk(base, path)
+    dispatch.const_site_fill(site, base, v)
+    return v
+
+
+def _const_walk(base, path):
+    """vm_get_ev_const_chain; a leading empty segment is `::Foo`."""
     i = 0
     # An id compare, not a name lookup: the dict read would stay in the trace.
     if path[0] == ROOT_CBASE:
@@ -1143,6 +1208,9 @@ def _defineclass(mid, w_body, cbase, super_v):
 def _opt_new_alloc(klass):
     """A fresh instance, or 0 for the miss branch; only classes RPyYARV made are known to have kept Class#new."""
     if not dispatch.is_known_class(klass):
+        return 0
+    if helpers.ary_new_pristine(klass):
+        # The miss branch's `send new` is where _array_new runs; alloc plus a separate initialize would leave CRuby to fill it.
         return 0
     return dispatch.alloc(klass)
 
@@ -1459,7 +1527,7 @@ def _execute(iseq, frame, pc):
         elif opcode == insns.OPT_GETCONSTANT_PATH:
             idx = code[pc]
             pc += 1
-            frame.push(_const_path(frame, iseq.paths[idx]))
+            frame.push(_const_path(frame, iseq, idx))
         elif opcode == insns.SETCONSTANT:
             mid = code[pc]
             pc += 1

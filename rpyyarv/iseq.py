@@ -29,6 +29,7 @@ class W_ISeq(object):
     _immutable_fields_ = ['name', 'code[*]', 'consts[*]', 'iseqs[*]',
                           'callinfos[*]', 'nlocals', 'stack_max', 'nparams',
                           'simple_params', 'catches[*]', 'paths[*]',
+                          'path_sites[*]',
                           'opt_table[*]', 'rest_start', 'post_start',
                           'post_num', 'unsupported', 'autosplat',
                           'has_return_throw', 'catches_return']
@@ -37,7 +38,8 @@ class W_ISeq(object):
                  stack_max, nparams=0, simple_params=True, catches=None,
                  paths=None, opt_table=None, rest_start=-1, post_start=-1,
                  post_num=0, unsupported='', autosplat=False,
-                 has_return_throw=False, catches_return=False):
+                 has_return_throw=False, catches_return=False,
+                 path_sites=None):
         self.name = name
         self.code = code
         # VALUEs built at load time; gcroots keeps them reachable.
@@ -69,6 +71,8 @@ class W_ISeq(object):
         # rescue/ensure entries in CRuby's search order; the first match wins.
         self.catches = catches if catches is not None else []
         self.paths = paths if paths is not None else []
+        # One inline cache slot per entry of paths, parallel to it.
+        self.path_sites = path_sites if path_sites is not None else []
 
     def repr(self):
         return '<W_ISeq %s>' % self.name

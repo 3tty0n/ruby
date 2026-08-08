@@ -120,6 +120,16 @@ def ary_new(values):
 
 
 @dont_look_inside
+def ary_new_capa(capa):
+    return boot.ary_new_capa(capa)
+
+
+@dont_look_inside
+def ary_new_filled(n, val):
+    return boot.ary_new_filled(n, val)
+
+
+@dont_look_inside
 def hash_new(capa):
     return boot.hash_new(capa)
 

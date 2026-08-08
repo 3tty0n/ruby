@@ -797,6 +797,34 @@ rpyyarv_ary_new_capa(long capa, int *state)
     return (uintptr_t)r;
 }
 
+/* rb_ary_initialize's non-block half (array.c:1194): every element is the same VALUE, not a copy. */
+static VALUE
+ary_new_filled_body(VALUE argp)
+{
+    struct ary_store_args *p = (struct ary_store_args *)argp;
+    VALUE ary = rb_ary_resize(rb_ary_new_capa(p->idx), p->idx);
+    if (p->val != Qnil) {
+        /* ary_memfill: one barrier covers n copies of the same VALUE. */
+        RARRAY_PTR_USE(ary, ptr, {
+            for (long i = 0; i < p->idx; i++) ptr[i] = p->val;
+            RB_OBJ_WRITTEN(ary, Qundef, p->val);
+        });
+    }
+    return ary;
+}
+
+uintptr_t
+rpyyarv_ary_new_filled(long len, uintptr_t val, int *state)
+{
+    struct ary_store_args a;
+    a.val = (VALUE)val;
+    a.idx = len;
+    *state = 0;
+    VALUE r = rb_protect(ary_new_filled_body, (VALUE)&a, state);
+    if (*state) return (uintptr_t)Qnil;
+    return (uintptr_t)r;
+}
+
 struct ary_cat_args {
     VALUE ary;
     const VALUE *elems;
@@ -1340,6 +1368,8 @@ rpyyarv_bop_mask(void)
     BOP(rb_cFloat, "==");
     /* Math.sqrt is a singleton method of the module, so the pair is its metaclass. */
     BOP(CLASS_OF(rb_mMath), "sqrt");
+    BOP(CLASS_OF(rb_cArray), "new");
+    BOP(rb_cArray, "initialize");
 #undef BOP
 
     return (uintptr_t)i << RPYYARV_BOP_COUNT_SHIFT | mask;
