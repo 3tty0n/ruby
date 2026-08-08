@@ -18828,6 +18828,7 @@ vm.$(OBJEXT): {$(VPATH)}probes.h
 vm.$(OBJEXT): {$(VPATH)}probes_helper.h
 vm.$(OBJEXT): {$(VPATH)}ractor.h
 vm.$(OBJEXT): {$(VPATH)}ractor_core.h
+vm.$(OBJEXT): {$(VPATH)}rpyyarv.h
 vm.$(OBJEXT): {$(VPATH)}ruby_assert.h
 vm.$(OBJEXT): {$(VPATH)}ruby_atomic.h
 vm.$(OBJEXT): {$(VPATH)}rubyparser.h

@@ -3,6 +3,7 @@
  */
 
 #include "id_table.h"
+#include "rpyyarv.h"
 #include "yjit.h"
 
 #define METHOD_DEBUG 0
@@ -328,6 +329,20 @@ rb_clear_constant_cache_for_id_i(st_data_t ic, st_data_t arg)
 // Here for backward compat.
 void rb_clear_constant_cache(void) {}
 
+static void (*rpyyarv_constant_hook)(ID id);
+
+void
+rb_rpyyarv_set_constant_hook(void (*fn)(ID id))
+{
+    rpyyarv_constant_hook = fn;
+}
+
+void
+rb_rpyyarv_constant_state_changed(ID id)
+{
+    if (rpyyarv_constant_hook) rpyyarv_constant_hook(id);
+}
+
 void
 rb_clear_constant_cache_for_id(ID id)
 {
@@ -342,6 +357,7 @@ rb_clear_constant_cache_for_id(ID id)
 
     rb_yjit_constant_state_changed(id);
     rb_zjit_constant_state_changed(id);
+    rb_rpyyarv_constant_state_changed(id);
 }
 
 static void
