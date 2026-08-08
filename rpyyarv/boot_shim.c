@@ -5,6 +5,7 @@
 /* In-tree, so the object-shape API libruby does not export is still reachable. */
 #include "shape.h"
 #include "internal/range.h"
+#include "rpyyarv.h"
 
 #include "boot_shim.h"
 
@@ -374,6 +375,22 @@ void
 rpyyarv_gc_mark_value(uintptr_t v)
 {
     rb_gc_mark((VALUE)v);
+}
+
+static void (*const_hook)(void);
+
+static void
+const_changed(ID id)
+{
+    (void)id;
+    if (const_hook) const_hook();
+}
+
+void
+rpyyarv_set_const_hook(void (*fn)(void))
+{
+    const_hook = fn;
+    rb_rpyyarv_set_constant_hook(fn ? const_changed : NULL);
 }
 
 void

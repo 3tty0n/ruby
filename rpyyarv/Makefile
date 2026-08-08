@@ -83,7 +83,7 @@ gccheck:
 	 for s in benchmark/*.rb test/exceptions.rb test/coverage.rb \
 	          test/requires.rb test/trampoline.rb \
 	          test/definesmethod.rb test/nonlocal_return.rb \
-	          test/attrs.rb test/fastops.rb test/ivars.rb \
+	          test/attrs.rb test/fastops.rb test/ivars.rb test/consts.rb \
 	          $(TOP)/benchmark/app_*.rb $(TOP)/benchmark/so_*.rb; do \
 	   n=`basename $$s`; \
 	   jo=`lim ./rpyyarv-jit $$s`; jrc=$$?; \

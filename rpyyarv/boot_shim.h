@@ -75,6 +75,9 @@ void rpyyarv_gc_set_mark_hook(void (*fn)(void));
 /* rb_gc_mark on a VALUE; only meaningful while the mark hook is running. */
 void rpyyarv_gc_mark_value(uintptr_t v);
 
+/* Called from rb_clear_constant_cache_for_id, beside the notifications YJIT and ZJIT take; the ID is dropped because RPyYARV's cache is invalidated whole. */
+void rpyyarv_set_const_hook(void (*fn)(void));
+
 void rpyyarv_gc_start(void);
 
 uintptr_t rpyyarv_str_new(const char *s);

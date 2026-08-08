@@ -60,6 +60,7 @@ VALUEP = rffi.CArrayPtr(VALUE)
 INTP = rffi.INTP
 VOIDP = rffi.VOIDP
 MARK_HOOK = lltype.Ptr(lltype.FuncType([], lltype.Void))
+CONST_HOOK = lltype.Ptr(lltype.FuncType([], lltype.Void))
 BLOCK_HOOK = lltype.Ptr(lltype.FuncType([lltype.Signed, rffi.INT, VALUEP],
                                         VALUE))
 # (self, mid, argc, argv, blockproc, status, errval) -> result
@@ -114,6 +115,7 @@ rb_special_consts = _ext('rpyyarv_special_consts',
 rb_gc_set_mark_hook = _ext('rpyyarv_gc_set_mark_hook', [MARK_HOOK],
                            lltype.Void)
 rb_gc_mark_value = _ext('rpyyarv_gc_mark_value', [VALUE], lltype.Void)
+rb_set_const_hook = _ext('rpyyarv_set_const_hook', [CONST_HOOK], lltype.Void)
 rb_gc_start = _ext('rpyyarv_gc_start', [], lltype.Void, reenters=True)
 rb_core_classes = _ext('rpyyarv_core_classes', [VALUEP], lltype.Void)
 rb_define_class_ = _ext('rpyyarv_define_class',
@@ -874,6 +876,11 @@ def gc_start():
 
 def set_mark_hook(fn):
     rb_gc_set_mark_hook(fn)
+
+
+def set_const_hook(fn):
+    """As install_block_callback: a plain function, so rffi builds the enter-RPython-from-C wrapper for it."""
+    rb_set_const_hook(fn)
 
 
 class _Node(object):

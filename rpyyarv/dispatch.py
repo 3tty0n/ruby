@@ -273,14 +273,55 @@ def alloc(klass):
     return boot.obj_alloc(klass)
 
 
+class ConstEntry(object):
+    # A box, not the bare VALUE: Qfalse is 0, so no VALUE is free to stand for "not cached".
+    _immutable_fields_ = ['value']
+
+    def __init__(self, v):
+        self.value = v
+
+
+class _Consts(object):
+    # Quasi-immutable: a constant can be reassigned or removed, so every write replaces the tag and drops the traces that folded it.
+    _immutable_fields_ = ['version?']
+
+    def __init__(self):
+        self.tab = {}       # (cbase VALUE, mid) -> ConstEntry
+        self.rooted = {}    # cbase VALUEs already handed to gcroots
+        self.version = Version()
+
+
+consts = _Consts()
+
+
+def invalidate_consts():
+    """CRuby's rb_clear_constant_cache_for_id, by way of the shim's const hook."""
+    consts.tab = {}
+    consts.version = Version()
+
+
+@elidable
+def _const_cached(klass, mid, version):
+    return consts.tab.get((klass, mid), None)
+
+
 def const_get(klass, mid):
-    # const_rid outside the residual call, so the trace folds it to a literal.
-    return _const_get(klass, rubycall.const_rid(mid))
+    entry = _const_cached(klass, mid, consts.version)
+    if entry is None:
+        entry = _const_fill(klass, mid)
+    return entry.value
 
 
 @dont_look_inside
-def _const_get(klass, rid):
-    return boot.const_get(klass, rid)
+def _const_fill(klass, mid):
+    entry = ConstEntry(boot.const_get(klass, rubycall.const_rid(mid)))
+    if klass not in consts.rooted:
+        # Kept alive: cbase roots the const table the cached VALUE still lives in, and a recycled class VALUE would otherwise read as a hit.
+        consts.rooted[klass] = None
+        gcroots.register_class(klass)
+    consts.tab[(klass, mid)] = entry
+    consts.version = Version()
+    return entry
 
 
 @dont_look_inside
@@ -423,3 +464,4 @@ def check_object_layout():
 def install():
     value.install_classes(boot.core_classes())
     barrier.direct = boot.wb_direct()
+    boot.set_const_hook(invalidate_consts)
