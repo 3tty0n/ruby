@@ -641,6 +641,31 @@ rpyyarv_shape_iv_index(unsigned int shape_id, uintptr_t id, int *index)
     return 0;
 }
 
+/*
+ * RB_OBJ_WRITE's barrier half, for a raw ivar store the RPython side has
+ * already made. Neither allocates a Ruby object nor runs a mark callback:
+ * gc/default/default.c:6085 only sets remembered/marking bits, and its one
+ * allocation is a raw malloc of a mark-stack chunk. That is why boot.py may
+ * declare it without random_effects_on_gcobjs.
+ */
+void
+rpyyarv_obj_written(uintptr_t a, uintptr_t b)
+{
+    RB_OBJ_WRITTEN((VALUE)a, Qundef, (VALUE)b);
+}
+
+/* False when rb_gc_writebarrier is a modular-GC function pointer instead of
+   the barrier above, which this shim cannot make the same promise about. */
+int
+rpyyarv_wb_direct(void)
+{
+#if USE_MODULAR_GC
+    return 0;
+#else
+    return 1;
+#endif
+}
+
 void
 rpyyarv_object_layout(int *out)
 {
@@ -650,6 +675,7 @@ rpyyarv_object_layout(int *out)
     out[3] = (int)(offsetof(struct RObject, as.ary) / SIZEOF_VALUE);
     out[4] = (int)RUBY_T_MASK;
     out[5] = (int)RUBY_T_OBJECT;
+    out[6] = (int)RUBY_FL_FREEZE;
 }
 
 void

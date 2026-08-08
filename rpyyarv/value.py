@@ -30,6 +30,7 @@ ROBJECT_HEAP = 1 << 16          # RUBY_FL_USER4: ivars spilled to a heap buffer
 FIELDS_WORD = 2                 # struct RObject: as.ary / as.heap.fields
 T_MASK = 0x1f
 T_OBJECT = 0x01
+FL_FREEZE = 1 << 11             # RUBY_FL_FREEZE, the bit rb_check_frozen reads
 
 # RArray layout for the opt_aref/opt_length fast paths, checked against
 # rpyyarv_array_layout. A short array embeds its elements, a longer one does

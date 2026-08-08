@@ -131,7 +131,12 @@ void rpyyarv_ivar_set(uintptr_t obj, uintptr_t id, uintptr_t val, int *state);
  * answers 1 (found, *index set), 0 (no such ivar) or -1 (fast path unusable),
  * allocating and raising nothing; object_layout reports the RObject layout the
  * RPython side compiles in, so a drifting CRuby is caught at boot. */
-#define RPYYARV_LAYOUT_N 6
+/* The write barrier alone, for an ivar store made by raw word write, and
+   whether this build's barrier is the one boot_shim.c vouches for. */
+void rpyyarv_obj_written(uintptr_t a, uintptr_t b);
+int rpyyarv_wb_direct(void);
+
+#define RPYYARV_LAYOUT_N 7
 int rpyyarv_shape_iv_index(unsigned int shape_id, uintptr_t id, int *index);
 void rpyyarv_object_layout(int *out);
 

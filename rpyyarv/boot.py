@@ -195,6 +195,10 @@ rb_method_owner = _ext('rpyyarv_method_owner', [VALUE, VALUE], VALUE,
                        reenters=True)
 # No reenters: reads two struct fields after a type test, allocating nothing.
 rb_range_part = _ext('rpyyarv_range_part', [VALUE, rffi.INT], VALUE)
+# No reenters either: the barrier sets bits in preallocated page bitmaps and
+# reaches no mark callback. See the comment on rpyyarv_obj_written.
+rb_obj_written = _ext('rpyyarv_obj_written', [VALUE, VALUE], lltype.Void)
+rb_wb_direct = _ext('rpyyarv_wb_direct', [], rffi.INT)
 
 REQ_LOADED = 0
 REQ_RB = 1
@@ -563,6 +567,14 @@ def core_classes():
         return result
 
 
+def obj_written(a, b):
+    return rb_obj_written(_v(a), _v(b))
+
+
+def wb_direct():
+    return rffi.cast(lltype.Signed, rb_wb_direct()) != 0
+
+
 RANGE_BEG = 0
 RANGE_END = 1
 RANGE_EXCL = 2
@@ -664,7 +676,7 @@ def ivar_set(obj, rid, val):
         _failed('instance_variable_set')
 
 
-LAYOUT_N = 6
+LAYOUT_N = 7
 
 
 def object_layout():

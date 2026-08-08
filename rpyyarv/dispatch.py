@@ -11,7 +11,8 @@ import gcroots
 import rubycall
 import value
 from error import RubyException, UnsupportedOperation
-from rlib import elidable, dont_look_inside, promote, raw_word
+from rlib import (elidable, dont_look_inside, promote, raw_word,
+                  set_raw_word)
 
 # Cycle guard: a superclass chain longer than this is a corrupt map.
 MAX_ANCESTORS = 64
@@ -301,9 +302,14 @@ def alloc(klass):
     return boot.obj_alloc(klass)
 
 
-@dont_look_inside
 def const_get(klass, mid):
-    return boot.const_get(klass, rubycall.rid(mid))
+    # const_rid outside the residual call, so the trace folds it to a literal.
+    return _const_get(klass, rubycall.const_rid(mid))
+
+
+@dont_look_inside
+def _const_get(klass, rid):
+    return boot.const_get(klass, rid)
 
 
 @dont_look_inside
@@ -401,10 +407,45 @@ def _ivar_get_slow(obj, mid):
     return boot.ivar_get(obj, rubycall.rid(mid))
 
 
-@dont_look_inside
+class _Barrier(object):
+    # Quasi-immutable: install() writes it once, before any Ruby code runs.
+    _immutable_fields_ = ['direct?']
+
+    def __init__(self):
+        self.direct = False
+
+
+barrier = _Barrier()
+
+
 def ivar_set(obj, mid, v):
-    # Still a call: a raw store would skip CRuby's write barrier and leave an
-    # old->young reference unremembered by RGenGC.
+    """The mirror of ivar_get: a shape guard, then a raw field store. An
+    immediate needs no write barrier at all, since rb_obj_written skips one
+    for a special const (ruby/internal/gc.h:788); a heap value takes CRuby's,
+    which allocates nothing. A frozen receiver must still raise, and a shape
+    without the ivar still needs CRuby to make the transition."""
+    if obj != 0 and (obj & value.IMMEDIATE_MASK) == 0:
+        immediate = value.is_immediate(v)
+        if immediate or barrier.direct:
+            flags = raw_word(obj, value.FLAGS_WORD)
+            if (flags & value.T_MASK) == value.T_OBJECT \
+                    and (flags & value.FL_FREEZE) == 0:
+                shape_id = promote(
+                    (flags >> value.SHAPE_SHIFT) & value.SHAPE_MASK)
+                slot = iv_slot(shape_id, rubycall.const_rid(mid))
+                if slot >= 0:
+                    if flags & value.ROBJECT_HEAP:
+                        set_raw_word(raw_word(obj, value.FIELDS_WORD), slot, v)
+                    else:
+                        set_raw_word(obj, value.FIELDS_WORD + slot, v)
+                    if not immediate:
+                        boot.obj_written(obj, v)
+                    return
+    _ivar_set_slow(obj, mid, v)
+
+
+@dont_look_inside
+def _ivar_set_slow(obj, mid, v):
     boot.ivar_set(obj, rubycall.rid(mid), v)
 
 
@@ -412,10 +453,12 @@ def check_object_layout():
     """The ivar fast path reads RObject by hand; refuse a CRuby it misreads."""
     got = boot.object_layout()
     want = [value.SHAPE_SHIFT, value.SHAPE_ID_BITS, value.ROBJECT_HEAP,
-            value.FIELDS_WORD, value.T_MASK, value.T_OBJECT]
+            value.FIELDS_WORD, value.T_MASK, value.T_OBJECT,
+            value.FL_FREEZE]
     return got == want
 
 
 def install():
     """Boot-time: the immediates' classes, and Object as the root of the map."""
     value.install_classes(boot.core_classes())
+    barrier.direct = boot.wb_direct()

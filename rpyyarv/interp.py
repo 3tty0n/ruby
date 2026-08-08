@@ -18,6 +18,8 @@ from rlib import (JitDriver, StackOverflow, always_inline, check_stack_overflow,
 
 TO_S = symbols.intern('to_s')
 DUP = symbols.intern('dup')
+# The empty leading segment the loader puts in a `::Foo` constant path.
+ROOT_CBASE = symbols.intern('')
 
 
 def define_method(frame, mid, w_iseq):
@@ -1170,7 +1172,8 @@ def _const_path(frame, path):
     """vm_get_ev_const_chain; a leading empty segment is `::Foo`."""
     base = _const_base(frame)
     i = 0
-    if symbols.name_of(path[0]) == '':
+    # An id compare, not a name lookup: the dict read would stay in the trace.
+    if path[0] == ROOT_CBASE:
         base = value.core_class(value.C_OBJECT)
         i = 1
     while i < len(path):

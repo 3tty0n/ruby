@@ -15,6 +15,10 @@ try:
         """The index'th machine word at a raw address, as a signed word."""
         return rffi.cast(lltype.Signed, rffi.cast(_WORDP, addr)[index])
 
+    def set_raw_word(addr, index, v):
+        """Store a signed word at the index'th word of a raw address."""
+        rffi.cast(_WORDP, addr)[index] = rffi.cast(rffi.LONG, v)
+
     def raw_short(addr, index):
         """The index'th C short at a raw address, as a signed word."""
         return rffi.cast(lltype.Signed, rffi.cast(_SHORTP, addr)[index])
@@ -64,6 +68,9 @@ except ImportError:
 
     def raw_word(addr, index):
         raise NotImplementedError('raw_word needs the RPython backend')
+
+    def set_raw_word(addr, index, v):
+        raise NotImplementedError('set_raw_word needs the RPython backend')
 
     def raw_short(addr, index):
         raise NotImplementedError('raw_short needs the RPython backend')
