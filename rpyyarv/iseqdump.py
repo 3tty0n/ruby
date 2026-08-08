@@ -1,7 +1,4 @@
-"""Read the text dump scripts/dump_iseq.rb writes into rawiseq objects.
-
-Record and operand grammar: see scripts/dump_iseq.rb.
-"""
+"""Read the text dump scripts/dump_iseq.rb writes into rawiseq objects; record and operand grammar is defined there."""
 
 import rawiseq
 from error import LoadError
@@ -169,8 +166,7 @@ def parse(text):
             catch_types = []
             for _ in range(_int(_field(fields, 1, 'catch table size'),
                                 'catch')):
-                # The text dump reports only how many; an entry with no
-                # labels is one the loader must refuse.
+                # The text dump reports only how many; an entry with no labels is one the loader must refuse.
                 catch_types.append(rawiseq.RawCatch('?'))
             if pending is None or nlocals < 0 or stack_max < 0:
                 raise LoadError('line %d: incomplete iseq header' % lineno)

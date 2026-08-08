@@ -1,6 +1,3 @@
-"""Methods and method tables.
-"""
-
 import symbols
 from error import UnsupportedOperation
 from objects.base import W_Root

@@ -1,14 +1,4 @@
-"""Kernel#require and #require_relative, served by RPyYARV itself.
-
-A file CRuby loads defines its methods into CRuby's method tables, which
-RPyYARV's registry never sees, so every later call into it leaves through
-rb_funcallv. Here the path is resolved the way load.c does, the file is
-compiled by the embedded CRuby, and its toplevel ISeq runs in RPyYARV with
-self = main, which puts its `def`s where dispatch.lookup can find them.
-A file RPyYARV cannot represent is handed to CRuby on its own, not the whole
-program: its `def`s land in CRuby's tables, and a call from there into a class
-RPyYARV defined comes back through the trampoline dispatch.py installs.
-"""
+"""Kernel#require/#require_relative: resolves the path as load.c does, compiles via embedded CRuby, and runs the toplevel ISeq in RPyYARV with self = main."""
 
 import os
 
@@ -28,12 +18,9 @@ COMPILE_FILE = 'compile_file'
 
 class _Files(object):
     def __init__(self):
-        # The files whose toplevel ISeq is running, innermost last; the base
-        # for require_relative, which cannot use rb_current_realfilepath
-        # because RPyYARV pushes no CRuby frame (load.c:1042).
+        # The files whose toplevel ISeq is running, innermost last; require_relative's base since RPyYARV pushes no CRuby frame (load.c:1042).
         self.stack = []
-        # Expanded paths whose load has not finished, so a cycle answers
-        # false instead of recurring.
+        # Expanded paths whose load has not finished, so a cycle answers false instead of recurring.
         self.loading = {}
 
 
@@ -75,8 +62,7 @@ def _load(fname):
     if kind == boot.REQ_LOADED:
         return value.Q_FALSE
     if kind != boot.REQ_RB:
-        # A C extension, or a name no $LOAD_PATH entry holds: CRuby's either
-        # way, and not a fallback, so the requiring file stays on RPyYARV.
+        # A C extension, or a name no $LOAD_PATH entry holds: CRuby's either way, and not a fallback, so the requiring file stays on RPyYARV.
         return _delegate(fname)
     gcroots.hold(path)
     try:
@@ -109,8 +95,7 @@ def _load_rb(fname, path):
         del files.loading[name]
     debug.count_native()
     debug.record_file(name, result.total, result.supported, '')
-    # After the body, as CRuby does (load.c:1379): a file that raised is not
-    # a loaded feature.
+    # After the body, as CRuby does (load.c:1379): a file that raised is not a loaded feature.
     boot.provide(path)
     return value.Q_TRUE
 
@@ -130,13 +115,7 @@ def _compile(path):
 
 
 def _punt(fname, name, total, supported, reason):
-    """This one file to CRuby; the file that required it stays on RPyYARV.
-
-    Its `def`s land in CRuby's method tables and RPyYARV's registry never sees
-    them, which a send out through rb_funcallv covers; the other direction --
-    CRuby dispatching to a class RPyYARV defined -- is what the trampoline
-    dispatch.define installs is for.
-    """
+    """This one file to CRuby; the file that required it stays on RPyYARV."""
     debug.record_file(name, total, supported, reason)
     return _delegate(fname)
 

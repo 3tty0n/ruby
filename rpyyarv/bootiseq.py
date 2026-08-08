@@ -1,7 +1,6 @@
 """Front end over an embedded CRuby: iseqw.to_a -> rawiseq objects."""
 
-# Only this module and boot.py import rpython; the rest stays importable on
-# plain CPython.
+# Only this module and boot.py import rpython; the rest stays importable on plain CPython.
 
 import boot
 import rawiseq
@@ -12,18 +11,12 @@ from to_a_layout import (I_BODY, I_CATCH, I_LABEL, I_LOCALS, I_MAGIC, I_MISC,
 
 EVENT_PREFIX = 'RUBY_EVENT_'
 
-# Keys of the params hash (iseq.c:3425-3462) whose argument layout the call
-# path places. use_block is a hint CRuby sets on every method named
-# initialize (iseq.c:615), not a parameter.
-# ambiguous_param0 only turns block autosplat on, which RPyYARV never does.
-# block_start is placeable without the call path touching it: the slot stays
-# untouched until getblockparam/getblockparamproxy reads the frame's block.
+# Keys of the params hash (iseq.c:3425-3462): use_block is a hint on `initialize` methods (iseq.c:615) not a parameter, ambiguous_param0 only enables block autosplat (unused here), block_start needs no call-path handling until getblockparam(proxy) reads it.
 PLAIN_PARAM_KEYS = ['lead_num', 'use_block', 'opt', 'rest_start',
                     'post_start', 'post_num', 'ambiguous_param0',
                     'block_start']
 
-# Anything outside this means the ISeq declares real parameters, so arg_size
-# is not the lead count.
+# Anything outside this means the ISeq declares real parameters, so arg_size is not the lead count.
 NO_PARAM_KEYS = ['use_block', 'ambiguous_param0']
 
 
@@ -177,8 +170,7 @@ def _operand(pending, owners, v, me):
 
 
 def _catches(pending, owners, catch, me):
-    """An entry's ISeq joins the same pending queue the body's nested ISeqs
-    use; see rawiseq.RawCatch for the layout."""
+    """An entry's ISeq joins the same pending queue the body's nested ISeqs use; see rawiseq.RawCatch for the layout."""
     out = []
     n = boot.ary_len(catch)
     i = 0
@@ -213,17 +205,14 @@ def _label(v):
 
 
 def _lead_num(misc, params):
-    """How many leading required parameters the ISeq takes. iseq.c:3437 omits
-    lead_num unless flags.has_lead is set, which a `for` loop's block
-    parameter is not; arg_size counts it either way."""
+    """Leading required parameter count: iseq.c:3437 omits lead_num unless flags.has_lead is set, which a `for` block param is not; arg_size counts it either way."""
     if len(_param_keys(params, NO_PARAM_KEYS)) == 0:
         return _int_or(boot.hash_aref(misc, 'arg_size'), 0)
     return _int_or(boot.hash_aref(params, 'lead_num'), 0)
 
 
 def _opt_labels(params):
-    """The opt table as label names; entry i starts the body with i optionals
-    filled (vm_args.c:906)."""
+    """The opt table as label names; entry i starts the body with i optionals filled (vm_args.c:906)."""
     v = boot.hash_aref(params, 'opt')
     if boot.is_nil(v):
         return []
@@ -246,8 +235,7 @@ def _int_or(v, default):
 
 
 def _extra_params(params):
-    """The parameter kinds RPyYARV cannot place: keyword, kwrest, block and
-    the block-only ambiguous_param0."""
+    """The parameter kinds RPyYARV cannot place: keyword, kwrest, block and the block-only ambiguous_param0."""
     return ','.join(_param_keys(params, PLAIN_PARAM_KEYS))
 
 

@@ -1,10 +1,4 @@
-"""The VALUEs that escaped into the RPython heap.
-
-CRuby's conservative stack scan covers VALUEs in machine registers and C/JIT
-stack frames, but not the frame stacks, frame locals and per-ISeq constant
-pools, which are RPython objects. This module keeps those enumerable and
-hands them to CRuby through the shim's mark hook.
-"""
+"""CRuby's conservative stack scan misses frame stacks/locals and const pools since they're RPython objects; this keeps them enumerable for the shim's mark hook."""
 
 import boot
 import value
@@ -25,8 +19,7 @@ state = Registry()
 
 
 def register_blocks(blocks):
-    """The blocks CRuby can reach through a handle. Their defining frames may
-    already have returned, so nothing else keeps their locals marked."""
+    """The blocks CRuby can reach through a handle; their defining frames may already have returned, so nothing else keeps their locals marked."""
     state.blocks = blocks
 
 
@@ -50,8 +43,7 @@ def release_load_temporaries():
 
 
 def hold(v):
-    """Keep a VALUE reachable while it waits in an RPython field no frame
-    covers."""
+    """Keep a VALUE reachable while it waits in an RPython field no frame covers."""
     state.held.append(v)
 
 
@@ -97,8 +89,7 @@ def _mark_frame(f):
 
 
 def _mark_block_procs(w_block):
-    """A block whose frames something else already marks: only the Proc it may
-    carry is left. The chain is the enclosing blocks, so it terminates."""
+    """A block whose frames something else already marks: only the Proc it may carry is left."""
     while w_block is not None:
         if not value.is_immediate(w_block.proc_value):
             boot.gc_mark_value(w_block.proc_value)
@@ -106,8 +97,7 @@ def _mark_block_procs(w_block):
 
 
 def _mark_block_deep(w_block):
-    """A block only the handle table holds: its defining frames may have
-    returned, so their locals are reachable from nowhere else."""
+    """A block only the handle table holds: its defining frames may have returned, so their locals are reachable from nowhere else."""
     while w_block is not None:
         if not value.is_immediate(w_block.proc_value):
             boot.gc_mark_value(w_block.proc_value)
@@ -120,8 +110,7 @@ def _mark_block_deep(w_block):
 
 @dont_look_inside
 def mark_roots():
-    # Not _mark_array: this list is resized, the pools are not, and the
-    # annotator will not merge the two list kinds.
+    # Not _mark_array: this list is resized, the pools are not, and the annotator will not merge the two list kinds.
     pinned = state.pinned
     k = 0
     while k < len(pinned):
@@ -153,8 +142,7 @@ def mark_roots():
         while k < len(table):
             _mark_block_deep(table[k])
             k += 1
-    # Reading a virtualizable's fields from here forces it, which jit-summary
-    # counts as "virtualizables forced".
+    # Reading a virtualizable's fields from here forces it, which jit-summary counts as "virtualizables forced".
     f = state.top
     while f is not None:
         _mark_frame(f)
@@ -162,6 +150,5 @@ def mark_roots():
 
 
 def install():
-    # A plain function, not an llhelper pointer, so rffi wraps it in the
-    # enter-RPython-from-C prologue. See boot.install_block_callback.
+    # A plain function, not an llhelper pointer, so rffi wraps it in the enter-RPython-from-C prologue. See boot.install_block_callback.
     boot.set_mark_hook(mark_roots)

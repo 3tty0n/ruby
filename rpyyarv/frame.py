@@ -1,8 +1,7 @@
 import value
 from rlib import hint
 
-# Which throw a rescue/ensure ISeq runs under, so its trailing `throw 0` can
-# continue it (vm_insnhelper.c:1733).
+# Which throw a rescue/ensure ISeq runs under, so its trailing `throw 0` can continue it (vm_insnhelper.c:1733).
 PENDING_NONE = 0
 PENDING_RAISE = 1
 PENDING_BREAK = 2
@@ -14,15 +13,10 @@ class Frame(object):
     # One per ISeq invocation, so Ruby call depth is RPython recursion depth.
     _virtualizable_ = ['sp', 'pc', 'stack[*]', 'locals[*]']
 
-    # VM_FRAME_FLAG_MODIFIED_BLOCK_PARAM: once set, the `&blk` local slot holds
-    # the answer and self.block is no longer consulted for it (insns.def:111).
-    # Left to the rtyper's zero-initialisation, so a call that has no block
-    # parameter -- almost all of them -- does not pay a store for it.
+    # VM_FRAME_FLAG_MODIFIED_BLOCK_PARAM (insns.def:111); left to the rtyper's zero-init so the common no-block-param call pays no store.
     block_param_set = False
 
-    # Set on the way out of execute(), and only for an ISeq a non-local return
-    # can name: a `return` whose target frame is already gone is the orphaned
-    # Proc that vm_throw_start answers with a LocalJumpError.
+    # Set on the way out of execute(); a `return` whose target frame is already gone is the orphaned Proc vm_throw_start answers with a LocalJumpError.
     dead = False
 
     def __init__(self, iseq, self_val, cref=0, entry=None):
@@ -41,8 +35,7 @@ class Frame(object):
         self.block = None
         # For a block's frame, the block itself: a break's unwind tag.
         self.own_block = None
-        # For a block's frame, the frame it was written in; getlocal at a
-        # non-zero level walks this chain, as CRuby walks the EP chain.
+        # For a block's frame, the frame it was written in; getlocal at a non-zero level walks this chain, as CRuby walks the EP chain.
         self.defining_frame = None
         # gcroots links live frames through this; not virtualizable.
         self.prev_frame = None

@@ -1,5 +1,3 @@
-"""CRuby boot and ISeq handoff."""
-
 import os
 import sys
 
@@ -72,12 +70,7 @@ MAX_ARGC = 32
 
 
 def _ext(name, args, result, reenters=False):
-    # releasegil=False: every call runs on the main Ruby thread holding the
-    # GVL, and the mark hook re-enters RPython from inside one of them.
-    # reenters=True marks a call that runs RPython code again through a
-    # callback; without it a minor collection inside the callback would move
-    # live objects out from under the C locals holding them. Every call that
-    # can allocate qualifies, since an allocation can start a CRuby GC.
+    # releasegil=False: all calls hold the GVL; reenters=True on any call that can allocate, so a GC in a callback cannot move objects out from under C locals.
     return rffi.llexternal(name, args, result, compilation_info=eci,
                            releasegil=False,
                            random_effects_on_gcobjs=reenters)
@@ -103,9 +96,7 @@ rb_is_false = _ext('rpyyarv_is_false', [VALUE], rffi.INT)
 rb_num2long = _ext('rpyyarv_num2long', [VALUE], rffi.LONG, reenters=True)
 rb_hash_aref = _ext('rpyyarv_hash_aref', [VALUE, rffi.CCHARP], VALUE, reenters=True)
 rb_sym_cstr = _ext('rpyyarv_sym_cstr', [VALUE], rffi.CCHARP, reenters=True)
-# No reenters: reached from an elidable, which the codewriter rejects. Safe --
-# neither this nor rb_shape_iv_index allocates, and elidable calls never
-# survive into an optimized trace.
+# No reenters: the codewriter rejects it inside an elidable; safe -- neither this nor rb_shape_iv_index allocates, and elidable calls never survive into an optimized trace.
 rb_intern_ = _ext('rpyyarv_intern', [rffi.CCHARP], VALUE)
 rb_sym_new = _ext('rpyyarv_sym_new', [rffi.CCHARP], VALUE, reenters=True)
 rb_funcallv_id = _ext('rpyyarv_funcallv_id',
@@ -195,8 +186,7 @@ rb_method_owner = _ext('rpyyarv_method_owner', [VALUE, VALUE], VALUE,
                        reenters=True)
 # No reenters: reads two struct fields after a type test, allocating nothing.
 rb_range_part = _ext('rpyyarv_range_part', [VALUE, rffi.INT], VALUE)
-# No reenters either: the barrier sets bits in preallocated page bitmaps and
-# reaches no mark callback. See the comment on rpyyarv_obj_written.
+# No reenters: the barrier sets bits in preallocated page bitmaps and reaches no mark callback; see the comment on rpyyarv_obj_written.
 rb_obj_written = _ext('rpyyarv_obj_written', [VALUE, VALUE], lltype.Void)
 rb_wb_direct = _ext('rpyyarv_wb_direct', [], rffi.INT)
 
@@ -208,7 +198,6 @@ NCLASS = 13
 
 
 def _v(n):
-    """Signed RPython word -> uintptr_t VALUE for the C boundary."""
     return rffi.cast(VALUE, n)
 
 
@@ -219,7 +208,6 @@ class RubyError(Exception):
 
 
 def _failed(name):
-    """A failed rb_protect as an RPython exception carrying the Ruby one."""
     v = rffi.cast(lltype.Signed, rb_take_errinfo())
     raise RubyException(v, name)
 
@@ -316,8 +304,7 @@ def sym_new(name):
 
 
 def funcallv(recv, rid, args, name, public_only=False):
-    """rb_funcallv on signed VALUEs; RubyError when the callee raised.
-    public_only picks rb_funcallv_public, which honours visibility."""
+    """public_only picks rb_funcallv_public, which honours visibility."""
     argc = len(args)
     if argc > MAX_ARGC:
         raise RubyError(name)
@@ -359,8 +346,7 @@ def ary_new(values):
 
 
 def _ary_new_chunked(values):
-    """More elements than one machine-stack buffer holds; `ary` stays an
-    RPython local, which the conservative stack scan covers between chunks."""
+    """`ary` stays an RPython local, which the conservative stack scan covers between chunks."""
     n = len(values)
     ary = 0
     with lltype.scoped_alloc(INTP.TO, 1) as state:
@@ -415,14 +401,12 @@ def call_with_block(recv, rid, args, handle, name):
 
 
 def install_block_callback(fn):
-    """A plain function, not an llhelper pointer: rffi only builds the
-    enter-RPython-from-C wrapper when the callback crosses as a function."""
+    """A plain function, not an llhelper pointer: only then does rffi build the enter-RPython-from-C wrapper."""
     rb_set_block_callback(fn)
 
 
 def install_trampoline_callback(fn):
-    """As install_block_callback: a plain function, so rffi builds the
-    enter-RPython-from-C wrapper for it."""
+    """As install_block_callback: a plain function, so rffi builds the enter-RPython-from-C wrapper for it."""
     rb_set_trampoline_callback(fn)
 
 
@@ -438,7 +422,6 @@ def define_method_entry(klass, rid, private):
 
 
 def as_signed(v):
-    """A VALUE the C boundary handed in, as an RPython word."""
     return rffi.cast(lltype.Signed, v)
 
 
@@ -462,7 +445,6 @@ def read_values(argv, argc):
 
 
 def as_value(n):
-    """A signed RPython word back out to C as a VALUE."""
     return rffi.cast(VALUE, n)
 
 
@@ -701,8 +683,7 @@ def array_layout():
 
 
 def shape_iv_index(shape_id, rid):
-    """The field slot holding rid in shape_id: >= 0 found, -1 provably absent,
-    -2 when the fast path must not be used."""
+    """The field slot holding rid in shape_id: >= 0 found, -1 provably absent, -2 fast path unusable."""
     with lltype.scoped_alloc(INTP.TO, 1) as idx:
         idx[0] = rffi.cast(rffi.INT, -1)
         found = rffi.cast(lltype.Signed,
@@ -844,8 +825,7 @@ def bop_mask():
 
 
 def require_resolve(fname):
-    """(REQ_*, expanded path VALUE); the path is 0 unless the answer is
-    REQ_RB."""
+    """(REQ_*, expanded path VALUE); the path is 0 unless the answer is REQ_RB."""
     path = 0
     kind = REQ_FOREIGN
     with lltype.scoped_alloc(rffi.CArray(VALUE), 1) as out:
@@ -907,8 +887,7 @@ node = _Node()
 
 def boot(argv):
     """Return (iseqw, status). iseqw is 0 when there is no ISeq to run."""
-    # Never freed: ruby_sysinit keeps this pointer in origarg (ruby.c) for
-    # the process lifetime.
+    # Never freed: ruby_sysinit keeps this pointer in origarg (ruby.c) for the process lifetime.
     c_argv = rffi.liststr2charpp(argv)
     with lltype.scoped_alloc(INTP.TO, 1) as status:
         status[0] = rffi.cast(rffi.INT, 0)

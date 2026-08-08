@@ -1,12 +1,4 @@
-"""The opt_* instructions: a fixnum or Array fast path that touches no rb_*
-API, and value.Q_UNDEF for everything else.
-
-Q_UNDEF is what vm_opt_plus and friends answer when their fast path does not
-apply (vm_insnhelper.c:6880); interp.py then runs the send for real, so a
-receiver whose class RPyYARV holds a method for reaches that method rather
-than CRuby's. Each fast path is also gated on the operator still being the
-one CRuby booted with, as BASIC_OP_UNREDEFINED_P gates its own.
-"""
+"""opt_* instructions: a fixnum/Array fast path touching no rb_* API, else value.Q_UNDEF as vm_opt_plus and friends do (vm_insnhelper.c:6880), so interp.py runs the real send."""
 
 import boot
 import dispatch
@@ -41,8 +33,7 @@ BEGIN = symbols.intern('begin')
 END = symbols.intern('end')
 EXCLUDE_END_P = symbols.intern('exclude_end?')
 
-# One bit per (class, operator) pair, in the order boot_shim.c's
-# rpyyarv_bop_mask sets them.
+# One bit per (class, operator) pair, in the order boot_shim.c's rpyyarv_bop_mask sets them.
 B_INT_PLUS = 0
 B_INT_MINUS = 1
 B_INT_MULT = 2
@@ -75,14 +66,11 @@ _SYM_MID = [EQ]
 
 
 class _Bops(object):
-    # Quasi-immutable: a fast path's guard folds into the trace, and
-    # refresh() invalidates every trace that read it. See value._Classes for
-    # why a prebuilt instance cannot use a plain immutable field.
+    # Quasi-immutable: a fast path's guard folds into the trace and refresh() invalidates it; see value._Classes for why not a plain immutable field.
     _immutable_fields_ = ['mask?']
 
     def __init__(self):
-        # Every bit set until refresh() runs, so nothing takes a fast path
-        # before CRuby has been asked.
+        # Every bit set until refresh() runs, so nothing takes a fast path before CRuby has been asked.
         self.mask = -1
 
 
@@ -90,10 +78,7 @@ bops = _Bops()
 
 
 def refresh():
-    """Re-ask CRuby which of the watched operators it still owns. Called
-    wherever RPyYARV can see the method world change; a redefinition made
-    inside a CRuby call with no RPyYARV definition after it is still missed.
-    """
+    """Re-ask CRuby which watched operators it still owns; a redefinition made inside a CRuby call with no RPyYARV definition after it is still missed."""
     dispatch.invalidate_owners()
     count, mask = boot.bop_mask()
     if count != B_COUNT:
@@ -107,9 +92,7 @@ def _cruby_owns(bit):
 
 
 def _int_op(bit):
-    """CRuby still owns the Integer operator, and RPyYARV has not defined one
-    of its own. The registry lookup is elidable on the method version, so it
-    folds away and a later `class Integer` invalidates it."""
+    """CRuby still owns the operator and RPyYARV hasn't defined one; the registry lookup is elidable on the method version, invalidated by a later `class Integer`."""
     return (_cruby_owns(bit)
             and dispatch.lookup_core(value.core_class(value.C_INTEGER),
                                      _INT_MID[bit]) is None)
@@ -183,8 +166,7 @@ def ge(a, b):
 
 
 def _sym_eq(a, mid):
-    """Symbol#== is rb_obj_equal (string.c:12227) and a name has exactly one
-    Symbol VALUE, so a word compare answers it."""
+    """Symbol#== is rb_obj_equal (string.c:12227) and a name has exactly one Symbol VALUE, so a word compare answers it."""
     if value.class_of(a) != value.core_class(value.C_SYMBOL):
         return False
     if not _sym_op(B_SYM_EQ):
@@ -195,8 +177,7 @@ def _sym_eq(a, mid):
 
 
 def identity_op(recv, mid):
-    """vm_opt_equality's second half: the receiver still resolves the operator
-    to BasicObject's, so comparing is comparing the words."""
+    """vm_opt_equality's second half: the receiver still resolves the operator to BasicObject's, so comparing is comparing the words."""
     klass = value.class_of(recv)
     if klass == 0:
         return False
@@ -224,8 +205,7 @@ def eq(a, b):
 
 
 def neq(a, b):
-    # BOP_NEQ is never flagged: vm_opt_neq resolves `!=` to BasicObject#!=
-    # and then asks opt_equality, so Integer#== is the definition that counts.
+    # BOP_NEQ is never flagged: vm_opt_neq resolves `!=` to BasicObject#!= then asks opt_equality, so Integer#== is the definition that counts.
     if _fix2(a, b, B_INT_EQ):
         return value.newbool(a != b)
     if identity_send(a, NEQ):
@@ -254,14 +234,12 @@ def xor(a, b):
 
 
 def rshift(a, b):
-    """Integer#>> for a non-negative fixnum shift; a negative one is a left
-    shift that CRuby may widen to a Bignum, so it goes back to CRuby."""
+    """Integer#>> for a non-negative fixnum shift; a negative one is a left shift CRuby may widen to a Bignum, so it goes back to CRuby."""
     if _fix2(a, b, B_INT_RSHIFT):
         n = value.fix2int(a)
         s = value.fix2int(b)
         if s >= 0:
-            # A fixnum is under 63 bits, so any wider shift is already the
-            # sign; RPython leaves a shift of the full word width undefined.
+            # A fixnum is under 63 bits, so any wider shift is already the sign; RPython leaves a shift of the full word width undefined.
             if s >= LONG_BIT - 1:
                 s = LONG_BIT - 1
             return value.int2fix(n >> s)
@@ -269,9 +247,7 @@ def rshift(a, b):
 
 
 def range_part(recv, mid):
-    """Range#begin, #end and #exclude_end? read straight off the Range. The
-    shim answers Qundef for anything but a direct Range instance, and the
-    caller has already found no RPyYARV definition of the name."""
+    """Range#begin, #end, #exclude_end? read straight off the Range; the shim answers Qundef for anything but a direct Range instance."""
     if value.is_immediate(recv):
         return value.Q_UNDEF
     if mid == BEGIN and _cruby_owns(B_RNG_BEGIN):
@@ -284,8 +260,7 @@ def range_part(recv, mid):
 
 
 def _both_positive(a, b):
-    # Ruby's / and % floor, RPython's truncate: only take operands where the
-    # two agree.
+    # Ruby's / and % floor, RPython's truncate: only take operands where the two agree.
     return (value.is_fixnum(a) and value.is_fixnum(b)
             and value.fix2int(a) >= 0 and value.fix2int(b) > 0)
 
@@ -343,8 +318,7 @@ def empty_p(recv):
 
 
 def opt_not(recv):
-    # TODO: vm_opt_not asks whether `!` still resolves to rb_obj_not, which no
-    # BOP flag records, so a redefined #! is still ignored here.
+    # TODO: vm_opt_not asks whether `!` still resolves to rb_obj_not, which no BOP flag records, so a redefined #! is still ignored here.
     return value.newbool(not value.is_true(recv))
 
 

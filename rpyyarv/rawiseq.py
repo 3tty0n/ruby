@@ -1,12 +1,6 @@
-"""The seam between front end and loader: ISeqs as CRuby spelled them.
+"""The seam between front end and loader: iseqdump.py and bootiseq.py both fill these in; loader.py works on them without knowing which ran."""
 
-iseqdump.py and bootiseq.py both fill these in; loader.py works on them
-without knowing which ran. Nested ISeqs sit in one flat table addressed by
-index, so no reader has to recurse.
-"""
-
-# Flat kinds, not a class hierarchy: the loader takes the meaning from the
-# operand's declared type in insns.def and never downcasts.
+# Flat kinds, not a class hierarchy: the loader takes the meaning from the operand's declared type in insns.def and never downcasts.
 OP_INT = 0
 OP_NIL = 1
 OP_TRUE = 2
@@ -55,8 +49,7 @@ class RawInsn(object):
 
 
 class RawCatch(object):
-    """[type, iseq, start, end, cont, sp], as iseq_data_to_ary spells it
-    (iseq.c:3605); the three pc fields arrive as label names."""
+    """[type, iseq, start, end, cont, sp], as iseq_data_to_ary spells it (iseq.c:3605); the three pc fields arrive as label names."""
     def __init__(self, kind, iseq_index=-1, start='', end='', cont='', sp=0):
         self.kind = kind        # 'rescue', 'ensure', 'break', ...
         self.iseq_index = iseq_index    # -1 when the entry has no ISeq
@@ -89,8 +82,7 @@ class RawISeq(object):
         self.insns = []
         # label name -> index into insns; the loader turns it into a pc.
         self.labels = {}
-        # Enclosing ISeq, -1 for the outermost; the naming scope a getlocal at
-        # level 1 reaches. Only bootiseq.py fills it in.
+        # Enclosing ISeq, -1 for the outermost; the naming scope a getlocal at level 1 reaches. Only bootiseq.py fills it in.
         self.parent = -1
 
     def add_insn(self, insn):

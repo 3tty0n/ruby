@@ -1,14 +1,6 @@
-"""Which YARV instructions RPyYARV implements, and how it encodes them.
+"""insns.py holds facts derived from insns.def, this file the decisions; rpyvmgen/verify.rb cross-checks the two, and anything absent from EMIT is unsupported (the loader fails loudly, never skips)."""
 
-insns.py holds the facts derived from insns.def, this file the decisions;
-rpyvmgen/verify.rb cross-checks the two and optable.py joins them. Anything
-absent from EMIT is unsupported, and the loader fails loudly, never skips.
-"""
-
-# YARV name -> the operand positions the loader emits, one int each in
-# W_ISeq.code; positions left out are consumed at load time. An operand
-# carrying more than an int goes into the constant pool and the code stream
-# holds its index.
+# YARV name -> operand positions the loader emits as ints in W_ISeq.code; an operand carrying more than an int goes into the constant pool instead, and the code stream holds its index.
 EMIT = {
     'nop': [],
     'putnil': [],
@@ -82,17 +74,7 @@ EMIT = {
     'leave': [],
 }
 
-# Operand types the loader knows how to transform; any other type in an
-# implemented instruction would be silently mis-decoded.
-#   VALUE      -> constant pool index
-#   lindex_t   -> EP-relative index to a 0-based local slot
-#   OFFSET     -> label to an absolute pc
-#   rb_num_t   -> plain integer
-#   ID         -> interned id (symbols.py)
-#   ISEQ       -> nested iseq loaded recursively, constant pool index
-#   CALL_DATA  -> W_CallInfo in the constant pool; flags outside
-#                 SIMPLE_CALL_FLAGS must clear W_CallInfo.simple
-#   IC         -> the constant path's segments (iseq.c)
+# Operand types the loader can transform (else silently mis-decoded): VALUE->pool idx, lindex_t->EP-relative local slot, OFFSET->label to pc, rb_num_t->int, ID->interned id (symbols.py), ISEQ->nested iseq pool idx, CALL_DATA->W_CallInfo (non-SIMPLE flags clear .simple), IC->constant path segments (iseq.c).
 SUPPORTED_OPERAND_TYPES = frozenset([
     'VALUE',
     'lindex_t',
@@ -114,17 +96,14 @@ DISCARDED_OPERAND_TYPES = frozenset([
 # The block-chain walk must stay bounded for the tracer to unroll it.
 MAX_LOCAL_LEVEL = 16
 
-# getlocal/setlocal pack slot and level into one operand, so level 0 is just
-# "the operand equals its own slot bits". No scope has 2**20 locals.
+# getlocal/setlocal pack slot and level into one operand, so level 0 is just "the operand equals its own slot bits". No scope has 2**20 locals.
 LOCAL_LEVEL_SHIFT = 20
 LOCAL_SLOT_MASK = (1 << LOCAL_LEVEL_SHIFT) - 1
 
-# vm_core.h. A lindex_t operand counts down from the top of the environment:
-#     slot = nlocals - operand + ENV_DATA_SIZE - 1
+# vm_core.h. A lindex_t operand counts down from the top of the environment: slot = nlocals - operand + ENV_DATA_SIZE - 1
 ENV_DATA_SIZE = 3
 
-# vm_callinfo.h, enum vm_call_flag_bits. Outside SIMPLE_CALL_FLAGS the
-# arguments reach the callee differently.
+# vm_callinfo.h, enum vm_call_flag_bits. Outside SIMPLE_CALL_FLAGS the arguments reach the callee differently.
 CALL_FLAG_ARGS_SPLAT = 0x01
 CALL_FLAG_ARGS_BLOCKARG = 0x02
 CALL_FLAG_KWARG = 0x20
@@ -151,8 +130,7 @@ CALL_FLAG_TAILCALL = 0x80
 # invokesuper only; a bare `super` (ZSUPER) pushes the parameters the same way.
 CALL_FLAG_SUPER = 0x100
 CALL_FLAG_ZSUPER = 0x200
-# ARGS_BLOCKARG is in here because the arguments below it still arrive the
-# plain way; the block value on top of them is what W_CallInfo.blockarg names.
+# ARGS_BLOCKARG is in here because the arguments below it still arrive the plain way; the block value on top of them is what W_CallInfo.blockarg names.
 SIMPLE_CALL_FLAGS = (CALL_FLAG_FCALL | CALL_FLAG_VCALL |
                      CALL_FLAG_ARGS_SIMPLE | CALL_FLAG_TAILCALL |
                      CALL_FLAG_SUPER | CALL_FLAG_ZSUPER |
@@ -170,8 +148,7 @@ SPECIAL_OBJECT_VMCORE = 1
 SPECIAL_OBJECT_CBASE = 2
 SPECIAL_OBJECT_CONST_BASE = 3
 
-# vm_core.h, enum vm_check_match_type. WHEN answers the pattern itself, CASE
-# and RESCUE run `pattern === target`; ARRAY means an Array of patterns.
+# vm_core.h, enum vm_check_match_type. WHEN answers the pattern itself, CASE and RESCUE run `pattern === target`; ARRAY means an Array of patterns.
 CHECKMATCH_TYPE_MASK = 0x03
 CHECKMATCH_TYPE_WHEN = 1
 CHECKMATCH_TYPE_CASE = 2

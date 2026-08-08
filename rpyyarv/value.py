@@ -1,9 +1,4 @@
-"""VALUEs as plain signed machine words.
-
-Signed is deliberate: FIX2LONG is an arithmetic right shift, which only a
-signed type gets right. The tags below are compiled in; entry_point checks
-them against rpyyarv_special_consts so a drifting libruby fails at startup.
-"""
+"""VALUEs as plain signed machine words: FIX2LONG is an arithmetic right shift, which only a signed type gets right; entry_point checks the tags below against rpyyarv_special_consts at startup."""
 
 from rlib import LONG_BIT, elidable, raw_word
 
@@ -32,9 +27,7 @@ T_MASK = 0x1f
 T_OBJECT = 0x01
 FL_FREEZE = 1 << 11             # RUBY_FL_FREEZE, the bit rb_check_frozen reads
 
-# RArray layout for the opt_aref/opt_length fast paths, checked against
-# rpyyarv_array_layout. A short array embeds its elements, a longer one does
-# not; ARY_EMBED_FLAG says which, and an embedded length lives in the flags.
+# RArray layout for opt_aref/opt_length, checked against rpyyarv_array_layout: ARY_EMBED_FLAG says whether the array embeds its elements or not.
 ARY_EMBED_FLAG = 1 << 13         # RUBY_FL_USER1
 ARY_EMBED_LEN_SHIFT = 15         # RUBY_FL_USHIFT + 3
 ARY_EMBED_LEN_MASK = 0x7f << ARY_EMBED_LEN_SHIFT
@@ -94,8 +87,7 @@ def is_immediate(v):
 
 
 class _Classes(object):
-    # Not _immutable_fields_: the rtyper would fold every read of this
-    # prebuilt instance to the zeros the list holds before boot fills it.
+    # Not _immutable_fields_: the rtyper would fold every read of this prebuilt instance to the zeros the list holds before boot fills it.
     def __init__(self):
         self.tab = [0] * NCLASS
 
@@ -114,8 +106,7 @@ def core_class(i):
 
 
 def class_of(v):
-    """The receiver's class VALUE, without an rb_* call. Heap objects are
-    tested first: one guard in front of the send site's guard_value."""
+    """The receiver's class VALUE, without an rb_* call; heap objects are tested first, one guard in front of the send site's guard_value."""
     if v != 0 and (v & IMMEDIATE_MASK) == 0:
         return raw_word(v, KLASS_WORD)
     if (v & FIXNUM_FLAG) != 0:

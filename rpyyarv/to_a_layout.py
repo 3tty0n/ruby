@@ -24,10 +24,7 @@ K_SYMBOL = 'Symbol'
 K_ARRAY = 'Array'
 K_HASH = 'Hash'
 
-# Enough of the shape that no single field can move undetected. Both front
-# ends read to_a by index, so bootiseq.check() enforces this on every iseq,
-# scripts/dump_iseq.rb repeats it, and test_boot_ctypes.py checks it against
-# a real iseq.
+# Enough of the shape that no single field can move undetected: bootiseq.check(), scripts/dump_iseq.rb, and test_boot_ctypes.py all check it.
 EXPECTED = [
     (I_MAGIC, K_STRING),
     (I_MAJOR, K_INTEGER),

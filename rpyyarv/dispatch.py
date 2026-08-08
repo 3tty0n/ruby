@@ -1,10 +1,4 @@
-"""Receiver-class-aware method dispatch: RPyYARV's inline cache.
-
-Methods live in a (klass VALUE -> mid -> entry) registry alongside a
-superclass map, and lookup is elidable in (klass, mid, version). A send
-promotes class_of(recv), so the lookup compiles away behind one guard_value
-on the receiver's class word, with a bridge per extra class.
-"""
+"""Lookup is elidable in (klass, mid, version) and a send promotes class_of(recv), so dispatch folds to one guard_value."""
 
 import boot
 import gcroots
@@ -22,7 +16,6 @@ class Version(object):
     pass
 
 
-# What an entry runs: an ISeq, or an attr_* accessor over entry.ivar.
 KIND_ISEQ = 0
 KIND_ATTR_READER = 1
 KIND_ATTR_WRITER = 2
@@ -38,14 +31,11 @@ class MethodEntry(object):
         self.kind = kind
         # For an accessor kind, the rpyyarv symbol id of the `@name` it reads.
         self.ivar = ivar
-        # The class the `def` was written in, which a constant in the body
-        # resolves against; not owner, since `def self.x` lands on the
-        # singleton class but reads constants of the class itself.
+        # Class the body's constants resolve against; not owner, since `def self.x` lands on the singleton class.
         self.cref = cref
         # Toplevel defs land on Object as private: only an fcall may reach one.
         self.private = private
-        # The class the def landed on, and under which name; invokesuper
-        # resumes the lookup above them.
+        # invokesuper resumes the lookup above (owner, mid).
         self.owner = owner
         self.mid = mid
 
@@ -72,18 +62,13 @@ trampoline = _Trampoline()
 
 
 def enable_trampolines():
-    """Turned on after the prelude: its Integer#times and Array#each
-    reimplement methods CRuby already has, and must not replace them for
-    CRuby's own callers."""
+    """Off during the prelude: its Integer#times and Array#each must not replace CRuby's for CRuby's own callers."""
     trampoline.enabled = True
 
 
 @dont_look_inside
 def _install_trampoline(klass, mid, private):
-    """A CRuby method entry beside the registry one, so a core method calling
-    back reaches the definition RPyYARV holds. Nothing is bound here: the
-    entry resolves through lookup at call time, so a later redefinition or an
-    undef needs no second visit."""
+    """A CRuby entry beside the registry one; it binds nothing and resolves through lookup, so redefine/undef needs no revisit."""
     if not trampoline.enabled:
         return
     boot.define_method_entry(klass, rubycall.rid(mid), private)
@@ -105,8 +90,7 @@ def define(klass, mid, w_iseq, private, cref=0):
 
 
 def define_attr(klass, mid, ivar, kind):
-    """An attr_* accessor as a registry entry. No trampoline: CRuby's own
-    attr method entry is still there, so a call from C reaches it directly."""
+    """No trampoline: CRuby's own attr entry is still there, so a call from C reaches it directly."""
     _table_for(klass)[mid] = MethodEntry(None, False, klass, mid, 0, kind,
                                          ivar)
     registry.version = Version()
@@ -115,8 +99,7 @@ def define_attr(klass, mid, ivar, kind):
 
 @dont_look_inside
 def define_singleton(obj, mid, w_iseq, cref=0):
-    """definesmethod: the target is the receiver's singleton class and the
-    visibility is always public (vm_insnhelper.c:6034)."""
+    """definesmethod targets the receiver's singleton class, always public (vm_insnhelper.c:6034)."""
     klass = boot.singleton_class(obj)
     if klass == 0 or value.is_immediate(klass):
         raise UnsupportedOperation(
@@ -128,9 +111,7 @@ def define_singleton(obj, mid, w_iseq, cref=0):
 
 @dont_look_inside
 def _record_ancestry(klass):
-    """CRuby's superclass chain above klass, copied into the map so lookup
-    walks it without leaving RPython. A singleton class is created by CRuby,
-    never by define_class, so nothing else would put it there."""
+    """Copy CRuby's chain above klass into the map so lookup stays in RPython; singleton classes reach the map only here."""
     k = klass
     n = 0
     while k != 0 and not value.is_immediate(k) and n < MAX_ANCESTORS:
@@ -146,9 +127,7 @@ def _record_ancestry(klass):
 
 @dont_look_inside
 def lookup_from_cruby(klass, mid):
-    """lookup for a call that came in through the trampoline: walks CRuby's
-    own superclass chain, since a class only CRuby created is absent from the
-    registry's map. No Object fallback -- CRuby resolved the entry already."""
+    """Walks CRuby's own chain, since a CRuby-only class is absent from the map; no Object fallback, CRuby already resolved."""
     k = klass
     n = 0
     while k != 0 and not value.is_immediate(k) and n < MAX_ANCESTORS:
@@ -161,8 +140,7 @@ def lookup_from_cruby(klass, mid):
 
 
 def undefine(klass, mid):
-    """Drop a method RPyYARV defined, so a later lookup falls through to
-    CRuby's."""
+    """Drops the registry entry, so a later lookup falls through to CRuby's."""
     table = registry.methods.get(klass, None)
     if table is None or mid not in table:
         return False
@@ -173,7 +151,6 @@ def undefine(klass, mid):
 
 
 def own_lookup(klass, mid):
-    """The entry defined on klass itself, which is what an alias copies."""
     table = registry.methods.get(klass, None)
     if table is None:
         return None
@@ -217,8 +194,7 @@ def lookup(klass, mid):
 
 @elidable
 def _lookup_core(klass, mid, version):
-    """_lookup without the Object fallback, so a toplevel `def +` does not
-    read as a redefinition of Integer#+."""
+    """No Object fallback, so a toplevel `def +` does not read as a redefinition of Integer#+."""
     methods = registry.methods
     supers = registry.supers
     k = klass
@@ -240,8 +216,7 @@ def lookup_core(klass, mid):
 
 @elidable
 def _lookup_super(owner, mid, version):
-    """_lookup starting above owner. No Object fallback, or super would find
-    an unrelated toplevel def."""
+    """Starts above owner; no Object fallback, or super would find an unrelated toplevel def."""
     supers = registry.supers
     methods = registry.methods
     k = supers.get(owner, 0)
@@ -263,8 +238,7 @@ def lookup_super(owner, mid):
 
 @dont_look_inside
 def _reopened(cbase, rid):
-    """An existing class of that name, or 0: reopening Integer through
-    rb_define_class_id_under with Object as super is a superclass mismatch."""
+    """Reopening e.g. Integer via rb_define_class_id_under with Object as super would be a superclass mismatch."""
     try:
         v = boot.const_get(cbase, rid)
     except RubyException:
@@ -276,7 +250,6 @@ def _reopened(cbase, rid):
 
 @dont_look_inside
 def define_class(cbase, mid, super_v):
-    """defineclass's class half: create or find it, then remember its parent."""
     rid = rubycall.rid(mid)
     klass = 0
     if super_v == 0:
@@ -290,9 +263,7 @@ def define_class(cbase, mid, super_v):
     if parent == 0 or value.is_immediate(parent):
         parent = value.core_class(value.C_OBJECT)
     record_class(klass, parent)
-    # The metaclass chain beside it: class_of(Bar) is meta(Bar), so a
-    # singleton method inherited from Foo is only found natively once
-    # meta(Bar) -> meta(Foo) is in the map.
+    # A singleton method inherited from Foo is found only once meta(Bar) -> meta(Foo) is in the map.
     _record_ancestry(boot.singleton_class(klass))
     return klass
 
@@ -318,8 +289,7 @@ def const_set(klass, mid, v):
 
 
 class _Owners(object):
-    # Quasi-immutable: unlike a shape, a method owner can change, so every
-    # write below replaces the tag and drops the traces that folded it.
+    # Quasi-immutable: a method owner can change, so every write replaces the tag and drops the traces that folded it.
     _immutable_fields_ = ['version?']
 
     def __init__(self):
@@ -353,9 +323,7 @@ def _fill_identity(klass, mid):
 
 
 def owns_identity(klass, mid):
-    """True when klass resolves mid to BasicObject's definition, which for
-    ==, != and equal? is a pointer compare. Asked of CRuby, not of the
-    registry, so a module included behind rpyyarv's back is still seen."""
+    """True when klass resolves mid to BasicObject's (a pointer compare); asked of CRuby, so modules included behind our back count."""
     got = _owns_identity(klass, mid, owners.version)
     if got == OWNER_UNKNOWN:
         _fill_identity(klass, mid)
@@ -375,9 +343,7 @@ IV_UNKNOWN = -3
 
 @elidable
 def iv_slot(shape_id, rid):
-    """Which field slot a shape keeps an ivar in. Elidable because a shape
-    node never changes: gaining an ivar moves the object to a different
-    shape_id, this cache's key, so an entry goes unreachable, never stale."""
+    """Elidable: a shape node never changes, and gaining an ivar moves the object to a different shape_id, this cache's key."""
     key = (shape_id, rid)
     got = slots.tab.get(key, IV_UNKNOWN)
     if got == IV_UNKNOWN:
@@ -419,11 +385,7 @@ barrier = _Barrier()
 
 
 def ivar_set(obj, mid, v):
-    """The mirror of ivar_get: a shape guard, then a raw field store. An
-    immediate needs no write barrier at all, since rb_obj_written skips one
-    for a special const (ruby/internal/gc.h:788); a heap value takes CRuby's,
-    which allocates nothing. A frozen receiver must still raise, and a shape
-    without the ivar still needs CRuby to make the transition."""
+    """Raw store: an immediate needs no write barrier (ruby/internal/gc.h:788), a heap value takes CRuby's; frozen or missing slot falls back."""
     if obj != 0 and (obj & value.IMMEDIATE_MASK) == 0:
         immediate = value.is_immediate(v)
         if immediate or barrier.direct:
@@ -459,6 +421,5 @@ def check_object_layout():
 
 
 def install():
-    """Boot-time: the immediates' classes, and Object as the root of the map."""
     value.install_classes(boot.core_classes())
     barrier.direct = boot.wb_direct()

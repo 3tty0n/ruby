@@ -17,8 +17,7 @@ state = _State()
 
 
 class _Stress(object):
-    # Quasi-immutable, so the check folds away but entry_point's write to a
-    # prebuilt instance still invalidates it. See value._Classes.
+    # Quasi-immutable, so the check folds away but entry_point's write to a prebuilt instance still invalidates it. See value._Classes.
     _immutable_fields_ = ['flag?']
 
     def __init__(self):
@@ -35,8 +34,7 @@ NOT_HANDLED = -1
 
 
 class RequireHook(object):
-    """Replaced by requires.install(); the base one hands every require back
-    to CRuby, which is what happens when the interception is turned off."""
+    """Replaced by requires.install(); the base one hands every require back to CRuby, which is what happens when interception is off."""
     def handle(self, mid, arg):
         return NOT_HANDLED
 
@@ -65,8 +63,7 @@ NO_MID = -1
 
 @dont_look_inside
 def mid_of_rid(r):
-    """The trampoline's rb_frame_this_func ID back to the id the registry is
-    keyed on; every trampolined method went through rid() to get installed."""
+    """The trampoline's rb_frame_this_func ID back to the id the registry is keyed on; every trampolined method went through rid() to get installed."""
     return state.mids.get(r, NO_MID)
 
 

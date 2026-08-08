@@ -14,8 +14,7 @@ VALUE rb_iseqw_new(const struct rb_iseq_struct *iseq);
 
 static int block_unwind;
 
-/* RPyYARV::Unwind, the carrier a parked unwind rides across libruby's C
-   frames. Under Exception so no bare `rescue` in between can eat it. */
+/* RPyYARV::Unwind carries a parked unwind across libruby's C frames; under Exception so no bare `rescue` can eat it. */
 static VALUE
 unwind_class(void)
 {
@@ -34,8 +33,7 @@ rpyyarv_set_block_unwind(void)
     block_unwind = 1;
 }
 
-/* A failed rb_protect whose exception is the carrier: the RPython side holds
-   the real unwind, so report success and let it re-raise. */
+/* A failed rb_protect whose exception is the carrier: the RPython side holds the real unwind, so report success. */
 static void
 absorb_unwind(int *state)
 {
@@ -51,8 +49,7 @@ absorb_unwind(int *state)
 void *
 rpyyarv_boot(int argc, char **argv, int *status_out)
 {
-    /* On the machine stack: ruby_init_stack records its address as the lower
-       bound of the conservative GC scan. */
+    /* On the machine stack: ruby_init_stack records its address as the lower bound of the conservative GC scan. */
     VALUE variable_in_this_stack_frame;
 
     ruby_sysinit(&argc, &argv);
@@ -77,8 +74,7 @@ rpyyarv_cleanup(int status)
     return ruby_cleanup(status);
 }
 
-/* The whole script back to CRuby: the node rpyyarv_boot held back is
-   ISEQ_TYPE_MAIN, which vm_set_top_stack (vm.c:888) refuses to eval. */
+/* rpyyarv_boot's node is ISEQ_TYPE_MAIN, which vm_set_top_stack (vm.c:888) refuses to eval. */
 int
 rpyyarv_run_node(void *n)
 {
@@ -145,8 +141,7 @@ uintptr_t
 rpyyarv_funcallv_id(uintptr_t recv, uintptr_t mid, int argc,
                     const uintptr_t *argv, int *state)
 {
-    /* On the machine stack, so the conservative scan covers the arguments
-       until rb_funcallv has copied them onto the VM stack. */
+    /* On the machine stack, so the conservative scan covers the arguments until rb_funcallv copies them onto the VM stack. */
     VALUE buf[RPYYARV_MAX_ARGC];
     struct funcallv_args a;
     int i;
@@ -176,9 +171,7 @@ funcallv_public_body(VALUE argp)
     return rb_funcallv_public(a->recv, a->mid, a->argc, a->argv);
 }
 
-/* rb_funcallv is CALL_FCALL and reaches a private method; a send with an
-   explicit receiver has to be refused one, now that a toplevel def leaves a
-   private trampoline on Object. */
+/* rb_funcallv is CALL_FCALL and reaches a private method; a send with an explicit receiver must be refused one, since a toplevel def leaves a private trampoline on Object. */
 uintptr_t
 rpyyarv_funcallv_public_id(uintptr_t recv, uintptr_t mid, int argc,
                            const uintptr_t *argv, int *state)
@@ -250,8 +243,7 @@ uintptr_t
 rpyyarv_iseqw_new(void *iseq)
 {
     VALUE v = rb_iseqw_new((const struct rb_iseq_struct *)iseq);
-    /* Held only in FFI-side memory the GC never scans; pinning it also marks
-       the wrapped iseq, and this runs once at boot. */
+    /* Held only in FFI-side memory the GC never scans; pinning it also marks the wrapped iseq, and this runs once at boot. */
     rb_gc_register_mark_object(v);
     return (uintptr_t)v;
 }
@@ -455,7 +447,6 @@ rpyyarv_method_owner(uintptr_t klass, uintptr_t id)
     return (uintptr_t)r;
 }
 
-/* One argument block for every rb_protect'ed class/object helper below. */
 struct obj_args {
     VALUE a;
     VALUE b;
@@ -506,8 +497,7 @@ static VALUE
 singleton_class_body(VALUE argp)
 {
     struct obj_args *p = (struct obj_args *)argp;
-    /* Checks the receiver may have one, and that it is not frozen
-       (vm_insnhelper.c:6035). */
+    /* Checks the receiver may have one and is not frozen (vm_insnhelper.c:6035). */
     return rb_singleton_class(p->a);
 }
 
@@ -641,21 +631,14 @@ rpyyarv_shape_iv_index(unsigned int shape_id, uintptr_t id, int *index)
     return 0;
 }
 
-/*
- * RB_OBJ_WRITE's barrier half, for a raw ivar store the RPython side has
- * already made. Neither allocates a Ruby object nor runs a mark callback:
- * gc/default/default.c:6085 only sets remembered/marking bits, and its one
- * allocation is a raw malloc of a mark-stack chunk. That is why boot.py may
- * declare it without random_effects_on_gcobjs.
- */
+/* RB_OBJ_WRITE's barrier half for a raw ivar store: gc/default/default.c:6085 only sets remembered/marking bits and raw-mallocs a mark-stack chunk, allocating no Ruby object and running no mark callback, so boot.py may declare it without random_effects_on_gcobjs. */
 void
 rpyyarv_obj_written(uintptr_t a, uintptr_t b)
 {
     RB_OBJ_WRITTEN((VALUE)a, Qundef, (VALUE)b);
 }
 
-/* False when rb_gc_writebarrier is a modular-GC function pointer instead of
-   the barrier above, which this shim cannot make the same promise about. */
+/* False when rb_gc_writebarrier is a modular-GC function pointer instead of the barrier above, which this shim cannot make the same promise about. */
 int
 rpyyarv_wb_direct(void)
 {
@@ -857,8 +840,7 @@ rpyyarv_set_block_callback(rpyyarv_block_fn fn)
 static VALUE
 block_yielder(RB_BLOCK_CALL_FUNC_ARGLIST(yielded, callback_arg))
 {
-    /* On the machine stack, so the yielded values stay scannable until the
-       RPython side has copied them into a frame the mark hook reaches. */
+    /* On the machine stack, so the yielded values stay scannable until the RPython side copies them into a frame the mark hook reaches. */
     VALUE buf[RPYYARV_MAX_ARGC];
     int i, n = argc;
     VALUE r;
@@ -871,8 +853,7 @@ block_yielder(RB_BLOCK_CALL_FUNC_ARGLIST(yielded, callback_arg))
     for (i = 0; i < n; i++) buf[i] = argv[i];
     r = (VALUE)block_callback((long)FIX2LONG(callback_arg), n,
                               (uintptr_t *)buf);
-    /* The block left early and parked why; abort the CRuby method running it
-       instead of letting it iterate on. */
+    /* The block left early and parked why; abort the CRuby method running it instead of letting it iterate on. */
     if (block_unwind) {
         block_unwind = 0;
         rb_raise(unwind_class(), "rpyyarv: non-local exit from a block");
@@ -934,8 +915,7 @@ rpyyarv_set_trampoline_callback(rpyyarv_tramp_fn fn)
 static VALUE
 rpyyarv_trampoline(int argc, VALUE *argv, VALUE self)
 {
-    /* argv points into CRuby's own VM stack, which rb_execution_context_mark
-       already covers for the extent of the call; no second root here. */
+    /* argv points into CRuby's VM stack, which rb_execution_context_mark already covers for the extent of the call; no second root here. */
     ID mid = rb_frame_this_func();
     VALUE blockproc = rb_block_given_p() ? rb_block_proc() : Qnil;
     int status = RPYYARV_TRAMP_OK;
@@ -948,8 +928,7 @@ rpyyarv_trampoline(int argc, VALUE *argv, VALUE self)
     r = (VALUE)tramp_callback((uintptr_t)self, (uintptr_t)mid, argc,
                               (uintptr_t *)argv, (uintptr_t)blockproc,
                               &status, (uintptr_t *)&err);
-    /* Raised here, not on the RPython side: unwinding an RPython exception
-       through this C frame back into libruby is undefined. */
+    /* Raised here, not on the RPython side: unwinding an RPython exception through this C frame back into libruby is undefined. */
     if (status == RPYYARV_TRAMP_RAISE) rb_exc_raise(err);
     if (status == RPYYARV_TRAMP_UNWIND) {
         rb_raise(unwind_class(), "rpyyarv: non-local exit from a method");
@@ -973,8 +952,7 @@ define_method_body(VALUE argp)
     rb_define_method_id(p->klass, p->mid,
                         RUBY_METHOD_FUNC(rpyyarv_trampoline), -1);
     if (p->is_private) {
-        /* A toplevel def lands on Object as private, and no ID-taking
-           rb_define_private_method exists. */
+        /* A toplevel def lands on Object as private, and no ID-taking rb_define_private_method exists. */
         rb_funcall(p->klass, rb_intern("private"), 1, ID2SYM(p->mid));
     }
     return Qnil;
@@ -995,8 +973,7 @@ rpyyarv_define_method(uintptr_t klass, uintptr_t mid, int is_private,
 static VALUE
 proc_new_body(VALUE handle)
 {
-    /* An ifunc Proc: calling it reaches block_yielder with the same handle
-       LONG2FIX'd argument rb_block_call passes. */
+    /* An ifunc Proc: calling it reaches block_yielder with the same LONG2FIX'd handle rb_block_call passes. */
     return rb_proc_new(block_yielder, handle);
 }
 
@@ -1163,8 +1140,7 @@ rpyyarv_splat_array(uintptr_t ary, int flag, int *state)
     return (uintptr_t)r;
 }
 
-/* FrozenCore is hidden: rb_set_class_path names it but defines no constant
-   (vm.c:4274), so only the exported variable reaches it. */
+/* FrozenCore is hidden: rb_set_class_path names it but defines no constant (vm.c:4274), so only the exported variable reaches it. */
 extern VALUE rb_mRubyVMFrozenCore;
 
 uintptr_t
@@ -1252,14 +1228,7 @@ rpyyarv_arity_error(int given, int min, int max, int *state)
     return (uintptr_t)r;
 }
 
-/*
- * ruby_vm_redefined_flag itself is hidden in libruby (nm reports it private
- * external), so BASIC_OP_UNREDEFINED_P is unreachable from here. This asks
- * the same question one method entry at a time: rb_method_basic_definition_p
- * is false exactly when the entry is no longer the one CRuby booted with,
- * which is what vm_redefinition_check_method_type gates on (vm.c:2341).
- * One bit per (class, operator) pair, in the order helpers.py names them.
- */
+/* ruby_vm_redefined_flag is hidden in libruby so BASIC_OP_UNREDEFINED_P is unreachable; rb_method_basic_definition_p asks the same question per entry (vm.c:2341), one bit per (class, operator) pair in the order helpers.py names them. */
 uintptr_t
 rpyyarv_bop_mask(void)
 {
@@ -1301,12 +1270,7 @@ rpyyarv_bop_mask(void)
     return (uintptr_t)i << RPYYARV_BOP_COUNT_SHIFT | mask;
 }
 
-/*
- * Range#begin, #end and #exclude_end? without a send. Qundef for anything but
- * a direct Range instance, so a subclass that overrode one of them is left to
- * the normal dispatch. The fields are read through internal/range.h, not by
- * hand, so no RRange layout is compiled into the RPython side.
- */
+/* Qundef for anything but a direct Range instance, so an overriding subclass falls back to normal dispatch; fields come from internal/range.h, so no RRange layout is compiled into the RPython side. */
 uintptr_t
 rpyyarv_range_part(uintptr_t range, int which)
 {

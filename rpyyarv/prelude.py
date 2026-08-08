@@ -1,7 +1,4 @@
-"""prelude.rb, compiled by the embedded CRuby and run before the main script.
-
-Read at import time, so translation bakes the source into the binary.
-"""
+"""prelude.rb, compiled by the embedded CRuby and run before the main script; read at import time, so translation bakes the source into the binary."""
 
 import os
 

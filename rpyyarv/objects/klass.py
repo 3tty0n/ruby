@@ -41,8 +41,7 @@ class W_Class(W_Root):
 
     @elidable
     def _find_in_ancestors(self, mid, version):
-        # version is never read: it is only the elidable key, replaced by
-        # method_table_changed() whenever an answer would change.
+        # version is never read: it is only the elidable key, replaced by method_table_changed() whenever an answer would change.
         w_class = self
         while w_class is not None:
             w_method = w_class.methods.lookup(mid)

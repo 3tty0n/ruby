@@ -45,8 +45,7 @@ state = _State()
 
 
 class _Coverage(object):
-    # Quasi-immutable, so the count in the send path folds away when it is
-    # off; see rubycall._Stress.
+    # Quasi-immutable, so the count in the send path folds away when it is off; see rubycall._Stress.
     _immutable_fields_ = ['enabled?']
 
     def __init__(self):
@@ -83,8 +82,7 @@ def configure_coverage():
 
 
 def record_file(path, total, supported, reason):
-    """One .rb file's outcome. A non-empty reason means RPyYARV punted it to
-    CRuby, whose method definitions its own dispatch never sees."""
+    """One .rb file's outcome; a non-empty reason means RPyYARV punted it to CRuby, whose method definitions its own dispatch never sees."""
     if not coverage.enabled:
         return
     coverage.iseqs_total += total
@@ -97,8 +95,7 @@ def record_file(path, total, supported, reason):
 
 
 def report():
-    """What actually ran, not what could have: an iseq figure alone reads as
-    100% while every send goes out to CRuby."""
+    """What actually ran, not what could have: an iseq figure alone reads as 100% while every send goes out to CRuby."""
     if not coverage.enabled:
         return
     note('sends: rpyyarv %d, cruby %d' % (coverage.native, coverage.foreign))

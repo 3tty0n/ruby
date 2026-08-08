@@ -34,8 +34,7 @@ def define_method(frame, mid, w_iseq):
 @unroll_safe
 def invoke(frame, w_ci, w_block=None):
     if w_ci.blockarg:
-        # Above the arguments, and read before it is popped so the frame keeps
-        # it marked while _block_from_value may allocate (vm_args.c:1119).
+        # Read before the pop, so the frame keeps it marked while _block_from_value may allocate (vm_args.c:1119).
         top = frame.sp - 1
         if top < 0:
             raise UnsupportedOperation(
@@ -56,8 +55,7 @@ def invoke(frame, w_ci, w_block=None):
 
     rubycall.gc_stress_point()
     recv = frame.stack[recv_at]
-    # Promoted: the guard on the class word is the inline cache, and the
-    # lookup below folds away behind it.
+    # Promoted: the guard on the class word is the inline cache, and the lookup below folds away behind it.
     klass = promote(value.class_of(recv))
     entry = dispatch.lookup(klass, w_ci.mid)
     callee_iseq = None
@@ -68,8 +66,7 @@ def invoke(frame, w_ci, w_block=None):
 
     if callee_iseq is not None:
         if w_block is None or w_ci.blockarg:
-            # A break unwinds to the send the block was *written* at, not to
-            # one that only passed it on, so only that send catches it.
+            # A break unwinds to the send the block was *written* at, not one that passed it on.
             return _enter(frame, entry, recv, recv_at, argc, w_ci.mid, w_block)
         try:
             return _enter(frame, entry, recv, recv_at, argc, w_ci.mid,
@@ -93,8 +90,7 @@ def invoke(frame, w_ci, w_block=None):
             and not value.is_immediate(recv) and dispatch.is_known_class(recv):
         return _define_attrs(frame, w_ci, recv, recv_at, argc)
     if w_ci.mid == BLOCK_GIVEN and w_ci.fcall and argc == 0:
-        # rb_f_block_given_p reads the *caller's* frame (vm.c:1862); out
-        # through rb_funcallv it would find a CRuby frame instead.
+        # rb_f_block_given_p reads the *caller's* frame (vm.c:1862); through rb_funcallv it would find a CRuby one.
         _drop(frame, recv_at)
         return value.newbool(frame.block is not None)
     if w_block is not None and w_ci.mid == NEW \
@@ -106,19 +102,16 @@ def invoke(frame, w_ci, w_block=None):
         return _block_send(frame, w_ci, recv_at, argc, frame.block)
     if len(blocks.by_proc) > 0 and _is_proxy_call(w_ci.mid) \
             and recv in blocks.by_proc:
-        # A Proc RPyYARV made: run its block here instead of going out to
-        # CRuby and straight back in through the block callback.
+        # A Proc RPyYARV made: run its block here instead of out to CRuby and back through the block callback.
         return _block_send(frame, w_ci, recv_at, argc, blocks.by_proc[recv])
     if w_ci.mid == CORE_ALIAS or w_ci.mid == CORE_UNDEF:
         return _core_method(frame, w_ci, recv, recv_at, argc)
     if vm_core.value != 0 and recv == vm_core.value:
-        # #lambda and #proc would hand libruby a Proc over a block handle
-        # that only lives for the extent of the call, and crash later.
+        # #lambda and #proc would hand libruby a Proc over a block handle that dies with the call, and crash later.
         raise UnsupportedOperation(
             "RubyVM::FrozenCore#%s is not supported"
             % symbols.name_of(w_ci.mid))
 
-    # Everything RPyYARV has not taken over goes back to CRuby.
     args = []
     i = 0
     while i < argc:
@@ -135,13 +128,11 @@ def invoke(frame, w_ci, w_block=None):
             if e.w_block is not w_block:
                 raise
             return e.value
-    # An entry survived here only by being private to a receiverless call, and
-    # rb_funcallv would reach the trampoline for it anyway (CALL_FCALL).
+    # An entry survives here only as private to a receiverless call, which rb_funcallv reaches anyway (CALL_FCALL).
     public_only = entry is not None and not w_ci.fcall
     if not debug.state.enabled:
         ret = rubycall.call(recv, w_ci.mid, args, public_only)
-        # The callee may have run a Proc of ours, which cannot raise through
-        # libruby's frames and parked its failure instead.
+        # The callee may have run a Proc of ours, which cannot raise through libruby's frames and parked instead.
         _check_block_error()
         return ret
     debug.trace_enter(w_ci.mid, args)
@@ -180,8 +171,7 @@ def _native_binop(recv, arg, mid):
 
 
 def _attr_send(frame, entry, recv, recv_at, argc):
-    """An attr_* entry: the shape-guarded ivar access dispatch.py compiles
-    getinstancevariable to, without a frame."""
+    """An attr_* entry: the shape-guarded ivar access getinstancevariable compiles to, without a frame."""
     if entry.kind == dispatch.KIND_ATTR_READER:
         if argc != 0:
             _arity_error(argc, 0, 0)
@@ -214,8 +204,7 @@ def _define_attrs(frame, w_ci, klass, recv_at, argc):
 
 @dont_look_inside
 def _install_attrs(klass, mid, args):
-    """attr_* still runs in CRuby, so its own method entries stay there for
-    reflection and for CRuby's callers; the registry gains native ones too."""
+    """attr_* still runs in CRuby, so its entries stay there for reflection and CRuby's callers; the registry gains native ones too."""
     for i in range(len(args)):
         name = _attr_name(args[i])
         if name == '':
@@ -238,12 +227,9 @@ def _attr_name(v):
 
 
 def _new_with_block(frame, entry, klass, recv_at, argc, w_block):
-    """`Klass.new { }` run here rather than through CRuby's Class#new, which
-    is what opt_new already does for the blockless form. Going out would hand
-    initialize a Proc over a block handle that dies when Class#new returns."""
+    """`Klass.new { }` run here: through CRuby's Class#new, initialize would get a Proc over a block handle that dies when it returns."""
     obj = dispatch.alloc(klass)
-    # In the caller's marked slot, since _enter drops it only once the
-    # arguments are placed.
+    # Into the caller's marked slot, since _enter drops it only once the arguments are placed.
     frame.stack[recv_at] = obj
     _enter(frame, entry, obj, recv_at, argc, INITIALIZE, w_block)
     return obj
@@ -265,8 +251,7 @@ def _enter(frame, entry, recv, recv_at, argc, mid, w_block=None):
             i += 1
     else:
         _refuse_iseq(callee_iseq, mid)
-        # Copied out first: the codewriter refuses a virtualizable array
-        # passed on, and the caller's frame keeps the values marked.
+        # Copied out first: the codewriter refuses a virtualizable array passed on, and the caller's frame keeps them marked.
         given = [0] * argc
         i = 0
         while i < argc:
@@ -297,9 +282,7 @@ def _refuse_iseq(w_iseq, mid):
 
 @unroll_safe
 def setup_params(w_iseq, callee, args, is_block):
-    """vm_args.c setup_parameters_complex for positional arguments only:
-    lead, then post off the tail, then optionals, then the rest Array.
-    Answers the pc the opt table names (vm_args.c:906)."""
+    """vm_args.c setup_parameters_complex, positional only; answers the pc the opt table names (vm_args.c:906)."""
     lead = w_iseq.nparams
     opt_num = len(w_iseq.opt_table) - 1
     if opt_num < 0:
@@ -307,8 +290,7 @@ def setup_params(w_iseq, callee, args, is_block):
     post_num = w_iseq.post_num
     rest = w_iseq.rest_start
     post_start = w_iseq.post_start
-    # The loader checked all of these against nlocals; restated so the
-    # codewriter sees every index into the virtualizable as non-negative.
+    # The loader checked these against nlocals; restated so the codewriter sees every virtualizable index as non-negative.
     assert lead >= 0
     assert post_num >= 0
     # vm_args.c:594; a rest parameter makes the maximum unlimited.
@@ -348,8 +330,7 @@ def setup_params(w_iseq, callee, args, is_block):
         while i < count:
             values[i] = args[lead + filled + i]
             i += 1
-        # The caller's frame still holds these while the shim copies them
-        # onto the machine stack.
+        # The caller's frame still holds these while the shim copies them onto the machine stack.
         ary = rubycall.ary_new(values)
         assert rest >= 0
         callee.locals[rest] = ary
@@ -378,9 +359,7 @@ def _arity_error(given, min_argc, max_argc):
 
 @unroll_safe
 def _opt_send(frame, mid, argc):
-    """The send an opt_* instruction falls through to when its fast path
-    answered Qundef, as vm_insnhelper.c's CALL_SIMPLE_METHOD does. The
-    operands are still on the frame's stack, so they stay marked."""
+    """The send an opt_* falls through to on Qundef, as vm_insnhelper.c's CALL_SIMPLE_METHOD does; the operands stay on the marked stack."""
     recv_at = frame.sp - argc - 1
     assert recv_at >= 0
     rubycall.gc_stress_point()
@@ -431,8 +410,7 @@ def invoke_super(frame, w_ci):
                   entry.mid)
 
 
-# `alias` and `undef` compile to a send of one of these (vm.c); RPyYARV has to
-# see them, or its own registry keeps shadowing what they change in CRuby.
+# `alias` and `undef` compile to a send of one of these (vm.c); unseen, the registry shadows what they change in CRuby.
 CORE_ALIAS = symbols.intern('core#set_method_alias')
 CORE_UNDEF = symbols.intern('core#undef_method')
 
@@ -480,10 +458,7 @@ def _sym_mid(v):
 
 
 class _Blocks(object):
-    """Blocks C refers to, by integer handle only: RPython's GC moves its
-    objects, so no pointer may cross. A handle rb_block_call holds is given
-    back when that call returns; one a Proc was made over never is, since the
-    Proc outlives every frame that could tell when the last reference died."""
+    """Blocks C refers to by integer handle only, since RPython's GC moves objects; a Proc's handle is never given back, as the Proc outlives every frame."""
     def __init__(self):
         self.table = []         # handle -> W_Block, None for a free slot
         self.free = []          # handles the transient path gave back
@@ -511,26 +486,21 @@ def _release_handle(h):
 
 
 class _Proxy(object):
-    # Quasi-immutable, so the compare below folds away; see value._Classes for
-    # why a prebuilt instance cannot use a plain immutable field.
+    # Quasi-immutable, so the compare below folds away; a prebuilt instance cannot use a plain immutable field (value._Classes).
     _immutable_fields_ = ['value?']
 
     def __init__(self):
         self.value = 0
 
 
-# rb_block_param_proxy's stand-in: what getblockparamproxy pushes instead of
-# building a Proc (insns.def:144). A Symbol, so it needs no marking, and it
-# never leaves the three places the compiler emits that instruction for.
+# rb_block_param_proxy's stand-in, pushed instead of a Proc (insns.def:144): a Symbol, so unmarked, and it never leaves those sites.
 proxy = _Proxy()
 
 PROXY_NAME = '__rpyyarv_block_param_proxy__'
 
 
 def block_callback(handle, argc, argv):
-    """Called from C, inside rb_block_call or a materialised Proc. No RPython
-    exception may escape into libruby, so a failure is re-raised once the call
-    has returned."""
+    """Called from C; no RPython exception may escape into libruby, so a failure is re-raised once the call has returned."""
     if blocks.error is not None or blocks.exc is not None \
             or blocks.jump is not None:
         return boot.as_value(value.Q_NIL)
@@ -555,8 +525,7 @@ def block_callback(handle, argc, argv):
         blocks.error = e
         return _park_unwind()
     except StackOverflow:
-        # Parked like the rest: returning normally would let the CRuby method
-        # call the block again, one exhausted stack later.
+        # Parked like the rest: returning normally would let CRuby call the block again on an exhausted stack.
         check_stack_overflow()
         blocks.error = UnsupportedOperation(STACK_TOO_DEEP)
         return _park_unwind()
@@ -567,9 +536,7 @@ STACK_TOO_DEEP = 'the call is nested too deeply for RPyYARV\'s stack'
 
 @dont_look_inside
 def _park_unwind():
-    """The block has to leave the CRuby method running it, and an RPython
-    exception cannot cross libruby's frames; the shim raises on its behalf
-    and the rb_protect boundary hands control back here."""
+    """An RPython exception cannot cross libruby's frames, so the shim raises on its behalf and rb_protect hands control back."""
     boot.set_block_unwind()
     return boot.as_value(value.Q_NIL)
 
@@ -581,15 +548,12 @@ TRAMP_UNWIND = 3
 
 
 def trampoline_callback(self_v, rid, argc, argv, blockv, statusp, errp):
-    """Called from C when CRuby dispatched a send to a method RPyYARV defined.
-    No RPython exception may reach libruby, so a failure leaves through
-    statusp/errp and the shim raises it as a Ruby one."""
+    """Called from C when CRuby dispatched to an RPyYARV method; no RPython exception may reach libruby, so failures leave via statusp/errp."""
     boot.store_int(statusp, TRAMP_OK)
     boot.store_value(errp, value.Q_NIL)
     recv = boot.as_signed(self_v)
     mid = rubycall.mid_of_rid(boot.as_signed(rid))
-    # argv still lives on CRuby's VM stack for the whole call, so the copy
-    # below needs no root of its own until it lands in the callee's frame.
+    # argv lives on CRuby's VM stack for the whole call, so the copy needs no root until it lands in the callee's frame.
     args = boot.read_values(argv, argc)
     w_block = None
     proc_v = boot.as_signed(blockv)
@@ -601,9 +565,7 @@ def trampoline_callback(self_v, rid, argc, argv, blockv, statusp, errp):
         boot.store_int(statusp, TRAMP_RAISE)
         boot.store_value(errp, e.value)
     except block_mod.BlockJump, e:
-        # Aimed past this call, at a frame CRuby's own frames now sit under;
-        # the shim raises so libruby unwinds them, and the rb_protect the
-        # RPyYARV caller is under hands control back.
+        # Aimed past this call: the shim raises so libruby unwinds its frames, and the caller's rb_protect hands control back.
         gcroots.hold(e.value)
         blocks.jump = e
         boot.store_int(statusp, TRAMP_UNWIND)
@@ -628,8 +590,7 @@ def _tramp_failed(statusp, errp, msg):
 
 
 def _from_cruby(recv, mid, args, w_block):
-    """The send half of the trampoline: the registry's own lookup and frame
-    setup, with the arguments CRuby already parsed."""
+    """The send half of the trampoline: the registry's own lookup, with the arguments CRuby already parsed."""
     if mid == rubycall.NO_MID:
         raise UnsupportedOperation(
             'CRuby dispatched a method name RPyYARV never interned')
@@ -681,8 +642,7 @@ def _call_with_block(recv, mid, args, w_block):
         try:
             ret = rubycall.call_with_block(recv, mid, args, handle)
         except RubyException:
-            # The CRuby method failed; whatever the block parked before that
-            # is the reason, and takes precedence.
+            # The CRuby method failed; whatever the block parked before that is the reason, and takes precedence.
             _check_block_error()
             raise
     finally:
@@ -692,8 +652,7 @@ def _call_with_block(recv, mid, args, w_block):
 
 
 def _check_block_error():
-    """What a callback into RPyYARV could not raise through libruby's frames,
-    now that the shim's RPyYARV::Unwind has brought control back."""
+    """Raises what a callback could not raise through libruby's frames, now that RPyYARV::Unwind brought control back."""
     exc = blocks.exc
     if exc is not None:
         blocks.exc = None
@@ -712,9 +671,7 @@ def _check_block_error():
 
 @dont_look_inside
 def _to_proc(w_block):
-    """A real Proc for a block that is about to escape, as
-    rb_vm_bh_to_procval builds one (vm_insnhelper.c:543). Memoised, so a
-    block has one Proc identity; the handle it carries is never released."""
+    """A real Proc for an escaping block, as rb_vm_bh_to_procval builds one (vm_insnhelper.c:543); memoised for one Proc identity, its handle never released."""
     if w_block is None:
         return value.Q_NIL
     if w_block.proc_value != 0:
@@ -733,15 +690,13 @@ EQQ_ = symbols.intern('===')
 
 
 def _is_proxy_call(mid):
-    """The proxy runs the block itself for these; anything else makes it
-    build the Proc first, as Proc#arity and friends need a real one."""
+    """The proxy runs the block itself for these; anything else builds the Proc first, as Proc#arity and friends need a real one."""
     return mid == CALL or mid == YIELD or mid == AREF or mid == EQQ_
 
 
 @dont_look_inside
 def _block_from_value(frame, v):
-    """The block a `&arg` call site passes on, as vm_caller_setup_arg_block
-    reads it (vm_args.c:1116)."""
+    """The block a `&arg` call site passes on, as vm_caller_setup_arg_block reads it (vm_args.c:1116)."""
     if v == value.Q_NIL:
         return None
     if v == proxy.value:
@@ -764,8 +719,7 @@ def _block_from_value(frame, v):
 
 @unroll_safe
 def _block_send(frame, w_ci, recv_at, argc, w_block):
-    """A send whose receiver stands for a block RPyYARV holds: the block-param
-    proxy (compile.c:9564), or a Proc it materialised itself."""
+    """A send whose receiver stands for a block RPyYARV holds: the block-param proxy (compile.c:9564), or a Proc it materialised."""
     args = [0] * argc
     i = 0
     while i < argc:
@@ -811,8 +765,7 @@ def call_block(w_block, args):
 
 @dont_look_inside
 def _call_foreign_block(w_block, args):
-    """A block that is not RPyYARV's own: a Proc from CRuby, or `&:sym`
-    (rb_sym_to_proc, vm_insnhelper.c:552)."""
+    """A block that is not RPyYARV's own: a Proc from CRuby, or `&:sym` (rb_sym_to_proc, vm_insnhelper.c:552)."""
     if w_block.kind == block_mod.KIND_PROC:
         return rubycall.call(w_block.proc_value, CALL, args)
     if len(args) == 0:
@@ -827,8 +780,7 @@ def _call_foreign_block(w_block, args):
 
 @dont_look_inside
 def _autosplat(args):
-    """One yielded value spread over several block parameters. TODO: CRuby
-    asks for to_ary (vm_args.c:863), this only takes a real Array."""
+    """One yielded value spread over block parameters. TODO: CRuby asks for to_ary (vm_args.c:863), this only takes a real Array."""
     v = args[0]
     if value.is_immediate(v) or not boot.is_array(v):
         return args
@@ -843,8 +795,7 @@ def _autosplat(args):
 
 @unroll_safe
 def _outer_frame(frame, level):
-    """The frame `level` steps up the block chain; reading its locals from a
-    trace forces that frame's virtualizable."""
+    """The frame `level` steps up the block chain; reading its locals from a trace forces that frame's virtualizable."""
     f = frame
     i = 0
     while i < level:
@@ -876,8 +827,7 @@ def invoke_block(frame, w_ci):
 
 
 class Throw(object):
-    """A throw in flight, as vm_exec_handle_exception takes it. Not an
-    exception itself; _rethrow turns it back into one."""
+    """A throw in flight, as vm_exec_handle_exception takes it; not an exception itself, _rethrow turns it back into one."""
     def __init__(self, kind, value, w_block=None, name='raise',
                  target=None):
         self.kind = kind
@@ -898,14 +848,12 @@ def _rethrow(throw):
     raise block_mod.BlockNext(throw.value)
 
 
-# A defining-frame chain longer than this is a corrupt one; the walk has to
-# terminate for the tracer.
+# A longer defining-frame chain is corrupt; the walk has to terminate for the tracer.
 MAX_SCOPES = 256
 
 
 def _return_target(frame):
-    """The frame a non-local return leaves: the outermost of the chain the
-    block was written in, which is CRuby's local EP (vm_insnhelper.c:1834)."""
+    """The frame a non-local return leaves: the outermost of the block's chain, CRuby's local EP (vm_insnhelper.c:1834)."""
     f = frame
     n = 0
     while f.defining_frame is not None and n < MAX_SCOPES:
@@ -920,9 +868,7 @@ def _local_jump_error(mesg, v, reason):
 
 
 def _return(frame, v):
-    """`return` from a block. The target has to still be running, and has to
-    be a method or the toplevel; anything else is the orphaned-Proc case
-    vm_throw_start answers with a LocalJumpError (vm_insnhelper.c:1926)."""
+    """`return` from a block; a dead target or one that is not a method is the orphaned-Proc LocalJumpError (vm_insnhelper.c:1926)."""
     target = _return_target(frame)
     if target.dead or not target.w_iseq.catches_return:
         raise _local_jump_error('unexpected return', v, optable.TAG_RETURN)
@@ -954,8 +900,7 @@ def _throw(frame, throw_state, v):
 
 
 def _catch_for(iseq, epc, kind):
-    """The first catch-table entry covering epc, in CRuby's search order
-    (vm.c:2911). A break or a next takes only an ensure."""
+    """The first catch-table entry covering epc, in CRuby's search order (vm.c:2911); a break or a next takes only an ensure."""
     catches = iseq.catches
     i = 0
     while i < len(catches):
@@ -968,8 +913,7 @@ def _catch_for(iseq, epc, kind):
 
 
 def _run_catch(frame, entry, throw):
-    """A catch ISeq runs in its own frame, chained to the raising one's
-    locals the way vm.c:3014 pushes it with the previous EP."""
+    """A catch ISeq runs in its own frame, chained to the raising one's locals the way vm.c:3014 pushes it with the previous EP."""
     w_iseq = entry.w_iseq
     callee = Frame(w_iseq, frame.self_val, frame.cref, frame.entry)
     callee.defining_frame = frame
@@ -988,8 +932,7 @@ def _run_catch(frame, entry, throw):
 
 
 def _run_with_errinfo(w_iseq, callee, errinfo):
-    """`$!` and a bare `raise` read ec->errinfo, since RPyYARV pushes no CRuby
-    rescue frame for rb_ec_get_errinfo to find."""
+    """`$!` and a bare `raise` read ec->errinfo, since RPyYARV pushes no CRuby rescue frame for rb_ec_get_errinfo to find."""
     prev = rubycall.swap_errinfo(errinfo)
     try:
         return execute(w_iseq, callee)
@@ -998,8 +941,7 @@ def _run_with_errinfo(w_iseq, callee, errinfo):
 
 
 def _unwind(iseq, frame, throw, epc):
-    """Run the entries covering epc until one completes, and answer the pc to
-    resume at; re-raises when the frame handles nothing."""
+    """Run the entries covering epc until one completes and answer the resume pc; re-raises when the frame handles nothing."""
     while True:
         entry = _catch_for(iseq, epc, throw.kind)
         if entry is None:
@@ -1034,7 +976,6 @@ def install():
 
 @unroll_safe
 def _local_frame(frame, packed):
-    """The frame a packed getlocal-style operand names."""
     if packed == (packed & optable.LOCAL_SLOT_MASK):
         return frame
     return _outer_frame(frame, packed >> optable.LOCAL_LEVEL_SHIFT)
@@ -1063,8 +1004,7 @@ def _newarray(frame, n):
     at = frame.sp - n
     if at < 0:
         raise UnsupportedOperation('newarray %d underflows the stack' % n)
-    # Copied but not popped: the frame marks them until the shim has them on
-    # the machine stack.
+    # Copied but not popped: the frame marks them until the shim has them on the machine stack.
     values = [0] * n
     i = 0
     while i < n:
@@ -1077,8 +1017,7 @@ def _newarray(frame, n):
 
 @unroll_safe
 def _newhash(frame, n):
-    """n/2 key/value pairs, left in the marked frame until each rb_hash_aset
-    has copied them into the Hash."""
+    """n/2 key/value pairs, left in the marked frame until each rb_hash_aset has copied them into the Hash."""
     at = frame.sp - n
     if at < 0 or n % 2 != 0:
         raise UnsupportedOperation('newhash %d underflows the stack' % n)
@@ -1145,8 +1084,7 @@ def _expand(frame, v, n):
 
 
 class _VMCore(object):
-    # Quasi-immutable, not immutable: a prebuilt instance's plain immutable
-    # field would fold to the 0 it holds before boot fills it.
+    # Quasi-immutable, not immutable: a prebuilt instance's plain immutable field would fold to the 0 it holds before boot.
     _immutable_fields_ = ['value?']
 
     def __init__(self):
@@ -1158,8 +1096,7 @@ vm_core = _VMCore()
 
 @dont_look_inside
 def _vm_core():
-    """RubyVM::FrozenCore, receiver of the core# methods
-    (vm_insnhelper.c:5668)."""
+    """RubyVM::FrozenCore, receiver of the core# methods (vm_insnhelper.c:5668)."""
     if vm_core.value == 0:
         v = boot.vm_core()
         boot.gc_register(v)
@@ -1183,10 +1120,7 @@ def _const_path(frame, path):
 
 
 def _const_base(frame):
-    """The cref's constant base. In a method body that is the class the def
-    was written in, which rb_const_get then searches with its ancestors.
-    TODO: a nested cref chain, so `class A; X=1; class B; def f; X; end` finds
-    A's constant the way a lexical scope walk would."""
+    """The cref's constant base. TODO: no nested cref chain, so `class A; X=1; class B; def f; X` misses A's constant."""
     if frame.cref != 0:
         return frame.cref
     entry = frame.entry
@@ -1205,8 +1139,7 @@ def _defineclass(mid, w_body, cbase, super_v):
 
 @dont_look_inside
 def _opt_new_alloc(klass):
-    """A fresh instance, or 0 for the miss branch. Only classes RPyYARV made:
-    nothing else is known to have kept Class#new."""
+    """A fresh instance, or 0 for the miss branch; only classes RPyYARV made are known to have kept Class#new."""
     if not dispatch.is_known_class(klass):
         return 0
     return dispatch.alloc(klass)
@@ -1240,15 +1173,13 @@ def _match_one(target, pattern, flag):
     if kind == optable.CHECKMATCH_TYPE_RESCUE and not is_module:
         raise UnsupportedOperation('class or module required for rescue clause')
     if is_module:
-        # Module#=== is rb_obj_is_kind_of, so going straight there skips a send.
-        # TODO: a subclass redefining #=== is ignored, as in vm_opt_*.
+        # Module#=== is rb_obj_is_kind_of, so this skips a send. TODO: a subclass redefining #=== is ignored, as in vm_opt_*.
         return boot.obj_is_kind_of(target, pattern)
     return value.is_true(rubycall.call1(pattern, EQQ, target))
 
 
 def _binop(frame, recv, arg, mid):
-    """Both operands back on the stack, where the mark hook reaches them,
-    before the send that may allocate."""
+    """Both operands back on the stack, where the mark hook reaches them, before the send that may allocate."""
     frame.push(recv)
     frame.push(arg)
     return _opt_send(frame, mid, 1)
@@ -1274,9 +1205,7 @@ def _epc(iseq, pc):
 
 
 def execute(iseq, frame, pc=0):
-    """Two shapes on purpose: the handler shape below stops the JIT inlining
-    the call, so an ISeq with no catch table keeps a plain tail call instead.
-    iseq is green, so the branch folds away."""
+    """Two shapes on purpose: the handler shape stops the JIT inlining the call, so a catch-free ISeq keeps a plain tail call; iseq is green, so the branch folds away."""
     if iseq.catches_return:
         return _execute_returnable(iseq, frame, pc)
     if len(iseq.catches) == 0:
@@ -1289,9 +1218,7 @@ def execute(iseq, frame, pc=0):
 
 
 def _execute_returnable(iseq, frame, pc):
-    """A frame a `return` inside one of its blocks names. The unwinding has
-    run this frame's own ensure entries by the time it gets here; what is
-    left is to answer the value, as vm_throw_start's valid_return does."""
+    """A frame a `return` inside one of its blocks names; its own ensure entries have run, so what is left is to answer the value (vm_throw_start's valid_return)."""
     try:
         try:
             if len(iseq.catches) == 0:
@@ -1338,11 +1265,9 @@ def _execute_guarded(iseq, frame, pc):
 def _execute(iseq, frame, pc):
     while True:
         jitdriver.jit_merge_point(iseq=iseq, pc=pc, frame=frame)
-        # Only an unwinding exception reads this; a store to a virtualizable
-        # field costs a trace nothing.
+        # Only an unwinding exception reads this; a store to a virtualizable field costs a trace nothing.
         frame.pc = pc
-        # Rebound each iteration: hoisting it would leave a live variable
-        # across the merge point that is neither green nor red.
+        # Rebound each iteration: hoisting it would leave a live variable across the merge point that is neither green nor red.
         code = iseq.code
         opcode = code[pc]
         if debug.state.enabled:
@@ -1564,8 +1489,7 @@ def _execute(iseq, frame, pc):
             if obj == 0:
                 pc = target
             else:
-                # Receiver of the `initialize` send that follows, and the
-                # slot below it, which becomes that send's result.
+                # Receiver of the `initialize` send that follows, and the slot below it, which becomes that send's result.
                 frame.stack[at] = obj
                 frame.stack[below] = obj
         elif opcode == insns.DEFINEMETHOD:
@@ -1765,6 +1689,5 @@ def run(iseq):
 
 
 def run_in_cruby():
-    """The whole script, handed back because some ISeq in it is one RPyYARV
-    cannot represent. Cleans up too, so its answer is the exit status."""
+    """The whole script handed back because some ISeq in it is one RPyYARV cannot represent; cleans up too, so its answer is the exit status."""
     return boot.run_node()

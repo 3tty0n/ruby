@@ -1,5 +1,4 @@
-# Hot iterators as Ruby, so their back edge is one the JIT can trace rather
-# than a CRuby rb_block_call it cannot see into.
+# Hot iterators as Ruby, so their back edge is one the JIT can trace rather than a CRuby rb_block_call it cannot see into.
 
 class Integer
   def times

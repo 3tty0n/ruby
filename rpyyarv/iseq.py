@@ -1,10 +1,4 @@
-"""Loaded code: W_ISeq.code is a flat list of ints.
-
-Operands that are already ints (local slots, branch targets, interned ids)
-sit in it directly; everything else goes into a pool and the code stream
-carries the index. The pools are split by type because `consts` holds raw
-VALUEs, and an RPython list of ints cannot also hold objects.
-"""
+"""W_ISeq.code is a flat list of ints; operands that aren't already ints go into type-split pools since `consts` holds raw VALUEs an int list can't hold."""
 
 import symbols
 
@@ -17,8 +11,7 @@ CATCH_ENSURE = 2
 
 
 class W_Catch(object):
-    """One catch-table entry; it covers a pc when start < epc <= end, epc
-    being the pc *after* the raising instruction (vm.c:2911)."""
+    """One catch-table entry; it covers a pc when start < epc <= end, epc being the pc *after* the raising instruction (vm.c:2911)."""
     _immutable_fields_ = ['kind', 'start', 'end', 'cont', 'sp', 'w_iseq']
 
     def __init__(self, kind, start, end, cont, sp, w_iseq):
@@ -32,8 +25,7 @@ class W_Catch(object):
 
 
 class W_ISeq(object):
-    # Nothing appends after the loader, so the JIT may fold code[pc] and
-    # consts[idx] away when pc and iseq are green.
+    # Nothing appends after the loader, so the JIT may fold code[pc] and consts[idx] away when pc and iseq are green.
     _immutable_fields_ = ['name', 'code[*]', 'consts[*]', 'iseqs[*]',
                           'callinfos[*]', 'nlocals', 'stack_max', 'nparams',
                           'simple_params', 'catches[*]', 'paths[*]',
@@ -72,8 +64,7 @@ class W_ISeq(object):
         self.autosplat = autosplat
         # This ISeq or one nested in it says `return` from a block.
         self.has_return_throw = has_return_throw
-        # ...and this one is the method (or toplevel) such a return names, so
-        # execute() has to catch it. Green, so the check folds away.
+        # ...and this one is the method (or toplevel) such a return names, so execute() has to catch it. Green, so the check folds away.
         self.catches_return = catches_return
         # rescue/ensure entries in CRuby's search order; the first match wins.
         self.catches = catches if catches is not None else []
@@ -89,8 +80,7 @@ class W_CallInfo(object):
 
     def __init__(self, mid, argc, simple=True, fcall=True, is_super=False,
                  blockarg=False):
-        # CALL_FLAG_ARGS_BLOCKARG: one more value above the arguments, which
-        # vm_caller_setup_arg_block pops first (vm_args.c:1119).
+        # CALL_FLAG_ARGS_BLOCKARG: one more value above the arguments, which vm_caller_setup_arg_block pops first (vm_args.c:1119).
         self.blockarg = blockarg
         # invokesuper's call data names no method: the running one is implied.
         self.is_super = is_super

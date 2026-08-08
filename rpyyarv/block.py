@@ -1,10 +1,4 @@
-"""A block, in the three shapes a call site can hand one over.
-
-KIND_ISEQ is RPyYARV's own: an ISeq plus the frame it was written in, with no
-VALUE of its own; self comes from the defining frame, which the mark hook
-already walks. KIND_PROC wraps a Proc that came from CRuby, KIND_SYM the
-`&:sym` shorthand; both hold a VALUE, so gcroots marks them too.
-"""
+"""KIND_ISEQ carries no VALUE (self comes from the defining frame, walked by the mark hook); KIND_PROC/KIND_SYM hold a VALUE, so gcroots marks them too."""
 
 KIND_ISEQ = 0
 KIND_PROC = 1
@@ -21,8 +15,7 @@ class W_Block(object):
         self.frame = frame
         # A `yield` inside a block reaches the enclosing method's block.
         self.outer = outer
-        # KIND_PROC: the Proc itself. KIND_ISEQ: the Proc materialised for it
-        # by getblockparam, once one exists; the handle table owns that one.
+        # KIND_PROC: the Proc itself. KIND_ISEQ: the Proc getblockparam materialises for it, once one exists; the handle table owns it.
         self.proc_value = proc_value
         self.mid = mid
 
@@ -42,24 +35,20 @@ class BlockNext(Exception):
 
 
 class BlockJump(Exception):
-    """An unwind out of a block towards a frame further out, as vm_throw
-    starts one. Not an error, so it may park and be re-raised."""
+    """An unwind out of a block, as vm_throw starts one; not an error, so it may park and be re-raised."""
     def __init__(self, value):
         self.value = value
 
 
 class BlockReturn(BlockJump):
-    """A non-local `return`: the tag is the frame of the method the block was
-    written in, which vm_throw_start finds as the block's local EP
-    (vm_insnhelper.c:1827)."""
+    """A non-local `return`: the tag is the frame of the block's defining method, found as its local EP (vm_throw_start, vm_insnhelper.c:1827)."""
     def __init__(self, frame, value):
         BlockJump.__init__(self, value)
         self.frame = frame
 
 
 class BlockBreak(BlockJump):
-    """`break`: the block itself is the tag, so it unwinds to the send that
-    passed this exact one."""
+    """`break`: the block itself is the tag, so it unwinds to the send that passed this exact one."""
     def __init__(self, w_block, value):
         BlockJump.__init__(self, value)
         self.w_block = w_block

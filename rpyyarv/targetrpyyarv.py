@@ -78,10 +78,7 @@ def entry_point(argv):
         program = bootiseq.load(iseqw)
         result = loader.load(program)
         if len(result.reasons) > 0:
-            # No per-method granularity: a method body RPyYARV cannot run has
-            # to be defined into CRuby, which needs the cref and the enclosing
-            # binding RPyYARV's frames do not carry. Per *file* there is, but
-            # only for the ones require pulls in; this is the main script.
+            # No per-method granularity: a method body RPyYARV cannot run needs a cref/binding RPyYARV's frames don't carry, so the whole file goes to CRuby.
             debug.record_file(program.path, result.total, result.supported,
                               result.reasons[0])
             debug.note('running under CRuby instead: %d unsupported iseq(s), '
