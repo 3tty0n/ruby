@@ -60,6 +60,8 @@ def invoke(frame, w_ci, w_block=None):
     entry = dispatch.lookup(klass, w_ci.mid)
     callee_iseq = None
     if entry is not None and (w_ci.fcall or not entry.private):
+        if entry.kind != dispatch.KIND_ISEQ:
+            return _attr_send(frame, entry, recv, recv_at, argc)
         callee_iseq = entry.w_iseq
 
     if callee_iseq is not None:
@@ -75,6 +77,17 @@ def invoke(frame, w_ci, w_block=None):
                 raise
             return e.value
 
+    if entry is None and argc == 1 and _is_identity_mid(w_ci.mid) \
+            and helpers.identity_op(recv, w_ci.mid):
+        same = recv == frame.stack[recv_at + 1]
+        if w_ci.mid == helpers.NEQ:
+            same = not same
+        _drop(frame, recv_at)
+        debug.count_native()
+        return value.newbool(same)
+    if _is_attr_mid(w_ci.mid) and argc > 0 \
+            and not value.is_immediate(recv) and dispatch.is_known_class(recv):
+        return _define_attrs(frame, w_ci, recv, recv_at, argc)
     if w_ci.mid == BLOCK_GIVEN and w_ci.fcall and argc == 0:
         # rb_f_block_given_p reads the *caller's* frame (vm.c:1862); out
         # through rb_funcallv it would find a CRuby frame instead.
@@ -83,7 +96,7 @@ def invoke(frame, w_ci, w_block=None):
     if w_block is not None and w_ci.mid == NEW \
             and dispatch.is_known_class(recv):
         entry = dispatch.lookup(promote(recv), INITIALIZE)
-        if entry is not None:
+        if entry is not None and entry.kind == dispatch.KIND_ISEQ:
             return _new_with_block(frame, entry, recv, recv_at, argc, w_block)
     if proxy.value != 0 and recv == proxy.value:
         return _block_send(frame, w_ci, recv_at, argc, frame.block)
@@ -137,6 +150,77 @@ def invoke(frame, w_ci, w_block=None):
 NEW = symbols.intern('new')
 INITIALIZE = symbols.intern('initialize')
 BLOCK_GIVEN = symbols.intern('block_given?')
+ATTR_READER = symbols.intern('attr_reader')
+ATTR_WRITER = symbols.intern('attr_writer')
+ATTR_ACCESSOR = symbols.intern('attr_accessor')
+
+
+def _is_attr_mid(mid):
+    return (mid == ATTR_READER or mid == ATTR_WRITER
+            or mid == ATTR_ACCESSOR)
+
+
+def _is_identity_mid(mid):
+    return (mid == helpers.EQ or mid == helpers.NEQ
+            or mid == helpers.EQUAL_P)
+
+
+def _attr_send(frame, entry, recv, recv_at, argc):
+    """An attr_* entry: the shape-guarded ivar access dispatch.py compiles
+    getinstancevariable to, without a frame."""
+    if entry.kind == dispatch.KIND_ATTR_READER:
+        if argc != 0:
+            _arity_error(argc, 0, 0)
+        _drop(frame, recv_at)
+        debug.count_native()
+        return dispatch.ivar_get(recv, entry.ivar)
+    if argc != 1:
+        _arity_error(argc, 1, 1)
+    # Stored before the drop: ivar_set may allocate, and the frame marks it.
+    v = frame.stack[recv_at + 1]
+    dispatch.ivar_set(recv, entry.ivar, v)
+    _drop(frame, recv_at)
+    debug.count_native()
+    return v
+
+
+@unroll_safe
+def _define_attrs(frame, w_ci, klass, recv_at, argc):
+    args = []
+    i = 0
+    while i < argc:
+        args.append(frame.stack[recv_at + 1 + i])
+        i += 1
+    _drop(frame, recv_at)
+    # First, so a name CRuby rejects raises before anything is registered.
+    ret = rubycall.call(klass, w_ci.mid, args)
+    _install_attrs(klass, w_ci.mid, args)
+    return ret
+
+
+@dont_look_inside
+def _install_attrs(klass, mid, args):
+    """attr_* still runs in CRuby, so its own method entries stay there for
+    reflection and for CRuby's callers; the registry gains native ones too."""
+    for i in range(len(args)):
+        name = _attr_name(args[i])
+        if name == '':
+            continue
+        ivar = symbols.intern('@' + name)
+        if mid != ATTR_WRITER:
+            dispatch.define_attr(klass, symbols.intern(name), ivar,
+                                 dispatch.KIND_ATTR_READER)
+        if mid != ATTR_READER:
+            dispatch.define_attr(klass, symbols.intern(name + '='), ivar,
+                                 dispatch.KIND_ATTR_WRITER)
+
+
+def _attr_name(v):
+    if boot.is_symbol(v):
+        return boot.sym_of(v)
+    if not value.is_immediate(v) and boot.is_string(v):
+        return boot.str_of(v)
+    return ''
 
 
 def _new_with_block(frame, entry, klass, recv_at, argc, w_block):
@@ -290,6 +374,8 @@ def _opt_send(frame, mid, argc):
     klass = promote(value.class_of(recv))
     entry = dispatch.lookup(klass, mid)
     if entry is not None and not entry.private:
+        if entry.kind != dispatch.KIND_ISEQ:
+            return _attr_send(frame, entry, recv, recv_at, argc)
         return _enter(frame, entry, recv, recv_at, argc, mid, None)
     args = []
     i = 0
@@ -325,6 +411,8 @@ def invoke_super(frame, w_ci):
             "super from '%s' reaches a method RPyYARV did not define; "
             "calling CRuby's implementation of a superclass method is not "
             "supported" % symbols.name_of(entry.mid))
+    if target.kind != dispatch.KIND_ISEQ:
+        return _attr_send(frame, target, frame.stack[recv_at], recv_at, argc)
     return _enter(frame, target, frame.stack[recv_at], recv_at, argc,
                   entry.mid)
 
@@ -355,8 +443,11 @@ def _core_method(frame, w_ci, recv, recv_at, argc):
     entry = dispatch.own_lookup(cbase, old)
     dispatch.undefine(cbase, name)
     if entry is not None:
-        # An RPyYARV method: the alias is a second name for the same ISeq.
-        dispatch.define(cbase, name, entry.w_iseq, entry.private)
+        # An RPyYARV method: the alias is a second name for the same body.
+        if entry.kind != dispatch.KIND_ISEQ:
+            dispatch.define_attr(cbase, name, entry.ivar, entry.kind)
+        else:
+            dispatch.define(cbase, name, entry.w_iseq, entry.private)
         _drop(frame, recv_at)
         return value.Q_NIL
     args = [cbase, frame.stack[recv_at + 2], frame.stack[recv_at + 3]]
@@ -533,6 +624,8 @@ def _from_cruby(recv, mid, args, w_block):
         raise UnsupportedOperation(
             "CRuby dispatched '%s' to RPyYARV, which no longer defines it"
             % symbols.name_of(mid))
+    if entry.kind != dispatch.KIND_ISEQ:
+        return _attr_from_cruby(entry, recv, args)
     callee_iseq = entry.w_iseq
     callee = Frame(callee_iseq, recv, 0, entry)
     callee.block = w_block
@@ -550,6 +643,20 @@ def _from_cruby(recv, mid, args, w_block):
         pc = setup_params(callee_iseq, callee, args, False)
     debug.count_native()
     return execute(callee_iseq, callee, pc)
+
+
+def _attr_from_cruby(entry, recv, args):
+    """_from_cruby's accessor case; CRuby's argv is already a marked buffer."""
+    if entry.kind == dispatch.KIND_ATTR_READER:
+        if len(args) != 0:
+            _arity_error(len(args), 0, 0)
+        debug.count_native()
+        return dispatch.ivar_get(recv, entry.ivar)
+    if len(args) != 1:
+        _arity_error(len(args), 1, 1)
+    dispatch.ivar_set(recv, entry.ivar, args[0])
+    debug.count_native()
+    return args[0]
 
 
 @dont_look_inside

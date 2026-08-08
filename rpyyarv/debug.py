@@ -59,6 +59,7 @@ class _Coverage(object):
         self.iseqs_total = 0
         self.iseqs_native = 0
         self.punted = []        # 'path: why RPyYARV would not run it'
+        self.by_name = {}       # method name -> foreign sends of it
 
 
 coverage = _Coverage()
@@ -70,9 +71,10 @@ def count_native():
 
 
 @dont_look_inside
-def count_foreign():
+def count_foreign(name='?'):
     if coverage.enabled:
         coverage.foreign += 1
+        coverage.by_name[name] = coverage.by_name.get(name, 0) + 1
 
 
 def configure_coverage():
@@ -109,6 +111,27 @@ def report():
             coverage.files_native + coverage.files_cruby))
     for i in range(len(coverage.punted)):
         note('  punted to cruby: %s' % coverage.punted[i])
+    for name, n in _top_foreign():
+        note('  cruby send: %s %d' % (name, n))
+
+
+def _top_foreign():
+    """The 20 method names most often sent out to CRuby, most frequent first."""
+    counts = []
+    names = []
+    for name, n in coverage.by_name.items():
+        at = len(counts)
+        while at > 0 and counts[at - 1] < n:
+            at -= 1
+        assert at >= 0
+        counts.insert(at, n)
+        names.insert(at, name)
+    out = []
+    for i in range(len(counts)):
+        if i == 20:
+            break
+        out.append((names[i], counts[i]))
+    return out
 
 
 def write(s):

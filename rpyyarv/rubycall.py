@@ -76,32 +76,32 @@ def call(recv, mid, args, public_only=False):
         v = hooks.require.handle(mid, args[0])
         if v != NOT_HANDLED:
             return v
-    debug.count_foreign()
+    debug.count_foreign(symbols.name_of(mid))
     return boot.funcallv(recv, rid(mid), args, symbols.name_of(mid),
                          public_only)
 
 
 @dont_look_inside
 def call1(recv, mid, arg):
-    debug.count_foreign()
+    debug.count_foreign(symbols.name_of(mid))
     return boot.funcallv(recv, rid(mid), [arg], symbols.name_of(mid))
 
 
 @dont_look_inside
 def call0(recv, mid):
-    debug.count_foreign()
+    debug.count_foreign(symbols.name_of(mid))
     return boot.funcallv(recv, rid(mid), [], symbols.name_of(mid))
 
 
 @dont_look_inside
 def call2(recv, mid, a, b):
-    debug.count_foreign()
+    debug.count_foreign(symbols.name_of(mid))
     return boot.funcallv(recv, rid(mid), [a, b], symbols.name_of(mid))
 
 
 @dont_look_inside
 def call_with_block(recv, mid, args, handle):
-    debug.count_foreign()
+    debug.count_foreign(symbols.name_of(mid))
     return boot.call_with_block(recv, rid(mid), args, handle,
                                 symbols.name_of(mid))
 

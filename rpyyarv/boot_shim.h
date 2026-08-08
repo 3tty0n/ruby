@@ -108,8 +108,12 @@ uintptr_t rpyyarv_str_concat(int n, const uintptr_t *parts);
 
 /* The immediates' classes, fetched once at boot so class_of() needs no rb_*
    call. Slot order is value.py's C_* constants. */
-#define RPYYARV_NCLASS 12
+#define RPYYARV_NCLASS 13
 void rpyyarv_core_classes(uintptr_t *out);
+
+/* The module a class resolves an instance method through, or Qnil when it has
+   no such method; used to recognise an inherited BasicObject#==. */
+uintptr_t rpyyarv_method_owner(uintptr_t klass, uintptr_t id);
 
 /* Class and object operations, each guarded by rb_protect. */
 uintptr_t rpyyarv_define_class(uintptr_t cbase, uintptr_t id, uintptr_t super,

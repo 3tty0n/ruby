@@ -420,6 +420,38 @@ rpyyarv_core_classes(uintptr_t *out)
     out[9]  = (uintptr_t)rb_cHash;
     out[10] = (uintptr_t)rb_cClass;
     out[11] = (uintptr_t)rb_cModule;
+    out[12] = (uintptr_t)rb_cBasicObject;
+}
+
+struct owner_args {
+    VALUE klass;
+    ID    id;
+};
+
+static VALUE
+method_owner_body(VALUE argp)
+{
+    struct owner_args *p = (struct owner_args *)argp;
+    VALUE m = rb_funcall(p->klass, rb_intern("instance_method"), 1,
+                         ID2SYM(p->id));
+    return rb_funcall(m, rb_intern("owner"), 0);
+}
+
+uintptr_t
+rpyyarv_method_owner(uintptr_t klass, uintptr_t id)
+{
+    struct owner_args a;
+    int state = 0;
+    VALUE r;
+    a.klass = (VALUE)klass;
+    a.id = (ID)id;
+    r = rb_protect(method_owner_body, (VALUE)&a, &state);
+    /* No such method, or klass is not a Module: not an error here. */
+    if (state) {
+        rb_set_errinfo(Qnil);
+        return (uintptr_t)Qnil;
+    }
+    return (uintptr_t)r;
 }
 
 /* One argument block for every rb_protect'ed class/object helper below. */

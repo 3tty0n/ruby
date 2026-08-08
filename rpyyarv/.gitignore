@@ -11,3 +11,5 @@ rpyyarv-dump-jit
 !Makefile
 
 pypy/
+awfy/
+*.md

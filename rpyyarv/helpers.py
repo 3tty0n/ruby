@@ -13,7 +13,7 @@ import dispatch
 import rubycall
 import symbols
 import value
-from rlib import ovfcheck
+from rlib import ovfcheck, promote
 
 PLUS = symbols.intern('+')
 MINUS = symbols.intern('-')
@@ -24,6 +24,7 @@ LE = symbols.intern('<=')
 GE = symbols.intern('>=')
 EQ = symbols.intern('==')
 NEQ = symbols.intern('!=')
+EQUAL_P = symbols.intern('equal?')
 DIV = symbols.intern('/')
 MOD = symbols.intern('%')
 AREF = symbols.intern('[]')
@@ -80,6 +81,7 @@ def refresh():
     wherever RPyYARV can see the method world change; a redefinition made
     inside a CRuby call with no RPyYARV definition after it is still missed.
     """
+    dispatch.invalidate_owners()
     count, mask = boot.bop_mask()
     if count != B_COUNT:
         return False
@@ -161,8 +163,24 @@ def ge(a, b):
     return value.Q_UNDEF
 
 
+def identity_op(recv, mid):
+    """vm_opt_equality's second half: the receiver still resolves the operator
+    to BasicObject's, so comparing is comparing the words."""
+    klass = value.class_of(recv)
+    if klass == 0:
+        return False
+    klass = promote(klass)
+    if mid == NEQ:
+        # BasicObject#!= is defined in terms of #==, so both must be untouched.
+        return (dispatch.owns_identity(klass, NEQ)
+                and dispatch.owns_identity(klass, EQ))
+    return dispatch.owns_identity(klass, mid)
+
+
 def eq(a, b):
     if _fix2(a, b, B_INT_EQ):
+        return value.newbool(a == b)
+    if identity_op(a, EQ):
         return value.newbool(a == b)
     return value.Q_UNDEF
 
@@ -171,6 +189,8 @@ def neq(a, b):
     # BOP_NEQ is never flagged: vm_opt_neq resolves `!=` to BasicObject#!=
     # and then asks opt_equality, so Integer#== is the definition that counts.
     if _fix2(a, b, B_INT_EQ):
+        return value.newbool(a != b)
+    if identity_op(a, NEQ):
         return value.newbool(a != b)
     return value.Q_UNDEF
 

@@ -191,12 +191,14 @@ rb_provide_ = _ext('rpyyarv_provide', [VALUE, INTP], lltype.Void,
                    reenters=True)
 rb_absolute_path = _ext('rpyyarv_absolute_path', [VALUE, VALUE, INTP], VALUE,
                         reenters=True)
+rb_method_owner = _ext('rpyyarv_method_owner', [VALUE, VALUE], VALUE,
+                       reenters=True)
 
 REQ_LOADED = 0
 REQ_RB = 1
 REQ_FOREIGN = 2
 
-NCLASS = 12
+NCLASS = 13
 
 
 def _v(n):
@@ -557,6 +559,11 @@ def core_classes():
             result[i] = rffi.cast(lltype.Signed, out[i])
             i += 1
         return result
+
+
+def method_owner(klass, rid):
+    """The module klass resolves rid through, or Qnil when it has none."""
+    return rffi.cast(lltype.Signed, rb_method_owner(_v(klass), _v(rid)))
 
 
 def define_class(cbase, rid, super_v):

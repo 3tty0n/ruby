@@ -21,11 +21,22 @@ class Version(object):
     pass
 
 
-class MethodEntry(object):
-    _immutable_fields_ = ['w_iseq', 'private', 'owner', 'mid', 'cref']
+# What an entry runs: an ISeq, or an attr_* accessor over entry.ivar.
+KIND_ISEQ = 0
+KIND_ATTR_READER = 1
+KIND_ATTR_WRITER = 2
 
-    def __init__(self, w_iseq, private, owner=0, mid=0, cref=0):
+
+class MethodEntry(object):
+    _immutable_fields_ = ['w_iseq', 'private', 'owner', 'mid', 'cref',
+                          'kind', 'ivar']
+
+    def __init__(self, w_iseq, private, owner=0, mid=0, cref=0,
+                 kind=KIND_ISEQ, ivar=0):
         self.w_iseq = w_iseq
+        self.kind = kind
+        # For an accessor kind, the rpyyarv symbol id of the `@name` it reads.
+        self.ivar = ivar
         # The class the `def` was written in, which a constant in the body
         # resolves against; not owner, since `def self.x` lands on the
         # singleton class but reads constants of the class itself.
@@ -77,14 +88,28 @@ def _install_trampoline(klass, mid, private):
     boot.define_method_entry(klass, rubycall.rid(mid), private)
 
 
-def define(klass, mid, w_iseq, private, cref=0):
+def _table_for(klass):
     table = registry.methods.get(klass, None)
     if table is None:
         table = {}
         registry.methods[klass] = table
-    table[mid] = MethodEntry(w_iseq, private, klass, mid, cref)
+    return table
+
+
+def define(klass, mid, w_iseq, private, cref=0):
+    _table_for(klass)[mid] = MethodEntry(w_iseq, private, klass, mid, cref)
     registry.version = Version()
+    invalidate_owners()
     _install_trampoline(klass, mid, private)
+
+
+def define_attr(klass, mid, ivar, kind):
+    """An attr_* accessor as a registry entry. No trampoline: CRuby's own
+    attr method entry is still there, so a call from C reaches it directly."""
+    _table_for(klass)[mid] = MethodEntry(None, False, klass, mid, 0, kind,
+                                         ivar)
+    registry.version = Version()
+    invalidate_owners()
 
 
 @dont_look_inside
@@ -142,6 +167,7 @@ def undefine(klass, mid):
         return False
     del table[mid]
     registry.version = Version()
+    invalidate_owners()
     return True
 
 
@@ -283,6 +309,52 @@ def const_get(klass, mid):
 @dont_look_inside
 def const_set(klass, mid, v):
     boot.const_set(klass, rubycall.rid(mid), v)
+
+
+class _Owners(object):
+    # Quasi-immutable: unlike a shape, a method owner can change, so every
+    # write below replaces the tag and drops the traces that folded it.
+    _immutable_fields_ = ['version?']
+
+    def __init__(self):
+        self.tab = {}       # (klass VALUE, mid) -> 1 identity, 0 not
+        self.version = Version()
+
+
+owners = _Owners()
+
+OWNER_UNKNOWN = -1
+
+
+def invalidate_owners():
+    owners.tab = {}
+    owners.version = Version()
+
+
+@elidable
+def _owns_identity(klass, mid, version):
+    return owners.tab.get((klass, mid), OWNER_UNKNOWN)
+
+
+@dont_look_inside
+def _fill_identity(klass, mid):
+    owner = boot.method_owner(klass, rubycall.rid(mid))
+    got = 1 if owner == value.core_class(value.C_BASIC_OBJECT) else 0
+    # Kept alive: a recycled class VALUE would otherwise read as a hit.
+    gcroots.register_class(klass)
+    owners.tab[(klass, mid)] = got
+    owners.version = Version()
+
+
+def owns_identity(klass, mid):
+    """True when klass resolves mid to BasicObject's definition, which for
+    ==, != and equal? is a pointer compare. Asked of CRuby, not of the
+    registry, so a module included behind rpyyarv's back is still seen."""
+    got = _owns_identity(klass, mid, owners.version)
+    if got == OWNER_UNKNOWN:
+        _fill_identity(klass, mid)
+        got = _owns_identity(klass, mid, owners.version)
+    return got == 1
 
 
 class _Slots(object):
