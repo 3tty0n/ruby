@@ -1,0 +1,228 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+#
+# Run one AWFY benchmark under a chosen engine using scripts/awfy_harness.rb,
+# and refuse to report a time that rpyyarv did not actually produce.
+#
+# rpyyarv punts at file granularity, so a single unimplemented opcode anywhere
+# in a benchmark file sends that whole file to CRuby and the run silently
+# measures CRuby instead. RPYYARV_COVERAGE=1 is therefore always on, and a
+# punted benchmark is an error, not a number.
+
+require "open3"
+require "tmpdir"
+require "fileutils"
+
+HERE = File.dirname(File.expand_path(__FILE__))
+ROOT = File.dirname(HERE)
+TOP = File.dirname(ROOT)
+BUILD = ENV.fetch("RPYYARV_BUILD", File.join(TOP, "build"))
+AWFY = File.join(ROOT, "awfy", "benchmarks", "Ruby")
+HARNESS = File.join(HERE, "awfy_harness.rb")
+
+LIBVAR = RUBY_PLATFORM.include?("darwin") ? "DYLD_LIBRARY_PATH" : "LD_LIBRARY_PATH"
+
+ENGINES = {
+  "rpyyarv-jit" => [File.join(ROOT, "rpyyarv-jit")],
+  "rpyyarv" => [File.join(ROOT, "rpyyarv")],
+  "cruby" => [File.join(BUILD, "ruby"), "--disable-gems"],
+  "cruby+yjit" => [File.join(BUILD, "ruby"), "--disable-gems", "--yjit"],
+  "cruby+zjit" => [File.join(BUILD, "ruby"), "--disable-gems", "--zjit"]
+}.freeze
+
+RPYYARV_ENGINES = ["rpyyarv", "rpyyarv-jit"].freeze
+
+# AWFY class name => canonical inner-iteration count from awfy/rebench.conf.
+BENCHMARKS = {
+  "Bounce" => 1500, "CD" => 250, "DeltaBlue" => 12_000, "Havlak" => 1500,
+  "Json" => 100, "List" => 1500, "Mandelbrot" => 500, "NBody" => 250_000,
+  "Permute" => 1000, "Queens" => 1000, "Richards" => 100, "Sieve" => 3000,
+  "Storage" => 1000, "Towers" => 600
+}.freeze
+
+# CRuby 4.0's Set.inherited needs set/subclass_compatible.rb on the load path or
+# cd and deltablue raise LoadError under every engine, rpyyarv and CRuby alike.
+def load_path_dir
+  dir = File.join(Dir.tmpdir, "rpyyarv-awfy-loadpath")
+  dest = File.join(dir, "set", "subclass_compatible.rb")
+  src = File.join(TOP, "lib", "set", "subclass_compatible.rb")
+  unless File.exist?(dest) && File.mtime(dest) >= File.mtime(src)
+    FileUtils.mkdir_p(File.dirname(dest))
+    FileUtils.cp(src, dest)
+  end
+  dir
+end
+
+def env_for_run(engine)
+  env = {
+    LIBVAR => BUILD + File::PATH_SEPARATOR + (ENV[LIBVAR] || ""),
+    "RUBYLIB" => load_path_dir + File::PATH_SEPARATOR + (ENV["RUBYLIB"] || ""),
+    "AWFY_BENCH_DIR" => AWFY
+  }
+  env["RPYYARV_COVERAGE"] = "1" if RPYYARV_ENGINES.include?(engine)
+  env
+end
+
+Coverage = Struct.new(:native_sends, :foreign_sends, :files_native, :files_cruby, :punted)
+
+def parse_coverage(stderr)
+  cov = Coverage.new(nil, nil, nil, nil, [])
+  stderr.each_line do |raw|
+    line = raw.chomp
+    case line
+    when /\Asends: rpyyarv (\d+), cruby (\d+)/
+      cov.native_sends = Regexp.last_match(1).to_i
+      cov.foreign_sends = Regexp.last_match(2).to_i
+    when /\Afiles: rpyyarv (\d+), punted to cruby (\d+)/
+      cov.files_native = Regexp.last_match(1).to_i
+      cov.files_cruby = Regexp.last_match(2).to_i
+    when /\A\s*punted to cruby: (.*)\z/
+      cov.punted << Regexp.last_match(1).strip
+    end
+  end
+  cov
+end
+
+def foreign_share(cov)
+  total = cov.native_sends.to_i + cov.foreign_sends.to_i
+  return nil if total.zero?
+
+  100.0 * cov.foreign_sends / total
+end
+
+# A punted file is decisive; the send share only backstops a punt the file
+# accounting missed, and its bar is deliberately near-total because mandelbrot
+# legitimately spends 89% of its sends in CRuby's Integer#<<.
+SOFT_FOREIGN = 50.0
+
+def verify(cov, max_foreign, min_sends)
+  return ["no coverage report; is this an rpyyarv build with RPYYARV_COVERAGE support?"] if cov.files_cruby.nil?
+
+  problems = []
+  cov.punted.each { |p| problems << "punted to cruby: #{p}" }
+  if cov.files_cruby > 0 && cov.punted.empty?
+    problems << format("%d file(s) punted to cruby", cov.files_cruby)
+  end
+  share = foreign_share(cov)
+  total = cov.native_sends.to_i + cov.foreign_sends.to_i
+  if share && total >= min_sends && share > max_foreign
+    problems << format("%.1f%% of %d sends went out to CRuby (limit %.1f%%)", share, total, max_foreign)
+  end
+  problems
+end
+
+def describe(cov)
+  return "coverage: (not an rpyyarv engine)" if cov.files_cruby.nil?
+
+  share = foreign_share(cov)
+  format("coverage: files rpyyarv %d / cruby %d; sends rpyyarv %d / cruby %d%s",
+         cov.files_native, cov.files_cruby, cov.native_sends.to_i, cov.foreign_sends.to_i,
+         share ? format(" (%.1f%% foreign)", share) : "")
+end
+
+def resolve_name(arg)
+  BENCHMARKS.keys.find { |k| k.casecmp?(arg) } || arg
+end
+
+def print_usage
+  puts <<~USAGE
+    usage: rpyyarv-awfy [options] <Benchmark> [num-iterations [inner-iter]]
+
+      --engine NAME     #{ENGINES.keys.join(", ")} (default: rpyyarv-jit)
+      --allow-cruby     report the time even when the benchmark ran under CRuby
+      --max-foreign PCT foreign-send share that fails the check (default: 99)
+      --min-sends N     sends below which the share check is skipped (default: 1000)
+      --list            list benchmarks and their canonical inner-iter counts
+      -h, --help        this message
+
+    inner-iter defaults to the benchmark's canonical value from awfy/rebench.conf.
+  USAGE
+end
+
+def main(argv)
+  engine = "rpyyarv-jit"
+  allow_cruby = false
+  max_foreign = 99.0
+  min_sends = 1000
+  rest = []
+
+  until argv.empty?
+    arg = argv.shift
+    case arg
+    when /\A--engine=(.*)\z/ then engine = Regexp.last_match(1)
+    when "--engine" then engine = argv.shift.to_s
+    when /\A--max-foreign=(.*)\z/ then max_foreign = Regexp.last_match(1).to_f
+    when "--max-foreign" then max_foreign = argv.shift.to_f
+    when /\A--min-sends=(.*)\z/ then min_sends = Regexp.last_match(1).to_i
+    when "--min-sends" then min_sends = argv.shift.to_i
+    when "--allow-cruby" then allow_cruby = true
+    when "--list"
+      BENCHMARKS.each { |n, i| puts format("  %-12s inner-iter %d", n, i) }
+      return 0
+    when "-h", "--help"
+      print_usage
+      return 0
+    when /\A-/
+      warn "unrecognized argument: #{arg}"
+      return 2
+    else rest << arg
+    end
+  end
+
+  if rest.empty?
+    print_usage
+    return 2
+  end
+
+  eargv = ENGINES[engine]
+  if eargv.nil?
+    warn "unknown engine: #{engine} (known: #{ENGINES.keys.join(", ")})"
+    return 2
+  end
+  unless File.executable?(eargv[0])
+    warn "engine binary not found: #{eargv[0]}"
+    return 2
+  end
+
+  name = resolve_name(rest[0])
+  iterations = rest[1] || "1"
+  inner = rest[2] || BENCHMARKS[name]&.to_s || "1"
+
+  env = env_for_run(engine)
+  out, err, status = Open3.capture3(env, *eargv, HARNESS, name, iterations, inner)
+  # The embedded CRuby boot path always warns about default gems it skipped.
+  noise = err.lines.reject { |l| l.include?("not loaded") || l.start_with?("[rpyyarv] ") }.join
+
+  cov = parse_coverage(err.gsub("[rpyyarv] ", ""))
+
+  unless status.success?
+    warn out unless out.empty?
+    warn noise
+    warn "FAILED: #{engine} exited #{status.exitstatus.inspect} on #{name}"
+    return 1
+  end
+
+  problems = RPYYARV_ENGINES.include?(engine) ? verify(cov, max_foreign, min_sends) : []
+
+  if problems.empty?
+    print out
+    warn noise unless noise.strip.empty?
+    warn "[#{engine}] #{describe(cov)}"
+    share = foreign_share(cov)
+    warn format("[%s] NOTE: %.1f%% of sends went out to CRuby; the number is partly CRuby's.", engine, share) if share && share > SOFT_FOREIGN
+    return 0
+  end
+
+  warn "REFUSING TO REPORT: #{name} ran under CRuby, not rpyyarv."
+  problems.each { |p| warn "  #{p}" }
+  warn "  #{describe(cov)}"
+  if allow_cruby
+    warn "  --allow-cruby given; the numbers below measure CRuby, not #{engine}."
+    print out
+    return 0
+  end
+  warn "  pass --allow-cruby to measure it anyway."
+  1
+end
+
+exit(main(ARGV)) if __FILE__ == $PROGRAM_NAME

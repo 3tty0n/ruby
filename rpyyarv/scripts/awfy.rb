@@ -116,18 +116,18 @@ end
 
 def main(argv)
   procs = 3
-  filter = ""
+  filters = []
   raw_path = nil
   until argv.empty?
     arg = argv.shift
     case arg
     when /\A--procs=(.*)\z/ then procs = Regexp.last_match(1).to_i
     when "--procs" then procs = argv.shift.to_i
-    when /\A--filter=(.*)\z/ then filter = Regexp.last_match(1)
-    when "--filter" then filter = argv.shift.to_s
+    when /\A--filter=(.*)\z/ then filters << Regexp.last_match(1)
+    when "--filter" then filters << argv.shift.to_s
     when /\A--raw=(.*)\z/ then raw_path = Regexp.last_match(1)
     when "-h", "--help"
-      puts "usage: awfy.rb [--procs N] [--filter SUBSTRING] [--raw FILE]"
+      puts "usage: awfy.rb [--procs N] [--filter SUBSTRING]... [--raw FILE]"
       return 0
     else
       warn "unrecognized argument: #{arg}"
@@ -149,7 +149,8 @@ def main(argv)
   end
   return 1 if engines.empty?
 
-  names = BENCHMARKS.keys.select { |n| n.include?(filter) }
+  # Repeated --filter is a union, not a last-one-wins overwrite.
+  names = BENCHMARKS.keys.select { |n| filters.empty? || filters.any? { |f| n.include?(f) } }
   rows = []
   raw = {}
 
