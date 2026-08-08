@@ -114,12 +114,16 @@ void rpyyarv_ivar_set(uintptr_t obj, uintptr_t id, uintptr_t val, int *state);
 void rpyyarv_obj_written(uintptr_t a, uintptr_t b);
 int rpyyarv_wb_direct(void);
 
-#define RPYYARV_LAYOUT_N 7
+#define RPYYARV_LAYOUT_N 8
 int rpyyarv_shape_iv_index(unsigned int shape_id, uintptr_t id, int *index);
 void rpyyarv_object_layout(int *out);
 
-/* Likewise RArray, for the opt_aref/opt_length fast paths. */
-#define RPYYARV_ARRAY_LAYOUT_N 6
+/* 1 when an object wearing shape `before` can gain `id` by a raw store to *index followed by a raw write of the shape id `after`; 0 when only rb_ivar_set can do it. */
+int rpyyarv_shape_add_ivar_fits(unsigned int before, unsigned int after,
+                                uintptr_t id, int *index);
+
+/* Likewise RArray, for the opt_aref/opt_aset/opt_length fast paths. */
+#define RPYYARV_ARRAY_LAYOUT_N 8
 void rpyyarv_array_layout(int *out);
 
 /* Array and Range operations, each guarded by rb_protect. */

@@ -133,6 +133,8 @@ rb_ivar_set_ = _ext('rpyyarv_ivar_set', [VALUE, VALUE, VALUE, INTP],
                     lltype.Void, reenters=True)
 rb_shape_iv_index = _ext('rpyyarv_shape_iv_index',   # no reenters: see rb_intern_
                          [rffi.UINT, VALUE, INTP], rffi.INT)
+rb_shape_add_ivar_fits = _ext('rpyyarv_shape_add_ivar_fits',  # no reenters: see rb_intern_
+                              [rffi.UINT, rffi.UINT, VALUE, INTP], rffi.INT)
 rb_object_layout = _ext('rpyyarv_object_layout', [INTP], lltype.Void)
 rb_set_block_callback = _ext('rpyyarv_set_block_callback', [BLOCK_HOOK],
                              lltype.Void)
@@ -666,7 +668,7 @@ def ivar_set(obj, rid, val):
         _failed('instance_variable_set')
 
 
-LAYOUT_N = 7
+LAYOUT_N = 8
 
 
 def object_layout():
@@ -690,7 +692,7 @@ def float_layout():
     return out
 
 
-ARRAY_LAYOUT_N = 6
+ARRAY_LAYOUT_N = 8
 
 
 def array_layout():
@@ -715,6 +717,20 @@ def shape_iv_index(shape_id, rid):
     if found == 0:
         return -1
     return -2
+
+
+def shape_add_ivar_slot(before, after, rid):
+    """The slot a raw store may put rid in when it moves an object from before to after, or -1 when only rb_ivar_set may."""
+    with lltype.scoped_alloc(INTP.TO, 1) as idx:
+        idx[0] = rffi.cast(rffi.INT, -1)
+        ok = rffi.cast(lltype.Signed,
+                       rb_shape_add_ivar_fits(rffi.cast(rffi.UINT, before),
+                                              rffi.cast(rffi.UINT, after),
+                                              _v(rid), idx))
+        slot = rffi.cast(lltype.Signed, idx[0])
+    if ok == 1:
+        return slot
+    return -1
 
 
 def proc_new(handle):

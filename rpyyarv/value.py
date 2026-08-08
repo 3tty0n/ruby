@@ -1,7 +1,7 @@
 """VALUEs as plain signed machine words: FIX2LONG is an arithmetic right shift, which only a signed type gets right; entry_point checks the tags below against rpyyarv_special_consts at startup."""
 
 from rlib import (LONG_BIT, bits2float, elidable, float2bits, intmask,
-                  r_uint, raw_word)
+                  r_uint, raw_word, set_raw_word)
 
 Q_FALSE = 0x00
 Q_NIL = 0x04
@@ -28,6 +28,8 @@ FLAGS_WORD = 0
 SHAPE_SHIFT = 32                # shape.h: SHAPE_FLAG_SHIFT on 64-bit
 SHAPE_ID_BITS = 32
 SHAPE_MASK = (1 << SHAPE_ID_BITS) - 1
+SHAPE_FLAG_MASK = SHAPE_MASK    # shape.h: the flags bits a shape id write keeps
+SHAPE_ID_IN_FLAGS = 0           # rbasic.h: RBASIC_SHAPE_ID_FIELD, 0 on 64-bit
 ROBJECT_HEAP = 1 << 16          # RUBY_FL_USER4: ivars spilled to a heap buffer
 FIELDS_WORD = 2                 # struct RObject: as.ary / as.heap.fields
 T_MASK = 0x1f
@@ -41,6 +43,8 @@ ARY_EMBED_LEN_MASK = 0x7f << ARY_EMBED_LEN_SHIFT
 ARY_HEAP_LEN_WORD = 2
 ARY_HEAP_PTR_WORD = 4
 ARY_EMBED_WORD = 2
+ARY_SHARED_FLAG = 1 << 12        # RUBY_ELTS_SHARED: the elements belong to a shared root
+ARY_SHARED_ROOT_FLAG = 1 << 24   # RUBY_FL_USER12: other arrays read these elements
 
 # Slots of the table rpyyarv_core_classes fills, in its order.
 C_OBJECT = 0
@@ -193,6 +197,21 @@ def ary_at(v, i):
     if flags & ARY_EMBED_FLAG:
         return raw_word(v, ARY_EMBED_WORD + i)
     return raw_word(raw_word(v, ARY_HEAP_PTR_WORD), i)
+
+
+def ary_writable(v):
+    """The two things ARY_SET asserts (array.c:177) plus the shared root a view would read through: rb_ary_modify would un-share, a raw store cannot."""
+    flags = raw_word(v, FLAGS_WORD)
+    return (flags & (FL_FREEZE | ARY_SHARED_FLAG | ARY_SHARED_ROOT_FLAG)) == 0
+
+
+def ary_set(v, i, val):
+    """Caller has checked ary_writable(v) and 0 <= i < ary_len(v); the write barrier is the caller's."""
+    flags = raw_word(v, FLAGS_WORD)
+    if flags & ARY_EMBED_FLAG:
+        set_raw_word(v, ARY_EMBED_WORD + i, val)
+    else:
+        set_raw_word(raw_word(v, ARY_HEAP_PTR_WORD), i, val)
 
 
 def repr_of(v):

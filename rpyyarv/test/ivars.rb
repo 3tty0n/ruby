@@ -209,6 +209,117 @@ end
 puts last.get(0)
 puts cs.first.get(0)
 
+# ---- a constructor run often enough for the transitions to be warm ----
+
+class Point4
+  attr_reader :x, :y, :z, :w
+
+  def initialize(i)
+    @x = i
+    @y = i + 1
+    @z = "s#{i % 3}"
+    @w = nil
+  end
+
+  def sum
+    @x + @y
+  end
+end
+
+total = 0
+tags = {}
+i = 0
+while i < 3000
+  p = Point4.new(i)
+  total += p.sum
+  tags[p.z] = true
+  i += 1
+end
+puts total
+puts tags.keys.sort.inspect
+last = Point4.new(7)
+puts [last.x, last.y, last.z, last.w].inspect
+
+# Same ivar names, a second class: the shape edges already exist.
+class Point4b
+  def initialize(i)
+    @x = i
+    @y = i * 2
+  end
+
+  def pair
+    [@x, @y]
+  end
+end
+
+acc = 0
+i = 0
+while i < 3000
+  acc += Point4b.new(i).pair.last
+  i += 1
+end
+puts acc
+
+# Two orders on one class, so the shape tree branches under the same parent.
+class Either
+  def initialize(flip)
+    if flip
+      @p = 1
+      @q = 2
+    else
+      @q = 3
+      @p = 4
+    end
+  end
+
+  def both
+    [@p, @q]
+  end
+end
+
+sums = [0, 0]
+i = 0
+while i < 2000
+  b = Either.new(i.even?).both
+  sums[0] += b[0]
+  sums[1] += b[1]
+  i += 1
+end
+puts sums.inspect
+
+# An extra ivar appears only after the two-ivar transition is warm.
+class Late
+  def initialize(i)
+    @a = i
+    @b = i + 1
+    @c = i + 2 if i >= 2500
+  end
+
+  def dump
+    [@a, @b, @c]
+  end
+end
+
+lates = []
+i = 0
+while i < 3000
+  o = Late.new(i)
+  lates << o if i % 1000 == 0 || i == 2999
+  i += 1
+end
+puts lates.map { |o| o.dump }.inspect
+
+# A frozen instance of a class whose transitions are warm.
+frozen = Point4.new(1)
+frozen.freeze
+begin
+  frozen.instance_variable_set(:@fresh, 1)
+  puts 'no error'
+rescue FrozenError
+  puts 'FrozenError on transition'
+end
+puts frozen.x
+
 # ---- ivars on things that are not plain objects ----
 
 s = 'str'

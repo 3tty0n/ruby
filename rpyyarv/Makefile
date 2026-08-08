@@ -89,6 +89,7 @@ gccheck:
 	          test/requires.rb test/trampoline.rb \
 	          test/definesmethod.rb test/nonlocal_return.rb \
 	          test/attrs.rb test/fastops.rb test/floats.rb test/ivars.rb \
+	          test/aset.rb \
 	          test/consts.rb \
 	          $(TOP)/benchmark/app_*.rb $(TOP)/benchmark/so_*.rb; do \
 	   n=`basename $$s`; \

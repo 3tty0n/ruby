@@ -4,6 +4,7 @@
 
 /* In-tree, so the object-shape API libruby does not export is still reachable. */
 #include "shape.h"
+#include "internal/array.h"
 #include "internal/numeric.h"
 #include "internal/range.h"
 #include "rpyyarv.h"
@@ -693,6 +694,33 @@ rpyyarv_object_layout(int *out)
     out[4] = (int)RUBY_T_MASK;
     out[5] = (int)RUBY_T_OBJECT;
     out[6] = (int)RUBY_FL_FREEZE;
+    /* Nonzero would put the shape id in its own word, not in the flags the RPython side reads and writes. */
+    out[7] = (int)RBASIC_SHAPE_ID_FIELD;
+}
+
+/* Neither allocates nor raises, so boot.py may declare it without reenters. */
+int
+rpyyarv_shape_add_ivar_fits(unsigned int before, unsigned int after,
+                            uintptr_t id, int *index)
+{
+    *index = -1;
+    if (before == INVALID_SHAPE_ID || after == INVALID_SHAPE_ID) return 0;
+    if (rb_shape_too_complex_p((shape_id_t)before)) return 0;
+    if (rb_shape_too_complex_p((shape_id_t)after)) return 0;
+    /* Same flags and same parent, so the shape id write changes nothing but the offset. */
+    if (!RSHAPE_DIRECT_CHILD_P((shape_id_t)before, (shape_id_t)after)) return 0;
+
+    rb_shape_t *shape = RSHAPE((shape_id_t)after);
+    if (shape->type != SHAPE_IVAR || shape->edge_name != (ID)id) return 0;
+    /* One field more than before, so the slot is the first unused one and no field is left uninitialized for the GC to scan. */
+    if (shape->next_field_index != RSHAPE_LEN((shape_id_t)before) + 1) return 0;
+
+    attr_index_t slot = shape->next_field_index - 1;
+    /* The condition obj_field_set reallocates the fields on (variable.c:1957), which a raw store cannot do. */
+    if (slot >= RSHAPE_CAPACITY((shape_id_t)before)) return 0;
+
+    *index = (int)slot;
+    return 1;
 }
 
 void
@@ -704,6 +732,8 @@ rpyyarv_array_layout(int *out)
     out[3] = (int)(offsetof(struct RArray, as.heap.len) / SIZEOF_VALUE);
     out[4] = (int)(offsetof(struct RArray, as.heap.ptr) / SIZEOF_VALUE);
     out[5] = (int)(offsetof(struct RArray, as.ary) / SIZEOF_VALUE);
+    out[6] = (int)RARRAY_SHARED_FLAG;
+    out[7] = (int)RARRAY_SHARED_ROOT_FLAG;
 }
 
 static VALUE

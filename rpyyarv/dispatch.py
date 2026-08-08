@@ -5,8 +5,8 @@ import gcroots
 import rubycall
 import value
 from error import RubyException, UnsupportedOperation
-from rlib import (elidable, dont_look_inside, promote, raw_word,
-                  set_raw_word)
+from rlib import (elidable, dont_look_inside, intmask, promote, r_uint,
+                  raw_word, set_raw_word)
 
 # Cycle guard: a superclass chain longer than this is a corrupt map.
 MAX_ANCESTORS = 64
@@ -425,6 +425,31 @@ class _Barrier(object):
 barrier = _Barrier()
 
 
+class TransEntry(object):
+    _immutable_fields_ = ['after', 'slot']
+
+    def __init__(self, after, slot):
+        self.after = after
+        self.slot = slot
+
+
+class _Trans(object):
+    # Quasi-immutable: a shape edge does not exist until the first object takes it, so recording one drops the traces that folded its absence.
+    _immutable_fields_ = ['version?']
+
+    def __init__(self):
+        self.tab = {}       # (shape_id, CRuby ID) -> TransEntry
+        self.version = Version()
+
+
+trans = _Trans()
+
+
+@elidable
+def _iv_transition(shape_id, rid, version):
+    return trans.tab.get((shape_id, rid), None)
+
+
 def ivar_set(obj, mid, v):
     """Raw store: an immediate needs no write barrier (ruby/internal/gc.h:788), a heap value takes CRuby's; frozen or missing slot falls back."""
     if obj != 0 and (obj & value.IMMEDIATE_MASK) == 0:
@@ -435,16 +460,48 @@ def ivar_set(obj, mid, v):
                     and (flags & value.FL_FREEZE) == 0:
                 shape_id = promote(
                     (flags >> value.SHAPE_SHIFT) & value.SHAPE_MASK)
-                slot = iv_slot(shape_id, rubycall.const_rid(mid))
+                rid = rubycall.const_rid(mid)
+                slot = iv_slot(shape_id, rid)
+                after = shape_id
+                if slot == -1:
+                    entry = _iv_transition(shape_id, rid, trans.version)
+                    if entry is not None:
+                        after = entry.after
+                        slot = entry.slot
                 if slot >= 0:
                     if flags & value.ROBJECT_HEAP:
                         set_raw_word(raw_word(obj, value.FIELDS_WORD), slot, v)
                     else:
                         set_raw_word(obj, value.FIELDS_WORD + slot, v)
+                    if after != shape_id:
+                        # The field is stored first: nothing can collect between two raw stores, and the new shape would expose the slot before it holds a VALUE.
+                        set_raw_word(obj, value.FLAGS_WORD,
+                                     intmask((r_uint(flags)
+                                              & r_uint(value.SHAPE_FLAG_MASK))
+                                             | (r_uint(after)
+                                                << value.SHAPE_SHIFT)))
                     if not immediate:
                         boot.obj_written(obj, v)
                     return
+                if slot == -1:
+                    _ivar_add_slow(obj, shape_id, rid, v)
+                    return
     _ivar_set_slow(obj, mid, v)
+
+
+@dont_look_inside
+def _ivar_add_slow(obj, before, rid, v):
+    """The first store of an ivar transitions the shape, which may allocate, so CRuby has to do it; the edge it creates is permanent, so the next object takes it in RPython."""
+    boot.ivar_set(obj, rid, v)
+    if (before, rid) in trans.tab:
+        return
+    after = (raw_word(obj, value.FLAGS_WORD)
+             >> value.SHAPE_SHIFT) & value.SHAPE_MASK
+    slot = boot.shape_add_ivar_slot(before, after, rid)
+    if slot < 0:
+        return
+    trans.tab[(before, rid)] = TransEntry(after, slot)
+    trans.version = Version()
 
 
 @dont_look_inside
@@ -453,11 +510,11 @@ def _ivar_set_slow(obj, mid, v):
 
 
 def check_object_layout():
-    """The ivar fast path reads RObject by hand; refuse a CRuby it misreads."""
+    """The ivar fast path reads RObject by hand and writes its shape id back; refuse a CRuby it misreads."""
     got = boot.object_layout()
     want = [value.SHAPE_SHIFT, value.SHAPE_ID_BITS, value.ROBJECT_HEAP,
             value.FIELDS_WORD, value.T_MASK, value.T_OBJECT,
-            value.FL_FREEZE]
+            value.FL_FREEZE, value.SHAPE_ID_IN_FLAGS]
     return got == want
 
 

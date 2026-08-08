@@ -397,8 +397,20 @@ def aref(recv, idx):
 
 
 def aset(recv, idx, val):
+    """A store inside a writable Array goes in place; growth, sharing and FrozenError stay with rb_ary_store."""
     if value.is_plain_array(recv) and value.is_fixnum(idx) \
             and _ary_op(B_ARY_ASET):
+        immediate = value.is_immediate(val)
+        if immediate or dispatch.barrier.direct:
+            n = value.ary_len(recv)
+            i = value.fix2int(idx)
+            if i < 0:
+                i += n
+            if i >= 0 and i < n and value.ary_writable(recv):
+                value.ary_set(recv, i, val)
+                if not immediate:
+                    boot.obj_written(recv, val)
+                return val
         rubycall.ary_store(recv, value.fix2int(idx), val)
         return val
     return value.Q_UNDEF
@@ -454,5 +466,6 @@ def check_array_layout():
     got = boot.array_layout()
     want = [value.ARY_EMBED_FLAG, value.ARY_EMBED_LEN_SHIFT,
             value.ARY_EMBED_LEN_MASK, value.ARY_HEAP_LEN_WORD,
-            value.ARY_HEAP_PTR_WORD, value.ARY_EMBED_WORD]
+            value.ARY_HEAP_PTR_WORD, value.ARY_EMBED_WORD,
+            value.ARY_SHARED_FLAG, value.ARY_SHARED_ROOT_FLAG]
     return got == want
