@@ -87,11 +87,15 @@ uintptr_t rpyyarv_ary_new(int n, const uintptr_t *elems);
 uintptr_t rpyyarv_str_concat(int n, const uintptr_t *parts);
 
 /* Fetched once at boot so class_of() needs no rb_* call; slot order is value.py's C_* constants. */
-#define RPYYARV_NCLASS 13
+#define RPYYARV_NCLASS 14
 void rpyyarv_core_classes(uintptr_t *out);
 
 /* The module a class resolves an instance method through, or Qnil when it has no such method. */
 uintptr_t rpyyarv_method_owner(uintptr_t klass, uintptr_t id);
+
+/* The heap Float the flonum encoding cannot represent, and the RFloat layout value.py reads by hand. */
+uintptr_t rpyyarv_float_new(double d);
+void rpyyarv_float_layout(int *out);
 
 /* Class and object operations, each guarded by rb_protect. */
 uintptr_t rpyyarv_define_class(uintptr_t cbase, uintptr_t id, uintptr_t super,

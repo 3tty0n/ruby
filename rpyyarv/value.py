@@ -1,6 +1,7 @@
 """VALUEs as plain signed machine words: FIX2LONG is an arithmetic right shift, which only a signed type gets right; entry_point checks the tags below against rpyyarv_special_consts at startup."""
 
-from rlib import LONG_BIT, elidable, raw_word
+from rlib import (LONG_BIT, bits2float, elidable, float2bits, intmask,
+                  r_uint, raw_word)
 
 Q_FALSE = 0x00
 Q_NIL = 0x04
@@ -12,6 +13,12 @@ FLONUM_MASK = 0x03
 FLONUM_FLAG = 0x02
 SYMBOL_MASK = 0xff
 SYMBOL_FLAG = 0x0c
+
+# The flonum encoding of internal/numeric.h, which rotates rather than shifts.
+FLONUM_ZERO = -0x7ffffffffffffffe    # 0x8000000000000002, DBL2NUM(+0.0)
+FLONUM_RESERVED = 0x3000000000000000  # rotates onto FLONUM_ZERO, so it stays in the heap
+FLONUM_ROT = 3
+FLOAT_VALUE_WORD = 2                # struct RFloat: float_value after RBasic
 
 # rbasic.h: flags then klass, one word each (SIZEOF_VALUE == 8 only).
 KLASS_WORD = 1
@@ -49,7 +56,8 @@ C_HASH = 9
 C_CLASS = 10
 C_MODULE = 11
 C_BASIC_OBJECT = 12
-NCLASS = 13
+C_MATH = 13                     # the Math module, receiver of the sqrt fast path
+NCLASS = 14
 
 FIXNUM_MAX = (1 << (LONG_BIT - 2)) - 1
 FIXNUM_MIN = -(1 << (LONG_BIT - 2))
@@ -122,6 +130,48 @@ def class_of(v):
     if v == Q_TRUE:
         return core_class(C_TRUECLASS)
     return 0            # Qundef, or an immediate this build invented
+
+
+def is_flonum(v):
+    return (v & FLONUM_MASK) == FLONUM_FLAG
+
+
+def is_heap_float(v):
+    """A direct Float on the heap, as vm_opt_plus tests it (vm_insnhelper.c:6893)."""
+    return (v != 0 and (v & IMMEDIATE_MASK) == 0
+            and raw_word(v, KLASS_WORD) == core_class(C_FLOAT))
+
+
+def is_float(v):
+    return is_flonum(v) or is_heap_float(v)
+
+
+def float_val(v):
+    """The double in a Float VALUE the caller has checked (internal/numeric.h:249)."""
+    if not is_flonum(v):
+        return bits2float(raw_word(v, FLOAT_VALUE_WORD))
+    if v == FLONUM_ZERO:
+        return 0.0
+    u = r_uint(v)
+    # The exponent's top bit comes back from bit 63: xx1... -> 011..., xx0... -> 100...
+    x = (r_uint(2) - (u >> (LONG_BIT - 1))) | (u & ~r_uint(FLONUM_MASK))
+    return bits2float(intmask((x >> FLONUM_ROT)
+                              | (x << (LONG_BIT - FLONUM_ROT))))
+
+
+def dbl2flonum(v):
+    """The flonum for a double, or Q_UNDEF when only a heap Float can hold it (internal/numeric.h:294)."""
+    w = float2bits(v)
+    u = r_uint(w)
+    # Only exponents whose bits 62..60 are 3 or 4 survive the rotation.
+    exp3 = intmask(u >> (LONG_BIT - 4)) & 0x7
+    if (exp3 == 3 or exp3 == 4) and w != FLONUM_RESERVED:
+        return intmask((((u << FLONUM_ROT)
+                         | (u >> (LONG_BIT - FLONUM_ROT))) & ~r_uint(0x01))
+                       | r_uint(FLONUM_FLAG))
+    if w == 0:
+        return FLONUM_ZERO
+    return Q_UNDEF
 
 
 def is_plain_array(v):

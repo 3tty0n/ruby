@@ -107,6 +107,8 @@ rb_funcallv_public_id = _ext('rpyyarv_funcallv_public_id',
                              reenters=True)
 rb_top_self = _ext('rpyyarv_top_self', [], VALUE)
 rb_int2inum = _ext('rpyyarv_int2inum', [rffi.LONG], VALUE, reenters=True)
+rb_float_new = _ext('rpyyarv_float_new', [rffi.DOUBLE], VALUE, reenters=True)
+rb_float_layout = _ext('rpyyarv_float_layout', [INTP], lltype.Void)
 rb_str_new = _ext('rpyyarv_str_new', [rffi.CCHARP], VALUE, reenters=True)
 rb_ary_new = _ext('rpyyarv_ary_new', [rffi.INT, VALUEP], VALUE, reenters=True)
 rb_str_concat = _ext('rpyyarv_str_concat', [rffi.INT, VALUEP], VALUE, reenters=True)
@@ -196,7 +198,7 @@ REQ_LOADED = 0
 REQ_RB = 1
 REQ_FOREIGN = 2
 
-NCLASS = 13
+NCLASS = 14
 
 
 def _v(n):
@@ -524,6 +526,10 @@ def int2inum(n):
     return rffi.cast(lltype.Signed, rb_int2inum(rffi.cast(rffi.LONG, n)))
 
 
+def float_new(d):
+    return rffi.cast(lltype.Signed, rb_float_new(rffi.cast(rffi.DOUBLE, d)))
+
+
 def str_new(s):
     with rffi.scoped_str2charp(s) as c_s:
         return rffi.cast(lltype.Signed, rb_str_new(c_s))
@@ -668,6 +674,18 @@ def object_layout():
     with lltype.scoped_alloc(INTP.TO, LAYOUT_N) as buf:
         rb_object_layout(buf)
         for i in range(LAYOUT_N):
+            out[i] = rffi.cast(lltype.Signed, buf[i])
+    return out
+
+
+FLOAT_LAYOUT_N = 3
+
+
+def float_layout():
+    out = [0] * FLOAT_LAYOUT_N
+    with lltype.scoped_alloc(INTP.TO, FLOAT_LAYOUT_N) as buf:
+        rb_float_layout(buf)
+        for i in range(FLOAT_LAYOUT_N):
             out[i] = rffi.cast(lltype.Signed, buf[i])
     return out
 

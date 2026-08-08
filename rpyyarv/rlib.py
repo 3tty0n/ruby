@@ -4,7 +4,9 @@ try:
     from rpython.rlib.jit import (
         JitDriver, elidable, promote, unroll_safe, dont_look_inside, hint)
     from rpython.rlib.objectmodel import always_inline
-    from rpython.rlib.rarithmetic import LONG_BIT, ovfcheck
+    from rpython.rlib.longlong2float import float2longlong, longlong2float
+    from rpython.rlib.rarithmetic import LONG_BIT, intmask, ovfcheck, r_uint
+    from rpython.rlib.rfloat import INFINITY, NAN
     from rpython.rlib.rstackovf import StackOverflow, check_stack_overflow
     from rpython.rtyper.lltypesystem import lltype, rffi
 
@@ -23,15 +25,40 @@ try:
         """The index'th C short at a raw address, as a signed word."""
         return rffi.cast(lltype.Signed, rffi.cast(_SHORTP, addr)[index])
 
+    def bits2float(w):
+        """The double whose IEEE bit pattern is the machine word w; a JIT-visible reinterpret, not a call."""
+        return longlong2float(rffi.cast(rffi.LONGLONG, w))
+
+    def float2bits(f):
+        return rffi.cast(lltype.Signed, float2longlong(f))
+
     def oswrite(fd, s):
         os.write(fd, s)
 
 except ImportError:
+    import struct
     import sys
     LONG_BIT = 64 if sys.maxsize > 2 ** 32 else 32
+    INFINITY = float('inf')
+    NAN = float('nan')
 
     def ovfcheck(x):
         return x
+
+    def r_uint(x):
+        return x & ((1 << LONG_BIT) - 1)
+
+    def intmask(x):
+        x &= (1 << LONG_BIT) - 1
+        if x >= 1 << (LONG_BIT - 1):
+            x -= 1 << LONG_BIT
+        return x
+
+    def bits2float(w):
+        return struct.unpack('<d', struct.pack('<q', intmask(w)))[0]
+
+    def float2bits(f):
+        return struct.unpack('<q', struct.pack('<d', f))[0]
 
     StackOverflow = RuntimeError
 

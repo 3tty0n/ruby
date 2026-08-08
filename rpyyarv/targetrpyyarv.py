@@ -59,6 +59,16 @@ def entry_point(argv):
     debug.configure_coverage()
     dispatch.install()
 
+    if not helpers.check_float_layout():
+        debug.note('libruby lays out RFloat or flonums differently than '
+                   'value.py assumes; the Float fast paths would misread it')
+        return 1
+
+    if not helpers.check_flonum_encoding():
+        debug.note('value.py encodes flonums differently than libruby does; '
+                   'every Float result would be a different number')
+        return 1
+
     if not helpers.refresh():
         debug.note('boot_shim.c watches a different set of basic operators '
                    'than helpers.py names; a redefined operator would go '

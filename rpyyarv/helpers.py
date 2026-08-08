@@ -1,11 +1,13 @@
 """opt_* instructions: a fixnum/Array fast path touching no rb_* API, else value.Q_UNDEF as vm_opt_plus and friends do (vm_insnhelper.c:6880), so interp.py runs the real send."""
 
+import math
+
 import boot
 import dispatch
 import rubycall
 import symbols
 import value
-from rlib import LONG_BIT, ovfcheck, promote
+from rlib import INFINITY, LONG_BIT, NAN, ovfcheck, promote
 
 PLUS = symbols.intern('+')
 MINUS = symbols.intern('-')
@@ -32,6 +34,7 @@ RSHIFT = symbols.intern('>>')
 BEGIN = symbols.intern('begin')
 END = symbols.intern('end')
 EXCLUDE_END_P = symbols.intern('exclude_end?')
+SQRT = symbols.intern('sqrt')
 
 # One bit per (class, operator) pair, in the order boot_shim.c's rpyyarv_bop_mask sets them.
 B_INT_PLUS = 0
@@ -57,12 +60,26 @@ B_SYM_EQ = 19
 B_RNG_BEGIN = 20
 B_RNG_END = 21
 B_RNG_EXCL = 22
-B_COUNT = 23
+B_FLT_PLUS = 23
+B_FLT_MINUS = 24
+B_FLT_MULT = 25
+B_FLT_DIV = 26
+B_FLT_LT = 27
+B_FLT_LE = 28
+B_FLT_GT = 29
+B_FLT_GE = 30
+B_FLT_EQ = 31
+B_MATH_SQRT = 32
+B_COUNT = 33
 
 _INT_MID = [PLUS, MINUS, MULT, DIV, MOD, EQ, LT, LE, GT, GE, AND, OR, XOR,
             RSHIFT]
 _ARY_MID = [AREF, ASET, LENGTH, SIZE, EMPTY_P]
 _SYM_MID = [EQ]
+_FLT_MID = [PLUS, MINUS, MULT, DIV, LT, LE, GT, GE, EQ]
+# The Integer bit the same operator takes when the *receiver* is the Fixnum.
+_FLT_AS_INT = [B_INT_PLUS, B_INT_MINUS, B_INT_MULT, B_INT_DIV, B_INT_LT,
+               B_INT_LE, B_INT_GT, B_INT_GE, B_INT_EQ]
 
 
 class _Bops(object):
@@ -110,6 +127,12 @@ def _sym_op(bit):
                                      _SYM_MID[bit - B_SYM_EQ]) is None)
 
 
+def _flt_op(bit):
+    return (_cruby_owns(bit)
+            and dispatch.lookup_core(value.core_class(value.C_FLOAT),
+                                     _FLT_MID[bit - B_FLT_PLUS]) is None)
+
+
 def _from_int(n):
     if value.fixable(n):
         return value.int2fix(n)
@@ -120,15 +143,58 @@ def _fix2(a, b, bit):
     return value.is_fixnum(a) and value.is_fixnum(b) and _int_op(bit)
 
 
+# Above this a Fixnum no longer converts to a double exactly, and the
+# comparisons CRuby answers with rb_integer_float_cmp would disagree.
+FLOAT_EXACT_INT = 1 << 53
+
+
+def _mixable(v, exact):
+    if not value.is_fixnum(v):
+        return False
+    if not exact:
+        return True
+    n = value.fix2int(v)
+    return n >= -FLOAT_EXACT_INT and n <= FLOAT_EXACT_INT
+
+
+def _flt2(a, b, bit, exact=False):
+    """One Float operand and one Float or Fixnum, with the receiver's own class still owning the operator; a Bignum falls back, as CRuby's Float methods reach rb_big2dbl for it."""
+    if value.is_float(a):
+        if not (value.is_float(b) or _mixable(b, exact)):
+            return False
+        return _flt_op(bit)
+    if value.is_float(b) and _mixable(a, exact):
+        return _int_op(_FLT_AS_INT[bit - B_FLT_PLUS])
+    return False
+
+
+def _dbl(v):
+    if value.is_fixnum(v):
+        return float(value.fix2int(v))
+    return value.float_val(v)
+
+
+def _from_dbl(d):
+    """A flonum when the encoding reaches d, else the heap Float DBL2NUM falls back to."""
+    v = value.dbl2flonum(d)
+    if v != value.Q_UNDEF:
+        return v
+    return rubycall.to_heap_float(d)
+
+
 def add(a, b):
     if _fix2(a, b, B_INT_PLUS):
         return _from_int(value.fix2int(a) + value.fix2int(b))
+    if _flt2(a, b, B_FLT_PLUS):
+        return _from_dbl(_dbl(a) + _dbl(b))
     return value.Q_UNDEF
 
 
 def sub(a, b):
     if _fix2(a, b, B_INT_MINUS):
         return _from_int(value.fix2int(a) - value.fix2int(b))
+    if _flt2(a, b, B_FLT_MINUS):
+        return _from_dbl(_dbl(a) - _dbl(b))
     return value.Q_UNDEF
 
 
@@ -138,31 +204,55 @@ def mul(a, b):
             return _from_int(ovfcheck(value.fix2int(a) * value.fix2int(b)))
         except OverflowError:
             pass
+    elif _flt2(a, b, B_FLT_MULT):
+        return _from_dbl(_dbl(a) * _dbl(b))
     return value.Q_UNDEF
 
 
 def lt(a, b):
     if _fix2(a, b, B_INT_LT):
         return value.newbool(value.fix2int(a) < value.fix2int(b))
+    if _flt2(a, b, B_FLT_LT, True):
+        return value.newbool(_dbl(a) < _dbl(b))
     return value.Q_UNDEF
 
 
 def gt(a, b):
     if _fix2(a, b, B_INT_GT):
         return value.newbool(value.fix2int(a) > value.fix2int(b))
+    if _flt2(a, b, B_FLT_GT, True):
+        return value.newbool(_dbl(a) > _dbl(b))
     return value.Q_UNDEF
 
 
 def le(a, b):
     if _fix2(a, b, B_INT_LE):
         return value.newbool(value.fix2int(a) <= value.fix2int(b))
+    if _flt2(a, b, B_FLT_LE, True):
+        return value.newbool(_dbl(a) <= _dbl(b))
     return value.Q_UNDEF
 
 
 def ge(a, b):
     if _fix2(a, b, B_INT_GE):
         return value.newbool(value.fix2int(a) >= value.fix2int(b))
+    if _flt2(a, b, B_FLT_GE, True):
+        return value.newbool(_dbl(a) >= _dbl(b))
     return value.Q_UNDEF
+
+
+def math_sqrt(recv, arg):
+    """Math.sqrt of a non-negative Float or Fixnum; a negative one keeps CRuby's Math::DomainError (math.c:765)."""
+    if recv != value.core_class(value.C_MATH) or not _cruby_owns(B_MATH_SQRT):
+        return value.Q_UNDEF
+    if not (value.is_float(arg) or value.is_fixnum(arg)):
+        return value.Q_UNDEF
+    d = _dbl(arg)
+    if d < 0.0:
+        return value.Q_UNDEF
+    if d == 0.0:
+        return _from_dbl(0.0)
+    return _from_dbl(math.sqrt(d))
 
 
 def _sym_eq(a, mid):
@@ -199,6 +289,8 @@ def identity_send(recv, mid):
 def eq(a, b):
     if _fix2(a, b, B_INT_EQ):
         return value.newbool(a == b)
+    if _flt2(a, b, B_FLT_EQ, True):
+        return value.newbool(_dbl(a) == _dbl(b))
     if identity_send(a, EQ):
         return value.newbool(a == b)
     return value.Q_UNDEF
@@ -208,6 +300,8 @@ def neq(a, b):
     # BOP_NEQ is never flagged: vm_opt_neq resolves `!=` to BasicObject#!= then asks opt_equality, so Integer#== is the definition that counts.
     if _fix2(a, b, B_INT_EQ):
         return value.newbool(a != b)
+    if _flt2(a, b, B_FLT_EQ, True):
+        return value.newbool(_dbl(a) != _dbl(b))
     if identity_send(a, NEQ):
         return value.newbool(a != b)
     return value.Q_UNDEF
@@ -265,9 +359,20 @@ def _both_positive(a, b):
             and value.fix2int(a) >= 0 and value.fix2int(b) > 0)
 
 
+def _fdiv(x, y):
+    """Float#/ never raises: a zero denominator gives NaN or a signed Infinity (numeric.c:1150)."""
+    if y != 0.0:
+        return x / y
+    if x == 0.0:
+        return NAN
+    return x * math.copysign(INFINITY, y)
+
+
 def div(a, b):
     if _both_positive(a, b) and _int_op(B_INT_DIV):
         return value.int2fix(value.fix2int(a) // value.fix2int(b))
+    if _flt2(a, b, B_FLT_DIV):
+        return _from_dbl(_fdiv(_dbl(a), _dbl(b)))
     return value.Q_UNDEF
 
 
@@ -320,6 +425,28 @@ def empty_p(recv):
 def opt_not(recv):
     # TODO: vm_opt_not asks whether `!` still resolves to rb_obj_not, which no BOP flag records, so a redefined #! is still ignored here.
     return value.newbool(not value.is_true(recv))
+
+
+def check_float_layout():
+    """The Float fast paths decode flonums and read RFloat by hand; refuse a CRuby they misread."""
+    got = boot.float_layout()
+    return got == [value.FLOAT_VALUE_WORD, 1, 1]
+
+
+def check_flonum_encoding():
+    """value.dbl2flonum against DBL2NUM itself, on the doubles the rotation reaches and the ones it does not."""
+    for d in [0.0, -0.0, 1.0, -1.0, 0.5, 1e-10, 1e10, 3.141592653589793,
+              1.727233711018889e-77, 1.7272337110188893e-77, 1e300, 1e-300,
+              INFINITY, -INFINITY]:
+        want = boot.float_new(d)
+        got = value.dbl2flonum(d)
+        if value.is_flonum(want) != (got != value.Q_UNDEF):
+            return False
+        if got != value.Q_UNDEF and got != want:
+            return False
+        if value.float_val(want) != d and d == d:
+            return False
+    return True
 
 
 def check_array_layout():

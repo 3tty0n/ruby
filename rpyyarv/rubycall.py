@@ -165,6 +165,11 @@ def to_bignum(n):
 
 
 @dont_look_inside
+def to_heap_float(d):
+    return boot.float_new(d)
+
+
+@dont_look_inside
 def is_string(v):
     return not value.is_immediate(v) and boot.is_string(v)
 

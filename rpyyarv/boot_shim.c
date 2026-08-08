@@ -4,6 +4,7 @@
 
 /* In-tree, so the object-shape API libruby does not export is still reachable. */
 #include "shape.h"
+#include "internal/numeric.h"
 #include "internal/range.h"
 #include "rpyyarv.h"
 
@@ -230,6 +231,21 @@ rpyyarv_int2inum(long n)
     return (uintptr_t)rb_int2inum(n);
 }
 
+/* Only for a double no flonum can hold: value.py encodes the rest itself. */
+uintptr_t
+rpyyarv_float_new(double d)
+{
+    return (uintptr_t)rb_float_new(d);
+}
+
+void
+rpyyarv_float_layout(int *out)
+{
+    out[0] = (int)(offsetof(struct RFloat, float_value) / SIZEOF_VALUE);
+    out[1] = (int)USE_FLONUM;
+    out[2] = (int)(SIZEOF_DOUBLE <= SIZEOF_VALUE);
+}
+
 void
 rpyyarv_special_consts(uintptr_t *qfalse, uintptr_t *qnil, uintptr_t *qtrue,
                        uintptr_t *fixnum_flag)
@@ -431,6 +447,7 @@ rpyyarv_core_classes(uintptr_t *out)
     out[10] = (uintptr_t)rb_cClass;
     out[11] = (uintptr_t)rb_cModule;
     out[12] = (uintptr_t)rb_cBasicObject;
+    out[13] = (uintptr_t)rb_mMath;
 }
 
 struct owner_args {
@@ -1282,6 +1299,17 @@ rpyyarv_bop_mask(void)
     BOP(rb_cRange, "begin");
     BOP(rb_cRange, "end");
     BOP(rb_cRange, "exclude_end?");
+    BOP(rb_cFloat, "+");
+    BOP(rb_cFloat, "-");
+    BOP(rb_cFloat, "*");
+    BOP(rb_cFloat, "/");
+    BOP(rb_cFloat, "<");
+    BOP(rb_cFloat, "<=");
+    BOP(rb_cFloat, ">");
+    BOP(rb_cFloat, ">=");
+    BOP(rb_cFloat, "==");
+    /* Math.sqrt is a singleton method of the module, so the pair is its metaclass. */
+    BOP(CLASS_OF(rb_mMath), "sqrt");
 #undef BOP
 
     return (uintptr_t)i << RPYYARV_BOP_COUNT_SHIFT | mask;

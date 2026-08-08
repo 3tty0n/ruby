@@ -161,6 +161,8 @@ def _native_binop(recv, arg, mid):
         return helpers.xor(recv, arg)
     if mid == helpers.RSHIFT:
         return helpers.rshift(recv, arg)
+    if mid == helpers.SQRT:
+        return helpers.math_sqrt(recv, arg)
     if (mid == helpers.EQ or mid == helpers.NEQ or mid == helpers.EQUAL_P) \
             and helpers.identity_send(recv, mid):
         same = recv == arg
