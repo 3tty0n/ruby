@@ -51,7 +51,7 @@ RUBY    ?= $(BUILD)/ruby
 GCLIMIT   ?= 16384
 GCTIMEOUT ?= 60
 
-.PHONY: all test microbench gccheck build-interp build-jit link clean
+.PHONY: all test microbench awfy gccheck build-interp build-jit link clean
 
 link: $(SHIM)
 
@@ -73,6 +73,11 @@ test: $(SHIM)
 
 microbench:
 	RPYYARV_BUILD=$(BUILD) $(RUBY_CMD) scripts/microbench.rb $(MICROBENCHFLAGS)
+
+# AWFY steady state. AWFY_RUBYLIB supplies set/subclass_compatible.rb, which
+# CRuby 4.0's Set.inherited hook needs before deltablue will load anywhere.
+awfy:
+	RPYYARV_BUILD=$(BUILD) AWFY_RUBYLIB=$(AWFY_RUBYLIB) $(RUBY_CMD) scripts/awfy.rb $(AWFYFLAGS)
 
 # Compare stdout of both rpyyarv binaries against CRuby under a tight GC limit.
 gccheck:
