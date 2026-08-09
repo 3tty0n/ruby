@@ -82,13 +82,14 @@ def call(recv, mid, args, public_only=False):
         v = hooks.require.handle(mid, args[0])
         if v != NOT_HANDLED:
             return v
-    debug.count_foreign(mid)
+    debug.count_foreign_site(mid, recv,
+                             args[0] if len(args) == 1 else value.Q_UNDEF)
     return boot.funcallv(recv, rid(mid), args, mid, public_only)
 
 
 @dont_look_inside
 def call1(recv, mid, arg):
-    debug.count_foreign(mid)
+    debug.count_foreign_site(mid, recv, arg)
     return boot.funcallv(recv, rid(mid), [arg], mid)
 
 

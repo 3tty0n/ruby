@@ -78,6 +78,9 @@ void rpyyarv_gc_mark_value(uintptr_t v);
 /* Called from rb_clear_constant_cache_for_id, beside the notifications YJIT and ZJIT take; the ID is dropped because RPyYARV's cache is invalidated whole. */
 void rpyyarv_set_const_hook(void (*fn)(void));
 
+/* Called from rb_clear_method_cache, CRuby's own funnel for every def, undef, alias, include and prepend. */
+void rpyyarv_set_method_hook(void (*fn)(void));
+
 void rpyyarv_gc_start(void);
 
 uintptr_t rpyyarv_str_new(const char *s);
@@ -92,6 +95,9 @@ void rpyyarv_core_classes(uintptr_t *out);
 
 /* The module a class resolves an instance method through, or Qnil when it has no such method. */
 uintptr_t rpyyarv_method_owner(uintptr_t klass, uintptr_t id);
+
+/* The module `super` from owner's copy of id reaches next, along klass's chain; Qnil when there is none. */
+uintptr_t rpyyarv_super_owner(uintptr_t klass, uintptr_t owner, uintptr_t id);
 
 /* The heap Float the flonum encoding cannot represent, and the RFloat layout value.py reads by hand. */
 uintptr_t rpyyarv_float_new(double d);

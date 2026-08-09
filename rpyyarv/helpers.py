@@ -37,6 +37,7 @@ EXCLUDE_END_P = symbols.intern('exclude_end?')
 SQRT = symbols.intern('sqrt')
 INITIALIZE = symbols.intern('initialize')
 ABS = symbols.intern('abs')
+TO_ARY = symbols.intern('to_ary')
 
 # One bit per (class, operator) pair, in the order boot_shim.c's rpyyarv_bop_mask sets them.
 B_INT_PLUS = 0
@@ -290,6 +291,18 @@ def identity_send(recv, mid):
     return identity_op(recv, mid)
 
 
+def _ary_eq_false(a, b):
+    """rb_ary_equal (array.c:5382) answers false for an argument that is neither an Array nor something answering to_ary; no BOP flag watches Array#==, so ask CRuby who owns it, as int_abs does."""
+    if not (value.is_plain_array(a) and value.is_immediate(b)):
+        return False
+    # TODO: a respond_to? or respond_to_missing? that claims a to_ary the class does not define is still read as no to_ary, as in opt_not's note.
+    if dispatch.owner_of(promote(value.class_of(b)), TO_ARY) != value.Q_NIL:
+        return False
+    klass = value.core_class(value.C_ARRAY)
+    return (dispatch.owner_of(klass, EQ) == klass
+            and dispatch.lookup_core(klass, EQ) is None)
+
+
 def eq(a, b):
     if _fix2(a, b, B_INT_EQ):
         return value.newbool(a == b)
@@ -297,6 +310,8 @@ def eq(a, b):
         return value.newbool(_dbl(a) == _dbl(b))
     if identity_send(a, EQ):
         return value.newbool(a == b)
+    if _ary_eq_false(a, b):
+        return value.Q_FALSE
     return value.Q_UNDEF
 
 
@@ -308,6 +323,9 @@ def neq(a, b):
         return value.newbool(_dbl(a) != _dbl(b))
     if identity_send(a, NEQ):
         return value.newbool(a != b)
+    if _ary_eq_false(a, b) \
+            and dispatch.owns_identity(value.core_class(value.C_ARRAY), NEQ):
+        return value.Q_TRUE
     return value.Q_UNDEF
 
 

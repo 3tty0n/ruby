@@ -462,7 +462,13 @@ def invoke_super(frame, w_ci):
             % symbols.name_of(entry.mid))
 
     rubycall.gc_stress_point()
-    target = dispatch.lookup_super(entry.owner, entry.mid)
+    recv = frame.stack[recv_at]
+    # CRuby is asked where super lands, since the chain above owner may hold iclasses registry.supers does not.
+    owner = dispatch.super_owner(promote(value.class_of(recv)), entry.owner,
+                                 entry.mid)
+    target = None
+    if owner != value.Q_NIL:
+        target = dispatch.lookup_owned(owner, entry.mid)
     if target is None:
         # rb_call_super needs a CRuby frame, which RPyYARV never has.
         raise UnsupportedOperation(

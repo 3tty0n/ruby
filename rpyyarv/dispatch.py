@@ -189,7 +189,26 @@ def _lookup(klass, mid, version):
 
 
 def lookup(klass, mid):
-    return _lookup(klass, mid, registry.version)
+    """registry.supers holds Class#superclass, which skips iclasses, so a module could own mid and the walk above never see it; CRuby knows and every registry entry has a CRuby entry beside it."""
+    entry = _lookup(klass, mid, registry.version)
+    if entry is not None:
+        owner = owner_of(klass, mid)
+        if owner != entry.owner and owner != value.Q_NIL:
+            return None
+    return entry
+
+
+@elidable
+def _own_lookup(klass, mid, version):
+    table = registry.methods.get(klass, None)
+    if table is None:
+        return None
+    return table.get(mid, None)
+
+
+def lookup_owned(klass, mid):
+    """own_lookup, but elidable on the method version, so a trace folds it away."""
+    return _own_lookup(klass, mid, registry.version)
 
 
 @elidable
@@ -212,28 +231,6 @@ def _lookup_core(klass, mid, version):
 
 def lookup_core(klass, mid):
     return _lookup_core(klass, mid, registry.version)
-
-
-@elidable
-def _lookup_super(owner, mid, version):
-    """Starts above owner; no Object fallback, or super would find an unrelated toplevel def."""
-    supers = registry.supers
-    methods = registry.methods
-    k = supers.get(owner, 0)
-    n = 0
-    while k != 0 and n < MAX_ANCESTORS:
-        table = methods.get(k, None)
-        if table is not None:
-            entry = table.get(mid, None)
-            if entry is not None:
-                return entry
-        k = supers.get(k, 0)
-        n += 1
-    return None
-
-
-def lookup_super(owner, mid):
-    return _lookup_super(owner, mid, registry.version)
 
 
 @dont_look_inside
@@ -384,12 +381,10 @@ def const_set(klass, mid, v):
 
 
 class _Owners(object):
-    # Quasi-immutable: a method owner can change, so every write replaces the tag and drops the traces that folded it.
-    _immutable_fields_ = ['version?']
-
+    # Tagged by registry.version, not one of its own: a lookup reads both, and one quasi-immutable is one guard_not_invalidated.
     def __init__(self):
         self.tab = {}       # (klass VALUE, mid) -> owning module VALUE
-        self.version = Version()
+        self.stab = {}      # the same, for the module above that one
 
 
 owners = _Owners()
@@ -398,8 +393,12 @@ OWNER_UNKNOWN = -1
 
 
 def invalidate_owners():
+    """CRuby's rb_clear_method_cache, by way of the shim's method hook: every def, undef, alias, include and prepend reaches it."""
+    if len(owners.tab) == 0 and len(owners.stab) == 0:
+        return
     owners.tab = {}
-    owners.version = Version()
+    owners.stab = {}
+    registry.version = Version()
 
 
 @elidable
@@ -413,15 +412,37 @@ def _fill_owner(klass, mid):
     # Kept alive: a recycled class VALUE would otherwise read as a hit, and the owner is in the registered class's ancestry.
     gcroots.register_class(klass)
     owners.tab[(klass, mid)] = owner
-    owners.version = Version()
+    registry.version = Version()
 
 
 def owner_of(klass, mid):
     """The module klass resolves mid through; asked of CRuby, so modules included behind our back count."""
-    got = _owner_of(klass, mid, owners.version)
+    got = _owner_of(klass, mid, registry.version)
     if got == OWNER_UNKNOWN:
         _fill_owner(klass, mid)
-        got = _owner_of(klass, mid, owners.version)
+        got = _owner_of(klass, mid, registry.version)
+    return got
+
+
+@elidable
+def _super_owner(klass, owner, mid, version):
+    return owners.stab.get((klass, owner, mid), OWNER_UNKNOWN)
+
+
+@dont_look_inside
+def _fill_super_owner(klass, owner, mid):
+    found = boot.super_owner(klass, owner, rubycall.rid(mid))
+    gcroots.register_class(klass)
+    owners.stab[(klass, owner, mid)] = found
+    registry.version = Version()
+
+
+def super_owner(klass, owner, mid):
+    """Where `super` from owner's mid lands, along klass's chain; CRuby answers, so the iclasses registry.supers skips still count."""
+    got = _super_owner(klass, owner, mid, registry.version)
+    if got == OWNER_UNKNOWN:
+        _fill_super_owner(klass, owner, mid)
+        got = _super_owner(klass, owner, mid, registry.version)
     return got
 
 
@@ -603,3 +624,4 @@ def install():
     value.install_classes(boot.core_classes())
     barrier.direct = boot.wb_direct()
     boot.set_const_hook(invalidate_consts)
+    boot.set_method_hook(invalidate_owners)

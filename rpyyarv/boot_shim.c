@@ -413,6 +413,12 @@ rpyyarv_set_const_hook(void (*fn)(void))
 }
 
 void
+rpyyarv_set_method_hook(void (*fn)(void))
+{
+    rb_rpyyarv_set_method_hook(fn);
+}
+
+void
 rpyyarv_gc_start(void)
 {
     rb_gc_start();
@@ -477,6 +483,49 @@ rpyyarv_method_owner(uintptr_t klass, uintptr_t id)
     a.id = (ID)id;
     r = rb_protect(method_owner_body, (VALUE)&a, &state);
     /* No such method, or klass is not a Module: not an error here. */
+    if (state) {
+        rb_set_errinfo(Qnil);
+        return (uintptr_t)Qnil;
+    }
+    return (uintptr_t)r;
+}
+
+struct super_args {
+    VALUE klass;
+    VALUE owner;
+    ID    id;
+};
+
+static VALUE
+super_owner_body(VALUE argp)
+{
+    struct super_args *p = (struct super_args *)argp;
+    ID owner_id = rb_intern("owner");
+    ID super_id = rb_intern("super_method");
+    /* UnboundMethod#super_method carries the iclass it was found through, so a prepended or included module counts. */
+    VALUE m = rb_funcall(p->klass, rb_intern("instance_method"), 1,
+                         ID2SYM(p->id));
+    while (!NIL_P(m)) {
+        VALUE found = rb_funcall(m, owner_id, 0);
+        m = rb_funcall(m, super_id, 0);
+        if (found == p->owner) {
+            if (NIL_P(m)) return Qnil;
+            return rb_funcall(m, owner_id, 0);
+        }
+    }
+    return Qnil;
+}
+
+uintptr_t
+rpyyarv_super_owner(uintptr_t klass, uintptr_t owner, uintptr_t id)
+{
+    struct super_args a;
+    int state = 0;
+    VALUE r;
+    a.klass = (VALUE)klass;
+    a.owner = (VALUE)owner;
+    a.id = (ID)id;
+    r = rb_protect(super_owner_body, (VALUE)&a, &state);
     if (state) {
         rb_set_errinfo(Qnil);
         return (uintptr_t)Qnil;

@@ -13,6 +13,7 @@ RPYYARV_DEBUG names the channels to turn on, comma separated:
 
 import os
 
+import boot
 import insns
 import optable
 import symbols
@@ -59,6 +60,7 @@ class _Coverage(object):
         self.iseqs_native = 0
         self.punted = []        # 'path: why RPyYARV would not run it'
         self.by_name = {}       # method name -> foreign sends of it
+        self.by_site = {}       # (mid, receiver class, argument class) -> the same
 
 
 coverage = _Coverage()
@@ -76,6 +78,16 @@ def count_foreign(mid):
         coverage.foreign += 1
         name = symbols.name_of(mid)
         coverage.by_name[name] = coverage.by_name.get(name, 0) + 1
+
+
+@dont_look_inside
+def count_foreign_site(mid, recv, arg):
+    """count_foreign, plus the receiver and argument classes; the class VALUEs are named only when the report is printed."""
+    if coverage.enabled:
+        count_foreign(mid)
+        key = (mid, value.class_of(recv),
+               0 if arg == value.Q_UNDEF else value.class_of(arg))
+        coverage.by_site[key] = coverage.by_site.get(key, 0) + 1
 
 
 def configure_coverage():
@@ -112,6 +124,34 @@ def report():
         note('  punted to cruby: %s' % coverage.punted[i])
     for name, n in _top_foreign():
         note('  cruby send: %s %d' % (name, n))
+    for key, n in _top_sites():
+        note('  cruby site: %s(%s, %s) %d'
+             % (symbols.name_of(key[0]), _class_name(key[1]),
+                _class_name(key[2]), n))
+
+
+def _class_name(klass):
+    if klass == 0:
+        return '-'
+    return boot.inspect(klass)
+
+
+def _top_sites():
+    counts = []
+    keys = []
+    for key, n in coverage.by_site.items():
+        at = len(counts)
+        while at > 0 and counts[at - 1] < n:
+            at -= 1
+        assert at >= 0
+        counts.insert(at, n)
+        keys.insert(at, key)
+    out = []
+    for i in range(len(counts)):
+        if i == 25:
+            break
+        out.append((keys[i], counts[i]))
+    return out
 
 
 def _top_foreign():

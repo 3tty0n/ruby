@@ -119,6 +119,7 @@ rb_gc_set_mark_hook = _ext('rpyyarv_gc_set_mark_hook', [MARK_HOOK],
                            lltype.Void)
 rb_gc_mark_value = _ext('rpyyarv_gc_mark_value', [VALUE], lltype.Void)
 rb_set_const_hook = _ext('rpyyarv_set_const_hook', [CONST_HOOK], lltype.Void)
+rb_set_method_hook = _ext('rpyyarv_set_method_hook', [CONST_HOOK], lltype.Void)
 rb_gc_start = _ext('rpyyarv_gc_start', [], lltype.Void, reenters=True)
 rb_core_classes = _ext('rpyyarv_core_classes', [VALUEP], lltype.Void)
 rb_define_class_ = _ext('rpyyarv_define_class',
@@ -193,6 +194,8 @@ rb_absolute_path = _ext('rpyyarv_absolute_path', [VALUE, VALUE, INTP], VALUE,
                         reenters=True)
 rb_method_owner = _ext('rpyyarv_method_owner', [VALUE, VALUE], VALUE,
                        reenters=True)
+rb_super_owner = _ext('rpyyarv_super_owner', [VALUE, VALUE, VALUE], VALUE,
+                      reenters=True)
 # No reenters: reads two struct fields after a type test, allocating nothing.
 rb_range_part = _ext('rpyyarv_range_part', [VALUE, rffi.INT], VALUE)
 # No reenters: the barrier sets bits in preallocated page bitmaps and reaches no mark callback; see the comment on rpyyarv_obj_written.
@@ -656,6 +659,12 @@ def method_owner(klass, rid):
     return rffi.cast(lltype.Signed, rb_method_owner(_v(klass), _v(rid)))
 
 
+def super_owner(klass, owner, rid):
+    """The module `super` from owner's copy of rid reaches next, or Qnil when there is none."""
+    return rffi.cast(lltype.Signed,
+                     rb_super_owner(_v(klass), _v(owner), _v(rid)))
+
+
 def define_class(cbase, rid, super_v):
     state = _enter_status()
     v = rb_define_class_(_v(cbase), _v(rid), _v(super_v), state)
@@ -970,6 +979,10 @@ def set_mark_hook(fn):
 def set_const_hook(fn):
     """As install_block_callback: a plain function, so rffi builds the enter-RPython-from-C wrapper for it."""
     rb_set_const_hook(fn)
+
+
+def set_method_hook(fn):
+    rb_set_method_hook(fn)
 
 
 class _Node(object):
