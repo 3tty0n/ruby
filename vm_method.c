@@ -343,6 +343,20 @@ rb_rpyyarv_constant_state_changed(ID id)
     if (rpyyarv_constant_hook) rpyyarv_constant_hook(id);
 }
 
+static void (*rpyyarv_method_hook)(void);
+
+void
+rb_rpyyarv_set_method_hook(void (*fn)(void))
+{
+    rpyyarv_method_hook = fn;
+}
+
+void
+rb_rpyyarv_method_state_changed(void)
+{
+    if (rpyyarv_method_hook) rpyyarv_method_hook();
+}
+
 void
 rb_clear_constant_cache_for_id(ID id)
 {
@@ -614,6 +628,8 @@ clear_iclass_method_cache_by_id_for_refinements(VALUE klass, VALUE d)
 void
 rb_clear_method_cache(VALUE klass_or_module, ID mid)
 {
+    rb_rpyyarv_method_state_changed();
+
     if (RB_TYPE_P(klass_or_module, T_MODULE)) {
         VALUE module = klass_or_module; // alias
 
