@@ -94,7 +94,10 @@ def invoke(frame, w_ci, w_block=None):
         _drop(frame, recv_at)
         return value.newbool(frame.block is not None)
     if w_ci.mid == NEW and helpers.ary_new_pristine(recv):
-        v = _array_new(frame, recv_at, argc, w_block)
+        if w_block is None:
+            v = _array_new(frame, recv_at, argc)
+        else:
+            v = _array_new_block(frame, recv_at, argc, w_block)
         if v != value.Q_UNDEF:
             debug.count_native()
             return v
@@ -154,14 +157,13 @@ ARY_NEW_BLOCK_MAX = 64
 ARY_NEW_FILL_MAX = 128
 
 
-def _array_new(frame, recv_at, argc, w_block):
+@dont_look_inside
+def _array_new(frame, recv_at, argc):
     """rb_ary_s_new for a direct Array (array.c:1071); Qundef for every argument shape rb_ary_initialize treats specially."""
+    # Left out of line on purpose: inlining these paths grew cd's and havlak's traces ~5%, and rb_ary_new is a call either way.
     if argc > 2:
         return value.Q_UNDEF
     if argc == 0:
-        if w_block is not None:
-            # rb_warning("given block not used"), which only $VERBOSE prints.
-            return value.Q_UNDEF
         _drop(frame, recv_at)
         return rubycall.ary_new_capa(0)
     size = frame.stack[recv_at + 1]
@@ -171,14 +173,24 @@ def _array_new(frame, recv_at, argc, w_block):
     n = value.fix2int(size)
     if n < 0:
         return value.Q_UNDEF
-    if w_block is None:
-        if argc == 2 and n > ARY_NEW_FILL_MAX:
-            return value.Q_UNDEF
-        fill = value.Q_NIL if argc == 1 else frame.stack[recv_at + 2]
-        _drop(frame, recv_at)
-        return rubycall.ary_new_filled(n, fill)
-    if argc != 1 or n > ARY_NEW_BLOCK_MAX:
-        # argc == 2 warns "block supersedes default value argument".
+    if argc == 2 and n > ARY_NEW_FILL_MAX:
+        return value.Q_UNDEF
+    fill = value.Q_NIL if argc == 1 else frame.stack[recv_at + 2]
+    _drop(frame, recv_at)
+    return rubycall.ary_new_filled(n, fill)
+
+
+@unroll_safe
+def _array_new_block(frame, recv_at, argc, w_block):
+    """Traced through, unlike _array_new: a block reading an enclosing local forces the caller's virtualizable, which aborts the trace unless the whole fill is inlined."""
+    # argc == 0 is rb_warning("given block not used") and argc == 2 "block supersedes default value argument".
+    if argc != 1:
+        return value.Q_UNDEF
+    size = frame.stack[recv_at + 1]
+    if not value.is_fixnum(size):
+        return value.Q_UNDEF
+    n = value.fix2int(size)
+    if n < 0 or n > ARY_NEW_BLOCK_MAX:
         return value.Q_UNDEF
     ary = rubycall.ary_new_capa(n)
     # Into the receiver's slot, which the caller's frame marks: the block runs arbitrary Ruby and nothing else holds the array.
