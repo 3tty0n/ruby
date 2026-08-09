@@ -170,9 +170,9 @@ def dbl2flonum(v):
     """The flonum for a double, or Q_UNDEF when only a heap Float can hold it (internal/numeric.h:294)."""
     w = float2bits(v)
     u = r_uint(w)
-    # Only exponents whose bits 62..60 are 3 or 4 survive the rotation.
+    # Bits 62..60 must be 3 or 4; one compare, or `exp3 == k` pins one octave into every trace.
     exp3 = intmask(u >> (LONG_BIT - 4)) & 0x7
-    if (exp3 == 3 or exp3 == 4) and w != FLONUM_RESERVED:
+    if ((exp3 + 1) >> 1) == 2 and w != FLONUM_RESERVED:
         return intmask((((u << FLONUM_ROT)
                          | (u >> (LONG_BIT - FLONUM_ROT))) & ~r_uint(0x01))
                        | r_uint(FLONUM_FLAG))
