@@ -1,3 +1,5 @@
+import os
+
 import block as block_mod
 import boot
 import debug
@@ -1039,6 +1041,7 @@ def _unwind(iseq, frame, throw, epc):
 
 
 def install():
+    configure_retrace()
     boot.install_block_callback(block_callback)
     boot.install_trampoline_callback(trampoline_callback)
     gcroots.register_blocks(blocks)
@@ -1286,6 +1289,44 @@ def get_printable_location(pc, iseq):
 jitdriver = JitDriver(greens=['pc', 'iseq'], reds=['frame'],
                       virtualizables=['frame'],
                       get_printable_location=get_printable_location)
+
+
+class _Retrace(object):
+    """One deliberate retrace: the first traces a program compiles are picked off a cold profile, so they are thrown away once and taken again from a warm one."""
+    # Quasi-immutable, so disarming folds the counter below out of every trace.
+    _immutable_fields_ = ['armed?']
+
+    def __init__(self):
+        self.armed = True
+        self.count = 0
+        self.at = RETRACE_AT
+
+
+# Late enough that the second selection sees a warm profile, early enough that a benchmark's measured region still runs on it; both ends were measured.
+RETRACE_AT = 2000000
+
+retrace = _Retrace()
+
+
+def configure_retrace():
+    """RPYYARV_RETRACE_AT overrides the backward-branch count the retrace fires at; 0 disarms it, and a disarmed counter folds out of every trace."""
+    spec = os.environ.get('RPYYARV_RETRACE_AT')
+    if spec is None:
+        return
+    try:
+        at = int(spec)
+    except ValueError:
+        return
+    retrace.at = at
+    retrace.armed = at > 0
+
+
+def _tick_retrace():
+    if retrace.armed:
+        retrace.count += 1
+        if retrace.count > retrace.at:
+            # Disarming invalidates every compiled trace, which is the retrace.
+            retrace.armed = False
 
 
 def _epc(iseq, pc):
@@ -1623,6 +1664,7 @@ def _execute(iseq, frame, pc):
             backward = target < pc
             pc = target
             if backward:
+                _tick_retrace()
                 jitdriver.can_enter_jit(iseq=iseq, pc=pc, frame=frame)
         elif opcode == insns.BRANCHIF:
             target = code[pc]
@@ -1631,6 +1673,7 @@ def _execute(iseq, frame, pc):
                 backward = target < pc
                 pc = target
                 if backward:
+                    _tick_retrace()
                     jitdriver.can_enter_jit(iseq=iseq, pc=pc, frame=frame)
         elif opcode == insns.BRANCHUNLESS:
             target = code[pc]
@@ -1639,6 +1682,7 @@ def _execute(iseq, frame, pc):
                 backward = target < pc
                 pc = target
                 if backward:
+                    _tick_retrace()
                     jitdriver.can_enter_jit(iseq=iseq, pc=pc, frame=frame)
         elif opcode == insns.CHECKMATCH:
             flag = code[pc]
