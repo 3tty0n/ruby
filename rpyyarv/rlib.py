@@ -8,7 +8,15 @@ try:
     from rpython.rlib.rarithmetic import LONG_BIT, intmask, ovfcheck, r_uint
     from rpython.rlib.rfloat import INFINITY, NAN
     from rpython.rlib.rstackovf import StackOverflow, check_stack_overflow
+    from rpython.rlib import rstack
     from rpython.rtyper.lltypesystem import lltype, rffi
+
+    def set_stack_length(nbytes):
+        """Raise RPython's soft stack limit; stack.c clamps it to 3/4 of RLIMIT_STACK, so it cannot outrun the real stack."""
+        cur = rstack._stack_get_length()
+        if cur > 0 and nbytes > cur:
+            rstack._stack_set_length_fraction(float(nbytes) / float(cur))
+        return rstack._stack_get_length()
 
     _WORDP = rffi.CArrayPtr(rffi.LONG)
     _SHORTP = rffi.CArrayPtr(rffi.SHORT)
@@ -64,6 +72,9 @@ except ImportError:
 
     def check_stack_overflow():
         pass
+
+    def set_stack_length(nbytes):
+        return 0
 
     class JitDriver(object):
         def __init__(self, **kwargs):

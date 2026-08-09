@@ -15,7 +15,23 @@ import requires
 import rubycall
 import value
 from error import RPyYarvError, RubyException
-from rlib import StackOverflow, check_stack_overflow
+from rlib import StackOverflow, check_stack_overflow, set_stack_length
+
+# rpy_stacktoobig starts at MAX_STACK_SIZE, 768 KB of the 8 MB main stack; libruby shares that stack and checks itself, so take half, not all.
+STACK_LIMIT = 4 * 1024 * 1024
+
+
+def _raise_stack_limit():
+    want = STACK_LIMIT
+    spec = os.environ.get('RPYYARV_STACK_LIMIT')
+    if spec is not None:
+        try:
+            want = int(spec)
+        except ValueError:
+            want = STACK_LIMIT
+    got = set_stack_length(want)
+    if spec is not None:
+        debug.note('stack limit %d byte(s)' % got)
 
 
 def _check_special_consts():
@@ -34,6 +50,8 @@ def entry_point(argv):
     if len(argv) < 2:
         print 'usage: %s SCRIPT.rb' % argv[0]
         return 1
+
+    _raise_stack_limit()
 
     for name in debug.configure_from_env():
         debug.note('unknown RPYYARV_DEBUG channel %s; known: %s'

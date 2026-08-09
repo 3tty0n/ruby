@@ -6,8 +6,11 @@ import boot
 import bootiseq
 import interp
 import loader
+import symbols
 import value
 from frame import Frame
+
+COMPILE = symbols.intern('compile')
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _f = open(os.path.join(_HERE, 'prelude.rb'))
@@ -23,7 +26,7 @@ def _compile(source):
     src = boot.str_new(source)
     # Pinned rather than kept on the RPython stack: CRuby's GC never scans it.
     boot.gc_register(src)
-    iseqw = boot.funcallv(iseq_class, boot.intern('compile'), [src], 'compile')
+    iseqw = boot.funcallv(iseq_class, boot.intern('compile'), [src], COMPILE)
     boot.gc_register(iseqw)
     return iseqw
 

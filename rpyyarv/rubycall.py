@@ -9,7 +9,8 @@ from rlib import dont_look_inside, elidable
 
 class _State(object):
     def __init__(self):
-        self.rids = {}      # rpyyarv symbol id -> CRuby ID
+        # A list, not a dict: symbol ids are dense, and this is read on every foreign send. 0 means not resolved yet; no CRuby ID is 0.
+        self.rids = []      # rpyyarv symbol id -> CRuby ID
         self.mids = {}      # CRuby ID -> rpyyarv symbol id
 
 
@@ -50,9 +51,17 @@ hooks = _Hooks()
 
 @dont_look_inside
 def rid(mid):
-    if mid in state.rids:
-        return state.rids[mid]
+    if mid < len(state.rids):
+        r = state.rids[mid]
+        if r != 0:
+            return r
+    return _resolve_rid(mid)
+
+
+def _resolve_rid(mid):
     r = boot.intern(symbols.name_of(mid))
+    while len(state.rids) <= mid:
+        state.rids.append(0)
     state.rids[mid] = r
     state.mids[r] = mid
     return r
@@ -73,34 +82,32 @@ def call(recv, mid, args, public_only=False):
         v = hooks.require.handle(mid, args[0])
         if v != NOT_HANDLED:
             return v
-    debug.count_foreign(symbols.name_of(mid))
-    return boot.funcallv(recv, rid(mid), args, symbols.name_of(mid),
-                         public_only)
+    debug.count_foreign(mid)
+    return boot.funcallv(recv, rid(mid), args, mid, public_only)
 
 
 @dont_look_inside
 def call1(recv, mid, arg):
-    debug.count_foreign(symbols.name_of(mid))
-    return boot.funcallv(recv, rid(mid), [arg], symbols.name_of(mid))
+    debug.count_foreign(mid)
+    return boot.funcallv(recv, rid(mid), [arg], mid)
 
 
 @dont_look_inside
 def call0(recv, mid):
-    debug.count_foreign(symbols.name_of(mid))
-    return boot.funcallv(recv, rid(mid), [], symbols.name_of(mid))
+    debug.count_foreign(mid)
+    return boot.funcallv(recv, rid(mid), [], mid)
 
 
 @dont_look_inside
 def call2(recv, mid, a, b):
-    debug.count_foreign(symbols.name_of(mid))
-    return boot.funcallv(recv, rid(mid), [a, b], symbols.name_of(mid))
+    debug.count_foreign(mid)
+    return boot.funcallv(recv, rid(mid), [a, b], mid)
 
 
 @dont_look_inside
 def call_with_block(recv, mid, args, handle):
-    debug.count_foreign(symbols.name_of(mid))
-    return boot.call_with_block(recv, rid(mid), args, handle,
-                                symbols.name_of(mid))
+    debug.count_foreign(mid)
+    return boot.call_with_block(recv, rid(mid), args, handle, mid)
 
 
 @dont_look_inside

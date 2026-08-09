@@ -36,6 +36,7 @@ END = symbols.intern('end')
 EXCLUDE_END_P = symbols.intern('exclude_end?')
 SQRT = symbols.intern('sqrt')
 INITIALIZE = symbols.intern('initialize')
+ABS = symbols.intern('abs')
 
 # One bit per (class, operator) pair, in the order boot_shim.c's rpyyarv_bop_mask sets them.
 B_INT_PLUS = 0
@@ -354,6 +355,29 @@ def range_part(recv, mid):
     if mid == EXCLUDE_END_P and _cruby_owns(B_RNG_EXCL):
         return boot.range_part(recv, boot.RANGE_EXCL)
     return value.Q_UNDEF
+
+
+def int_abs(recv):
+    """Integer#abs for a Fixnum; no BOP flag watches it, so ask CRuby who owns it, as identity_op does."""
+    if not value.is_fixnum(recv):
+        return value.Q_UNDEF
+    klass = value.core_class(value.C_INTEGER)
+    if dispatch.owner_of(klass, ABS) != klass \
+            or dispatch.lookup_core(klass, ABS) is not None:
+        return value.Q_UNDEF
+    n = value.fix2int(recv)
+    if n >= 0:
+        return recv
+    # The fixnum minimum negates to a Bignum, which only CRuby builds.
+    if not value.fixable(-n):
+        return value.Q_UNDEF
+    return value.int2fix(-n)
+
+
+def zero_arg(recv, mid):
+    if mid == ABS:
+        return int_abs(recv)
+    return range_part(recv, mid)
 
 
 def _both_positive(a, b):

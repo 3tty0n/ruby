@@ -388,7 +388,7 @@ class _Owners(object):
     _immutable_fields_ = ['version?']
 
     def __init__(self):
-        self.tab = {}       # (klass VALUE, mid) -> 1 identity, 0 not
+        self.tab = {}       # (klass VALUE, mid) -> owning module VALUE
         self.version = Version()
 
 
@@ -403,27 +403,31 @@ def invalidate_owners():
 
 
 @elidable
-def _owns_identity(klass, mid, version):
+def _owner_of(klass, mid, version):
     return owners.tab.get((klass, mid), OWNER_UNKNOWN)
 
 
 @dont_look_inside
-def _fill_identity(klass, mid):
+def _fill_owner(klass, mid):
     owner = boot.method_owner(klass, rubycall.rid(mid))
-    got = 1 if owner == value.core_class(value.C_BASIC_OBJECT) else 0
-    # Kept alive: a recycled class VALUE would otherwise read as a hit.
+    # Kept alive: a recycled class VALUE would otherwise read as a hit, and the owner is in the registered class's ancestry.
     gcroots.register_class(klass)
-    owners.tab[(klass, mid)] = got
+    owners.tab[(klass, mid)] = owner
     owners.version = Version()
 
 
-def owns_identity(klass, mid):
-    """True when klass resolves mid to BasicObject's (a pointer compare); asked of CRuby, so modules included behind our back count."""
-    got = _owns_identity(klass, mid, owners.version)
+def owner_of(klass, mid):
+    """The module klass resolves mid through; asked of CRuby, so modules included behind our back count."""
+    got = _owner_of(klass, mid, owners.version)
     if got == OWNER_UNKNOWN:
-        _fill_identity(klass, mid)
-        got = _owns_identity(klass, mid, owners.version)
-    return got == 1
+        _fill_owner(klass, mid)
+        got = _owner_of(klass, mid, owners.version)
+    return got
+
+
+def owns_identity(klass, mid):
+    """True when klass resolves mid to BasicObject's, which is a pointer compare."""
+    return owner_of(klass, mid) == value.core_class(value.C_BASIC_OBJECT)
 
 
 class _Slots(object):

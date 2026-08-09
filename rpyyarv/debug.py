@@ -70,9 +70,11 @@ def count_native():
 
 
 @dont_look_inside
-def count_foreign(name='?'):
+def count_foreign(mid):
+    # The mid, not its name: resolving one costs a dict lookup on every foreign send, and only a coverage run ever reads it.
     if coverage.enabled:
         coverage.foreign += 1
+        name = symbols.name_of(mid)
         coverage.by_name[name] = coverage.by_name.get(name, 0) + 1
 
 

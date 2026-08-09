@@ -4,6 +4,7 @@ import sys
 from rpython.rtyper.lltypesystem import lltype, rffi
 from rpython.translator.tool.cbuild import ExternalCompilationInfo
 
+import symbols
 from error import RubyException
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
@@ -209,6 +210,62 @@ def _v(n):
     return rffi.cast(VALUE, n)
 
 
+# One preallocated cell per shim nesting level; a CRuby call can trampoline back into RPyYARV, so these really do nest.
+SHIM_DEPTH = 64
+
+_status_pool = lltype.malloc(INTP.TO, SHIM_DEPTH, flavor='raw',
+                             immortal=True, zero=True)
+_argv_pool = lltype.malloc(rffi.CArray(VALUE), SHIM_DEPTH * (MAX_ARGC + 1),
+                           flavor='raw', immortal=True, zero=True)
+
+
+class _Nesting(object):
+    def __init__(self):
+        self.status = 0
+        self.argv = 0
+
+
+_nesting = _Nesting()
+
+
+def _enter_status():
+    """The status cell for one shim call; past SHIM_DEPTH it falls back to a fresh raw cell rather than reusing a slot."""
+    d = _nesting.status
+    _nesting.status = d + 1
+    if d >= SHIM_DEPTH:
+        p = lltype.malloc(INTP.TO, 1, flavor='raw')
+    else:
+        p = rffi.ptradd(_status_pool, d)
+    p[0] = rffi.cast(rffi.INT, 0)
+    return p
+
+
+def _leave_status(p):
+    d = _nesting.status - 1
+    _nesting.status = d
+    failed = rffi.cast(lltype.Signed, p[0]) != 0
+    if d >= SHIM_DEPTH:
+        lltype.free(p, flavor='raw')
+    return failed
+
+
+def _enter_argv(n):
+    """An argument buffer for one shim call; the shim copies it to the machine stack before anything can allocate, so this one need not be scanned."""
+    assert n <= MAX_ARGC
+    d = _nesting.argv
+    _nesting.argv = d + 1
+    if d >= SHIM_DEPTH:
+        return lltype.malloc(rffi.CArray(VALUE), n + 1, flavor='raw')
+    return rffi.ptradd(_argv_pool, d * (MAX_ARGC + 1))
+
+
+def _leave_argv(p):
+    d = _nesting.argv - 1
+    _nesting.argv = d
+    if d >= SHIM_DEPTH:
+        lltype.free(p, flavor='raw')
+
+
 class RubyError(Exception):
     # A call RPyYARV could not make; one that raised becomes a RubyException.
     def __init__(self, mid):
@@ -218,6 +275,11 @@ class RubyError(Exception):
 def _failed(name):
     v = rffi.cast(lltype.Signed, rb_take_errinfo())
     raise RubyException(v, name)
+
+
+def _failed_mid(mid):
+    """As _failed, but off the send path, where resolving the name costs a dict lookup on every call that does not raise."""
+    _failed(symbols.name_of(mid))
 
 
 def call0(recv, mid):
@@ -311,32 +373,30 @@ def sym_new(name):
         return rffi.cast(lltype.Signed, rb_sym_new(c_name))
 
 
-def funcallv(recv, rid, args, name, public_only=False):
+def funcallv(recv, rid, args, mid, public_only=False):
     """public_only picks rb_funcallv_public, which honours visibility."""
     argc = len(args)
     if argc > MAX_ARGC:
-        raise RubyError(name)
-    ret = 0
-    failed = False
-    with lltype.scoped_alloc(rffi.CArray(VALUE), argc + 1) as argv:
-        i = 0
-        while i < argc:
-            argv[i] = rffi.cast(VALUE, args[i])
-            i += 1
-        with lltype.scoped_alloc(INTP.TO, 1) as state:
-            state[0] = rffi.cast(rffi.INT, 0)
-            if public_only:
-                v = rb_funcallv_public_id(
-                    rffi.cast(VALUE, recv), rffi.cast(VALUE, rid),
-                    rffi.cast(rffi.INT, argc), argv, state)
-            else:
-                v = rb_funcallv_id(
-                    rffi.cast(VALUE, recv), rffi.cast(VALUE, rid),
-                    rffi.cast(rffi.INT, argc), argv, state)
-            failed = rffi.cast(lltype.Signed, state[0]) != 0
-            ret = rffi.cast(lltype.Signed, v)
+        raise RubyError(symbols.name_of(mid))
+    argv = _enter_argv(argc)
+    i = 0
+    while i < argc:
+        argv[i] = rffi.cast(VALUE, args[i])
+        i += 1
+    state = _enter_status()
+    if public_only:
+        v = rb_funcallv_public_id(
+            rffi.cast(VALUE, recv), rffi.cast(VALUE, rid),
+            rffi.cast(rffi.INT, argc), argv, state)
+    else:
+        v = rb_funcallv_id(
+            rffi.cast(VALUE, recv), rffi.cast(VALUE, rid),
+            rffi.cast(rffi.INT, argc), argv, state)
+    failed = _leave_status(state)
+    ret = rffi.cast(lltype.Signed, v)
+    _leave_argv(argv)
     if failed:
-        _failed(name)
+        _failed_mid(mid)
     return ret
 
 
@@ -344,24 +404,24 @@ def ary_new(values):
     n = len(values)
     if n > MAX_ARGC:
         return _ary_new_chunked(values)
-    with lltype.scoped_alloc(rffi.CArray(VALUE), n + 1) as buf:
-        i = 0
-        while i < n:
-            buf[i] = rffi.cast(VALUE, values[i])
-            i += 1
-        return rffi.cast(lltype.Signed,
-                         rb_ary_new(rffi.cast(rffi.INT, n), buf))
+    buf = _enter_argv(n)
+    i = 0
+    while i < n:
+        buf[i] = rffi.cast(VALUE, values[i])
+        i += 1
+    ret = rffi.cast(lltype.Signed, rb_ary_new(rffi.cast(rffi.INT, n), buf))
+    _leave_argv(buf)
+    return ret
 
 
 def _ary_new_chunked(values):
     """`ary` stays an RPython local, which the conservative stack scan covers between chunks."""
     n = len(values)
     ary = 0
-    with lltype.scoped_alloc(INTP.TO, 1) as state:
-        state[0] = rffi.cast(rffi.INT, 0)
-        ary = rffi.cast(lltype.Signed,
-                        rb_ary_new_capa(rffi.cast(rffi.LONG, n), state))
-        failed = rffi.cast(lltype.Signed, state[0]) != 0
+    state = _enter_status()
+    ary = rffi.cast(lltype.Signed,
+                    rb_ary_new_capa(rffi.cast(rffi.LONG, n), state))
+    failed = _leave_status(state)
     if failed:
         _failed('Array.new')
     at = 0
@@ -374,37 +434,34 @@ def _ary_new_chunked(values):
             while i < count:
                 buf[i] = rffi.cast(VALUE, values[at + i])
                 i += 1
-            with lltype.scoped_alloc(INTP.TO, 1) as state:
-                state[0] = rffi.cast(rffi.INT, 0)
-                rb_ary_cat(rffi.cast(VALUE, ary), rffi.cast(rffi.INT, count),
-                           buf, state)
-                failed = rffi.cast(lltype.Signed, state[0]) != 0
+            state = _enter_status()
+            rb_ary_cat(rffi.cast(VALUE, ary), rffi.cast(rffi.INT, count),
+                       buf, state)
+            failed = _leave_status(state)
         if failed:
             _failed('Array#concat')
         at += count
     return ary
 
 
-def call_with_block(recv, rid, args, handle, name):
+def call_with_block(recv, rid, args, handle, mid):
     argc = len(args)
     if argc > MAX_ARGC:
-        raise RubyError(name)
-    ret = 0
-    failed = False
-    with lltype.scoped_alloc(rffi.CArray(VALUE), argc + 1) as argv:
-        i = 0
-        while i < argc:
-            argv[i] = rffi.cast(VALUE, args[i])
-            i += 1
-        with lltype.scoped_alloc(INTP.TO, 1) as state:
-            state[0] = rffi.cast(rffi.INT, 0)
-            v = rb_call_with_block(_v(recv), _v(rid),
-                                   rffi.cast(rffi.INT, argc), argv,
-                                   rffi.cast(rffi.LONG, handle), state)
-            failed = rffi.cast(lltype.Signed, state[0]) != 0
-            ret = rffi.cast(lltype.Signed, v)
+        raise RubyError(symbols.name_of(mid))
+    argv = _enter_argv(argc)
+    i = 0
+    while i < argc:
+        argv[i] = rffi.cast(VALUE, args[i])
+        i += 1
+    state = _enter_status()
+    v = rb_call_with_block(_v(recv), _v(rid),
+                           rffi.cast(rffi.INT, argc), argv,
+                           rffi.cast(rffi.LONG, handle), state)
+    failed = _leave_status(state)
+    ret = rffi.cast(lltype.Signed, v)
+    _leave_argv(argv)
     if failed:
-        _failed(name)
+        _failed_mid(mid)
     return ret
 
 
@@ -420,11 +477,10 @@ def install_trampoline_callback(fn):
 
 def define_method_entry(klass, rid, private):
     """A CRuby method entry over the generic trampoline."""
-    with lltype.scoped_alloc(INTP.TO, 1) as state:
-        state[0] = rffi.cast(rffi.INT, 0)
-        rb_define_method_id(_v(klass), _v(rid),
-                            rffi.cast(rffi.INT, 1 if private else 0), state)
-        failed = rffi.cast(lltype.Signed, state[0]) != 0
+    state = _enter_status()
+    rb_define_method_id(_v(klass), _v(rid),
+                        rffi.cast(rffi.INT, 1 if private else 0), state)
+    failed = _leave_status(state)
     if failed:
         _failed('define_method')
 
@@ -457,76 +513,69 @@ def as_value(n):
 
 
 def ary_resurrect(ary):
-    with lltype.scoped_alloc(INTP.TO, 1) as state:
-        state[0] = rffi.cast(rffi.INT, 0)
-        v = rb_ary_resurrect(_v(ary), state)
-        failed = rffi.cast(lltype.Signed, state[0]) != 0
-        ret = rffi.cast(lltype.Signed, v)
+    state = _enter_status()
+    v = rb_ary_resurrect(_v(ary), state)
+    failed = _leave_status(state)
+    ret = rffi.cast(lltype.Signed, v)
     if failed:
         _failed('Array#dup')
     return ret
 
 
 def ary_store(ary, idx, val):
-    with lltype.scoped_alloc(INTP.TO, 1) as state:
-        state[0] = rffi.cast(rffi.INT, 0)
-        rb_ary_store_(_v(ary), rffi.cast(rffi.LONG, idx), _v(val), state)
-        failed = rffi.cast(lltype.Signed, state[0]) != 0
+    state = _enter_status()
+    rb_ary_store_(_v(ary), rffi.cast(rffi.LONG, idx), _v(val), state)
+    failed = _leave_status(state)
     if failed:
         _failed('Array#[]=')
 
 
 def ary_new_capa(capa):
-    with lltype.scoped_alloc(INTP.TO, 1) as state:
-        state[0] = rffi.cast(rffi.INT, 0)
-        v = rb_ary_new_capa(rffi.cast(rffi.LONG, capa), state)
-        failed = rffi.cast(lltype.Signed, state[0]) != 0
-        ret = rffi.cast(lltype.Signed, v)
+    state = _enter_status()
+    v = rb_ary_new_capa(rffi.cast(rffi.LONG, capa), state)
+    failed = _leave_status(state)
+    ret = rffi.cast(lltype.Signed, v)
     if failed:
         _failed('Array.new')
     return ret
 
 
 def ary_new_filled(n, val):
-    with lltype.scoped_alloc(INTP.TO, 1) as state:
-        state[0] = rffi.cast(rffi.INT, 0)
-        v = rb_ary_new_filled(rffi.cast(rffi.LONG, n), _v(val), state)
-        failed = rffi.cast(lltype.Signed, state[0]) != 0
-        ret = rffi.cast(lltype.Signed, v)
+    state = _enter_status()
+    v = rb_ary_new_filled(rffi.cast(rffi.LONG, n), _v(val), state)
+    failed = _leave_status(state)
+    ret = rffi.cast(lltype.Signed, v)
     if failed:
         _failed('Array.new')
     return ret
 
 
 def range_new(low, high, excl):
-    with lltype.scoped_alloc(INTP.TO, 1) as state:
-        state[0] = rffi.cast(rffi.INT, 0)
-        v = rb_range_new_(_v(low), _v(high), rffi.cast(rffi.INT, excl), state)
-        failed = rffi.cast(lltype.Signed, state[0]) != 0
-        ret = rffi.cast(lltype.Signed, v)
+    state = _enter_status()
+    v = rb_range_new_(_v(low), _v(high), rffi.cast(rffi.INT, excl), state)
+    failed = _leave_status(state)
+    ret = rffi.cast(lltype.Signed, v)
     if failed:
         _failed('Range.new')
     return ret
 
 
 def gvar_get(name):
-    with lltype.scoped_alloc(INTP.TO, 1) as state:
-        state[0] = rffi.cast(rffi.INT, 0)
-        with rffi.scoped_str2charp(name) as c_name:
-            v = rb_gvar_get_(c_name, state)
-        failed = rffi.cast(lltype.Signed, state[0]) != 0
-        ret = rffi.cast(lltype.Signed, v)
+    state = _enter_status()
+    with rffi.scoped_str2charp(name) as c_name:
+        v = rb_gvar_get_(c_name, state)
+    failed = _leave_status(state)
+    ret = rffi.cast(lltype.Signed, v)
     if failed:
         _failed(name)
     return ret
 
 
 def gvar_set(name, val):
-    with lltype.scoped_alloc(INTP.TO, 1) as state:
-        state[0] = rffi.cast(rffi.INT, 0)
-        with rffi.scoped_str2charp(name) as c_name:
-            rb_gvar_set_(c_name, _v(val), state)
-        failed = rffi.cast(lltype.Signed, state[0]) != 0
+    state = _enter_status()
+    with rffi.scoped_str2charp(name) as c_name:
+        rb_gvar_set_(c_name, _v(val), state)
+    failed = _leave_status(state)
     if failed:
         _failed(name)
 
@@ -608,22 +657,20 @@ def method_owner(klass, rid):
 
 
 def define_class(cbase, rid, super_v):
-    with lltype.scoped_alloc(INTP.TO, 1) as state:
-        state[0] = rffi.cast(rffi.INT, 0)
-        v = rb_define_class_(_v(cbase), _v(rid), _v(super_v), state)
-        failed = rffi.cast(lltype.Signed, state[0]) != 0
-        ret = rffi.cast(lltype.Signed, v)
+    state = _enter_status()
+    v = rb_define_class_(_v(cbase), _v(rid), _v(super_v), state)
+    failed = _leave_status(state)
+    ret = rffi.cast(lltype.Signed, v)
     if failed:
         _failed('Class.new')
     return ret
 
 
 def class_superclass(klass):
-    with lltype.scoped_alloc(INTP.TO, 1) as state:
-        state[0] = rffi.cast(rffi.INT, 0)
-        v = rb_class_superclass(_v(klass), state)
-        failed = rffi.cast(lltype.Signed, state[0]) != 0
-        ret = rffi.cast(lltype.Signed, v)
+    state = _enter_status()
+    v = rb_class_superclass(_v(klass), state)
+    failed = _leave_status(state)
+    ret = rffi.cast(lltype.Signed, v)
     if failed:
         rb_take_errinfo()
         return 0
@@ -631,63 +678,57 @@ def class_superclass(klass):
 
 
 def singleton_class(obj):
-    with lltype.scoped_alloc(INTP.TO, 1) as state:
-        state[0] = rffi.cast(rffi.INT, 0)
-        v = rb_singleton_class(_v(obj), state)
-        failed = rffi.cast(lltype.Signed, state[0]) != 0
-        ret = rffi.cast(lltype.Signed, v)
+    state = _enter_status()
+    v = rb_singleton_class(_v(obj), state)
+    failed = _leave_status(state)
+    ret = rffi.cast(lltype.Signed, v)
     if failed:
         _failed('singleton_class')
     return ret
 
 
 def obj_alloc(klass):
-    with lltype.scoped_alloc(INTP.TO, 1) as state:
-        state[0] = rffi.cast(rffi.INT, 0)
-        v = rb_obj_alloc(_v(klass), state)
-        failed = rffi.cast(lltype.Signed, state[0]) != 0
-        ret = rffi.cast(lltype.Signed, v)
+    state = _enter_status()
+    v = rb_obj_alloc(_v(klass), state)
+    failed = _leave_status(state)
+    ret = rffi.cast(lltype.Signed, v)
     if failed:
         _failed('allocate')
     return ret
 
 
 def const_get(klass, rid):
-    with lltype.scoped_alloc(INTP.TO, 1) as state:
-        state[0] = rffi.cast(rffi.INT, 0)
-        v = rb_const_get_(_v(klass), _v(rid), state)
-        failed = rffi.cast(lltype.Signed, state[0]) != 0
-        ret = rffi.cast(lltype.Signed, v)
+    state = _enter_status()
+    v = rb_const_get_(_v(klass), _v(rid), state)
+    failed = _leave_status(state)
+    ret = rffi.cast(lltype.Signed, v)
     if failed:
         _failed('const_get')
     return ret
 
 
 def const_set(klass, rid, val):
-    with lltype.scoped_alloc(INTP.TO, 1) as state:
-        state[0] = rffi.cast(rffi.INT, 0)
-        rb_const_set_(_v(klass), _v(rid), _v(val), state)
-        failed = rffi.cast(lltype.Signed, state[0]) != 0
+    state = _enter_status()
+    rb_const_set_(_v(klass), _v(rid), _v(val), state)
+    failed = _leave_status(state)
     if failed:
         _failed('const_set')
 
 
 def ivar_get(obj, rid):
-    with lltype.scoped_alloc(INTP.TO, 1) as state:
-        state[0] = rffi.cast(rffi.INT, 0)
-        v = rb_ivar_get_(_v(obj), _v(rid), state)
-        failed = rffi.cast(lltype.Signed, state[0]) != 0
-        ret = rffi.cast(lltype.Signed, v)
+    state = _enter_status()
+    v = rb_ivar_get_(_v(obj), _v(rid), state)
+    failed = _leave_status(state)
+    ret = rffi.cast(lltype.Signed, v)
     if failed:
         _failed('instance_variable_get')
     return ret
 
 
 def ivar_set(obj, rid, val):
-    with lltype.scoped_alloc(INTP.TO, 1) as state:
-        state[0] = rffi.cast(rffi.INT, 0)
-        rb_ivar_set_(_v(obj), _v(rid), _v(val), state)
-        failed = rffi.cast(lltype.Signed, state[0]) != 0
+    state = _enter_status()
+    rb_ivar_set_(_v(obj), _v(rid), _v(val), state)
+    failed = _leave_status(state)
     if failed:
         _failed('instance_variable_set')
 
@@ -759,11 +800,10 @@ def shape_add_ivar_slot(before, after, rid):
 
 def proc_new(handle):
     """A Proc whose call re-enters RPyYARV through the block callback."""
-    with lltype.scoped_alloc(INTP.TO, 1) as state:
-        state[0] = rffi.cast(rffi.INT, 0)
-        v = rb_proc_new(rffi.cast(rffi.LONG, handle), state)
-        failed = rffi.cast(lltype.Signed, state[0]) != 0
-        ret = rffi.cast(lltype.Signed, v)
+    state = _enter_status()
+    v = rb_proc_new(rffi.cast(rffi.LONG, handle), state)
+    failed = _leave_status(state)
+    ret = rffi.cast(lltype.Signed, v)
     if failed:
         _failed('Proc.new')
     return ret
@@ -778,11 +818,10 @@ def is_class(v):
 
 
 def obj_is_kind_of(obj, klass):
-    with lltype.scoped_alloc(INTP.TO, 1) as state:
-        state[0] = rffi.cast(rffi.INT, 0)
-        r = rffi.cast(lltype.Signed, rb_obj_is_kind_of(_v(obj), _v(klass),
-                                                       state))
-        failed = rffi.cast(lltype.Signed, state[0]) != 0
+    state = _enter_status()
+    r = rffi.cast(lltype.Signed, rb_obj_is_kind_of(_v(obj), _v(klass),
+                                                   state))
+    failed = _leave_status(state)
     if failed:
         _failed('kind_of?')
     return r != 0
@@ -797,42 +836,38 @@ def cleanup_with_error(v):
 
 
 def hash_new(capa):
-    with lltype.scoped_alloc(INTP.TO, 1) as state:
-        state[0] = rffi.cast(rffi.INT, 0)
-        v = rb_hash_new_capa(rffi.cast(rffi.LONG, capa), state)
-        failed = rffi.cast(lltype.Signed, state[0]) != 0
-        ret = rffi.cast(lltype.Signed, v)
+    state = _enter_status()
+    v = rb_hash_new_capa(rffi.cast(rffi.LONG, capa), state)
+    failed = _leave_status(state)
+    ret = rffi.cast(lltype.Signed, v)
     if failed:
         _failed('Hash.new')
     return ret
 
 
 def hash_aset(hash_v, key, val):
-    with lltype.scoped_alloc(INTP.TO, 1) as state:
-        state[0] = rffi.cast(rffi.INT, 0)
-        rb_hash_aset_(_v(hash_v), _v(key), _v(val), state)
-        failed = rffi.cast(lltype.Signed, state[0]) != 0
+    state = _enter_status()
+    rb_hash_aset_(_v(hash_v), _v(key), _v(val), state)
+    failed = _leave_status(state)
     if failed:
         _failed('Hash#[]=')
 
 
 def hash_resurrect(hash_v):
-    with lltype.scoped_alloc(INTP.TO, 1) as state:
-        state[0] = rffi.cast(rffi.INT, 0)
-        v = rb_hash_resurrect(_v(hash_v), state)
-        failed = rffi.cast(lltype.Signed, state[0]) != 0
-        ret = rffi.cast(lltype.Signed, v)
+    state = _enter_status()
+    v = rb_hash_resurrect(_v(hash_v), state)
+    failed = _leave_status(state)
+    ret = rffi.cast(lltype.Signed, v)
     if failed:
         _failed('Hash#dup')
     return ret
 
 
 def splat_array(ary, flag):
-    with lltype.scoped_alloc(INTP.TO, 1) as state:
-        state[0] = rffi.cast(rffi.INT, 0)
-        v = rb_splat_array(_v(ary), rffi.cast(rffi.INT, flag), state)
-        failed = rffi.cast(lltype.Signed, state[0]) != 0
-        ret = rffi.cast(lltype.Signed, v)
+    state = _enter_status()
+    v = rb_splat_array(_v(ary), rffi.cast(rffi.INT, flag), state)
+    failed = _leave_status(state)
+    ret = rffi.cast(lltype.Signed, v)
     if failed:
         _failed('to_a')
     return ret
@@ -844,13 +879,12 @@ def vm_core():
 
 def arity_error(given, min_argc, max_argc):
     """The ArgumentError VALUE; -1 for max_argc means unlimited."""
-    with lltype.scoped_alloc(INTP.TO, 1) as state:
-        state[0] = rffi.cast(rffi.INT, 0)
-        v = rb_arity_error(rffi.cast(rffi.INT, given),
-                           rffi.cast(rffi.INT, min_argc),
-                           rffi.cast(rffi.INT, max_argc), state)
-        failed = rffi.cast(lltype.Signed, state[0]) != 0
-        ret = rffi.cast(lltype.Signed, v)
+    state = _enter_status()
+    v = rb_arity_error(rffi.cast(rffi.INT, given),
+                       rffi.cast(rffi.INT, min_argc),
+                       rffi.cast(rffi.INT, max_argc), state)
+    failed = _leave_status(state)
+    ret = rffi.cast(lltype.Signed, v)
     if failed:
         _failed('ArgumentError')
     return ret
@@ -858,13 +892,12 @@ def arity_error(given, min_argc, max_argc):
 
 def local_jump_error(mesg, val, reason):
     """The LocalJumpError VALUE; reason is a ruby_tag_type."""
-    with lltype.scoped_alloc(INTP.TO, 1) as state:
-        state[0] = rffi.cast(rffi.INT, 0)
-        with rffi.scoped_str2charp(mesg) as c_mesg:
-            v = rb_local_jump_error(c_mesg, _v(val),
-                                    rffi.cast(rffi.INT, reason), state)
-        failed = rffi.cast(lltype.Signed, state[0]) != 0
-        ret = rffi.cast(lltype.Signed, v)
+    state = _enter_status()
+    with rffi.scoped_str2charp(mesg) as c_mesg:
+        v = rb_local_jump_error(c_mesg, _v(val),
+                                rffi.cast(rffi.INT, reason), state)
+    failed = _leave_status(state)
+    ret = rffi.cast(lltype.Signed, v)
     if failed:
         _failed('LocalJumpError')
     return ret
@@ -901,20 +934,18 @@ def require_resolve(fname):
 
 
 def provide(path):
-    with lltype.scoped_alloc(INTP.TO, 1) as state:
-        state[0] = rffi.cast(rffi.INT, 0)
-        rb_provide_(_v(path), state)
-        failed = rffi.cast(lltype.Signed, state[0]) != 0
+    state = _enter_status()
+    rb_provide_(_v(path), state)
+    failed = _leave_status(state)
     if failed:
         _failed('$LOADED_FEATURES')
 
 
 def absolute_path(fname, base):
-    with lltype.scoped_alloc(INTP.TO, 1) as state:
-        state[0] = rffi.cast(rffi.INT, 0)
-        v = rb_absolute_path(_v(fname), _v(base), state)
-        failed = rffi.cast(lltype.Signed, state[0]) != 0
-        ret = rffi.cast(lltype.Signed, v)
+    state = _enter_status()
+    v = rb_absolute_path(_v(fname), _v(base), state)
+    failed = _leave_status(state)
+    ret = rffi.cast(lltype.Signed, v)
     if failed:
         _failed('File.absolute_path')
     return ret

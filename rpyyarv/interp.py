@@ -81,7 +81,7 @@ def invoke(frame, w_ci, w_block=None):
         if argc == 1:
             v = _native_binop(recv, frame.stack[recv_at + 1], w_ci.mid)
         else:
-            v = helpers.range_part(recv, w_ci.mid)
+            v = helpers.zero_arg(recv, w_ci.mid)
         if v != value.Q_UNDEF:
             _drop(frame, recv_at)
             debug.count_native()

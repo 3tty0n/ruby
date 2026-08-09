@@ -9,11 +9,13 @@ import gcroots
 import interp
 import loader
 import rubycall
+import symbols
 import value
 from error import RubyException
 from frame import Frame
 
 COMPILE_FILE = 'compile_file'
+COMPILE_FILE_MID = symbols.intern(COMPILE_FILE)
 
 
 class _Files(object):
@@ -106,7 +108,7 @@ def _compile(path):
                             boot.intern('RubyVM'))
     iseq_class = boot.const_get(rubyvm, boot.intern('InstructionSequence'))
     iseqw = boot.funcallv(iseq_class, boot.intern(COMPILE_FILE), [path],
-                          COMPILE_FILE)
+                          COMPILE_FILE_MID)
     gcroots.hold(iseqw)
     try:
         return loader.load(bootiseq.load(iseqw))
@@ -122,9 +124,9 @@ def _punt(fname, name, total, supported, reason):
 
 def _delegate(fname):
     """CRuby's own require, which keeps its own $LOADED_FEATURES bookkeeping."""
-    debug.count_foreign()
+    debug.count_foreign(rubycall.REQUIRE)
     return boot.funcallv(boot.top_self(), rubycall.rid(rubycall.REQUIRE),
-                         [fname], 'require')
+                         [fname], rubycall.REQUIRE)
 
 
 def _current_dir():
