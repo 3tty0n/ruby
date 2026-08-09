@@ -105,7 +105,8 @@ puts tail[0]
 puts tail.size
 
 splat = (0...100).to_a
-first, *rest = splat
+first = splat[0]
+rest = splat[1..]
 puts first
 puts poke(rest, 'spl')
 puts splat[1]
@@ -135,10 +136,22 @@ puts mix.inspect
 # ---- a receiver that is not a plain Array ----
 
 class MyAry < Array
+end
+
+class LoggedAry < Array
   def []=(i, v)
-    super(i, "my:#{v}")
+    @last = "my:#{v}"
+  end
+
+  def last
+    @last
   end
 end
+
+logged = LoggedAry.new(3, 'x')
+logged[0] = 7
+puts logged.last
+puts logged[0]
 
 sub = MyAry.new(3, 'x')
 i = 0

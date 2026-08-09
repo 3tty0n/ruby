@@ -40,6 +40,10 @@ class MethodEntry(object):
         self.mid = mid
 
 
+# Never reaches a caller of lookup: it only says the owner table has no answer yet.
+OWNER_PENDING = MethodEntry(None, False)
+
+
 class Registry(object):
     # Quasi-immutable: reads fold into the trace and definemethod invalidates.
     _immutable_fields_ = ['version?']
@@ -167,8 +171,7 @@ def is_known_class(klass):
     return klass in registry.supers
 
 
-@elidable
-def _lookup(klass, mid, version):
+def _walk(klass, mid):
     methods = registry.methods
     supers = registry.supers
     k = klass
@@ -188,13 +191,26 @@ def _lookup(klass, mid, version):
     return None
 
 
+@elidable
+def _lookup(klass, mid, version):
+    """The walk and the owner check in one elidable, so a trace records one call_pure where two shifted its inlining."""
+    entry = _walk(klass, mid)
+    if entry is None:
+        return None
+    owner = owners.tab.get((klass, mid), OWNER_UNKNOWN)
+    if owner == OWNER_UNKNOWN:
+        return OWNER_PENDING
+    if owner != entry.owner and owner != value.Q_NIL:
+        return None
+    return entry
+
+
 def lookup(klass, mid):
     """registry.supers holds Class#superclass, which skips iclasses, so a module could own mid and the walk above never see it; CRuby knows and every registry entry has a CRuby entry beside it."""
     entry = _lookup(klass, mid, registry.version)
-    if entry is not None:
-        owner = owner_of(klass, mid)
-        if owner != entry.owner and owner != value.Q_NIL:
-            return None
+    if entry is OWNER_PENDING:
+        _fill_owner(klass, mid)
+        entry = _lookup(klass, mid, registry.version)
     return entry
 
 

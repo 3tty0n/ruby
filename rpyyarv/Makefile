@@ -92,9 +92,16 @@ gccheck:
 	          test/aset.rb \
 	          test/consts.rb test/arynew.rb \
 	          test/recursion.rb test/intabs.rb test/mixins.rb \
+	          test/floatops.rb \
 	          test/equality.rb \
 	          $(TOP)/benchmark/app_*.rb $(TOP)/benchmark/so_*.rb; do \
 	   n=`basename $$s`; \
+	   case $$s in test/*) \
+	     if ./rpyyarv $$s 2>&1 >/dev/null | grep -q 'running under CRuby instead'; then \
+	       echo "FAIL  $$n PUNTED to cruby, so it compares cruby against cruby"; \
+	       failed=`expr $$failed + 1`; continue; \
+	     fi;; \
+	   esac; \
 	   jo=`lim ./rpyyarv-jit $$s`; jrc=$$?; \
 	   io=`lim ./rpyyarv $$s`; irc=$$?; \
 	   jpre=0; ipre=0; \

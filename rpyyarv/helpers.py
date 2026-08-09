@@ -38,6 +38,12 @@ SQRT = symbols.intern('sqrt')
 INITIALIZE = symbols.intern('initialize')
 ABS = symbols.intern('abs')
 TO_ARY = symbols.intern('to_ary')
+TO_I = symbols.intern('to_i')
+UMINUS = symbols.intern('-@')
+
+# RB_FIXABLE for a double (arithmetic/fixnum.h); both bounds are exact powers of two.
+FIXNUM_MAX_PLUS_1_DBL = float(value.FIXNUM_MAX + 1)
+FIXNUM_MIN_DBL = float(value.FIXNUM_MIN)
 
 # One bit per (class, operator) pair, in the order boot_shim.c's rpyyarv_bop_mask sets them.
 B_INT_PLUS = 0
@@ -392,9 +398,41 @@ def int_abs(recv):
     return value.int2fix(-n)
 
 
+def _flt_owns(mid):
+    """No BOP flag watches these, so ask CRuby who owns them, as int_abs does."""
+    klass = value.core_class(value.C_FLOAT)
+    return (dispatch.owner_of(klass, mid) == klass
+            and dispatch.lookup_core(klass, mid) is None)
+
+
+def flt_to_i(recv):
+    """flo_to_i (numeric.c:2562) truncates toward zero; NaN, an infinity and anything outside the fixnum range go back to CRuby, which raises FloatDomainError or builds the Bignum."""
+    if not value.is_float(recv) or not _flt_owns(TO_I):
+        return value.Q_UNDEF
+    d = value.float_val(recv)
+    if d > 0.0:
+        d = math.floor(d)
+    elif d < 0.0:
+        d = math.ceil(d)
+    if not (d >= FIXNUM_MIN_DBL and d < FIXNUM_MAX_PLUS_1_DBL):
+        return value.Q_UNDEF
+    return value.int2fix(int(d))
+
+
+def flt_uminus(recv):
+    """rb_float_uminus (numeric.c:1048) is a plain IEEE negate, so 0.0 and -0.0 swap."""
+    if not value.is_float(recv) or not _flt_owns(UMINUS):
+        return value.Q_UNDEF
+    return _from_dbl(-value.float_val(recv))
+
+
 def zero_arg(recv, mid):
     if mid == ABS:
         return int_abs(recv)
+    if mid == TO_I:
+        return flt_to_i(recv)
+    if mid == UMINUS:
+        return flt_uminus(recv)
     return range_part(recv, mid)
 
 
