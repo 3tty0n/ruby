@@ -35,6 +35,9 @@ FIELDS_WORD = 2                 # struct RObject: as.ary / as.heap.fields
 T_MASK = 0x1f
 T_OBJECT = 0x01
 FL_FREEZE = 1 << 11             # RUBY_FL_FREEZE, the bit rb_check_frozen reads
+T_DATA = 0x0c
+FL_TYPED_DATA = 1 << 6          # RUBY_TYPED_FL_IS_TYPED_DATA: RData keeps a function pointer where RTypedData keeps fields_obj
+FL_SHAREABLE = 1 << 8           # RUBY_FL_SHAREABLE, the bit ivar_ractor_check raises on
 
 # RArray layout for opt_aref/opt_length, checked against rpyyarv_array_layout: ARY_EMBED_FLAG says whether the array embeds its elements or not.
 ARY_EMBED_FLAG = 1 << 13         # RUBY_FL_USER1

@@ -5,6 +5,8 @@
 /* In-tree, so the object-shape API libruby does not export is still reachable. */
 #include "shape.h"
 #include "internal/array.h"
+/* Its STATIC_ASSERTs are what let the RPython ivar fast path read an imemo/fields with the RObject layout. */
+#include "internal/imemo.h"
 #include "internal/numeric.h"
 #include "internal/range.h"
 #include "rpyyarv.h"
@@ -696,6 +698,12 @@ rpyyarv_object_layout(int *out)
     out[6] = (int)RUBY_FL_FREEZE;
     /* Nonzero would put the shape id in its own word, not in the flags the RPython side reads and writes. */
     out[7] = (int)RBASIC_SHAPE_ID_FIELD;
+    out[8] = (int)RUBY_T_DATA;
+    out[9] = (int)RUBY_TYPED_FL_IS_TYPED_DATA;
+    /* Where a typed T_DATA keeps its imemo/fields; RData puts a function pointer here, hence the flag above. */
+    out[10] = (int)(offsetof(struct RTypedData, fields_obj) / SIZEOF_VALUE);
+    /* Set on the objects ivar_ractor_check (variable.c:1220) may raise for. */
+    out[11] = (int)RUBY_FL_SHAREABLE;
 }
 
 /* Neither allocates nor raises, so boot.py may declare it without reenters. */

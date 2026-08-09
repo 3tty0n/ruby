@@ -322,6 +322,69 @@ puts frozen.x
 
 # ---- ivars on things that are not plain objects ----
 
+# A typed T_DATA keeps its ivars in a separate imemo/fields object.
+class Random
+  def initialize
+    @seed = 74_755
+    @tag = nil
+  end
+
+  def step
+    @seed = ((@seed * 1_309) + 13_849) & 65_535
+  end
+
+  def hold(o)
+    @tag = o
+  end
+
+  def dump
+    [@seed, @tag]
+  end
+end
+
+r = Random.new
+i = 0
+while i < 3000
+  r.step
+  i += 1
+end
+puts r.dump.inspect
+r.hold('young')
+GC.start
+puts r.dump.inspect
+r.hold([1, 2])
+puts r.dump.inspect
+puts r.instance_variable_get(:@absent).inspect
+r.instance_variable_set(:@late, 9)
+puts r.instance_variable_get(:@late)
+puts r.step > 0
+
+fr = Random.new
+fr.step
+fr.freeze
+begin
+  fr.step
+  puts 'no error'
+rescue FrozenError
+  puts 'FrozenError on T_DATA'
+end
+puts fr.dump.inspect
+
+# Enough ivars on one T_DATA to reach the hash-table fallback.
+big = Random.new
+i = 0
+while i < 90
+  big.instance_variable_set("@f#{i}", i)
+  i += 1
+end
+i = 0
+while i < 200
+  big.step
+  i += 1
+end
+puts [big.instance_variable_get(:@f0), big.instance_variable_get(:@f89)].inspect
+puts big.dump.first > 0
+
 s = 'str'
 s.instance_variable_set(:@tag, 1)
 puts s.instance_variable_get(:@tag)

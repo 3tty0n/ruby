@@ -451,17 +451,31 @@ def iv_slot(shape_id, rid):
     return got
 
 
+def _data_fields(obj, flags):
+    """The imemo/fields a typed T_DATA keeps its ivars in, which internal/imemo.h gives the RObject layout; 0 for anything else, including the shareable receivers ivar_ractor_check (variable.c:1220) may raise for."""
+    if (flags & value.T_MASK) == value.T_DATA \
+            and (flags & (value.FL_TYPED_DATA | value.FL_SHAREABLE)) \
+            == value.FL_TYPED_DATA:
+        return raw_word(obj, value.FIELDS_WORD)
+    return 0
+
+
 def ivar_get(obj, mid):
-    """T_OBJECT reads compile to a shape guard plus a raw field load."""
+    """T_OBJECT reads compile to a shape guard plus a raw field load, and a typed T_DATA to the same over its fields object."""
     if obj != 0 and (obj & value.IMMEDIATE_MASK) == 0:
         flags = raw_word(obj, value.FLAGS_WORD)
-        if (flags & value.T_MASK) == value.T_OBJECT:
+        fields = obj
+        if (flags & value.T_MASK) != value.T_OBJECT:
+            fields = _data_fields(obj, flags)
+            if fields != 0:
+                flags = raw_word(fields, value.FLAGS_WORD)
+        if fields != 0:
             shape_id = promote((flags >> value.SHAPE_SHIFT) & value.SHAPE_MASK)
             slot = iv_slot(shape_id, rubycall.const_rid(mid))
             if slot >= 0:
                 if flags & value.ROBJECT_HEAP:
-                    return raw_word(raw_word(obj, value.FIELDS_WORD), slot)
-                return raw_word(obj, value.FIELDS_WORD + slot)
+                    return raw_word(raw_word(fields, value.FIELDS_WORD), slot)
+                return raw_word(fields, value.FIELDS_WORD + slot)
             if slot == -1:
                 return value.Q_NIL
     return _ivar_get_slow(obj, mid)
@@ -514,36 +528,44 @@ def ivar_set(obj, mid, v):
         immediate = value.is_immediate(v)
         if immediate or barrier.direct:
             flags = raw_word(obj, value.FLAGS_WORD)
-            if (flags & value.T_MASK) == value.T_OBJECT \
-                    and (flags & value.FL_FREEZE) == 0:
-                shape_id = promote(
-                    (flags >> value.SHAPE_SHIFT) & value.SHAPE_MASK)
-                rid = rubycall.const_rid(mid)
-                slot = iv_slot(shape_id, rid)
-                after = shape_id
-                if slot == -1:
-                    entry = _iv_transition(shape_id, rid, trans.version)
-                    if entry is not None:
-                        after = entry.after
-                        slot = entry.slot
-                if slot >= 0:
-                    if flags & value.ROBJECT_HEAP:
-                        set_raw_word(raw_word(obj, value.FIELDS_WORD), slot, v)
-                    else:
-                        set_raw_word(obj, value.FIELDS_WORD + slot, v)
-                    if after != shape_id:
-                        # The field is stored first: nothing can collect between two raw stores, and the new shape would expose the slot before it holds a VALUE.
-                        set_raw_word(obj, value.FLAGS_WORD,
-                                     intmask((r_uint(flags)
-                                              & r_uint(value.SHAPE_FLAG_MASK))
-                                             | (r_uint(after)
-                                                << value.SHAPE_SHIFT)))
-                    if not immediate:
-                        boot.obj_written(obj, v)
-                    return
-                if slot == -1:
-                    _ivar_add_slow(obj, shape_id, rid, v)
-                    return
+            if (flags & value.FL_FREEZE) == 0:
+                # Only an object holding its own fields may gain one here: a separate imemo/fields may have to be reallocated and hung back off its owner.
+                own = (flags & value.T_MASK) == value.T_OBJECT
+                fields = obj
+                if not own:
+                    fields = _data_fields(obj, flags)
+                    if fields != 0:
+                        flags = raw_word(fields, value.FLAGS_WORD)
+                if fields != 0:
+                    shape_id = promote(
+                        (flags >> value.SHAPE_SHIFT) & value.SHAPE_MASK)
+                    rid = rubycall.const_rid(mid)
+                    slot = iv_slot(shape_id, rid)
+                    after = shape_id
+                    if slot == -1 and own:
+                        entry = _iv_transition(shape_id, rid, trans.version)
+                        if entry is not None:
+                            after = entry.after
+                            slot = entry.slot
+                    if slot >= 0:
+                        if flags & value.ROBJECT_HEAP:
+                            set_raw_word(raw_word(fields, value.FIELDS_WORD),
+                                         slot, v)
+                        else:
+                            set_raw_word(fields, value.FIELDS_WORD + slot, v)
+                        if after != shape_id:
+                            # The field is stored first: nothing can collect between two raw stores, and the new shape would expose the slot before it holds a VALUE.
+                            set_raw_word(obj, value.FLAGS_WORD,
+                                         intmask((r_uint(flags)
+                                                  & r_uint(value.SHAPE_FLAG_MASK))
+                                                 | (r_uint(after)
+                                                    << value.SHAPE_SHIFT)))
+                        if not immediate:
+                            boot.obj_written(fields, v)
+                        return
+                    if slot == -1 and own:
+                        _ivar_add_slow(obj, shape_id, rid, v)
+                        return
     _ivar_set_slow(obj, mid, v)
 
 
@@ -572,7 +594,8 @@ def check_object_layout():
     got = boot.object_layout()
     want = [value.SHAPE_SHIFT, value.SHAPE_ID_BITS, value.ROBJECT_HEAP,
             value.FIELDS_WORD, value.T_MASK, value.T_OBJECT,
-            value.FL_FREEZE, value.SHAPE_ID_IN_FLAGS]
+            value.FL_FREEZE, value.SHAPE_ID_IN_FLAGS, value.T_DATA,
+            value.FL_TYPED_DATA, value.FIELDS_WORD, value.FL_SHAREABLE]
     return got == want
 
 

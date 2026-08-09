@@ -114,7 +114,7 @@ void rpyyarv_ivar_set(uintptr_t obj, uintptr_t id, uintptr_t val, int *state);
 void rpyyarv_obj_written(uintptr_t a, uintptr_t b);
 int rpyyarv_wb_direct(void);
 
-#define RPYYARV_LAYOUT_N 8
+#define RPYYARV_LAYOUT_N 12
 int rpyyarv_shape_iv_index(unsigned int shape_id, uintptr_t id, int *index);
 void rpyyarv_object_layout(int *out);
 
