@@ -809,7 +809,8 @@ def call_block(w_block, args):
     """Run a block's ISeq in a frame whose locals chain to the defining one."""
     if w_block.kind != block_mod.KIND_ISEQ:
         return _call_foreign_block(w_block, args)
-    b_iseq = w_block.w_iseq
+    # Promoted here, not left to the merge point below: the frame's arrays then take constant sizes instead of an out-of-line malloc.
+    b_iseq = promote(w_block.w_iseq)
     outer = w_block.frame
     callee = Frame(b_iseq, outer.self_val, outer.cref, outer.entry)
     callee.defining_frame = outer
