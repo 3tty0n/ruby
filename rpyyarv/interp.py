@@ -1041,7 +1041,7 @@ def _unwind(iseq, frame, throw, epc):
 
 
 def install():
-    configure_retrace()
+    configure_reselection()
     boot.install_block_callback(block_callback)
     boot.install_trampoline_callback(trampoline_callback)
     gcroots.register_blocks(blocks)
@@ -1292,42 +1292,42 @@ jitdriver = JitDriver(greens=['pc', 'iseq'], reds=['frame'],
                       get_printable_location=get_printable_location)
 
 
-class _Retrace(object):
-    """One deliberate retrace: the first traces a program compiles are picked off a cold profile, so they are thrown away once and taken again from a warm one."""
-    # Quasi-immutable, so disarming folds the counter below out of every trace.
-    _immutable_fields_ = ['armed?']
+class _Reselection(object):
+    """One deliberate reselection: the first traces a program compiles are picked off a cold profile, so they are thrown away once and taken again from a warm one."""
+    # Quasi-immutable, so disabling folds the counter below out of every trace.
+    _immutable_fields_ = ['enabled?']
 
     def __init__(self):
-        self.armed = True
+        self.enabled = True
         self.count = 0
-        self.at = RETRACE_AT
+        self.at = RESELECT_AT
 
 
 # Late enough that the second selection sees a warm profile, early enough that a benchmark's measured region still runs on it; both ends were measured.
-RETRACE_AT = 2000000
+RESELECT_AT = 2000000
 
-retrace = _Retrace()
+reselection = _Reselection()
 
 
-def configure_retrace():
-    """RPYYARV_RETRACE_AT overrides the backward-branch count the retrace fires at; 0 disarms it, and a disarmed counter folds out of every trace."""
-    spec = os.environ.get('RPYYARV_RETRACE_AT')
+def configure_reselection():
+    """RPYYARV_RESELECT_AT overrides the backward-branch count the reselection fires at; 0 disables it, and a disabled counter folds out of every trace."""
+    spec = os.environ.get('RPYYARV_RESELECT_AT')
     if spec is None:
         return
     try:
         at = int(spec)
     except ValueError:
         return
-    retrace.at = at
-    retrace.armed = at > 0
+    reselection.at = at
+    reselection.enabled = at > 0
 
 
-def _tick_retrace():
-    if retrace.armed:
-        retrace.count += 1
-        if retrace.count > retrace.at:
-            # Disarming invalidates every compiled trace, which is the retrace.
-            retrace.armed = False
+def _tick_reselection():
+    if reselection.enabled:
+        reselection.count += 1
+        if reselection.count > reselection.at:
+            # Disabling invalidates every compiled trace, which is the reselection.
+            reselection.enabled = False
 
 
 def _epc(iseq, pc):
@@ -1665,7 +1665,7 @@ def _execute(iseq, frame, pc):
             backward = target < pc
             pc = target
             if backward:
-                _tick_retrace()
+                _tick_reselection()
                 jitdriver.can_enter_jit(iseq=iseq, pc=pc, frame=frame)
         elif opcode == insns.BRANCHIF:
             target = code[pc]
@@ -1674,7 +1674,7 @@ def _execute(iseq, frame, pc):
                 backward = target < pc
                 pc = target
                 if backward:
-                    _tick_retrace()
+                    _tick_reselection()
                     jitdriver.can_enter_jit(iseq=iseq, pc=pc, frame=frame)
         elif opcode == insns.BRANCHUNLESS:
             target = code[pc]
@@ -1683,7 +1683,7 @@ def _execute(iseq, frame, pc):
                 backward = target < pc
                 pc = target
                 if backward:
-                    _tick_retrace()
+                    _tick_reselection()
                     jitdriver.can_enter_jit(iseq=iseq, pc=pc, frame=frame)
         elif opcode == insns.CHECKMATCH:
             flag = code[pc]
