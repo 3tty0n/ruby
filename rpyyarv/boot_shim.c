@@ -616,6 +616,13 @@ rpyyarv_obj_alloc(uintptr_t klass, int *state)
     return (uintptr_t)r;
 }
 
+/* No rb_protect: dispatch.py only allocates classes it defined itself, which always kept Object's allocator. */
+uintptr_t
+rpyyarv_obj_alloc_fast(uintptr_t klass)
+{
+    return (uintptr_t)rb_obj_alloc((VALUE)klass);
+}
+
 static VALUE
 const_get_body(VALUE argp)
 {
@@ -854,6 +861,20 @@ rpyyarv_ary_new_capa(long capa, int *state)
     return (uintptr_t)r;
 }
 
+/* No rb_protect: interp.py checks 0 <= capa, and the only other raise here is NoMemoryError. */
+uintptr_t
+rpyyarv_ary_new_capa_fast(long capa)
+{
+    return (uintptr_t)rb_ary_new_capa(capa);
+}
+
+/* No rb_protect: the array is one _array_new_block just made, so it is neither frozen nor shared, and 0 <= idx < its capacity. */
+void
+rpyyarv_ary_store_fresh(uintptr_t ary, long idx, uintptr_t val)
+{
+    rb_ary_store((VALUE)ary, idx, (VALUE)val);
+}
+
 /* rb_ary_initialize's non-block half (array.c:1194): every element is the same VALUE, not a copy. */
 static VALUE
 ary_new_filled_body(VALUE argp)
@@ -880,6 +901,16 @@ rpyyarv_ary_new_filled(long len, uintptr_t val, int *state)
     VALUE r = rb_protect(ary_new_filled_body, (VALUE)&a, state);
     if (*state) return (uintptr_t)Qnil;
     return (uintptr_t)r;
+}
+
+/* No rb_protect: interp.py checks 0 <= len <= ARY_NEW_FILL_MAX, so nothing below raises but NoMemoryError. */
+uintptr_t
+rpyyarv_ary_new_filled_fast(long len, uintptr_t val)
+{
+    struct ary_store_args a;
+    a.val = (VALUE)val;
+    a.idx = len;
+    return (uintptr_t)ary_new_filled_body((VALUE)&a);
 }
 
 struct ary_cat_args {

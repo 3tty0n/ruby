@@ -128,13 +128,19 @@ def ary_new(values):
 
 
 @dont_look_inside
+def ary_store_fresh(ary, idx, val):
+    # rb_ary_store still, for the write barrier; only rb_protect is dropped.
+    boot.ary_store_fresh(ary, idx, val)
+
+
+@dont_look_inside
 def ary_new_capa(capa):
-    return boot.ary_new_capa(capa)
+    return boot.ary_new_capa_fast(capa)
 
 
 @dont_look_inside
 def ary_new_filled(n, val):
-    return boot.ary_new_filled(n, val)
+    return boot.ary_new_filled_fast(n, val)
 
 
 @dont_look_inside

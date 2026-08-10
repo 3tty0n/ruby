@@ -127,6 +127,7 @@ rb_define_class_ = _ext('rpyyarv_define_class',
 rb_class_superclass = _ext('rpyyarv_class_superclass', [VALUE, INTP], VALUE, reenters=True)
 rb_singleton_class = _ext('rpyyarv_singleton_class', [VALUE, INTP], VALUE, reenters=True)
 rb_obj_alloc = _ext('rpyyarv_obj_alloc', [VALUE, INTP], VALUE, reenters=True)
+rb_obj_alloc_fast = _ext('rpyyarv_obj_alloc_fast', [VALUE], VALUE, reenters=True)
 rb_const_get_ = _ext('rpyyarv_const_get', [VALUE, VALUE, INTP], VALUE, reenters=True)
 rb_const_set_ = _ext('rpyyarv_const_set', [VALUE, VALUE, VALUE, INTP],
                      lltype.Void, reenters=True)
@@ -153,6 +154,11 @@ rb_ary_resurrect = _ext('rpyyarv_ary_resurrect', [VALUE, INTP], VALUE, reenters=
 rb_ary_store_ = _ext('rpyyarv_ary_store', [VALUE, rffi.LONG, VALUE, INTP],
                      lltype.Void, reenters=True)
 rb_ary_new_capa = _ext('rpyyarv_ary_new_capa', [rffi.LONG, INTP], VALUE, reenters=True)
+rb_ary_store_fresh = _ext('rpyyarv_ary_store_fresh', [VALUE, rffi.LONG, VALUE],
+                          lltype.Void, reenters=True)
+rb_ary_new_capa_fast = _ext('rpyyarv_ary_new_capa_fast', [rffi.LONG], VALUE, reenters=True)
+rb_ary_new_filled_fast = _ext('rpyyarv_ary_new_filled_fast', [rffi.LONG, VALUE],
+                              VALUE, reenters=True)
 rb_ary_new_filled = _ext('rpyyarv_ary_new_filled', [rffi.LONG, VALUE, INTP],
                          VALUE, reenters=True)
 rb_ary_cat = _ext('rpyyarv_ary_cat', [VALUE, rffi.INT, VALUEP, INTP],
@@ -533,6 +539,20 @@ def ary_store(ary, idx, val):
         _failed('Array#[]=')
 
 
+def ary_store_fresh(ary, idx, val):
+    """No status cell: the shim call cannot raise, so there is nothing to report."""
+    rb_ary_store_fresh(_v(ary), rffi.cast(rffi.LONG, idx), _v(val))
+
+
+def ary_new_capa_fast(capa):
+    return rffi.cast(lltype.Signed, rb_ary_new_capa_fast(rffi.cast(rffi.LONG, capa)))
+
+
+def ary_new_filled_fast(n, val):
+    return rffi.cast(lltype.Signed,
+                     rb_ary_new_filled_fast(rffi.cast(rffi.LONG, n), _v(val)))
+
+
 def ary_new_capa(capa):
     state = _enter_status()
     v = rb_ary_new_capa(rffi.cast(rffi.LONG, capa), state)
@@ -694,6 +714,10 @@ def singleton_class(obj):
     if failed:
         _failed('singleton_class')
     return ret
+
+
+def obj_alloc_fast(klass):
+    return rffi.cast(lltype.Signed, rb_obj_alloc_fast(_v(klass)))
 
 
 def obj_alloc(klass):

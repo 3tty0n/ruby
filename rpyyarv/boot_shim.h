@@ -109,6 +109,7 @@ uintptr_t rpyyarv_define_class(uintptr_t cbase, uintptr_t id, uintptr_t super,
 uintptr_t rpyyarv_class_superclass(uintptr_t klass, int *state);
 uintptr_t rpyyarv_singleton_class(uintptr_t obj, int *state);
 uintptr_t rpyyarv_obj_alloc(uintptr_t klass, int *state);
+uintptr_t rpyyarv_obj_alloc_fast(uintptr_t klass);
 uintptr_t rpyyarv_const_get(uintptr_t klass, uintptr_t id, int *state);
 void rpyyarv_const_set(uintptr_t klass, uintptr_t id, uintptr_t val,
                        int *state);
@@ -137,6 +138,9 @@ uintptr_t rpyyarv_ary_resurrect(uintptr_t ary, int *state);
 void rpyyarv_ary_store(uintptr_t ary, long idx, uintptr_t val, int *state);
 uintptr_t rpyyarv_ary_new_capa(long capa, int *state);
 uintptr_t rpyyarv_ary_new_filled(long len, uintptr_t val, int *state);
+void rpyyarv_ary_store_fresh(uintptr_t ary, long idx, uintptr_t val);
+uintptr_t rpyyarv_ary_new_capa_fast(long capa);
+uintptr_t rpyyarv_ary_new_filled_fast(long len, uintptr_t val);
 /* Copies elems onto the machine stack first, as funcallv does. */
 void rpyyarv_ary_cat(uintptr_t ary, int n, const uintptr_t *elems, int *state);
 uintptr_t rpyyarv_range_new(uintptr_t low, uintptr_t high, int excl,
