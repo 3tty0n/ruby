@@ -13,3 +13,6 @@ rpyyarv-dump-jit
 pypy/
 awfy/
 *.md
+/ruby-bench/
+/yjit-bench/
+.bench-inventory.json

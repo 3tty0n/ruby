@@ -42,6 +42,7 @@ endif
 PROBE   := test/probe
 SHIM    := librpyyarv_boot.$(SOEXT)
 PYPY    ?= ./pypy
+RUBY_BENCH ?= $(CURDIR)/ruby-bench
 PYTHON  ?= python3
 PYTHONPATH ?= $(TOP)
 # The harness must not run on $(BUILD)/ruby: that is the system under test.
@@ -54,7 +55,7 @@ RUBY    ?= $(BUILD)/ruby
 GCLIMIT   ?= 16384
 GCTIMEOUT ?= 60
 
-.PHONY: all test microbench awfy gccheck build-interp build-jit link clean
+.PHONY: all test microbench awfy bench gccheck build-interp build-jit link clean
 
 link: $(SHIM)
 
@@ -81,6 +82,13 @@ microbench:
 # CRuby 4.0's Set.inherited hook needs before deltablue will load anywhere.
 awfy:
 	RPYYARV_BUILD=$(BUILD) AWFY_RUBYLIB=$(AWFY_RUBYLIB) $(RUBY_CMD) scripts/awfy.rb $(AWFYFLAGS)
+
+# Both suites through one driver; RUBY_BENCH points at the ruby-bench checkout.
+bench:
+	RPYYARV_BUILD=$(BUILD) AWFY_RUBYLIB=$(AWFY_RUBYLIB) RUBY_BENCH=$(RUBY_BENCH) $(RUBY_CMD) scripts/bench.rb $(BENCHFLAGS)
+
+$(RUBY_BENCH):
+	git clone --depth=1 https://github.com/ruby/ruby-bench $@
 
 # Compare stdout of both rpyyarv binaries against CRuby under a tight GC limit.
 gccheck:
