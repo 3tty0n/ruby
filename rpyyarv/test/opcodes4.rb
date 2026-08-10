@@ -56,6 +56,57 @@ puts mixed(2.5)
 puts mixed("s")
 puts mixed(nil)
 
+# Dense integer cases, the shape a CDHASH dispatch would take.
+def dense(n)
+  case n
+  when 0 then "zero"
+  when 1 then "one"
+  when 2 then "two"
+  when 3 then "three"
+  when 4 then "four"
+  when 5 then "five"
+  when 6 then "six"
+  when 7 then "seven"
+  else "out"
+  end
+end
+
+d = -1
+acc = ""
+while d < 9
+  acc = acc + dense(d) + ","
+  d = d + 1
+end
+puts acc
+
+# String cases in a loop, the shape json's read_value has.
+def chars(c)
+  case c
+  when "n" then 1
+  when "t" then 2
+  when "f" then 3
+  when '"' then 4
+  when "[" then 5
+  when "{" then 6
+  when "-", "0", "1", "2" then 7
+  else 0
+  end
+end
+
+src = "nt\"f[{-2x0"
+sum = 0
+k = 0
+while k < src.length
+  sum = sum + chars(src[k])
+  k = k + 1
+end
+puts sum
+
+# Keys no dispatch hash could answer for.
+puts dense(2.0)
+puts dense(nil)
+puts chars(:n)
+
 s = "frozen".freeze
 puts s
 puts s.frozen?
@@ -107,3 +158,13 @@ class NilClass
 end
 puts nil.nil?
 puts 2.nil?
+
+# A redefined Integer#=== every case above must go through.
+class Integer
+  def ===(other)
+    true
+  end
+end
+puts dense(99)
+puts dense(4)
+puts chars("t")
