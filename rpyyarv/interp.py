@@ -1,21 +1,21 @@
 import os
 
-import block as block_mod
-import boot
-import debug
-import dispatch
-import gcroots
-import helpers
-import insns
-import optable
-import rubycall
-import symbols
-import value
-from error import RPyYarvError, RubyException, UnsupportedOperation
-from frame import (Frame, PENDING_BREAK, PENDING_NEXT, PENDING_NONE,
+from rpyyarv import block as block_mod
+from rpyyarv import boot
+from rpyyarv import debug
+from rpyyarv import dispatch
+from rpyyarv import gcroots
+from rpyyarv import helpers
+from rpyyarv import insns
+from rpyyarv import optable
+from rpyyarv import rubycall
+from rpyyarv import symbols
+from rpyyarv import value
+from rpyyarv.error import RPyYarvError, RubyException, UnsupportedOperation
+from rpyyarv.frame import (Frame, PENDING_BREAK, PENDING_NEXT, PENDING_NONE,
                    PENDING_RAISE, PENDING_RETURN)
-from iseq import CATCH_ENSURE, CATCH_RESCUE, NO_BLOCK_ISEQ
-from rlib import (JitDriver, StackOverflow, always_inline, check_stack_overflow,
+from rpyyarv.iseq import CATCH_ENSURE, CATCH_RESCUE, NO_BLOCK_ISEQ
+from rpyyarv.rlib import (JitDriver, StackOverflow, always_inline, check_stack_overflow,
                   dont_look_inside, promote, set_user_param, unroll_safe)
 
 TO_S = symbols.intern('to_s')

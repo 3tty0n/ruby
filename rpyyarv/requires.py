@@ -2,17 +2,17 @@
 
 import os
 
-import boot
-import bootiseq
-import debug
-import gcroots
-import interp
-import loader
-import rubycall
-import symbols
-import value
-from error import RubyException
-from frame import Frame
+from rpyyarv import boot
+from rpyyarv import bootiseq
+from rpyyarv import debug
+from rpyyarv import gcroots
+from rpyyarv import interp
+from rpyyarv import loader
+from rpyyarv import rubycall
+from rpyyarv import symbols
+from rpyyarv import value
+from rpyyarv.error import RubyException
+from rpyyarv.frame import Frame
 
 COMPILE_FILE = 'compile_file'
 COMPILE_FILE_MID = symbols.intern(COMPILE_FILE)

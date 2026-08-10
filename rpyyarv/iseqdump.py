@@ -1,7 +1,7 @@
 """Read the text dump scripts/dump_iseq.rb writes into rawiseq objects; record and operand grammar is defined there."""
 
-import rawiseq
-from error import LoadError
+from rpyyarv import rawiseq
+from rpyyarv.error import LoadError
 
 FORMAT_VERSION = 1
 

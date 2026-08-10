@@ -2,13 +2,13 @@
 
 import os
 
-import boot
-import bootiseq
-import interp
-import loader
-import symbols
-import value
-from frame import Frame
+from rpyyarv import boot
+from rpyyarv import bootiseq
+from rpyyarv import interp
+from rpyyarv import loader
+from rpyyarv import symbols
+from rpyyarv import value
+from rpyyarv.frame import Frame
 
 COMPILE = symbols.intern('compile')
 

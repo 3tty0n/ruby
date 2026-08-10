@@ -1,6 +1,6 @@
 """W_ISeq.code is a flat list of ints; operands that aren't already ints go into type-split pools since `consts` holds raw VALUEs an int list can't hold."""
 
-import symbols
+from rpyyarv import symbols
 
 # A `send` whose call site has no block. Pool indices are >= 0.
 NO_BLOCK_ISEQ = -1

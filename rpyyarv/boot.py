@@ -4,8 +4,8 @@ import sys
 from rpython.rtyper.lltypesystem import lltype, rffi
 from rpython.translator.tool.cbuild import ExternalCompilationInfo
 
-import symbols
-from error import RubyException
+from rpyyarv import symbols
+from rpyyarv.error import RubyException
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _TOP = os.path.dirname(_HERE)

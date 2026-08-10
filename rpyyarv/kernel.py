@@ -2,8 +2,8 @@
 
 import os
 
-import symbols
-from methods import W_CFunc
+from rpyyarv import symbols
+from rpyyarv.methods import W_CFunc
 from objects.transparent import w_nil
 
 

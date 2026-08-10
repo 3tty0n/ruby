@@ -2,12 +2,12 @@
 
 import math
 
-import boot
-import dispatch
-import rubycall
-import symbols
-import value
-from rlib import INFINITY, LONG_BIT, NAN, ovfcheck, promote
+from rpyyarv import boot
+from rpyyarv import dispatch
+from rpyyarv import rubycall
+from rpyyarv import symbols
+from rpyyarv import value
+from rpyyarv.rlib import INFINITY, LONG_BIT, NAN, ovfcheck, promote
 
 PLUS = symbols.intern('+')
 MINUS = symbols.intern('-')

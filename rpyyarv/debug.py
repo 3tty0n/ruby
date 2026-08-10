@@ -13,13 +13,13 @@ RPYYARV_DEBUG names the channels to turn on, comma separated:
 
 import os
 
-import boot
-import insns
-import optable
-import symbols
-import value
-from iseq import NO_BLOCK_ISEQ
-from rlib import dont_look_inside, oswrite
+from rpyyarv import boot
+from rpyyarv import insns
+from rpyyarv import optable
+from rpyyarv import symbols
+from rpyyarv import value
+from rpyyarv.iseq import NO_BLOCK_ISEQ
+from rpyyarv.rlib import dont_look_inside, oswrite
 
 INSN = 1
 STACK = 2

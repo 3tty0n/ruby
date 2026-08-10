@@ -1,11 +1,11 @@
 """Lookup is elidable in (klass, mid, version) and a send promotes class_of(recv), so dispatch folds to one guard_value."""
 
-import boot
-import gcroots
-import rubycall
-import value
-from error import RubyException, UnsupportedOperation
-from rlib import (elidable, dont_look_inside, intmask, promote, r_uint,
+from rpyyarv import boot
+from rpyyarv import gcroots
+from rpyyarv import rubycall
+from rpyyarv import value
+from rpyyarv.error import RubyException, UnsupportedOperation
+from rpyyarv.rlib import (elidable, dont_look_inside, intmask, promote, r_uint,
                   raw_word, set_raw_word)
 
 # Cycle guard: a superclass chain longer than this is a corrupt map.

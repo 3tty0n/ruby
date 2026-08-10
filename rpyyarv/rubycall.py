@@ -1,10 +1,10 @@
 """The one door from RPython into CRuby's method dispatch."""
 
-import boot
-import debug
-import symbols
-import value
-from rlib import dont_look_inside, elidable
+from rpyyarv import boot
+from rpyyarv import debug
+from rpyyarv import symbols
+from rpyyarv import value
+from rpyyarv.rlib import dont_look_inside, elidable
 
 
 class _State(object):

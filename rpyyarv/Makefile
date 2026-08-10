@@ -41,6 +41,7 @@ PROBE   := test/probe
 SHIM    := librpyyarv_boot.$(SOEXT)
 PYPY    ?= ./pypy
 PYTHON  ?= python3
+PYTHONPATH ?= $(TOP)
 # The harness must not run on $(BUILD)/ruby: that is the system under test.
 RUBY_CMD ?= ruby
 RPYTHON ?= python2 $(PYPY)/rpython/bin/rpython
@@ -133,11 +134,11 @@ gccheck:
 	 [ $$failed -eq 0 ] || { echo "GCCHECK FAILED"; exit 1; }
 
 build-interp: | $(PYPY)
-	RPYYARV_BUILD=$(BUILD) $(RPYTHON) --output=rpyyarv targetrpyyarv.py
+	RPYYARV_BUILD=$(BUILD) PYTHONPATH=$(PYTHONPATH) $(RPYTHON) --output=rpyyarv targetrpyyarv.py
 	$(call fix_install_name,rpyyarv)
 
 build-jit: | $(PYPY)
-	RPYYARV_BUILD=$(BUILD) $(RPYTHON) -Ojit --output=rpyyarv-jit targetrpyyarv.py
+	RPYYARV_BUILD=$(BUILD) PYTHONPATH=$(PYTHONPATH) $(RPYTHON) -Ojit --output=rpyyarv-jit targetrpyyarv.py
 	$(call fix_install_name,rpyyarv-jit)
 
 $(PYPY):

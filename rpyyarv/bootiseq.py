@@ -2,11 +2,11 @@
 
 # Only this module and boot.py import rpython; the rest stays importable on plain CPython.
 
-import boot
-import rawiseq
-import to_a_layout
-from error import LoadError
-from to_a_layout import (I_BODY, I_CATCH, I_LABEL, I_LOCALS, I_MAGIC, I_MISC,
+from rpyyarv import boot
+from rpyyarv import rawiseq
+from rpyyarv import to_a_layout
+from rpyyarv.error import LoadError
+from rpyyarv.to_a_layout import (I_BODY, I_CATCH, I_LABEL, I_LOCALS, I_MAGIC, I_MISC,
                          I_PARAMS, I_TYPE)
 
 EVENT_PREFIX = 'RUBY_EVENT_'

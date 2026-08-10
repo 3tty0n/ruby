@@ -1,8 +1,8 @@
 """CRuby's conservative stack scan misses frame stacks/locals and const pools since they're RPython objects; this keeps them enumerable for the shim's mark hook."""
 
-import boot
-import value
-from rlib import dont_look_inside
+from rpyyarv import boot
+from rpyyarv import value
+from rpyyarv.rlib import dont_look_inside
 
 
 class Registry(object):

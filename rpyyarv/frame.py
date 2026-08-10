@@ -1,5 +1,5 @@
-import value
-from rlib import hint
+from rpyyarv import value
+from rpyyarv.rlib import hint
 
 # Which throw a rescue/ensure ISeq runs under, so its trailing `throw 0` can continue it (vm_insnhelper.c:1733).
 PENDING_NONE = 0

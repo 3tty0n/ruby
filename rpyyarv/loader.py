@@ -1,17 +1,17 @@
 """Load raw ISeqs into W_ISeqs, transforming operands by their insns.def type."""
 
-import boot
-import dispatch
-import gcroots
-import insns
-import iseqdump
-import optable
-import rawiseq
-import rubycall
-import symbols
-import value
-from error import LoadError, UnsupportedOperation
-from iseq import (CATCH_ENSURE, CATCH_RESCUE, NO_BLOCK_ISEQ, W_Catch,
+from rpyyarv import boot
+from rpyyarv import dispatch
+from rpyyarv import gcroots
+from rpyyarv import insns
+from rpyyarv import iseqdump
+from rpyyarv import optable
+from rpyyarv import rawiseq
+from rpyyarv import rubycall
+from rpyyarv import symbols
+from rpyyarv import value
+from rpyyarv.error import LoadError, UnsupportedOperation
+from rpyyarv.iseq import (CATCH_ENSURE, CATCH_RESCUE, NO_BLOCK_ISEQ, W_Catch,
                   W_CallInfo, W_ISeq)
 
 

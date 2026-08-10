@@ -2,20 +2,20 @@
 
 import os
 
-import boot
-import bootiseq
-import debug
-import dispatch
-import gcroots
-import helpers
-import interp
-import loader
-import prelude
-import requires
-import rubycall
-import value
-from error import RPyYarvError, RubyException
-from rlib import StackOverflow, check_stack_overflow, set_stack_length
+from rpyyarv import boot
+from rpyyarv import bootiseq
+from rpyyarv import debug
+from rpyyarv import dispatch
+from rpyyarv import gcroots
+from rpyyarv import helpers
+from rpyyarv import interp
+from rpyyarv import loader
+from rpyyarv import prelude
+from rpyyarv import requires
+from rpyyarv import rubycall
+from rpyyarv import value
+from rpyyarv.error import RPyYarvError, RubyException
+from rpyyarv.rlib import StackOverflow, check_stack_overflow, set_stack_length
 
 # rpy_stacktoobig starts at MAX_STACK_SIZE, 768 KB of the 8 MB main stack; libruby shares that stack and checks itself, so take half, not all.
 STACK_LIMIT = 4 * 1024 * 1024

@@ -1,6 +1,6 @@
 """VALUEs as plain signed machine words: FIX2LONG is an arithmetic right shift, which only a signed type gets right; entry_point checks the tags below against rpyyarv_special_consts at startup."""
 
-from rlib import (LONG_BIT, bits2float, elidable, float2bits, intmask,
+from rpyyarv.rlib import (LONG_BIT, bits2float, elidable, float2bits, intmask,
                   r_uint, raw_word, set_raw_word)
 
 Q_FALSE = 0x00

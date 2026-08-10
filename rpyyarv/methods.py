@@ -1,5 +1,5 @@
-import symbols
-from error import UnsupportedOperation
+from rpyyarv import symbols
+from rpyyarv.error import UnsupportedOperation
 from objects.base import W_Root
 
 

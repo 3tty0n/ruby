@@ -1,8 +1,8 @@
 import os
 
-import debug
-import interp
-import loader
+from rpyyarv import debug
+from rpyyarv import interp
+from rpyyarv import loader
 
 
 def read_file(path):
