@@ -167,8 +167,14 @@ def record_class(klass, superklass):
     gcroots.register_class(klass)
 
 
-def is_known_class(klass):
+@elidable
+def _is_known_class(klass, version):
     return klass in registry.supers
+
+
+def is_known_class(klass):
+    """Elidable on the method version, so a promoted klass folds the dict lookup out of the trace."""
+    return _is_known_class(klass, registry.version)
 
 
 def _walk(klass, mid):
@@ -283,7 +289,8 @@ def define_class(cbase, mid, super_v):
 
 @dont_look_inside
 def alloc(klass):
-    return boot.obj_alloc(klass)
+    # The unprotected shim call: every caller checked is_known_class first.
+    return boot.obj_alloc_fast(klass)
 
 
 class ConstEntry(object):

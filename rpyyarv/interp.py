@@ -95,7 +95,7 @@ def invoke(frame, w_ci, w_block=None):
         # rb_f_block_given_p reads the *caller's* frame (vm.c:1862); through rb_funcallv it would find a CRuby one.
         _drop(frame, recv_at)
         return value.newbool(frame.block is not None)
-    if w_ci.mid == NEW and helpers.ary_new_pristine(recv):
+    if w_ci.mid == NEW and helpers.ary_new_pristine(promote(recv)):
         if w_block is None:
             v = _array_new(frame, recv_at, argc)
         else:
@@ -201,7 +201,7 @@ def _array_new_block(frame, recv_at, argc, w_block):
     while i < n:
         v = call_block(w_block, [value.int2fix(i)])
         # rb_ary_store, so a block that raises leaves the length CRuby would.
-        rubycall.ary_store(ary, i, v)
+        rubycall.ary_store_fresh(ary, i, v)
         i += 1
     _drop(frame, recv_at)
     return ary
@@ -1226,9 +1226,10 @@ def _defineclass(mid, w_body, cbase, super_v):
     return ret
 
 
-@dont_look_inside
 def _opt_new_alloc(klass):
     """A fresh instance, or 0 for the miss branch; only classes RPyYARV made are known to have kept Class#new."""
+    # Promoted, so both tests below fold to a constant and only the allocation is left in the trace.
+    klass = promote(klass)
     if not dispatch.is_known_class(klass):
         return 0
     if helpers.ary_new_pristine(klass):
