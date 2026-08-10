@@ -204,6 +204,7 @@ rb_hash_delete = _ext('rpyyarv_hash_delete', [VALUE, VALUE, INTP],
 rb_hash_keys = _ext('rpyyarv_hash_keys', [VALUE, INTP], VALUE, reenters=True)
 rb_to_hash_type = _ext('rpyyarv_to_hash_type', [VALUE, INTP], VALUE, reenters=True)
 rb_splat_array = _ext('rpyyarv_splat_array', [VALUE, rffi.INT, INTP], VALUE, reenters=True)
+rb_concat_array = _ext('rpyyarv_concat_array', [VALUE, VALUE, rffi.INT, INTP], VALUE, reenters=True)
 rb_vm_core = _ext('rpyyarv_vm_core', [], VALUE, reenters=True)
 rb_arity_error = _ext('rpyyarv_arity_error',
                       [rffi.INT, rffi.INT, rffi.INT, INTP], VALUE,
@@ -1016,6 +1017,17 @@ def to_hash_type(v):
 def splat_array(ary, flag):
     state = _enter_status()
     v = rb_splat_array(_v(ary), rffi.cast(rffi.INT, flag), state)
+    failed = _leave_status(state)
+    ret = rffi.cast(lltype.Signed, v)
+    if failed:
+        _failed('to_a')
+    return ret
+
+
+def concat_array(ary1, ary2, to):
+    state = _enter_status()
+    v = rb_concat_array(_v(ary1), _v(ary2), rffi.cast(rffi.INT, 1 if to else 0),
+                        state)
     failed = _leave_status(state)
     ret = rffi.cast(lltype.Signed, v)
     if failed:

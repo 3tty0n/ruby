@@ -173,7 +173,8 @@ class Loader(object):
     def stub(self, raw, reason):
         self.reasons.append("'%s': %s" % (raw.name, reason))
         return W_ISeq(raw.name, [insns.LEAVE], [], [], [], raw.nlocals,
-                      raw.stack_max, simple_params=False, unsupported=reason)
+                      raw.stack_max, simple_params=False, unsupported=reason,
+                      path=self.program.path)
 
     def build_iseq(self, raw, parents):
         for entry in raw.catches:
@@ -250,7 +251,7 @@ class Loader(object):
                         returns, returns and raw.type in self.RETURN_TARGETS,
                         [dispatch.new_const_site() for _ in pool.paths],
                         kw_table, kw_defaults, raw.kw_required, kw_start,
-                        raw.kw_bits, raw.kwrest)
+                        raw.kw_bits, raw.kwrest, self.program.path)
         gcroots.register_consts(consts)
         return w_iseq
 
@@ -423,13 +424,11 @@ class Loader(object):
                 raise UnsupportedOperation(
                     "putspecialobject %d in '%s' is not supported"
                     % (kind, raw.name))
-        elif op == insns.SEND or op == insns.OPT_SEND_WITHOUT_BLOCK:
-            # definemethod writes straight into the registry, so CRuby's visibility scope never reaches the copy RPyYARV dispatches on.
-            if ops[0].kind == rawiseq.OP_CALL and \
-                    ops[0].strval == 'module_function':
+        elif op == insns.OPT_DUPARRAY_SEND:
+            if self.int_of(ops[2], op, raw, 'argc') != 1:
                 raise UnsupportedOperation(
-                    "'%s' calls module_function, which RPyYARV does not "
-                    "support" % raw.name)
+                    "opt_duparray_send in '%s' takes an argument count "
+                    "RPyYARV does not support" % raw.name)
         elif op == insns.OPT_NEWARRAY_SEND:
             meth = self.int_of(ops[1], op, raw, 'method')
             argc = -1
@@ -507,7 +506,13 @@ class Loader(object):
                             % (insns.NAMES[op], raw.name))
         ids = []
         for item in operand.items:
-            ids.append(symbols.intern(self.sym_of(item, op, raw)))
+            name = self.sym_of(item, op, raw)
+            if name == 'Fiber':
+                # Fiber.new stores its block and resume switches machine stacks, neither of which RPyYARV's own frames survive.
+                raise UnsupportedOperation(
+                    "'%s' names Fiber, which RPyYARV does not support"
+                    % raw.name)
+            ids.append(symbols.intern(name))
         return pool.add_path(ids)
 
     def literal(self, operand, op, raw, pool):
@@ -594,17 +599,20 @@ class Loader(object):
                   and (flags & ~optable.SIMPLE_CALL_FLAGS) == 0)
         kw_names = []
         kw_splat = (flags & optable.CALL_FLAG_KW_SPLAT) != 0
+        splat = (flags & optable.CALL_FLAG_ARGS_SPLAT) != 0
         blockarg = (flags & optable.CALL_FLAG_ARGS_BLOCKARG) != 0
         if not simple:
             # Refused here, not at the send: an ISeq holding a call site the interpreter cannot make is one it cannot finish running.
-            if (len(operand.kw_names) == 0 and not kw_splat) or \
+            if (len(operand.kw_names) == 0 and not kw_splat and not splat) or \
                     (len(operand.kw_names) > 0 and kw_splat) or \
-                    (flags & ~optable.KWARG_CALL_FLAGS) != 0:
+                    (flags & ~optable.SPLAT_CALL_FLAGS) != 0:
                 raise UnsupportedOperation(
                     "the call to '%s' passes %s, which RPyYARV does not "
                     "support" % (operand.strval, self.call_flag_name(operand)))
             for name in operand.kw_names:
                 kw_names.append(symbols.intern(name))
+        if splat and op == insns.INVOKESUPER:
+            raise UnsupportedOperation('super with a *splat is not supported')
         if blockarg and (flags & optable.CALL_FLAG_SUPER) != 0:
             raise UnsupportedOperation('super with a block is not supported')
         # iseq.c:3537 reports orig_argc without them; on the stack they are the topmost arguments. A **splat's one Hash is already counted.
@@ -612,7 +620,7 @@ class Loader(object):
                           operand.intval + len(kw_names),
                           simple, (flags & optable.CALL_FLAG_FCALL) != 0,
                           (flags & optable.CALL_FLAG_SUPER) != 0, blockarg,
-                          [m for m in kw_names], kw_splat)
+                          [m for m in kw_names], kw_splat, splat)
 
     def call_flag_name(self, operand):
         for flag, name in optable.CALL_FLAG_NAMES:

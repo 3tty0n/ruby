@@ -19,6 +19,20 @@ try:
             rstack._stack_set_length_fraction(float(nbytes) / float(cur))
         return rstack._stack_get_length()
 
+    from rpython.rtyper.lltypesystem.lloperation import llop
+
+    def on_foreign_stack():
+        """True when the machine stack is not the one RPython measures against; CRuby runs a Fiber on its own, and the depth check reads any address on it as an overflow."""
+        current = llop.stack_current(lltype.Signed)
+        return r_uint(rstack._stack_get_end() - current) \
+            > r_uint(rstack._stack_get_length())
+
+    def unchecked_stack_start():
+        rstack._stack_criticalcode_start()
+
+    def unchecked_stack_stop():
+        rstack._stack_criticalcode_stop()
+
     _WORDP = rffi.CArrayPtr(rffi.LONG)
     _SHORTP = rffi.CArrayPtr(rffi.SHORT)
 
@@ -72,6 +86,15 @@ except ImportError:
     StackOverflow = RuntimeError
 
     def check_stack_overflow():
+        pass
+
+    def on_foreign_stack():
+        return False
+
+    def unchecked_stack_start():
+        pass
+
+    def unchecked_stack_stop():
         pass
 
     def set_stack_length(nbytes):

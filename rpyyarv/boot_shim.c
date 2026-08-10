@@ -1475,6 +1475,13 @@ rpyyarv_hash_keys(uintptr_t hash, int *state)
     return (uintptr_t)r;
 }
 
+/* rb_check_to_array is internal; this is the same to_a conversion. */
+static VALUE
+check_to_array(VALUE v)
+{
+    return rb_check_convert_type(v, T_ARRAY, "Array", "to_a");
+}
+
 struct splat_args {
     VALUE ary;
     int   flag;
@@ -1487,7 +1494,8 @@ splat_array_body(VALUE argp)
     struct splat_args *p = (struct splat_args *)argp;
     VALUE tmp;
     if (NIL_P(p->ary)) return rb_ary_new();
-    tmp = rb_check_array_type(p->ary);
+    /* to_a, as rb_check_to_array does; to_ary would leave a Range as [range]. */
+    tmp = check_to_array(p->ary);
     if (NIL_P(tmp)) return rb_ary_new3(1, p->ary);
     if (p->flag) return rb_ary_dup(tmp);
     return tmp;
@@ -1501,6 +1509,44 @@ rpyyarv_splat_array(uintptr_t ary, int flag, int *state)
     a.flag = flag;
     *state = 0;
     VALUE r = rb_protect(splat_array_body, (VALUE)&a, state);
+    if (*state) return (uintptr_t)Qnil;
+    return (uintptr_t)r;
+}
+
+struct concat_args {
+    VALUE ary1, ary2;
+    int   to;
+};
+
+/* vm_concat_array and vm_concat_to_array (vm_insnhelper.c:5692). */
+static VALUE
+concat_array_body(VALUE argp)
+{
+    struct concat_args *p = (struct concat_args *)argp;
+    VALUE tmp1, tmp2;
+    if (p->to) {
+        if (NIL_P(p->ary2)) return p->ary1;
+        tmp2 = check_to_array(p->ary2);
+        if (NIL_P(tmp2)) return rb_ary_push(p->ary1, p->ary2);
+        return rb_ary_concat(p->ary1, tmp2);
+    }
+    tmp1 = check_to_array(p->ary1);
+    tmp2 = check_to_array(p->ary2);
+    if (NIL_P(tmp1)) tmp1 = rb_ary_new3(1, p->ary1);
+    if (tmp1 == p->ary1) tmp1 = rb_ary_dup(p->ary1);
+    if (NIL_P(tmp2)) return rb_ary_push(tmp1, p->ary2);
+    return rb_ary_concat(tmp1, tmp2);
+}
+
+uintptr_t
+rpyyarv_concat_array(uintptr_t ary1, uintptr_t ary2, int to, int *state)
+{
+    struct concat_args a;
+    a.ary1 = (VALUE)ary1;
+    a.ary2 = (VALUE)ary2;
+    a.to = to;
+    *state = 0;
+    VALUE r = rb_protect(concat_array_body, (VALUE)&a, state);
     if (*state) return (uintptr_t)Qnil;
     return (uintptr_t)r;
 }

@@ -26,6 +26,11 @@ EMIT = {
     'newhash': [0],
     'duphash': [0],
     'splatarray': [0],      # the flag is a Qtrue/Qfalse VALUE operand
+    'pushtoarray': [0],
+    'concatarray': [],
+    'concattoarray': [],
+    'opt_regexpmatch2': [],  # CALL_DATA dropped: the fallback is a =~ send
+    'opt_duparray_send': [0, 1, 2],
     'opt_and': [],          # CALL_DATA dropped
     'opt_or': [],
     'newrange': [0],
@@ -145,6 +150,11 @@ SIMPLE_CALL_FLAGS = (CALL_FLAG_FCALL | CALL_FLAG_VCALL |
 # **splat, whose one Hash is the topmost argument (MUT only says it is fresh).
 KWARG_CALL_FLAGS = (SIMPLE_CALL_FLAGS | CALL_FLAG_KWARG |
                     CALL_FLAG_KW_SPLAT | CALL_FLAG_KW_SPLAT_MUT)
+
+# ...plus a *splat, whose Array is the last positional; the compiler pushes any
+# argument after it into that Array, and MUT only says the Array is fresh.
+SPLAT_CALL_FLAGS = (KWARG_CALL_FLAGS | CALL_FLAG_ARGS_SPLAT |
+                    CALL_FLAG_ARGS_SPLAT_MUT)
 
 # vm_core.h VM_KW_SPECIFIED_BITS_MAX: past this the kwbits local is a Hash.
 KW_SPECIFIED_BITS_MAX = 31

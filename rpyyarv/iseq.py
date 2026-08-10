@@ -34,7 +34,7 @@ class W_ISeq(object):
                           'post_num', 'unsupported', 'autosplat',
                           'has_return_throw', 'catches_return',
                           'kw_table[*]', 'kw_defaults[*]', 'kw_required',
-                          'kw_start', 'kw_bits', 'kwrest']
+                          'kw_start', 'kw_bits', 'kwrest', 'path']
 
     def __init__(self, name, code, consts, iseqs, callinfos, nlocals,
                  stack_max, nparams=0, simple_params=True, catches=None,
@@ -42,7 +42,9 @@ class W_ISeq(object):
                  post_num=0, unsupported='', autosplat=False,
                  has_return_throw=False, catches_return=False,
                  path_sites=None, kw_table=None, kw_defaults=None,
-                 kw_required=0, kw_start=-1, kw_bits=-1, kwrest=-1):
+                 kw_required=0, kw_start=-1, kw_bits=-1, kwrest=-1, path=''):
+        # The file this ISeq was compiled from; require_relative in a method body resolves against it, since no CRuby frame carries it.
+        self.path = path
         self.name = name
         self.code = code
         # VALUEs built at load time; gcroots keeps them reachable.
@@ -93,10 +95,12 @@ class W_ISeq(object):
 
 class W_CallInfo(object):
     _immutable_fields_ = ['mid', 'argc', 'simple', 'fcall', 'is_super',
-                          'blockarg', 'kw_names[*]', 'kw_splat']
+                          'blockarg', 'kw_names[*]', 'kw_splat', 'splat']
 
     def __init__(self, mid, argc, simple=True, fcall=True, is_super=False,
-                 blockarg=False, kw_names=None, kw_splat=False):
+                 blockarg=False, kw_names=None, kw_splat=False, splat=False):
+        # VM_CALL_ARGS_SPLAT: the last positional is an Array to spread there.
+        self.splat = splat
         # VM_CALL_KWARG: the last len(kw_names) of the argc values on the stack are keyword values, named here in push order.
         self.kw_names = kw_names if kw_names is not None else []
         # VM_CALL_KW_SPLAT: instead, the topmost argument is a Hash of them.

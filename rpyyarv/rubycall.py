@@ -42,6 +42,15 @@ class RequireHook(object):
         return NOT_HANDLED
 
 
+class _Relative(object):
+    """The file a require_relative resolves against, stamped by the send; load.c reads a CRuby frame for this and RPyYARV pushes none."""
+    def __init__(self):
+        self.path = ''
+
+
+relative = _Relative()
+
+
 class _Hooks(object):
     # A field, not a module global: RPython freezes module globals.
     def __init__(self):
@@ -215,6 +224,11 @@ def to_hash_type(v):
 @dont_look_inside
 def splat_array(ary, flag):
     return boot.splat_array(ary, 1 if flag else 0)
+
+
+@dont_look_inside
+def concat_array(ary1, ary2, to):
+    return boot.concat_array(ary1, ary2, to)
 
 
 @dont_look_inside

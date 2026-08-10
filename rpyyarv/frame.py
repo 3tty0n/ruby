@@ -16,6 +16,9 @@ class Frame(object):
     # VM_FRAME_FLAG_MODIFIED_BLOCK_PARAM (insns.def:111); left to the rtyper's zero-init so the common no-block-param call pays no store.
     block_param_set = False
 
+    # A module body that ran `module_function` with no arguments; every def after it becomes private plus a singleton method (vm_method.c rb_mod_modfunc).
+    module_func = False
+
     # Set on the way out of execute(); a `return` whose target frame is already gone is the orphaned Proc vm_throw_start answers with a LocalJumpError.
     dead = False
 

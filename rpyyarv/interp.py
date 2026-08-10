@@ -16,7 +16,8 @@ from rpyyarv.frame import (Frame, PENDING_BREAK, PENDING_NEXT, PENDING_NONE,
                    PENDING_RAISE, PENDING_RETURN)
 from rpyyarv.iseq import CATCH_ENSURE, CATCH_RESCUE, NO_BLOCK_ISEQ
 from rpyyarv.rlib import (JitDriver, StackOverflow, always_inline, check_stack_overflow,
-                  dont_look_inside, promote, set_user_param, unroll_safe)
+                  dont_look_inside, on_foreign_stack, promote, set_user_param,
+                  unchecked_stack_start, unchecked_stack_stop, unroll_safe)
 
 TO_S = symbols.intern('to_s')
 DUP = symbols.intern('dup')
@@ -68,6 +69,9 @@ def define_method(frame, mid, w_iseq):
     if node is None:
         dispatch.define(value.core_class(value.C_OBJECT), mid, w_iseq, True,
                         0, _cref_of(frame))
+    elif frame.module_func:
+        dispatch.define(node.klass, mid, w_iseq, True, node.klass, node)
+        dispatch.define_singleton(node.klass, mid, w_iseq, node.klass, node)
     else:
         dispatch.define(node.klass, mid, w_iseq, False, node.klass, node)
 
@@ -87,13 +91,16 @@ def invoke(frame, w_ci, w_block=None):
     mid = w_ci.mid
     argc = w_ci.argc
     fcall = w_ci.fcall
+    if mid == rubycall.REQUIRE_RELATIVE:
+        # Green, so this store is only in the trace of a site that really is one.
+        rubycall.relative.path = frame.w_iseq.path
     recv_at = frame.sp - argc - 1
     if recv_at < 0:
         raise UnsupportedOperation(
             "call to '%s' with %d argument(s) underflows the stack"
             % (symbols.name_of(mid), argc))
     if not w_ci.simple:
-        if len(w_ci.kw_names) == 0 and not w_ci.kw_splat:
+        if len(w_ci.kw_names) == 0 and not w_ci.kw_splat and not w_ci.splat:
             raise UnsupportedOperation(
                 "call to '%s' passes arguments RPyYARV does not support"
                 % symbols.name_of(mid))
@@ -166,6 +173,8 @@ def invoke(frame, w_ci, w_block=None):
             and recv in blocks.by_proc:
         # A Proc RPyYARV made: run its block here instead of out to CRuby and back through the block callback.
         return _block_send(frame, mid, recv_at, argc, blocks.by_proc[recv])
+    if mid == MODULE_FUNCTION and fcall and _in_body_of(frame, recv):
+        return _module_function(frame, recv, recv_at, argc)
     if mid == CORE_ALIAS or mid == CORE_UNDEF:
         return _core_method(frame, mid, recv, recv_at, argc)
     if vm_core.value != 0 and recv == vm_core.value \
@@ -275,6 +284,8 @@ def _is_attr_mid(mid):
 
 SEND = symbols.intern('send')
 SEND2 = symbols.intern('__send__')
+# opt_regexpmatch2 has no fast path here: it falls straight through to this send, which is where CRuby sets $~ for the getspecial that follows.
+MATCH = symbols.intern('=~')
 
 
 class _SendOwners(object):
@@ -291,9 +302,13 @@ send_owners = _SendOwners()
 
 
 def _send_target(frame, klass, mid, argc, recv_at):
-    """vm_call_opt_send: the method a `send` names, or NO_MID when this is not a pristine send."""
     if argc < 1:
         return rubycall.NO_MID
+    return _send_target_of(klass, mid, frame.stack[recv_at + 1])
+
+
+def _send_target_of(klass, mid, name):
+    """vm_call_opt_send: the method a `send` names, or NO_MID when this is not a pristine send."""
     if mid == SEND:
         if not helpers.kernel_send_pristine():
             return rubycall.NO_MID
@@ -306,7 +321,7 @@ def _send_target(frame, klass, mid, argc, recv_at):
         return rubycall.NO_MID
     if dispatch.lookup(klass, mid) is not None:
         return rubycall.NO_MID
-    return _name_mid(frame.stack[recv_at + 1])
+    return _name_mid(name)
 
 
 @dont_look_inside
@@ -433,6 +448,8 @@ def _kw_invoke(frame, w_ci, recv_at, argc, w_block, mid, fcall):
     """A send with literal keywords (VM_CALL_KWARG), whose values are the topmost arguments named by w_ci.kw_names, or with a **splat (VM_CALL_KW_SPLAT), whose one Hash is the topmost argument."""
     if w_ci.kw_splat:
         _kw_splat_hash(frame, recv_at + argc)
+    if w_ci.splat:
+        return _splat_invoke(frame, w_ci, recv_at, argc, w_block, mid, fcall)
     rubycall.gc_stress_point()
     recv = frame.stack[recv_at]
     klass = promote(value.class_of(recv))
@@ -519,6 +536,167 @@ def _kw_invoke(frame, w_ci, recv_at, argc, w_block, mid, fcall):
     else:
         ret = rubycall.call(recv, mid, args, public_only)
     _check_block_error()
+    return ret
+
+
+@dont_look_inside
+def _ary_len(v):
+    if value.is_immediate(v) or not boot.is_array(v):
+        raise UnsupportedOperation('a *splat argument is not an Array')
+    return boot.ary_len(v)
+
+
+@dont_look_inside
+def _ary_entry(ary, i):
+    return boot.ary_entry(ary, i)
+
+
+@unroll_safe
+def _splat_args(frame, at, npos, trailing):
+    """The arguments of a *splat call as a list: the Array is the last positional (the compiler pushed anything after it into the Array itself), and it stays on the frame's stack, which is what keeps its elements marked."""
+    # Restated so the codewriter sees every stack index as non-negative.
+    assert at >= 0
+    args = []
+    i = 0
+    while i < npos - 1:
+        j = at + i
+        assert j >= 0
+        args.append(frame.stack[j])
+        i += 1
+    splat_at = at + npos - 1
+    assert splat_at >= 0
+    ary = frame.stack[splat_at]
+    # Promoted: the expansion's length is what makes args a fixed-size list the trace can keep virtual.
+    n = promote(_ary_len(ary))
+    i = 0
+    while i < n:
+        args.append(_ary_entry(ary, i))
+        i += 1
+    i = 0
+    while i < trailing:
+        j = at + npos + i
+        assert j >= 0
+        args.append(frame.stack[j])
+        i += 1
+    return args
+
+
+@unroll_safe
+def _splat_invoke(frame, w_ci, recv_at, argc, w_block, mid, fcall):
+    """A call site with a *splat, whose expansion is a list: it may be longer than the stack the compiler sized this frame for."""
+    kw_names = w_ci.kw_names
+    nkw = len(kw_names)
+    trailing = 1 if w_ci.kw_splat else nkw
+    args = _splat_args(frame, recv_at + 1, argc - trailing, trailing)
+    rubycall.gc_stress_point()
+    recv = frame.stack[recv_at]
+    klass = promote(value.class_of(recv))
+    while mid == SEND or mid == SEND2:
+        if len(args) - trailing < 1:
+            break
+        target = _send_target_of(klass, mid, args[0])
+        if target == rubycall.NO_MID:
+            break
+        args = args[1:]
+        mid = target
+        fcall = True
+    entry = dispatch.lookup(klass, mid)
+    if entry is not None and (fcall or not entry.private):
+        if entry.kind != dispatch.KIND_ISEQ:
+            return _attr_send_args(frame, entry, recv, recv_at, args)
+        if w_block is None or w_ci.blockarg:
+            return _enter_args(frame, entry, recv, recv_at, args, mid,
+                               w_block, kw_names, w_ci.kw_splat)
+        try:
+            return _enter_args(frame, entry, recv, recv_at, args, mid,
+                               w_block, kw_names, w_ci.kw_splat)
+        except block_mod.BlockBreak, e:
+            if e.w_block is not w_block:
+                raise
+            return e.value
+    if proxy.value != 0 and recv == proxy.value:
+        _drop(frame, recv_at)
+        return _block_send_args(mid, frame.block, args, kw_names,
+                                w_ci.kw_splat)
+    if len(blocks.by_proc) > 0 and _is_proxy_call(mid) \
+            and recv in blocks.by_proc:
+        w_proc = blocks.by_proc[recv]
+        _drop(frame, recv_at)
+        return _block_send_args(mid, w_proc, args, kw_names, w_ci.kw_splat)
+    # Built while the arguments are still on the marked stack, as _kw_invoke does.
+    pass_kw = w_ci.kw_splat or nkw > 0
+    if w_ci.kw_splat:
+        # `**{}` compiles to a putnil, which stands for no keywords at all.
+        if len(args) > 0 and args[len(args) - 1] == value.Q_NIL:
+            args.pop()
+            pass_kw = False
+    elif nkw > 0:
+        rubycall.rid(mid)
+        args = _kw_to_positional(args, kw_names)
+    _drop(frame, recv_at)
+    if w_block is not None:
+        if w_ci.blockarg:
+            return _call_with_block(recv, mid, args, w_block, pass_kw)
+        try:
+            return _call_with_block(recv, mid, args, w_block, pass_kw)
+        except block_mod.BlockBreak, e:
+            if e.w_block is not w_block:
+                raise
+            return e.value
+    public_only = entry is not None and not fcall
+    if pass_kw:
+        ret = rubycall.call_kw(recv, mid, args, public_only)
+    else:
+        ret = rubycall.call(recv, mid, args, public_only)
+    _check_block_error()
+    return ret
+
+
+def _attr_send_args(frame, entry, recv, recv_at, args):
+    """_attr_send for a *splat call, whose arguments are already a list."""
+    argc = len(args)
+    if entry.kind == dispatch.KIND_ATTR_READER:
+        if argc != 0:
+            _arity_error(argc, 0, 0)
+        _drop(frame, recv_at)
+        debug.count_native()
+        return dispatch.ivar_get(recv, entry.ivar)
+    if argc != 1:
+        _arity_error(argc, 1, 1)
+    v = args[0]
+    dispatch.ivar_set(recv, entry.ivar, v)
+    _drop(frame, recv_at)
+    debug.count_native()
+    return v
+
+
+@unroll_safe
+def _enter_args(frame, entry, recv, recv_at, args, mid, w_block=None,
+                kw_names=NO_KEYWORDS, kw_splat=False):
+    """_enter for a *splat call; the caller's stack still holds the Array the arguments came out of until the drop below."""
+    callee_iseq = entry.w_iseq
+    callee = Frame(callee_iseq, recv, None, entry)
+    callee.block = w_block
+    pc = 0
+    argc = len(args)
+    if callee_iseq.simple_params and len(kw_names) == 0 and not kw_splat:
+        if argc != callee_iseq.nparams:
+            _arity_error(argc, callee_iseq.nparams, callee_iseq.nparams)
+        i = 0
+        while i < argc:
+            callee.locals[i] = args[i]
+            i += 1
+    else:
+        _refuse_iseq(callee_iseq, mid)
+        pc = setup_params(callee_iseq, callee, args, False, kw_names,
+                          kw_splat)
+    _drop(frame, recv_at)
+    debug.count_native()
+    if not debug.state.enabled:
+        return execute(callee_iseq, callee, pc)
+    debug.trace_enter(mid, args)
+    ret = execute(callee_iseq, callee, pc)
+    debug.trace_leave(mid, ret)
     return ret
 
 
@@ -879,6 +1057,46 @@ HASH_MERGE_PTR = symbols.intern('core#hash_merge_ptr')
 HASH_MERGE_KWD = symbols.intern('core#hash_merge_kwd')
 
 
+MODULE_FUNCTION = symbols.intern('module_function')
+
+
+def _in_body_of(frame, recv):
+    node = frame.cref
+    return node is not None and node.klass == recv
+
+
+@unroll_safe
+def _module_function(frame, recv, recv_at, argc):
+    """rb_mod_modfunc: with no arguments it flips the body's scope, and every def after it lands both privately here and on the singleton class."""
+    if argc == 0:
+        frame.module_func = True
+        _drop(frame, recv_at)
+        return recv
+    args = []
+    i = 0
+    while i < argc:
+        args.append(frame.stack[recv_at + 1 + i])
+        i += 1
+    _drop(frame, recv_at)
+    # CRuby first, so a name it rejects raises before the registry is touched.
+    ret = rubycall.call(recv, MODULE_FUNCTION, args)
+    _copy_to_singleton(recv, args)
+    return ret
+
+
+@dont_look_inside
+def _copy_to_singleton(klass, args):
+    for v in args:
+        mid = symbols.intern(_attr_name(v))
+        entry = dispatch.own_lookup(klass, mid)
+        if entry is None or entry.kind != dispatch.KIND_ISEQ:
+            continue
+        dispatch.define(klass, mid, entry.w_iseq, True, entry.cref,
+                        entry.lexical)
+        dispatch.define_singleton(klass, mid, entry.w_iseq, entry.cref,
+                                  entry.lexical)
+
+
 def _core_method(frame, mid, recv, recv_at, argc):
     if argc != 3 and mid == CORE_ALIAS:
         raise UnsupportedOperation('core#set_method_alias needs 3 arguments')
@@ -975,6 +1193,7 @@ def block_callback(handle, argc, argv):
             'a block was called after its handle was released')
         return boot.as_value(value.Q_NIL)
     args = boot.read_values(argv, argc)
+    foreign = _enter_foreign_stack()
     try:
         return boot.as_value(call_block(w_block, args))
     except RubyException, e:
@@ -994,6 +1213,9 @@ def block_callback(handle, argc, argv):
         check_stack_overflow()
         blocks.error = UnsupportedOperation(STACK_TOO_DEEP)
         return _park_unwind()
+    finally:
+        if foreign:
+            _leave_foreign_stack()
 
 
 STACK_TOO_DEEP = 'the call is nested too deeply for RPyYARV\'s stack'
@@ -1024,6 +1246,7 @@ def trampoline_callback(self_v, rid, argc, argv, blockv, statusp, errp):
     proc_v = boot.as_signed(blockv)
     if proc_v != value.Q_NIL:
         w_block = block_mod.from_proc(proc_v)
+    foreign = _enter_foreign_stack()
     try:
         return boot.as_value(_from_cruby(recv, mid, args, w_block))
     except RubyException, e:
@@ -1045,7 +1268,36 @@ def trampoline_callback(self_v, rid, argc, argv, blockv, statusp, errp):
     except StackOverflow:
         check_stack_overflow()
         _tramp_failed(statusp, errp, STACK_TOO_DEEP)
+    finally:
+        if foreign:
+            _leave_foreign_stack()
     return boot.as_value(value.Q_NIL)
+
+
+class _Foreign(object):
+    def __init__(self):
+        self.depth = 0
+
+
+foreign_stack = _Foreign()
+
+
+@dont_look_inside
+def _enter_foreign_stack():
+    """CRuby re-entered RPyYARV on a machine stack RPython did not measure, a Fiber's; the depth check reads every address on it as an overflow, so it is off for the duration."""
+    # ponytail: off, not re-based -- a run-away recursion started on a Fiber's stack segfaults instead of raising. Re-basing wants an rstack primitive that does not exist.
+    if not on_foreign_stack():
+        return False
+    foreign_stack.depth += 1
+    unchecked_stack_start()
+    return True
+
+
+@dont_look_inside
+def _leave_foreign_stack():
+    foreign_stack.depth -= 1
+    if foreign_stack.depth == 0:
+        unchecked_stack_stop()
 
 
 @dont_look_inside
@@ -1192,6 +1444,12 @@ def _block_send(frame, mid, recv_at, argc, w_block,
         args[i] = frame.stack[recv_at + 1 + i]
         i += 1
     _drop(frame, recv_at)
+    return _block_send_args(mid, w_block, args, kw_names, kw_splat)
+
+
+@unroll_safe
+def _block_send_args(mid, w_block, args, kw_names=NO_KEYWORDS,
+                     kw_splat=False):
     if _is_proxy_call(mid):
         if w_block is None:
             raise UnsupportedOperation('the block parameter is nil')
@@ -1307,11 +1565,15 @@ def invoke_block(frame, w_ci):
             'yield with %d argument(s) underflows the stack' % argc)
     if w_ci.kw_splat:
         _kw_splat_hash(frame, at + argc - 1)
-    args = [0] * argc
-    i = 0
-    while i < argc:
-        args[i] = frame.stack[at + i]
-        i += 1
+    if w_ci.splat:
+        trailing = 1 if w_ci.kw_splat else len(w_ci.kw_names)
+        args = _splat_args(frame, at, argc - trailing, trailing)
+    else:
+        args = [0] * argc
+        i = 0
+        while i < argc:
+            args[i] = frame.stack[at + i]
+            i += 1
     _drop(frame, at)
     return call_block(w_block, args, w_ci.kw_names, w_ci.kw_splat)
 
@@ -1489,6 +1751,26 @@ def _local_frame(frame, packed):
 def _drop(frame, sp):
     while frame.sp > sp:
         frame.pop()
+
+
+@unroll_safe
+def _pushtoarray(frame, n):
+    """rb_ary_cat of the n topmost values onto the Array under them, which stays on the stack as the result."""
+    at = frame.sp - n
+    if at < 1:
+        raise UnsupportedOperation('pushtoarray %d underflows the stack' % n)
+    # Restated so the codewriter sees every stack index as non-negative.
+    below = at - 1
+    assert below >= 0
+    ary = frame.stack[below]
+    base = _ary_len(ary)
+    i = 0
+    while i < n:
+        j = at + i
+        assert j >= 0
+        rubycall.ary_store(ary, base + i, frame.stack[j])
+        i += 1
+    _drop(frame, at)
 
 
 @dont_look_inside
@@ -2332,6 +2614,26 @@ def _execute(iseq, frame, pc):
             meth = code[pc + 1]
             pc += 2
             frame.push(_newarray_send(frame, n, meth))
+        elif opcode == insns.PUSHTOARRAY:
+            n = code[pc]
+            pc += 1
+            _pushtoarray(frame, n)
+        elif opcode == insns.CONCATARRAY or opcode == insns.CONCATTOARRAY:
+            b = frame.pop()
+            a = frame.pop()
+            frame.push(rubycall.concat_array(
+                a, b, opcode == insns.CONCATTOARRAY))
+        elif opcode == insns.OPT_REGEXPMATCH2:
+            b = frame.pop()
+            a = frame.pop()
+            frame.push(_binop(frame, a, b, MATCH))
+        elif opcode == insns.OPT_DUPARRAY_SEND:
+            idx = code[pc]
+            mid = code[pc + 1]
+            pc += 3
+            arg = frame.pop()
+            frame.push(rubycall.call1(
+                rubycall.ary_resurrect(iseq.consts[idx]), mid, arg))
         else:
             raise UnsupportedOperation('unknown opcode %d' % opcode)
 

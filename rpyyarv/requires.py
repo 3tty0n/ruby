@@ -130,9 +130,13 @@ def _delegate(fname):
 
 
 def _current_dir():
-    if len(files.stack) == 0:
-        return ''
-    path = files.stack[len(files.stack) - 1]
+    # The calling ISeq's own file when the send stamped one: a require_relative in a method body runs long after its file's toplevel left the stack.
+    path = rubycall.relative.path
+    rubycall.relative.path = ''
+    if path == '':
+        if len(files.stack) == 0:
+            return ''
+        path = files.stack[len(files.stack) - 1]
     at = path.rfind('/')
     if at < 0:
         return ''

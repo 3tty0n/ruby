@@ -222,6 +222,10 @@ uintptr_t rpyyarv_to_hash_type(uintptr_t v, int *state);
 
 uintptr_t rpyyarv_splat_array(uintptr_t ary, int flag, int *state);
 
+/* vm_concat_array (to == 0) and vm_concat_to_array (to != 0). */
+uintptr_t rpyyarv_concat_array(uintptr_t ary1, uintptr_t ary2, int to,
+                               int *state);
+
 /* rb_mRubyVMFrozenCore, the receiver putspecialobject 1 pushes. */
 uintptr_t rpyyarv_vm_core(void);
 
