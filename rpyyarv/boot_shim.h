@@ -139,6 +139,9 @@ int rpyyarv_shape_add_ivar_fits(unsigned int before, unsigned int after,
 #define RPYYARV_ARRAY_LAYOUT_N 8
 void rpyyarv_array_layout(int *out);
 
+/* rb_str_equal's String-argument half, which neither allocates nor raises. */
+uintptr_t rpyyarv_str_eq(uintptr_t a, uintptr_t b);
+
 /* Array and Range operations, each guarded by rb_protect. */
 uintptr_t rpyyarv_ary_resurrect(uintptr_t ary, int *state);
 void rpyyarv_ary_store(uintptr_t ary, long idx, uintptr_t val, int *state);

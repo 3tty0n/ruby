@@ -191,6 +191,12 @@ def is_plain_array(v):
             and raw_word(v, KLASS_WORD) == core_class(C_ARRAY))
 
 
+def is_plain_string(v):
+    """A direct String instance: a subclass may have redefined #==."""
+    return (v != 0 and (v & IMMEDIATE_MASK) == 0
+            and raw_word(v, KLASS_WORD) == core_class(C_STRING))
+
+
 def ary_len(v):
     flags = raw_word(v, FLAGS_WORD)
     if flags & ARY_EMBED_FLAG:

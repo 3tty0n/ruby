@@ -157,6 +157,8 @@ rb_define_method_id = _ext('rpyyarv_define_method',
                            [VALUE, VALUE, rffi.INT, INTP], lltype.Void,
                            reenters=True)
 rb_array_layout = _ext('rpyyarv_array_layout', [INTP], lltype.Void)
+# No reenters: rb_str_eql_internal neither allocates nor raises, see rb_range_part.
+rb_str_eq = _ext('rpyyarv_str_eq', [VALUE, VALUE], VALUE)
 rb_ary_resurrect = _ext('rpyyarv_ary_resurrect', [VALUE, INTP], VALUE, reenters=True)
 rb_ary_store_ = _ext('rpyyarv_ary_store', [VALUE, rffi.LONG, VALUE, INTP],
                      lltype.Void, reenters=True)
@@ -846,6 +848,10 @@ def array_layout():
         for i in range(ARRAY_LAYOUT_N):
             out[i] = rffi.cast(lltype.Signed, buf[i])
     return out
+
+
+def str_eq(a, b):
+    return rffi.cast(lltype.Signed, rb_str_eq(_v(a), _v(b)))
 
 
 def shape_iv_index(shape_id, rid):

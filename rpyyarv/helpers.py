@@ -38,6 +38,7 @@ SQRT = symbols.intern('sqrt')
 INITIALIZE = symbols.intern('initialize')
 ABS = symbols.intern('abs')
 TO_ARY = symbols.intern('to_ary')
+TO_STR = symbols.intern('to_str')
 TO_I = symbols.intern('to_i')
 UMINUS = symbols.intern('-@')
 NIL_P = symbols.intern('nil?')
@@ -90,7 +91,8 @@ B_ARY_NEW = 33
 B_ARY_INITIALIZE = 34
 B_NIL_NIL_P = 35
 B_STR_FREEZE = 36
-B_COUNT = 37
+B_STR_EQ = 37
+B_COUNT = 38
 
 _INT_MID = [PLUS, MINUS, MULT, DIV, MOD, EQ, LT, LE, GT, GE, AND, OR, XOR,
             RSHIFT]
@@ -145,6 +147,12 @@ def _sym_op(bit):
     return (_cruby_owns(bit)
             and dispatch.lookup_core(value.core_class(value.C_SYMBOL),
                                      _SYM_MID[bit - B_SYM_EQ]) is None)
+
+
+def _str_eq_op():
+    return (_cruby_owns(B_STR_EQ)
+            and dispatch.lookup_core(value.core_class(value.C_STRING),
+                                     EQ) is None)
 
 
 def _flt_op(bit):
@@ -318,11 +326,29 @@ def _ary_eq_false(a, b):
             and dispatch.lookup_core(klass, EQ) is None)
 
 
+def _str_eq(a, b):
+    """vm_opt_str_eq's arm (vm_insnhelper.c:2540); an argument that is neither a String nor something answering to_str is false, as rb_str_equal answers it (string.c:4271)."""
+    if not (value.is_plain_string(a) and _str_eq_op()):
+        return value.Q_UNDEF
+    v = boot.str_eq(a, b)
+    if v != value.Q_UNDEF:
+        return v
+    # TODO: a respond_to_missing? claiming a to_str the class does not define is still read as no to_str, as in _ary_eq_false.
+    if value.is_immediate(b) \
+            and dispatch.owner_of(promote(value.class_of(b)),
+                                  TO_STR) == value.Q_NIL:
+        return value.Q_FALSE
+    return value.Q_UNDEF
+
+
 def eq(a, b):
     if _fix2(a, b, B_INT_EQ):
         return value.newbool(a == b)
     if _flt2(a, b, B_FLT_EQ, True):
         return value.newbool(_dbl(a) == _dbl(b))
+    v = _str_eq(a, b)
+    if v != value.Q_UNDEF:
+        return v
     if identity_send(a, EQ):
         return value.newbool(a == b)
     if _ary_eq_false(a, b):
@@ -336,6 +362,11 @@ def neq(a, b):
         return value.newbool(a != b)
     if _flt2(a, b, B_FLT_EQ, True):
         return value.newbool(_dbl(a) != _dbl(b))
+    if value.is_plain_string(a) \
+            and dispatch.owns_identity(value.core_class(value.C_STRING), NEQ):
+        v = _str_eq(a, b)
+        if v != value.Q_UNDEF:
+            return value.newbool(v == value.Q_FALSE)
     if identity_send(a, NEQ):
         return value.newbool(a != b)
     if _ary_eq_false(a, b) \

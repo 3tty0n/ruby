@@ -9,6 +9,8 @@
 #include "internal/imemo.h"
 #include "internal/numeric.h"
 #include "internal/range.h"
+/* rb_str_eql_internal, which YJIT relies on to neither allocate nor raise. */
+#include "internal/string.h"
 #include "rpyyarv.h"
 
 #include "boot_shim.h"
@@ -865,6 +867,16 @@ rpyyarv_array_layout(int *out)
     out[7] = (int)RARRAY_SHARED_ROOT_FLAG;
 }
 
+/* vm_opt_str_eq's arm (vm_insnhelper.c:2540); Qundef when the argument is no String, which helpers.py answers for. No rb_protect: rb_str_eql_internal neither allocates nor raises. */
+uintptr_t
+rpyyarv_str_eq(uintptr_t a, uintptr_t b)
+{
+    VALUE x = (VALUE)a, y = (VALUE)b;
+    if (x == y) return (uintptr_t)Qtrue;
+    if (!RB_TYPE_P(y, T_STRING)) return (uintptr_t)Qundef;
+    return (uintptr_t)rb_str_eql_internal(x, y);
+}
+
 static VALUE
 ary_resurrect_body(VALUE argp)
 {
@@ -1565,6 +1577,7 @@ rpyyarv_bop_mask(void)
     BOP(rb_cArray, "initialize");
     BOP(rb_cNilClass, "nil?");
     BOP(rb_cString, "freeze");
+    BOP(rb_cString, "==");
 #undef BOP
 
     return (uintptr_t)i << RPYYARV_BOP_COUNT_SHIFT | mask;
