@@ -509,15 +509,18 @@ def ivar_get(obj, mid):
     if obj != 0 and (obj & value.IMMEDIATE_MASK) == 0:
         flags = raw_word(obj, value.FLAGS_WORD)
         fields = obj
-        if (flags & value.T_MASK) != value.T_OBJECT:
+        # One promoted word, so the three tests below fold into its one guard.
+        hdr = promote(flags & value.IV_HEADER_MASK)
+        if (hdr & value.T_MASK) != value.T_OBJECT:
             fields = _data_fields(obj, flags)
             if fields != 0:
-                flags = raw_word(fields, value.FLAGS_WORD)
+                hdr = promote(raw_word(fields, value.FLAGS_WORD)
+                              & value.IV_HEADER_MASK)
         if fields != 0:
-            shape_id = promote((flags >> value.SHAPE_SHIFT) & value.SHAPE_MASK)
+            shape_id = (hdr >> value.SHAPE_SHIFT) & value.SHAPE_MASK
             slot = iv_slot(shape_id, rubycall.const_rid(mid))
             if slot >= 0:
-                if flags & value.ROBJECT_HEAP:
+                if hdr & value.ROBJECT_HEAP:
                     return raw_word(raw_word(fields, value.FIELDS_WORD), slot)
                 return raw_word(fields, value.FIELDS_WORD + slot)
             if slot == -1:
@@ -572,17 +575,19 @@ def ivar_set(obj, mid, v):
         immediate = value.is_immediate(v)
         if immediate or barrier.direct:
             flags = raw_word(obj, value.FLAGS_WORD)
-            if (flags & value.FL_FREEZE) == 0:
+            # One promoted word, so the four tests below fold into its one guard.
+            hdr = promote(flags & value.IV_SET_HEADER_MASK)
+            if (hdr & value.FL_FREEZE) == 0:
                 # Only an object holding its own fields may gain one here: a separate imemo/fields may have to be reallocated and hung back off its owner.
-                own = (flags & value.T_MASK) == value.T_OBJECT
+                own = (hdr & value.T_MASK) == value.T_OBJECT
                 fields = obj
                 if not own:
                     fields = _data_fields(obj, flags)
                     if fields != 0:
                         flags = raw_word(fields, value.FLAGS_WORD)
+                        hdr = promote(flags & value.IV_SET_HEADER_MASK)
                 if fields != 0:
-                    shape_id = promote(
-                        (flags >> value.SHAPE_SHIFT) & value.SHAPE_MASK)
+                    shape_id = (hdr >> value.SHAPE_SHIFT) & value.SHAPE_MASK
                     rid = rubycall.const_rid(mid)
                     slot = iv_slot(shape_id, rid)
                     after = shape_id
@@ -592,7 +597,7 @@ def ivar_set(obj, mid, v):
                             after = entry.after
                             slot = entry.slot
                     if slot >= 0:
-                        if flags & value.ROBJECT_HEAP:
+                        if hdr & value.ROBJECT_HEAP:
                             set_raw_word(raw_word(fields, value.FIELDS_WORD),
                                          slot, v)
                         else:

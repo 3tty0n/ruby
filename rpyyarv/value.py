@@ -39,6 +39,10 @@ T_DATA = 0x0c
 FL_TYPED_DATA = 1 << 6          # RUBY_TYPED_FL_IS_TYPED_DATA: RData keeps a function pointer where RTypedData keeps fields_obj
 FL_SHAREABLE = 1 << 8           # RUBY_FL_SHAREABLE, the bit ivar_ractor_check raises on
 
+# Every header bit an ivar access decides on, in one word: promoting it collapses the type, shape and spill tests into a single guard. -(1 << SHAPE_SHIFT) is the shape id's bits as a signed word.
+IV_HEADER_MASK = -(1 << SHAPE_SHIFT) | ROBJECT_HEAP | T_MASK
+IV_SET_HEADER_MASK = IV_HEADER_MASK | FL_FREEZE
+
 # RArray layout for opt_aref/opt_length, checked against rpyyarv_array_layout: ARY_EMBED_FLAG says whether the array embeds its elements or not.
 ARY_EMBED_FLAG = 1 << 13         # RUBY_FL_USER1
 ARY_EMBED_LEN_SHIFT = 15         # RUBY_FL_USHIFT + 3
