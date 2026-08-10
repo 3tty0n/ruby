@@ -12,6 +12,8 @@ class _State(object):
         # A list, not a dict: symbol ids are dense, and this is read on every foreign send. 0 means not resolved yet; no CRuby ID is 0.
         self.rids = []      # rpyyarv symbol id -> CRuby ID
         self.mids = {}      # CRuby ID -> rpyyarv symbol id
+        # Same shape, for the Symbol object a keyword name becomes.
+        self.syms = []      # rpyyarv symbol id -> Symbol VALUE
 
 
 state = _State()
@@ -67,6 +69,20 @@ def _resolve_rid(mid):
     return r
 
 
+@dont_look_inside
+def sym_value(mid):
+    """The static Symbol for an interned name; ID2SYM of an rb_intern, so CRuby pins it."""
+    if mid < len(state.syms):
+        v = state.syms[mid]
+        if v != 0:
+            return v
+    v = boot.sym_new(symbols.name_of(mid))
+    while len(state.syms) <= mid:
+        state.syms.append(0)
+    state.syms[mid] = v
+    return v
+
+
 NO_MID = -1
 
 
@@ -88,6 +104,13 @@ def call(recv, mid, args, public_only=False):
 
 
 @dont_look_inside
+def call_kw(recv, mid, args, public_only=False):
+    """args[-1] is the keyword Hash; CRuby unpacks it because of RB_PASS_KEYWORDS."""
+    debug.count_foreign(mid)
+    return boot.funcallv_kw(recv, rid(mid), args, mid, public_only)
+
+
+@dont_look_inside
 def call1(recv, mid, arg):
     debug.count_foreign_site(mid, recv, arg)
     return boot.funcallv(recv, rid(mid), [arg], mid)
@@ -106,9 +129,9 @@ def call2(recv, mid, a, b):
 
 
 @dont_look_inside
-def call_with_block(recv, mid, args, handle):
+def call_with_block(recv, mid, args, handle, kw=False):
     debug.count_foreign(mid)
-    return boot.call_with_block(recv, rid(mid), args, handle, mid)
+    return boot.call_with_block(recv, rid(mid), args, handle, mid, kw)
 
 
 @dont_look_inside
@@ -151,6 +174,11 @@ def hash_new(capa):
 @dont_look_inside
 def hash_aset(h, key, val):
     return boot.hash_aset(h, key, val)
+
+
+@dont_look_inside
+def keyword_error(kind, keys):
+    return boot.keyword_error(kind, keys)
 
 
 @dont_look_inside

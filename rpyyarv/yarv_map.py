@@ -75,6 +75,7 @@ EMIT = {
     'invokeblock': [0],
     'throw': [0],
     'checkmatch': [0],      # a rescue clause's class test, and case/when
+    'checkkeyword': [0, 1], # slot of the kwbits local, then the optional's bit
     'leave': [],
 }
 
@@ -139,6 +140,12 @@ SIMPLE_CALL_FLAGS = (CALL_FLAG_FCALL | CALL_FLAG_VCALL |
                      CALL_FLAG_ARGS_SIMPLE | CALL_FLAG_TAILCALL |
                      CALL_FLAG_SUPER | CALL_FLAG_ZSUPER |
                      CALL_FLAG_ARGS_BLOCKARG)
+
+# ...plus literal keywords, whose values ride above the positionals.
+KWARG_CALL_FLAGS = SIMPLE_CALL_FLAGS | CALL_FLAG_KWARG
+
+# vm_core.h VM_KW_SPECIFIED_BITS_MAX: past this the kwbits local is a Hash.
+KW_SPECIFIED_BITS_MAX = 31
 
 # vm_core.h. A plain `class Foo` or `module Foo`: no singleton class or A::B.
 DEFINECLASS_TYPE_MASK = 0x07

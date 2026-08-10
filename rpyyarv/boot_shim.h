@@ -35,6 +35,10 @@ uintptr_t rpyyarv_funcallv(uintptr_t recv, const char *mid, int argc,
 uintptr_t rpyyarv_funcallv_public_id(uintptr_t recv, uintptr_t mid, int argc,
                                      const uintptr_t *argv, int *state);
 
+/* The last argument must be a Hash; it reaches the callee as keywords. */
+uintptr_t rpyyarv_funcallv_kw_id(uintptr_t recv, uintptr_t mid, int argc,
+                                 const uintptr_t *argv, int pub, int *state);
+
 /* The toplevel `main`, pinned on first use. */
 uintptr_t rpyyarv_top_self(void);
 
@@ -156,8 +160,9 @@ void rpyyarv_gvar_set(const char *name, uintptr_t val, int *state);
 typedef uintptr_t (*rpyyarv_block_fn)(long handle, int argc,
                                       uintptr_t *argv);
 void rpyyarv_set_block_callback(rpyyarv_block_fn fn);
+/* kw != 0 means the last argument is a Hash the callee takes as keywords. */
 uintptr_t rpyyarv_call_with_block(uintptr_t recv, uintptr_t mid, int argc,
-                                  const uintptr_t *argv, long handle,
+                                  const uintptr_t *argv, long handle, int kw,
                                   int *state);
 
 /* A block leaving a CRuby method early cannot unwind as an RPython exception through libruby's frames, so the yielder raises RPyYARV::Unwind (under Exception, not StandardError, so a bare `rescue` cannot eat it) standing in for CRuby's EC_JUMP_TAG (vm_insnhelper.c:1929); every rb_protect boundary below swallows it and leaves *state zero so the RPython side re-raises the parked unwind. */
@@ -213,6 +218,9 @@ void rpyyarv_gc_register_mark_object(uintptr_t v);
 
 /* An ArgumentError worded exactly as rb_arity_error_new does; max < 0 is CRuby's UNLIMITED_ARGUMENTS. */
 uintptr_t rpyyarv_arity_error(int given, int min, int max, int *state);
+
+/* kind is "missing" or "unknown"; keys is an Array of Symbols. */
+uintptr_t rpyyarv_keyword_error(const char *kind, uintptr_t keys, int *state);
 
 /* One bit per (class, basic operator) pair, set when the pair is no longer CRuby's own definition; the pair count rides above the bits so a caller can refuse a shim it disagrees with. */
 #define RPYYARV_BOP_COUNT_SHIFT 32

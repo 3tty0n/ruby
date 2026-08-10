@@ -133,6 +133,7 @@ struct funcallv_args {
     ID    mid;
     int   argc;
     const VALUE *argv;
+    int   pub;
 };
 
 static VALUE
@@ -198,6 +199,44 @@ rpyyarv_funcallv_public_id(uintptr_t recv, uintptr_t mid, int argc,
 
     *state = 0;
     VALUE r = rb_protect(funcallv_public_body, (VALUE)&a, state);
+    absorb_unwind(state);
+    if (*state) return (uintptr_t)Qnil;
+    return (uintptr_t)r;
+}
+
+static VALUE
+funcallv_kw_body(VALUE argp)
+{
+    struct funcallv_args *a = (struct funcallv_args *)argp;
+    if (a->pub)
+        return rb_funcallv_public_kw(a->recv, a->mid, a->argc, a->argv,
+                                     RB_PASS_KEYWORDS);
+    return rb_funcallv_kw(a->recv, a->mid, a->argc, a->argv, RB_PASS_KEYWORDS);
+}
+
+/* The last argument is a Hash of keywords; RB_PASS_KEYWORDS is what tells the callee to unpack it rather than take it as a positional. */
+uintptr_t
+rpyyarv_funcallv_kw_id(uintptr_t recv, uintptr_t mid, int argc,
+                       const uintptr_t *argv, int pub, int *state)
+{
+    VALUE buf[RPYYARV_MAX_ARGC];
+    struct funcallv_args a;
+    int i;
+
+    if (argc < 1 || argc > RPYYARV_MAX_ARGC) {
+        *state = -1;
+        return (uintptr_t)Qnil;
+    }
+    for (i = 0; i < argc; i++) buf[i] = (VALUE)argv[i];
+
+    a.recv = (VALUE)recv;
+    a.mid  = (ID)mid;
+    a.argc = argc;
+    a.argv = buf;
+    a.pub  = pub;
+
+    *state = 0;
+    VALUE r = rb_protect(funcallv_kw_body, (VALUE)&a, state);
     absorb_unwind(state);
     if (*state) return (uintptr_t)Qnil;
     return (uintptr_t)r;
@@ -1073,19 +1112,21 @@ struct blockcall_args {
     int   argc;
     const VALUE *argv;
     long  handle;
+    /* RB_PASS_KEYWORDS when the last argument is a keyword Hash. */
+    int   kw_splat;
 };
 
 static VALUE
 call_with_block_body(VALUE argp)
 {
     struct blockcall_args *a = (struct blockcall_args *)argp;
-    return rb_block_call(a->recv, a->mid, a->argc, a->argv, block_yielder,
-                         LONG2FIX(a->handle));
+    return rb_block_call_kw(a->recv, a->mid, a->argc, a->argv, block_yielder,
+                            LONG2FIX(a->handle), a->kw_splat);
 }
 
 uintptr_t
 rpyyarv_call_with_block(uintptr_t recv, uintptr_t mid, int argc,
-                        const uintptr_t *argv, long handle, int *state)
+                        const uintptr_t *argv, long handle, int kw, int *state)
 {
     VALUE buf[RPYYARV_MAX_ARGC];
     struct blockcall_args a;
@@ -1102,6 +1143,7 @@ rpyyarv_call_with_block(uintptr_t recv, uintptr_t mid, int argc,
     a.argc = argc;
     a.argv = buf;
     a.handle = handle;
+    a.kw_splat = kw ? RB_PASS_KEYWORDS : RB_NO_KEYWORDS;
 
     *state = 0;
     VALUE r = rb_protect(call_with_block_body, (VALUE)&a, state);
@@ -1361,6 +1403,30 @@ struct arity_args {
     int max;
 };
 
+struct kwerr_args {
+    const char *kind;
+    VALUE keys;
+};
+
+/* rb_keyword_error_new (class.c:2859), which libruby does not export. */
+static VALUE
+keyword_error_body(VALUE argp)
+{
+    struct kwerr_args *p = (struct kwerr_args *)argp;
+    long i = 0, len = RARRAY_LEN(p->keys);
+    VALUE mesg = rb_sprintf("%s keyword%.*s", p->kind, len > 1, "s");
+
+    if (len > 0) {
+        rb_str_cat_cstr(mesg, ": ");
+        while (1) {
+            rb_str_append(mesg, rb_inspect(RARRAY_AREF(p->keys, i)));
+            if (++i >= len) break;
+            rb_str_cat_cstr(mesg, ", ");
+        }
+    }
+    return rb_exc_new_str(rb_eArgError, mesg);
+}
+
 /* rb_arity_error_new (vm_insnhelper.c:487), which is static there. */
 static VALUE
 arity_error_body(VALUE argp)
@@ -1417,6 +1483,19 @@ rpyyarv_local_jump_error(const char *mesg, uintptr_t value, int reason,
     a.reason = reason;
     *state = 0;
     VALUE r = rb_protect(local_jump_error_body, (VALUE)&a, state);
+    if (*state) return (uintptr_t)Qnil;
+    return (uintptr_t)r;
+}
+
+/* rb_keyword_error_new is class.c's, the same one vm_args.c raises with, so the message matches CRuby's byte for byte. */
+uintptr_t
+rpyyarv_keyword_error(const char *kind, uintptr_t keys, int *state)
+{
+    struct kwerr_args a;
+    a.kind = kind;
+    a.keys = (VALUE)keys;
+    *state = 0;
+    VALUE r = rb_protect(keyword_error_body, (VALUE)&a, state);
     if (*state) return (uintptr_t)Qnil;
     return (uintptr_t)r;
 }

@@ -229,8 +229,10 @@ class Loader(object):
             raise UnsupportedOperation(
                 "'%s' takes %s parameter(s), which RPyYARV does not support"
                 % (raw.name, raw.extra_params))
+        kw_table, kw_defaults, kw_start = self.keywords(raw, pool)
         simple = (len(opt_table) == 0
-                  and raw.rest_start < 0 and raw.post_num == 0)
+                  and raw.rest_start < 0 and raw.post_num == 0
+                  and len(kw_table) == 0 and raw.kwrest < 0)
         self.check_param_slots(raw, opt_table)
         opt_num = len(opt_table) - 1 if len(opt_table) > 0 else 0
         autosplat = (not raw.ambiguous_param0
@@ -246,7 +248,9 @@ class Loader(object):
                         [p for p in pool.paths], opt_table, raw.rest_start,
                         raw.post_start, raw.post_num, '', autosplat,
                         returns, returns and raw.type in self.RETURN_TARGETS,
-                        [dispatch.new_const_site() for _ in pool.paths])
+                        [dispatch.new_const_site() for _ in pool.paths],
+                        kw_table, kw_defaults, raw.kw_required, kw_start,
+                        raw.kw_bits, raw.kwrest)
         gcroots.register_consts(consts)
         return w_iseq
 
@@ -308,6 +312,40 @@ class Loader(object):
                                 % (raw.name, name))
             out.append(labels[name])
         return out
+
+    def keywords(self, raw, pool):
+        """Keyword names as symbol ids, their static defaults as VALUEs (Qundef where the body computes one), and the slot the first one lives in."""
+        if len(raw.kw_names) == 0:
+            if raw.kwrest >= 0 and (raw.kwrest >= raw.nlocals):
+                raise LoadError("'%s' puts **rest in slot %d, outside its %d "
+                                "local(s)"
+                                % (raw.name, raw.kwrest, raw.nlocals))
+            return [], [], -1
+        if len(raw.kw_names) > optable.KW_SPECIFIED_BITS_MAX:
+            raise UnsupportedOperation(
+                "'%s' takes %d keyword parameter(s); past %d CRuby keeps the "
+                "unspecified mask in a Hash, which RPyYARV does not read"
+                % (raw.name, len(raw.kw_names),
+                   optable.KW_SPECIFIED_BITS_MAX))
+        kw_start = raw.kw_bits - len(raw.kw_names)
+        if kw_start < 0 or raw.kw_bits >= raw.nlocals or \
+                (raw.kwrest >= 0 and raw.kwrest >= raw.nlocals):
+            raise LoadError("'%s' puts its keyword parameters outside its %d "
+                            "local(s)" % (raw.name, raw.nlocals))
+        table = []
+        defaults = []
+        for name in raw.kw_names:
+            table.append(symbols.intern(name))
+        for operand in raw.kw_defaults:
+            if operand is None:
+                defaults.append(value.Q_UNDEF)
+            else:
+                v = self.literal_value(operand, insns.PUTOBJECT, raw)
+                # Into the pool too, so gcroots keeps it alive for the run.
+                pool.add(v)
+                defaults.append(v)
+        # Copied: W_ISeq declares both immutable, so neither may be resizable.
+        return [m for m in table], [d for d in defaults], kw_start
 
     def check_param_slots(self, raw, opt_table):
         opt_num = len(opt_table) - 1 if len(opt_table) > 0 else 0
@@ -422,6 +460,11 @@ class Loader(object):
         if t == insns.T_VALUE:
             return self.literal(operand, op, raw, pool)
         if t == insns.T_LINDEX_T:
+            if op == insns.CHECKKEYWORD:
+                # Only operand 0 names a local; operand 1 is a bit number.
+                if pos == 1:
+                    return self.int_of(operand, op, raw, 'keyword index')
+                return self.local_slot(operand, op, raw, parents, 0)
             level = self.int_of(ops[1], op, raw, 'level')
             return self.local_slot(operand, op, raw, parents, level)
         if t == insns.T_RB_NUM_T:
@@ -546,17 +589,27 @@ class Loader(object):
         # Not ARGS_SIMPLE itself: CRuby clears it whenever a block ISeq is attached, and every other reason has its own bit outside this mask.
         simple = (not operand.has_kwarg
                   and (flags & ~optable.SIMPLE_CALL_FLAGS) == 0)
+        kw_names = []
         if not simple:
             # Refused here, not at the send: an ISeq holding a call site the interpreter cannot make is one it cannot finish running.
-            raise UnsupportedOperation(
-                "the call to '%s' passes %s, which RPyYARV does not support"
-                % (operand.strval, self.call_flag_name(operand)))
+            if len(operand.kw_names) == 0 or \
+                    (flags & ~optable.KWARG_CALL_FLAGS) != 0 or \
+                    (flags & optable.CALL_FLAG_SUPER) != 0 or \
+                    op == insns.INVOKEBLOCK:
+                raise UnsupportedOperation(
+                    "the call to '%s' passes %s, which RPyYARV does not "
+                    "support" % (operand.strval, self.call_flag_name(operand)))
+            for name in operand.kw_names:
+                kw_names.append(symbols.intern(name))
         blockarg = (flags & optable.CALL_FLAG_ARGS_BLOCKARG) != 0
         if blockarg and (flags & optable.CALL_FLAG_SUPER) != 0:
             raise UnsupportedOperation('super with a block is not supported')
-        return W_CallInfo(symbols.intern(operand.strval), operand.intval,
+        # iseq.c:3537 reports orig_argc without them; on the stack they are the topmost arguments.
+        return W_CallInfo(symbols.intern(operand.strval),
+                          operand.intval + len(kw_names),
                           simple, (flags & optable.CALL_FLAG_FCALL) != 0,
-                          (flags & optable.CALL_FLAG_SUPER) != 0, blockarg)
+                          (flags & optable.CALL_FLAG_SUPER) != 0, blockarg,
+                          [m for m in kw_names])
 
     def call_flag_name(self, operand):
         for flag, name in optable.CALL_FLAG_NAMES:

@@ -19,12 +19,14 @@ KIND_NAMES = ['Integer', 'nil', 'true', 'false', 'Symbol', 'String',
 
 class RawOperand(object):
     def __init__(self, kind, intval=0, strval='', flag=0, has_kwarg=False,
-                 items=None):
+                 items=None, kw_names=None):
         self.kind = kind
         self.intval = intval
         self.strval = strval
         self.flag = flag
         self.has_kwarg = has_kwarg
+        # The call site's literal keywords, in the order their values are pushed; empty when the front end reported none by name.
+        self.kw_names = kw_names if kw_names is not None else []
         self.items = items if items is not None else []
 
     def describe(self):
@@ -62,7 +64,9 @@ class RawCatch(object):
 class RawISeq(object):
     def __init__(self, name, type_, nlocals, stack_max, lead_num,
                  extra_params, catches, opt_labels=None, rest_start=-1,
-                 post_start=-1, post_num=0, ambiguous_param0=False):
+                 post_start=-1, post_num=0, ambiguous_param0=False,
+                 kw_names=None, kw_required=0, kw_defaults=None,
+                 kw_bits=-1, kwrest=-1):
         self.name = name
         self.type = type_
         self.nlocals = nlocals
@@ -79,6 +83,14 @@ class RawISeq(object):
         self.post_num = post_num
         # `{|a| }`, whose single parameter takes a yielded Array whole.
         self.ambiguous_param0 = ambiguous_param0
+        # Keyword parameters (iseq.c:3442), required ones first; they occupy
+        # the slots below kw_bits, which holds the unspecified-optionals mask.
+        self.kw_names = kw_names if kw_names is not None else []
+        self.kw_required = kw_required
+        # One per keyword, None where the default is computed by the body.
+        self.kw_defaults = kw_defaults if kw_defaults is not None else []
+        self.kw_bits = kw_bits
+        self.kwrest = kwrest
         self.insns = []
         # label name -> index into insns; the loader turns it into a pc.
         self.labels = {}

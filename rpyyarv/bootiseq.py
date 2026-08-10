@@ -11,10 +11,12 @@ from rpyyarv.to_a_layout import (I_BODY, I_CATCH, I_LABEL, I_LOCALS, I_MAGIC, I_
 
 EVENT_PREFIX = 'RUBY_EVENT_'
 
+_MOVED = 'iseq_data_to_ary in iseq.c moved a field; update to_a_layout.py'
+
 # Keys of the params hash (iseq.c:3425-3462): use_block is a hint on `initialize` methods (iseq.c:615) not a parameter, ambiguous_param0 only enables block autosplat (unused here), block_start needs no call-path handling until getblockparam(proxy) reads it.
 PLAIN_PARAM_KEYS = ['lead_num', 'use_block', 'opt', 'rest_start',
                     'post_start', 'post_num', 'ambiguous_param0',
-                    'block_start']
+                    'block_start', 'keyword', 'kwbits', 'kwrest']
 
 # Anything outside this means the ISeq declares real parameters, so arg_size is not the lead count.
 NO_PARAM_KEYS = ['use_block', 'ambiguous_param0']
@@ -98,6 +100,16 @@ def _read_iseq(program, pending, owners, ary, parent):
         _int_or(boot.hash_aref(params, 'post_start'), -1),
         _int_or(boot.hash_aref(params, 'post_num'), 0),
         not boot.is_nil(boot.hash_aref(params, 'ambiguous_param0')))
+    me = len(program.iseqs)
+    names, required, defaults = _keywords(pending, owners, params, me)
+    raw.kw_names = names
+    raw.kw_required = required
+    raw.kw_defaults = defaults
+    raw.kw_bits = _int_or(boot.hash_aref(params, 'kwbits'), -1)
+    raw.kwrest = _int_or(boot.hash_aref(params, 'kwrest'), -1)
+    if len(names) > 0 and raw.kw_bits < 0:
+        raise LoadError("'%s' has keyword parameters but no kwbits slot: %s"
+                        % (raw.name, _MOVED))
     raw.parent = parent
     program.add_iseq(raw)
 
@@ -161,10 +173,11 @@ def _operand(pending, owners, v, me):
             name = ''
             if boot.is_symbol(mid):
                 name = boot.sym_of(mid)
+            kw_names = _kw_arg_names(v)
             return rawiseq.RawOperand(
                 rawiseq.OP_CALL, boot.num2long(argc), name,
                 _int_or(boot.hash_aref(v, 'flag'), 0),
-                not boot.is_nil(boot.hash_aref(v, 'kw_arg')))
+                len(kw_names) > 0, None, kw_names)
     # Float, Range, Regexp and the rest cross as the VALUE itself.
     return rawiseq.RawOperand(rawiseq.OP_VALUE, v, boot.inspect(v))
 
@@ -226,6 +239,65 @@ def _opt_labels(params):
         out.append(boot.sym_of(e))
         i += 1
     return out
+
+
+def _keywords(pending, owners, params, me):
+    """The keyword section (iseq.c:3442): a bare Symbol is required, [name] has a default the body computes, [name, value] a static one."""
+    v = boot.hash_aref(params, 'keyword')
+    if boot.is_nil(v):
+        return [], 0, []
+    if not boot.is_array(v):
+        raise LoadError('the keyword parameter list is not an Array: %s'
+                        % _MOVED)
+    names = []
+    defaults = []
+    required = 0
+    optional_seen = False
+    n = boot.ary_len(v)
+    i = 0
+    while i < n:
+        e = boot.ary_entry(v, i)
+        i += 1
+        if boot.is_symbol(e):
+            if optional_seen:
+                raise LoadError('a required keyword follows an optional one: '
+                                '%s' % _MOVED)
+            names.append(boot.sym_of(e))
+            defaults.append(None)
+            required += 1
+            continue
+        if not boot.is_array(e) or boot.ary_len(e) < 1 or \
+                boot.ary_len(e) > 2 or not boot.is_symbol(boot.ary_entry(e, 0)):
+            raise LoadError('a keyword parameter entry is neither a Symbol '
+                            'nor a 1-or-2 element Array: %s' % _MOVED)
+        optional_seen = True
+        names.append(boot.sym_of(boot.ary_entry(e, 0)))
+        if boot.ary_len(e) == 2:
+            defaults.append(_operand(pending, owners, boot.ary_entry(e, 1),
+                                     me))
+        else:
+            defaults.append(None)
+    return names, required, defaults
+
+
+def _kw_arg_names(v):
+    """The call site's keyword names (iseq.c:3532), one per value pushed above the positionals."""
+    kw = boot.hash_aref(v, 'kw_arg')
+    if boot.is_nil(kw):
+        return []
+    if not boot.is_array(kw) or boot.ary_len(kw) == 0:
+        raise LoadError('a call site has a kw_arg that is not a non-empty '
+                        'Array: %s' % _MOVED)
+    names = []
+    n = boot.ary_len(kw)
+    i = 0
+    while i < n:
+        e = boot.ary_entry(kw, i)
+        if not boot.is_symbol(e):
+            raise LoadError('a call site keyword is not a Symbol: %s' % _MOVED)
+        names.append(boot.sym_of(e))
+        i += 1
+    return names
 
 
 def _int_or(v, default):

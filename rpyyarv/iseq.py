@@ -32,14 +32,17 @@ class W_ISeq(object):
                           'path_sites[*]',
                           'opt_table[*]', 'rest_start', 'post_start',
                           'post_num', 'unsupported', 'autosplat',
-                          'has_return_throw', 'catches_return']
+                          'has_return_throw', 'catches_return',
+                          'kw_table[*]', 'kw_defaults[*]', 'kw_required',
+                          'kw_start', 'kw_bits', 'kwrest']
 
     def __init__(self, name, code, consts, iseqs, callinfos, nlocals,
                  stack_max, nparams=0, simple_params=True, catches=None,
                  paths=None, opt_table=None, rest_start=-1, post_start=-1,
                  post_num=0, unsupported='', autosplat=False,
                  has_return_throw=False, catches_return=False,
-                 path_sites=None):
+                 path_sites=None, kw_table=None, kw_defaults=None,
+                 kw_required=0, kw_start=-1, kw_bits=-1, kwrest=-1):
         self.name = name
         self.code = code
         # VALUEs built at load time; gcroots keeps them reachable.
@@ -68,6 +71,16 @@ class W_ISeq(object):
         self.has_return_throw = has_return_throw
         # ...and this one is the method (or toplevel) such a return names, so execute() has to catch it. Green, so the check folds away.
         self.catches_return = catches_return
+        # Keyword parameter names as symbol ids, the required ones first.
+        self.kw_table = kw_table if kw_table is not None else []
+        # Parallel to kw_table; Q_UNDEF where the body computes the default.
+        self.kw_defaults = kw_defaults if kw_defaults is not None else []
+        self.kw_required = kw_required
+        # Local slots: the keywords sit at kw_start, the unspecified-optionals
+        # mask at kw_bits, and **rest at kwrest; -1 when the kind is absent.
+        self.kw_start = kw_start
+        self.kw_bits = kw_bits
+        self.kwrest = kwrest
         # rescue/ensure entries in CRuby's search order; the first match wins.
         self.catches = catches if catches is not None else []
         self.paths = paths if paths is not None else []
@@ -80,10 +93,12 @@ class W_ISeq(object):
 
 class W_CallInfo(object):
     _immutable_fields_ = ['mid', 'argc', 'simple', 'fcall', 'is_super',
-                          'blockarg']
+                          'blockarg', 'kw_names[*]']
 
     def __init__(self, mid, argc, simple=True, fcall=True, is_super=False,
-                 blockarg=False):
+                 blockarg=False, kw_names=None):
+        # VM_CALL_KWARG: the last len(kw_names) of the argc values on the stack are keyword values, named here in push order.
+        self.kw_names = kw_names if kw_names is not None else []
         # CALL_FLAG_ARGS_BLOCKARG: one more value above the arguments, which vm_caller_setup_arg_block pops first (vm_args.c:1119).
         self.blockarg = blockarg
         # invokesuper's call data names no method: the running one is implied.

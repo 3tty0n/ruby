@@ -107,6 +107,9 @@ rb_funcallv_id = _ext('rpyyarv_funcallv_id',
 rb_funcallv_public_id = _ext('rpyyarv_funcallv_public_id',
                              [VALUE, VALUE, rffi.INT, VALUEP, INTP], VALUE,
                              reenters=True)
+rb_funcallv_kw_id = _ext('rpyyarv_funcallv_kw_id',
+                         [VALUE, VALUE, rffi.INT, VALUEP, rffi.INT, INTP],
+                         VALUE, reenters=True)
 rb_top_self = _ext('rpyyarv_top_self', [], VALUE)
 rb_int2inum = _ext('rpyyarv_int2inum', [rffi.LONG], VALUE, reenters=True)
 rb_float_new = _ext('rpyyarv_float_new', [rffi.DOUBLE], VALUE, reenters=True)
@@ -146,8 +149,8 @@ rb_object_layout = _ext('rpyyarv_object_layout', [INTP], lltype.Void)
 rb_set_block_callback = _ext('rpyyarv_set_block_callback', [BLOCK_HOOK],
                              lltype.Void)
 rb_call_with_block = _ext('rpyyarv_call_with_block',
-                          [VALUE, VALUE, rffi.INT, VALUEP, rffi.LONG, INTP],
-                          VALUE, reenters=True)
+                          [VALUE, VALUE, rffi.INT, VALUEP, rffi.LONG,
+                           rffi.INT, INTP], VALUE, reenters=True)
 rb_set_trampoline_callback = _ext('rpyyarv_set_trampoline_callback',
                                   [TRAMP_HOOK], lltype.Void)
 rb_define_method_id = _ext('rpyyarv_define_method',
@@ -191,6 +194,8 @@ rb_vm_core = _ext('rpyyarv_vm_core', [], VALUE, reenters=True)
 rb_arity_error = _ext('rpyyarv_arity_error',
                       [rffi.INT, rffi.INT, rffi.INT, INTP], VALUE,
                       reenters=True)
+rb_keyword_error = _ext('rpyyarv_keyword_error',
+                        [rffi.CCHARP, VALUE, INTP], VALUE, reenters=True)
 rb_local_jump_error = _ext('rpyyarv_local_jump_error',
                            [rffi.CCHARP, VALUE, rffi.INT, INTP], VALUE,
                            reenters=True)
@@ -414,6 +419,29 @@ def funcallv(recv, rid, args, mid, public_only=False):
     return ret
 
 
+def funcallv_kw(recv, rid, args, mid, public_only=False):
+    """args[-1] must be a Hash; it reaches the callee as keywords."""
+    argc = len(args)
+    if argc > MAX_ARGC or argc < 1:
+        raise RubyError(symbols.name_of(mid))
+    argv = _enter_argv(argc)
+    i = 0
+    while i < argc:
+        argv[i] = rffi.cast(VALUE, args[i])
+        i += 1
+    state = _enter_status()
+    v = rb_funcallv_kw_id(
+        rffi.cast(VALUE, recv), rffi.cast(VALUE, rid),
+        rffi.cast(rffi.INT, argc), argv,
+        rffi.cast(rffi.INT, 1 if public_only else 0), state)
+    failed = _leave_status(state)
+    ret = rffi.cast(lltype.Signed, v)
+    _leave_argv(argv)
+    if failed:
+        _failed_mid(mid)
+    return ret
+
+
 def ary_new(values):
     n = len(values)
     if n > MAX_ARGC:
@@ -458,7 +486,8 @@ def _ary_new_chunked(values):
     return ary
 
 
-def call_with_block(recv, rid, args, handle, mid):
+def call_with_block(recv, rid, args, handle, mid, kw=False):
+    """kw: args[-1] is a Hash the callee should see as keywords."""
     argc = len(args)
     if argc > MAX_ARGC:
         raise RubyError(symbols.name_of(mid))
@@ -470,7 +499,8 @@ def call_with_block(recv, rid, args, handle, mid):
     state = _enter_status()
     v = rb_call_with_block(_v(recv), _v(rid),
                            rffi.cast(rffi.INT, argc), argv,
-                           rffi.cast(rffi.LONG, handle), state)
+                           rffi.cast(rffi.LONG, handle),
+                           rffi.cast(rffi.INT, 1 if kw else 0), state)
     failed = _leave_status(state)
     ret = rffi.cast(lltype.Signed, v)
     _leave_argv(argv)
@@ -924,6 +954,18 @@ def splat_array(ary, flag):
 
 def vm_core():
     return rffi.cast(lltype.Signed, rb_vm_core())
+
+
+def keyword_error(kind, keys):
+    """The ArgumentError VALUE for 'missing' or 'unknown' keywords; keys is an Array of Symbols."""
+    state = _enter_status()
+    with rffi.scoped_str2charp(kind) as c_kind:
+        v = rb_keyword_error(c_kind, _v(keys), state)
+    failed = _leave_status(state)
+    ret = rffi.cast(lltype.Signed, v)
+    if failed:
+        _failed('ArgumentError')
+    return ret
 
 
 def arity_error(given, min_argc, max_argc):

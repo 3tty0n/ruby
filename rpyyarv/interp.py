@@ -23,6 +23,9 @@ DUP = symbols.intern('dup')
 # The empty leading segment the loader puts in a `::Foo` constant path.
 ROOT_CBASE = symbols.intern('')
 
+# Prebuilt, so len() of it folds to 0 wherever a call passes no keywords.
+NO_KEYWORDS = []
+
 
 def define_method(frame, mid, w_iseq):
     """A def in a class body lands on it; a toplevel def is private on Object."""
@@ -51,9 +54,11 @@ def invoke(frame, w_ci, w_block=None):
             "call to '%s' with %d argument(s) underflows the stack"
             % (symbols.name_of(w_ci.mid), argc))
     if not w_ci.simple:
-        raise UnsupportedOperation(
-            "call to '%s' passes arguments RPyYARV does not support"
-            % symbols.name_of(w_ci.mid))
+        if len(w_ci.kw_names) == 0:
+            raise UnsupportedOperation(
+                "call to '%s' passes arguments RPyYARV does not support"
+                % symbols.name_of(w_ci.mid))
+        return _kw_invoke(frame, w_ci, recv_at, argc, w_block)
 
     rubycall.gc_stress_point()
     recv = frame.stack[recv_at]
@@ -303,13 +308,78 @@ def _new_with_block(frame, entry, klass, recv_at, argc, w_block):
 
 
 @unroll_safe
-def _enter(frame, entry, recv, recv_at, argc, mid, w_block=None):
+def _kw_invoke(frame, w_ci, recv_at, argc, w_block):
+    """A send with literal keywords (VM_CALL_KWARG): their values are the topmost arguments, named by w_ci.kw_names."""
+    rubycall.gc_stress_point()
+    recv = frame.stack[recv_at]
+    klass = promote(value.class_of(recv))
+    entry = dispatch.lookup(klass, w_ci.mid)
+    if entry is not None and (w_ci.fcall or not entry.private):
+        if entry.kind != dispatch.KIND_ISEQ:
+            # An attr_* entry takes no keywords, so this only ever raises the arity error CRuby would.
+            return _attr_send(frame, entry, recv, recv_at, argc)
+        if w_block is None or w_ci.blockarg:
+            return _enter(frame, entry, recv, recv_at, argc, w_ci.mid,
+                          w_block, w_ci.kw_names)
+        try:
+            return _enter(frame, entry, recv, recv_at, argc, w_ci.mid,
+                          w_block, w_ci.kw_names)
+        except block_mod.BlockBreak, e:
+            if e.w_block is not w_block:
+                raise
+            return e.value
+    # Left in the marked frame until rb_hash_aset has copied each one, as _newhash does.
+    kw_names = w_ci.kw_names
+    nkw = len(kw_names)
+    base = recv_at + 1
+    n = argc - nkw
+    # Restated so the codewriter sees every stack index as non-negative.
+    assert base >= 0
+    assert n >= 0
+    args = []
+    i = 0
+    while i < n:
+        args.append(frame.stack[base + i])
+        i += 1
+    # Resolved before the Hash exists: rb_intern allocates, and only the frame keeps a VALUE marked, never an RPython list.
+    rubycall.rid(w_ci.mid)
+    i = 0
+    while i < nkw:
+        rubycall.sym_value(kw_names[i])
+        i += 1
+    h = rubycall.hash_new(nkw)
+    i = 0
+    while i < nkw:
+        rubycall.hash_aset(h, rubycall.sym_value(kw_names[i]),
+                           frame.stack[base + n + i])
+        i += 1
+    args.append(h)
+    _drop(frame, recv_at)
+    if w_block is not None:
+        if w_ci.blockarg:
+            return _call_with_block(recv, w_ci.mid, args, w_block, True)
+        try:
+            return _call_with_block(recv, w_ci.mid, args, w_block, True)
+        except block_mod.BlockBreak, e:
+            # As in invoke(): only the send the block was written at catches it.
+            if e.w_block is not w_block:
+                raise
+            return e.value
+    ret = rubycall.call_kw(recv, w_ci.mid, args,
+                           entry is not None and not w_ci.fcall)
+    _check_block_error()
+    return ret
+
+
+@unroll_safe
+def _enter(frame, entry, recv, recv_at, argc, mid, w_block=None,
+           kw_names=NO_KEYWORDS):
     """Move argc arguments into a fresh frame and run it; also invokesuper."""
     callee_iseq = entry.w_iseq
     callee = Frame(callee_iseq, recv, 0, entry)
     callee.block = w_block
     pc = 0
-    if callee_iseq.simple_params:
+    if callee_iseq.simple_params and len(kw_names) == 0:
         if argc != callee_iseq.nparams:
             _arity_error(argc, callee_iseq.nparams, callee_iseq.nparams)
         i = 0
@@ -324,7 +394,7 @@ def _enter(frame, entry, recv, recv_at, argc, mid, w_block=None):
         while i < argc:
             given[i] = frame.stack[recv_at + 1 + i]
             i += 1
-        pc = setup_params(callee_iseq, callee, given, False)
+        pc = setup_params(callee_iseq, callee, given, False, kw_names)
     _drop(frame, recv_at)
     debug.count_native()
     if not debug.state.enabled:
@@ -348,8 +418,11 @@ def _refuse_iseq(w_iseq, mid):
 
 
 @unroll_safe
-def setup_params(w_iseq, callee, args, is_block):
-    """vm_args.c setup_parameters_complex, positional only; answers the pc the opt table names (vm_args.c:906)."""
+def setup_params(w_iseq, callee, args, is_block, kw_names=NO_KEYWORDS):
+    """vm_args.c setup_parameters_complex; answers the pc the opt table names (vm_args.c:906)."""
+    nkw = len(kw_names)
+    # Nowhere to place them: CRuby folds them into one trailing positional Hash instead (vm_args.c args_kw_argv_to_hash).
+    fold = nkw > 0 and len(w_iseq.kw_table) == 0 and w_iseq.kwrest < 0
     lead = w_iseq.nparams
     opt_num = len(w_iseq.opt_table) - 1
     if opt_num < 0:
@@ -363,7 +436,9 @@ def setup_params(w_iseq, callee, args, is_block):
     # vm_args.c:594; a rest parameter makes the maximum unlimited.
     min_argc = lead + post_num
     max_argc = -1 if rest >= 0 else min_argc + opt_num
-    n = len(args)
+    n = len(args) - nkw
+    if fold:
+        n += 1
     if n < min_argc:
         if not is_block:
             _arity_error(n, min_argc, max_argc)
@@ -372,6 +447,15 @@ def setup_params(w_iseq, callee, args, is_block):
             _arity_error(n, min_argc, max_argc)
         # arg_setup_block truncates instead of raising (vm_args.c:884).
         n = max_argc
+
+    # After the arity check, so nothing raises between the hold and the release; an RPython list is no GC root, and the Hash is fresh.
+    kw_hash = 0
+    if fold:
+        args = _kw_to_positional(args, kw_names)
+        kw_hash = args[len(args) - 1]
+        gcroots.hold(kw_hash)
+        kw_names = NO_KEYWORDS
+        nkw = 0
 
     i = 0
     while i < lead:
@@ -413,9 +497,112 @@ def setup_params(w_iseq, callee, args, is_block):
                 callee.locals[post_start + i] = value.Q_NIL
             i += 1
 
+    if kw_hash != 0:
+        gcroots.release(kw_hash)
+
+    if len(w_iseq.kw_table) > 0 or w_iseq.kwrest >= 0:
+        _setup_keywords(w_iseq, callee, args, len(args) - nkw, kw_names)
+
     if opt_num > 0:
         return w_iseq.opt_table[filled]
     return 0
+
+
+@unroll_safe
+def _kw_to_positional(args, kw_names):
+    """A callee with no keyword parameters takes them as one trailing Hash."""
+    n = len(args) - len(kw_names)
+    out = [0] * (n + 1)
+    i = 0
+    while i < n:
+        out[i] = args[i]
+        i += 1
+    i = 0
+    while i < len(kw_names):
+        rubycall.sym_value(kw_names[i])
+        i += 1
+    h = rubycall.hash_new(len(kw_names))
+    i = 0
+    while i < len(kw_names):
+        rubycall.hash_aset(h, rubycall.sym_value(kw_names[i]), args[n + i])
+        i += 1
+    out[n] = h
+    return out
+
+
+@unroll_safe
+def _setup_keywords(w_iseq, callee, args, base, kw_names):
+    """vm_args.c args_setup_kw_parameters: match by name, default the rest, and mark every unfilled optional in the kwbits local."""
+    table = w_iseq.kw_table
+    required = w_iseq.kw_required
+    start = w_iseq.kw_start
+    nkw = len(kw_names)
+    taken = [False] * nkw
+    missing = []
+    bits = 0
+    i = 0
+    while i < len(table):
+        found = -1
+        j = 0
+        while j < nkw:
+            if not taken[j] and kw_names[j] == table[i]:
+                found = j
+                break
+            j += 1
+        slot = start + i
+        assert slot >= 0
+        if found >= 0:
+            taken[found] = True
+            callee.locals[slot] = args[base + found]
+        elif i < required:
+            missing.append(table[i])
+        elif w_iseq.kw_defaults[i] != value.Q_UNDEF:
+            callee.locals[slot] = w_iseq.kw_defaults[i]
+        else:
+            callee.locals[slot] = value.Q_NIL
+            bits |= 1 << (i - required)
+        i += 1
+    if len(missing) > 0:
+        _keyword_error('missing', missing)
+
+    if w_iseq.kwrest >= 0:
+        j = 0
+        while j < nkw:
+            rubycall.sym_value(kw_names[j])
+            j += 1
+        rest = rubycall.hash_new(nkw)
+        j = 0
+        while j < nkw:
+            if not taken[j]:
+                rubycall.hash_aset(rest, rubycall.sym_value(kw_names[j]),
+                                   args[base + j])
+            j += 1
+        slot = w_iseq.kwrest
+        assert slot >= 0
+        callee.locals[slot] = rest
+    else:
+        unknown = []
+        j = 0
+        while j < nkw:
+            if not taken[j]:
+                unknown.append(kw_names[j])
+            j += 1
+        if len(unknown) > 0:
+            _keyword_error('unknown', unknown)
+
+    if w_iseq.kw_bits >= 0:
+        slot = w_iseq.kw_bits
+        assert slot >= 0
+        callee.locals[slot] = value.int2fix(bits)
+
+
+@dont_look_inside
+def _keyword_error(kind, names):
+    keys = []
+    for mid in names:
+        keys.append(rubycall.sym_value(mid))
+    raise RubyException(
+        rubycall.keyword_error(kind, rubycall.ary_new(keys)), 'ArgumentError')
 
 
 @dont_look_inside
@@ -708,12 +895,12 @@ def _attr_from_cruby(entry, recv, args):
 
 
 @dont_look_inside
-def _call_with_block(recv, mid, args, w_block):
+def _call_with_block(recv, mid, args, w_block, kw=False):
     handle = _alloc_handle(w_block)
     ret = value.Q_NIL
     try:
         try:
-            ret = rubycall.call_with_block(recv, mid, args, handle)
+            ret = rubycall.call_with_block(recv, mid, args, handle, kw)
         except RubyException:
             # The CRuby method failed; whatever the block parked before that is the reason, and takes precedence.
             _check_block_error()
@@ -1737,6 +1924,14 @@ def _execute(iseq, frame, pc):
             pattern = frame.pop()
             target = frame.pop()
             frame.push(_checkmatch(target, pattern, flag))
+        elif opcode == insns.CHECKKEYWORD:
+            idx = code[pc]
+            bit = code[pc + 1]
+            pc += 2
+            assert idx >= 0
+            # A set bit means the optional went unfilled, so vm_check_keyword answers false and the body computes its default.
+            frame.push(value.newbool(
+                (value.fix2int(frame.locals[idx]) & (1 << bit)) == 0))
         elif opcode == insns.THROW:
             throw_state = code[pc]
             pc += 1
