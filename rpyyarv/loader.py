@@ -382,6 +382,13 @@ class Loader(object):
                 raise UnsupportedOperation(
                     "putspecialobject %d in '%s' is not supported"
                     % (kind, raw.name))
+        elif op == insns.SEND or op == insns.OPT_SEND_WITHOUT_BLOCK:
+            # definemethod writes straight into the registry, so CRuby's visibility scope never reaches the copy RPyYARV dispatches on.
+            if ops[0].kind == rawiseq.OP_CALL and \
+                    ops[0].strval == 'module_function':
+                raise UnsupportedOperation(
+                    "'%s' calls module_function, which RPyYARV does not "
+                    "support" % raw.name)
         elif op == insns.OPT_NEWARRAY_SEND:
             meth = self.int_of(ops[1], op, raw, 'method')
             argc = -1
@@ -399,10 +406,11 @@ class Loader(object):
                 raise UnsupportedOperation(
                     "'%s' opens a singleton class body, which RPyYARV does "
                     "not support" % raw.name)
-            if kind != optable.DEFINECLASS_TYPE_CLASS:
+            if kind != optable.DEFINECLASS_TYPE_CLASS and \
+                    kind != optable.DEFINECLASS_TYPE_MODULE:
                 raise UnsupportedOperation(
-                    "'%s' defines a module, which RPyYARV does not support"
-                    % raw.name)
+                    "'%s' uses defineclass type %d, which RPyYARV does not "
+                    "support" % (raw.name, kind))
             if flags & optable.DEFINECLASS_FLAG_SCOPED:
                 raise UnsupportedOperation(
                     "'%s' defines a class under an explicit scope, which "

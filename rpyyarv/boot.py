@@ -126,6 +126,8 @@ rb_gc_start = _ext('rpyyarv_gc_start', [], lltype.Void, reenters=True)
 rb_core_classes = _ext('rpyyarv_core_classes', [VALUEP], lltype.Void)
 rb_define_class_ = _ext('rpyyarv_define_class',
                         [VALUE, VALUE, VALUE, INTP], VALUE, reenters=True)
+rb_define_module_ = _ext('rpyyarv_define_module',
+                         [VALUE, VALUE, INTP], VALUE, reenters=True)
 rb_class_superclass = _ext('rpyyarv_class_superclass', [VALUE, INTP], VALUE, reenters=True)
 rb_singleton_class = _ext('rpyyarv_singleton_class', [VALUE, INTP], VALUE, reenters=True)
 rb_obj_alloc = _ext('rpyyarv_obj_alloc', [VALUE, INTP], VALUE, reenters=True)
@@ -696,6 +698,16 @@ def define_class(cbase, rid, super_v):
     ret = rffi.cast(lltype.Signed, v)
     if failed:
         _failed('Class.new')
+    return ret
+
+
+def define_module(cbase, rid):
+    state = _enter_status()
+    v = rb_define_module_(_v(cbase), _v(rid), state)
+    failed = _leave_status(state)
+    ret = rffi.cast(lltype.Signed, v)
+    if failed:
+        _failed('Module.new')
     return ret
 
 

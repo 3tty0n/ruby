@@ -46,12 +46,14 @@ OWNER_PENDING = MethodEntry(None, False)
 
 class Registry(object):
     # Quasi-immutable: reads fold into the trace and definemethod invalidates.
-    _immutable_fields_ = ['version?']
+    _immutable_fields_ = ['version?', 'module_owned?']
 
     def __init__(self):
         self.methods = {}       # klass VALUE -> {mid: MethodEntry}
         self.supers = {}        # klass VALUE -> superclass VALUE
         self.version = Version()
+        # Set once RPyYARV defines a module, which is the only way an entry can sit outside registry.supers; until then _lookup skips the owner detour entirely.
+        self.module_owned = False
 
 
 registry = Registry()
@@ -131,7 +133,10 @@ def _record_ancestry(klass):
 
 @dont_look_inside
 def lookup_from_cruby(klass, mid):
-    """Walks CRuby's own chain, since a CRuby-only class is absent from the map; no Object fallback, CRuby already resolved."""
+    """CRuby already resolved, so the module it owns mid through names the entry; the walk below is the fallback for a klass the owner table cannot answer for, and skips iclasses."""
+    entry = own_lookup(owner_of(klass, mid), mid)
+    if entry is not None:
+        return entry
     k = klass
     n = 0
     while k != 0 and not value.is_immediate(k) and n < MAX_ANCESTORS:
@@ -197,12 +202,27 @@ def _walk(klass, mid):
     return None
 
 
+def _module_lookup(klass, mid):
+    """registry.supers holds Class#superclass, which skips every iclass, so a module RPyYARV defined is invisible to _walk; CRuby's own owner names it."""
+    owner = owners.tab.get((klass, mid), OWNER_UNKNOWN)
+    if owner == OWNER_UNKNOWN:
+        return OWNER_PENDING
+    if owner == value.Q_NIL:
+        return None
+    table = registry.methods.get(owner, None)
+    if table is None:
+        return None
+    return table.get(mid, None)
+
+
 @elidable
 def _lookup(klass, mid, version):
     """The walk and the owner check in one elidable, so a trace records one call_pure where two shifted its inlining."""
     entry = _walk(klass, mid)
     if entry is None:
-        return None
+        if not registry.module_owned:
+            return None
+        return _module_lookup(klass, mid)
     owner = owners.tab.get((klass, mid), OWNER_UNKNOWN)
     if owner == OWNER_UNKNOWN:
         return OWNER_PENDING
@@ -285,6 +305,18 @@ def define_class(cbase, mid, super_v):
     # A singleton method inherited from Foo is found only once meta(Bar) -> meta(Foo) is in the map.
     _record_ancestry(boot.singleton_class(klass))
     return klass
+
+
+@dont_look_inside
+def define_module(cbase, mid):
+    """No entry in registry.supers: a module has no superclass to walk, and nothing is ever an instance of one."""
+    mod = boot.define_module(cbase, rubycall.rid(mid))
+    registry.module_owned = True
+    boot.gc_register(mod)
+    gcroots.register_class(mod)
+    # `def self.x` and module_function land on the singleton class.
+    _record_ancestry(boot.singleton_class(mod))
+    return mod
 
 
 @dont_look_inside

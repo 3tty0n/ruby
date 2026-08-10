@@ -140,10 +140,11 @@ SIMPLE_CALL_FLAGS = (CALL_FLAG_FCALL | CALL_FLAG_VCALL |
                      CALL_FLAG_SUPER | CALL_FLAG_ZSUPER |
                      CALL_FLAG_ARGS_BLOCKARG)
 
-# vm_core.h. Only a plain `class Foo`: no module, singleton class or A::B.
+# vm_core.h. A plain `class Foo` or `module Foo`: no singleton class or A::B.
 DEFINECLASS_TYPE_MASK = 0x07
 DEFINECLASS_TYPE_CLASS = 0x00
 DEFINECLASS_TYPE_SINGLETON_CLASS = 0x01
+DEFINECLASS_TYPE_MODULE = 0x02
 DEFINECLASS_FLAG_SCOPED = 0x08
 DEFINECLASS_FLAG_HAS_SUPERCLASS = 0x10
 

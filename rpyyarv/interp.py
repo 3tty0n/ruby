@@ -1258,8 +1258,11 @@ def _const_base(frame):
     return value.core_class(value.C_OBJECT)
 
 
-def _defineclass(mid, w_body, cbase, super_v):
-    klass = dispatch.define_class(cbase, mid, super_v)
+def _defineclass(mid, w_body, cbase, super_v, is_module=False):
+    if is_module:
+        klass = dispatch.define_module(cbase, mid)
+    else:
+        klass = dispatch.define_class(cbase, mid, super_v)
     ret = execute(w_body, Frame(w_body, klass, klass))
     # Reopening a class is where CRuby-side operator redefinitions show up.
     helpers.refresh()
@@ -1643,7 +1646,10 @@ def _execute(iseq, frame, pc):
             cbase = frame.pop()
             if not flags & optable.DEFINECLASS_FLAG_HAS_SUPERCLASS:
                 super_v = 0
-            frame.push(_defineclass(mid, w_body, cbase, super_v))
+            frame.push(_defineclass(
+                mid, w_body, cbase, super_v,
+                flags & optable.DEFINECLASS_TYPE_MASK
+                == optable.DEFINECLASS_TYPE_MODULE))
         elif opcode == insns.OPT_NEW:
             w_ci = iseq.callinfos[code[pc]]
             target = code[pc + 1]

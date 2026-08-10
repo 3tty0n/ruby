@@ -567,6 +567,26 @@ rpyyarv_define_class(uintptr_t cbase, uintptr_t id, uintptr_t super,
     return (uintptr_t)r;
 }
 
+/* rb_define_module_id_under reopens an existing module itself, so no separate lookup. */
+static VALUE
+define_module_body(VALUE argp)
+{
+    struct obj_args *p = (struct obj_args *)argp;
+    return rb_define_module_id_under(p->a, p->id);
+}
+
+uintptr_t
+rpyyarv_define_module(uintptr_t cbase, uintptr_t id, int *state)
+{
+    struct obj_args a;
+    a.a = (VALUE)cbase;
+    a.id = (ID)id;
+    *state = 0;
+    VALUE r = rb_protect(define_module_body, (VALUE)&a, state);
+    if (*state) return (uintptr_t)Qnil;
+    return (uintptr_t)r;
+}
+
 static VALUE
 class_superclass_body(VALUE argp)
 {

@@ -105,6 +105,7 @@ uintptr_t rpyyarv_float_new(double d);
 void rpyyarv_float_layout(int *out);
 
 /* Class and object operations, each guarded by rb_protect. */
+uintptr_t rpyyarv_define_module(uintptr_t cbase, uintptr_t id, int *state);
 uintptr_t rpyyarv_define_class(uintptr_t cbase, uintptr_t id, uintptr_t super,
                                int *state);
 uintptr_t rpyyarv_class_superclass(uintptr_t klass, int *state);
