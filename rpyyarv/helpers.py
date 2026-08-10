@@ -92,7 +92,9 @@ B_ARY_INITIALIZE = 34
 B_NIL_NIL_P = 35
 B_STR_FREEZE = 36
 B_STR_EQ = 37
-B_COUNT = 38
+B_KERNEL_SEND = 38
+B_BASIC_SEND = 39
+B_COUNT = 40
 
 _INT_MID = [PLUS, MINUS, MULT, DIV, MOD, EQ, LT, LE, GT, GE, AND, OR, XOR,
             RSHIFT]
@@ -128,6 +130,15 @@ def refresh():
 
 def _cruby_owns(bit):
     return bops.mask & (1 << bit) == 0
+
+
+def kernel_send_pristine():
+    """Kernel#send is still rb_f_send, so a send may be resolved here instead."""
+    return _cruby_owns(B_KERNEL_SEND)
+
+
+def basic_send_pristine():
+    return _cruby_owns(B_BASIC_SEND)
 
 
 def _int_op(bit):

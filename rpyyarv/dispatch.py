@@ -23,16 +23,18 @@ KIND_ATTR_WRITER = 2
 
 class MethodEntry(object):
     _immutable_fields_ = ['w_iseq', 'private', 'owner', 'mid', 'cref',
-                          'kind', 'ivar']
+                          'kind', 'ivar', 'lexical']
 
     def __init__(self, w_iseq, private, owner=0, mid=0, cref=0,
-                 kind=KIND_ISEQ, ivar=0):
+                 kind=KIND_ISEQ, ivar=0, lexical=None):
         self.w_iseq = w_iseq
         self.kind = kind
         # For an accessor kind, the rpyyarv symbol id of the `@name` it reads.
         self.ivar = ivar
         # Class the body's constants resolve against; not owner, since `def self.x` lands on the singleton class.
         self.cref = cref
+        # The interp.Cref chain the def was written in, for lexical constants.
+        self.lexical = lexical
         # Toplevel defs land on Object as private: only an fcall may reach one.
         self.private = private
         # invokesuper resumes the lookup above (owner, mid).
@@ -88,8 +90,9 @@ def _table_for(klass):
     return table
 
 
-def define(klass, mid, w_iseq, private, cref=0):
-    _table_for(klass)[mid] = MethodEntry(w_iseq, private, klass, mid, cref)
+def define(klass, mid, w_iseq, private, cref=0, lexical=None):
+    _table_for(klass)[mid] = MethodEntry(w_iseq, private, klass, mid, cref,
+                                         KIND_ISEQ, 0, lexical)
     registry.version = Version()
     invalidate_owners()
     _install_trampoline(klass, mid, private)
@@ -104,7 +107,7 @@ def define_attr(klass, mid, ivar, kind):
 
 
 @dont_look_inside
-def define_singleton(obj, mid, w_iseq, cref=0):
+def define_singleton(obj, mid, w_iseq, cref=0, lexical=None):
     """definesmethod targets the receiver's singleton class, always public (vm_insnhelper.c:6034)."""
     klass = boot.singleton_class(obj)
     if klass == 0 or value.is_immediate(klass):
@@ -112,7 +115,7 @@ def define_singleton(obj, mid, w_iseq, cref=0):
             "'%s' cannot be given a singleton method" % value.repr_of(obj))
     if klass not in registry.supers:
         _record_ancestry(klass)
-    define(klass, mid, w_iseq, False, cref)
+    define(klass, mid, w_iseq, False, cref, lexical)
 
 
 @dont_look_inside
@@ -358,6 +361,8 @@ class _Consts(object):
 
     def __init__(self):
         self.tab = {}       # (cbase VALUE, mid) -> ConstEntry
+        # The same, for a cbase's own table alone; Qundef records a miss.
+        self.attab = {}
         self.rooted = {}    # cbase VALUEs already handed to gcroots
         self.sites = []     # every ConstSite the loader built
         self.version = Version()
@@ -375,6 +380,7 @@ def new_const_site():
 def invalidate_consts():
     """CRuby's rb_clear_constant_cache_for_id, by way of the shim's const hook."""
     consts.tab = {}
+    consts.attab = {}
     sites = consts.sites
     i = 0
     while i < len(sites):
@@ -419,6 +425,28 @@ def const_get(klass, mid):
     if entry is None:
         entry = _const_fill(klass, mid)
     return entry.value
+
+
+@elidable
+def _const_at_cached(klass, mid, version):
+    return consts.attab.get((klass, mid), None)
+
+
+def const_at(klass, mid):
+    """rb_const_lookup: what klass's own table holds, Qundef when it holds nothing."""
+    entry = _const_at_cached(klass, mid, consts.version)
+    if entry is None:
+        entry = _const_at_fill(klass, mid)
+    return entry.value
+
+
+@dont_look_inside
+def _const_at_fill(klass, mid):
+    entry = ConstEntry(boot.const_at(klass, rubycall.const_rid(mid)))
+    root_base(klass)
+    consts.attab[(klass, mid)] = entry
+    consts.version = Version()
+    return entry
 
 
 @dont_look_inside

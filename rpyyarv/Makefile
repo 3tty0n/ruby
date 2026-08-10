@@ -97,6 +97,7 @@ gccheck:
 	          test/equality.rb \
 	          test/nulstr.rb test/opcodes4.rb test/moduledefs.rb \
 	          test/kwargs.rb test/strops.rb \
+	          test/sendblock.rb test/crefconsts.rb \
 	          $(TOP)/benchmark/app_*.rb $(TOP)/benchmark/so_*.rb; do \
 	   n=`basename $$s`; \
 	   case $$s in test/*) \

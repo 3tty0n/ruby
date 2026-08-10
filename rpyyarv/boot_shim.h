@@ -117,6 +117,7 @@ uintptr_t rpyyarv_singleton_class(uintptr_t obj, int *state);
 uintptr_t rpyyarv_obj_alloc(uintptr_t klass, int *state);
 uintptr_t rpyyarv_obj_alloc_fast(uintptr_t klass);
 uintptr_t rpyyarv_const_get(uintptr_t klass, uintptr_t id, int *state);
+uintptr_t rpyyarv_const_at(uintptr_t klass, uintptr_t id, int *state);
 void rpyyarv_const_set(uintptr_t klass, uintptr_t id, uintptr_t val,
                        int *state);
 uintptr_t rpyyarv_ivar_get(uintptr_t obj, uintptr_t id, int *state);

@@ -710,6 +710,27 @@ rpyyarv_const_get(uintptr_t klass, uintptr_t id, int *state)
 }
 
 static VALUE
+const_at_body(VALUE argp)
+{
+    struct obj_args *p = (struct obj_args *)argp;
+    /* rb_const_lookup, which vm_get_ev_const walks the cref chain with: this class's own table, no ancestors and no Object fallback. */
+    if (!rb_const_defined_at(p->a, p->id)) return Qundef;
+    return rb_const_get_at(p->a, p->id);
+}
+
+uintptr_t
+rpyyarv_const_at(uintptr_t klass, uintptr_t id, int *state)
+{
+    struct obj_args a;
+    a.a = (VALUE)klass;
+    a.id = (ID)id;
+    *state = 0;
+    VALUE r = rb_protect(const_at_body, (VALUE)&a, state);
+    if (*state) return (uintptr_t)Qnil;
+    return (uintptr_t)r;
+}
+
+static VALUE
 const_set_body(VALUE argp)
 {
     struct obj_args *p = (struct obj_args *)argp;
@@ -1658,6 +1679,8 @@ rpyyarv_bop_mask(void)
     BOP(rb_cNilClass, "nil?");
     BOP(rb_cString, "freeze");
     BOP(rb_cString, "==");
+    BOP(rb_mKernel, "send");
+    BOP(rb_cBasicObject, "__send__");
 #undef BOP
 
     return (uintptr_t)i << RPYYARV_BOP_COUNT_SHIFT | mask;

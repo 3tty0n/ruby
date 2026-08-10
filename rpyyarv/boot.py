@@ -136,6 +136,8 @@ rb_singleton_class = _ext('rpyyarv_singleton_class', [VALUE, INTP], VALUE, reent
 rb_obj_alloc = _ext('rpyyarv_obj_alloc', [VALUE, INTP], VALUE, reenters=True)
 rb_obj_alloc_fast = _ext('rpyyarv_obj_alloc_fast', [VALUE], VALUE, reenters=True)
 rb_const_get_ = _ext('rpyyarv_const_get', [VALUE, VALUE, INTP], VALUE, reenters=True)
+rb_const_at_ = _ext('rpyyarv_const_at', [VALUE, VALUE, INTP], VALUE,
+                    reenters=True)
 rb_const_set_ = _ext('rpyyarv_const_set', [VALUE, VALUE, VALUE, INTP],
                      lltype.Void, reenters=True)
 rb_ivar_get_ = _ext('rpyyarv_ivar_get', [VALUE, VALUE, INTP], VALUE, reenters=True)
@@ -791,6 +793,16 @@ def const_get(klass, rid):
     ret = rffi.cast(lltype.Signed, v)
     if failed:
         _failed('const_get')
+    return ret
+
+
+def const_at(klass, rid):
+    state = _enter_status()
+    v = rb_const_at_(_v(klass), _v(rid), state)
+    failed = _leave_status(state)
+    ret = rffi.cast(lltype.Signed, v)
+    if failed:
+        _failed('const_at')
     return ret
 
 

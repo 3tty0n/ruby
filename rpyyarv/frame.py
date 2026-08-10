@@ -19,7 +19,7 @@ class Frame(object):
     # Set on the way out of execute(); a `return` whose target frame is already gone is the orphaned Proc vm_throw_start answers with a LocalJumpError.
     dead = False
 
-    def __init__(self, iseq, self_val, cref=0, entry=None):
+    def __init__(self, iseq, self_val, cref=None, entry=None):
         self = hint(self, access_directly=True, fresh_virtualizable=True)
         self.w_iseq = iseq
         self.stack = [0] * iseq.stack_max
@@ -28,7 +28,7 @@ class Frame(object):
         self.pc = 0
         self.locals = [value.Q_NIL] * iseq.nlocals
         self.self_val = self_val
-        # The class a class body defines into; 0 outside one, meaning Object.
+        # The interp.Cref a class body pushed, None outside one; its klass is what a def in the body lands on.
         self.cref = cref
         # The running MethodEntry, which invokesuper resumes above.
         self.entry = entry

@@ -27,13 +27,49 @@ ROOT_CBASE = symbols.intern('')
 NO_KEYWORDS = []
 
 
+class Cref(object):
+    """One lexical scope, chained as CRuby's rb_cref_t is; klass 0 is the toplevel Object."""
+    _immutable_fields_ = ['klass', 'outer']
+
+    def __init__(self, klass, outer):
+        self.klass = klass
+        self.outer = outer
+        # klass -> Cref, so re-running a class body reuses the node a const site's guard holds.
+        self.inner = {}
+
+
+TOP_CREF = Cref(0, None)
+
+
+def _push_cref(outer, klass):
+    node = outer.inner.get(klass, None)
+    if node is None:
+        dispatch.root_base(klass)
+        node = Cref(klass, outer)
+        outer.inner[klass] = node
+    return node
+
+
+def _cref_of(frame):
+    """The lexical scope chain a constant resolves against; a method frame carries none of its own, so its entry's stands in."""
+    c = frame.cref
+    if c is None:
+        entry = frame.entry
+        if entry is not None:
+            c = entry.lexical
+    if c is None:
+        return TOP_CREF
+    return c
+
+
 def define_method(frame, mid, w_iseq):
     """A def in a class body lands on it; a toplevel def is private on Object."""
-    klass = frame.cref
-    if klass == 0:
-        dispatch.define(value.core_class(value.C_OBJECT), mid, w_iseq, True)
+    node = frame.cref
+    if node is None:
+        dispatch.define(value.core_class(value.C_OBJECT), mid, w_iseq, True,
+                        0, _cref_of(frame))
     else:
-        dispatch.define(klass, mid, w_iseq, False, klass)
+        dispatch.define(node.klass, mid, w_iseq, False, node.klass, node)
 
 
 @unroll_safe
@@ -47,26 +83,37 @@ def invoke(frame, w_ci, w_block=None):
                 % symbols.name_of(w_ci.mid))
         w_block = _block_from_value(frame, frame.stack[top])
         frame.pop()
+    # A `send` rewrites these three; the callinfo keeps the rest of the site.
+    mid = w_ci.mid
     argc = w_ci.argc
+    fcall = w_ci.fcall
     recv_at = frame.sp - argc - 1
     if recv_at < 0:
         raise UnsupportedOperation(
             "call to '%s' with %d argument(s) underflows the stack"
-            % (symbols.name_of(w_ci.mid), argc))
+            % (symbols.name_of(mid), argc))
     if not w_ci.simple:
         if len(w_ci.kw_names) == 0 and not w_ci.kw_splat:
             raise UnsupportedOperation(
                 "call to '%s' passes arguments RPyYARV does not support"
-                % symbols.name_of(w_ci.mid))
-        return _kw_invoke(frame, w_ci, recv_at, argc, w_block)
+                % symbols.name_of(mid))
+        return _kw_invoke(frame, w_ci, recv_at, argc, w_block, mid, fcall)
 
     rubycall.gc_stress_point()
     recv = frame.stack[recv_at]
     # Promoted: the guard on the class word is the inline cache, and the lookup below folds away behind it.
     klass = promote(value.class_of(recv))
-    entry = dispatch.lookup(klass, w_ci.mid)
+    while mid == SEND or mid == SEND2:
+        target = _send_target(frame, klass, mid, argc, recv_at)
+        if target == rubycall.NO_MID:
+            break
+        _shift_off(frame, recv_at)
+        argc -= 1
+        mid = target
+        fcall = True
+    entry = dispatch.lookup(klass, mid)
     callee_iseq = None
-    if entry is not None and (w_ci.fcall or not entry.private):
+    if entry is not None and (fcall or not entry.private):
         if entry.kind != dispatch.KIND_ISEQ:
             return _attr_send(frame, entry, recv, recv_at, argc)
         callee_iseq = entry.w_iseq
@@ -74,9 +121,9 @@ def invoke(frame, w_ci, w_block=None):
     if callee_iseq is not None:
         if w_block is None or w_ci.blockarg:
             # A break unwinds to the send the block was *written* at, not one that passed it on.
-            return _enter(frame, entry, recv, recv_at, argc, w_ci.mid, w_block)
+            return _enter(frame, entry, recv, recv_at, argc, mid, w_block)
         try:
-            return _enter(frame, entry, recv, recv_at, argc, w_ci.mid,
+            return _enter(frame, entry, recv, recv_at, argc, mid,
                           w_block)
         except block_mod.BlockBreak, e:
             if e.w_block is not w_block:
@@ -86,21 +133,21 @@ def invoke(frame, w_ci, w_block=None):
     if entry is None and argc <= 1:
         # A send an opt_* instruction would have caught if YARV had one for it.
         if argc == 1:
-            v = _native_binop(recv, frame.stack[recv_at + 1], w_ci.mid)
+            v = _native_binop(recv, frame.stack[recv_at + 1], mid)
         else:
-            v = helpers.zero_arg(recv, w_ci.mid)
+            v = helpers.zero_arg(recv, mid)
         if v != value.Q_UNDEF:
             _drop(frame, recv_at)
             debug.count_native()
             return v
-    if _is_attr_mid(w_ci.mid) and argc > 0 \
+    if _is_attr_mid(mid) and argc > 0 \
             and not value.is_immediate(recv) and dispatch.is_known_class(recv):
-        return _define_attrs(frame, w_ci, recv, recv_at, argc)
-    if w_ci.mid == BLOCK_GIVEN and w_ci.fcall and argc == 0:
+        return _define_attrs(frame, mid, recv, recv_at, argc)
+    if mid == BLOCK_GIVEN and fcall and argc == 0:
         # rb_f_block_given_p reads the *caller's* frame (vm.c:1862); through rb_funcallv it would find a CRuby one.
         _drop(frame, recv_at)
         return value.newbool(frame.block is not None)
-    if w_ci.mid == NEW and helpers.ary_new_pristine(promote(recv)):
+    if mid == NEW and helpers.ary_new_pristine(promote(recv)):
         if w_block is None:
             v = _array_new(frame, recv_at, argc)
         else:
@@ -108,25 +155,25 @@ def invoke(frame, w_ci, w_block=None):
         if v != value.Q_UNDEF:
             debug.count_native()
             return v
-    if w_block is not None and w_ci.mid == NEW \
+    if w_block is not None and mid == NEW \
             and dispatch.is_known_class(recv):
         entry = dispatch.lookup(promote(recv), INITIALIZE)
         if entry is not None and entry.kind == dispatch.KIND_ISEQ:
             return _new_with_block(frame, entry, recv, recv_at, argc, w_block)
     if proxy.value != 0 and recv == proxy.value:
-        return _block_send(frame, w_ci, recv_at, argc, frame.block)
-    if len(blocks.by_proc) > 0 and _is_proxy_call(w_ci.mid) \
+        return _block_send(frame, mid, recv_at, argc, frame.block)
+    if len(blocks.by_proc) > 0 and _is_proxy_call(mid) \
             and recv in blocks.by_proc:
         # A Proc RPyYARV made: run its block here instead of out to CRuby and back through the block callback.
-        return _block_send(frame, w_ci, recv_at, argc, blocks.by_proc[recv])
-    if w_ci.mid == CORE_ALIAS or w_ci.mid == CORE_UNDEF:
-        return _core_method(frame, w_ci, recv, recv_at, argc)
+        return _block_send(frame, mid, recv_at, argc, blocks.by_proc[recv])
+    if mid == CORE_ALIAS or mid == CORE_UNDEF:
+        return _core_method(frame, mid, recv, recv_at, argc)
     if vm_core.value != 0 and recv == vm_core.value \
-            and w_ci.mid != HASH_MERGE_PTR and w_ci.mid != HASH_MERGE_KWD:
+            and mid != HASH_MERGE_PTR and mid != HASH_MERGE_KWD:
         # #lambda and #proc would hand libruby a Proc over a block handle that dies with the call, and crash later; the keyword merges below are plain Hash work, so they go out to CRuby.
         raise UnsupportedOperation(
             "RubyVM::FrozenCore#%s is not supported"
-            % symbols.name_of(w_ci.mid))
+            % symbols.name_of(mid))
 
     args = []
     i = 0
@@ -136,25 +183,25 @@ def invoke(frame, w_ci, w_block=None):
     _drop(frame, recv_at)
     if w_block is not None:
         if w_ci.blockarg:
-            return _call_with_block(recv, w_ci.mid, args, w_block)
+            return _call_with_block(recv, mid, args, w_block)
         try:
-            return _call_with_block(recv, w_ci.mid, args, w_block)
+            return _call_with_block(recv, mid, args, w_block)
         except block_mod.BlockBreak, e:
             # As above: only the send the block was written at catches it.
             if e.w_block is not w_block:
                 raise
             return e.value
     # An entry survives here only as private to a receiverless call, which rb_funcallv reaches anyway (CALL_FCALL).
-    public_only = entry is not None and not w_ci.fcall
+    public_only = entry is not None and not fcall
     if not debug.state.enabled:
-        ret = rubycall.call(recv, w_ci.mid, args, public_only)
+        ret = rubycall.call(recv, mid, args, public_only)
         # The callee may have run a Proc of ours, which cannot raise through libruby's frames and parked instead.
         _check_block_error()
         return ret
-    debug.trace_enter(w_ci.mid, args)
-    ret = rubycall.call(recv, w_ci.mid, args, public_only)
+    debug.trace_enter(mid, args)
+    ret = rubycall.call(recv, mid, args, public_only)
     _check_block_error()
-    debug.trace_leave(w_ci.mid, ret)
+    debug.trace_leave(mid, ret)
     return ret
 
 
@@ -226,6 +273,63 @@ def _is_attr_mid(mid):
             or mid == ATTR_ACCESSOR)
 
 
+SEND = symbols.intern('send')
+SEND2 = symbols.intern('__send__')
+
+
+class _SendOwners(object):
+    # Quasi-immutable: install() writes it once, before any Ruby code runs.
+    _immutable_fields_ = ['kernel?', 'basic?']
+
+    def __init__(self):
+        self.kernel = 0
+        self.basic = 0
+
+
+# Kernel#send and BasicObject#__send__, so a class that overrides either is seen.
+send_owners = _SendOwners()
+
+
+def _send_target(frame, klass, mid, argc, recv_at):
+    """vm_call_opt_send: the method a `send` names, or NO_MID when this is not a pristine send."""
+    if argc < 1:
+        return rubycall.NO_MID
+    if mid == SEND:
+        if not helpers.kernel_send_pristine():
+            return rubycall.NO_MID
+        owner = send_owners.kernel
+    else:
+        if not helpers.basic_send_pristine():
+            return rubycall.NO_MID
+        owner = send_owners.basic
+    if owner == 0 or dispatch.owner_of(klass, mid) != owner:
+        return rubycall.NO_MID
+    if dispatch.lookup(klass, mid) is not None:
+        return rubycall.NO_MID
+    return _name_mid(frame.stack[recv_at + 1])
+
+
+@dont_look_inside
+def _name_mid(v):
+    """rb_check_id of a send's first argument (vm_eval.c:1245); NO_MID leaves the send to CRuby, which raises for it."""
+    if boot.is_symbol(v):
+        return symbols.intern(boot.sym_of(v))
+    if not value.is_immediate(v) and boot.is_string(v):
+        return symbols.intern(boot.str_of(v))
+    return rubycall.NO_MID
+
+
+@unroll_safe
+def _shift_off(frame, recv_at):
+    """Drop a send's method-name argument, closing the gap the receiver sits under."""
+    i = recv_at + 1
+    assert i >= 0
+    while i < frame.sp - 1:
+        frame.stack[i] = frame.stack[i + 1]
+        i += 1
+    frame.pop()
+
+
 def _native_binop(recv, arg, mid):
     """A one-argument send RPyYARV answers itself, or Qundef."""
     if mid == helpers.XOR:
@@ -262,7 +366,7 @@ def _attr_send(frame, entry, recv, recv_at, argc):
 
 
 @unroll_safe
-def _define_attrs(frame, w_ci, klass, recv_at, argc):
+def _define_attrs(frame, mid, klass, recv_at, argc):
     args = []
     i = 0
     while i < argc:
@@ -270,8 +374,8 @@ def _define_attrs(frame, w_ci, klass, recv_at, argc):
         i += 1
     _drop(frame, recv_at)
     # First, so a name CRuby rejects raises before anything is registered.
-    ret = rubycall.call(klass, w_ci.mid, args)
-    _install_attrs(klass, w_ci.mid, args)
+    ret = rubycall.call(klass, mid, args)
+    _install_attrs(klass, mid, args)
     return ret
 
 
@@ -325,23 +429,33 @@ def _is_hash(v):
 
 
 @unroll_safe
-def _kw_invoke(frame, w_ci, recv_at, argc, w_block):
+def _kw_invoke(frame, w_ci, recv_at, argc, w_block, mid, fcall):
     """A send with literal keywords (VM_CALL_KWARG), whose values are the topmost arguments named by w_ci.kw_names, or with a **splat (VM_CALL_KW_SPLAT), whose one Hash is the topmost argument."""
     if w_ci.kw_splat:
         _kw_splat_hash(frame, recv_at + argc)
     rubycall.gc_stress_point()
     recv = frame.stack[recv_at]
     klass = promote(value.class_of(recv))
-    entry = dispatch.lookup(klass, w_ci.mid)
-    if entry is not None and (w_ci.fcall or not entry.private):
+    # As in invoke(); the keywords stay the topmost arguments, so only the name below them is shifted off.
+    while mid == SEND or mid == SEND2:
+        target = _send_target(frame, klass, mid, argc - len(w_ci.kw_names),
+                              recv_at)
+        if target == rubycall.NO_MID:
+            break
+        _shift_off(frame, recv_at)
+        argc -= 1
+        mid = target
+        fcall = True
+    entry = dispatch.lookup(klass, mid)
+    if entry is not None and (fcall or not entry.private):
         if entry.kind != dispatch.KIND_ISEQ:
             # An attr_* entry takes no keywords, so this only ever raises the arity error CRuby would.
             return _attr_send(frame, entry, recv, recv_at, argc)
         if w_block is None or w_ci.blockarg:
-            return _enter(frame, entry, recv, recv_at, argc, w_ci.mid,
+            return _enter(frame, entry, recv, recv_at, argc, mid,
                           w_block, w_ci.kw_names, w_ci.kw_splat)
         try:
-            return _enter(frame, entry, recv, recv_at, argc, w_ci.mid,
+            return _enter(frame, entry, recv, recv_at, argc, mid,
                           w_block, w_ci.kw_names, w_ci.kw_splat)
         except block_mod.BlockBreak, e:
             if e.w_block is not w_block:
@@ -349,11 +463,11 @@ def _kw_invoke(frame, w_ci, recv_at, argc, w_block):
             return e.value
     # As in invoke(): a block RPyYARV holds runs here, so its keyword parameters do not have to survive a round trip through libruby.
     if proxy.value != 0 and recv == proxy.value:
-        return _block_send(frame, w_ci, recv_at, argc, frame.block,
+        return _block_send(frame, mid, recv_at, argc, frame.block,
                            w_ci.kw_names, w_ci.kw_splat)
-    if len(blocks.by_proc) > 0 and _is_proxy_call(w_ci.mid) \
+    if len(blocks.by_proc) > 0 and _is_proxy_call(mid) \
             and recv in blocks.by_proc:
-        return _block_send(frame, w_ci, recv_at, argc, blocks.by_proc[recv],
+        return _block_send(frame, mid, recv_at, argc, blocks.by_proc[recv],
                            w_ci.kw_names, w_ci.kw_splat)
     # Left in the marked frame until rb_hash_aset has copied each one, as _newhash does.
     kw_names = w_ci.kw_names
@@ -376,7 +490,7 @@ def _kw_invoke(frame, w_ci, recv_at, argc, w_block):
             pass_kw = False
     else:
         # Resolved before the Hash exists: rb_intern allocates, and only the frame keeps a VALUE marked, never an RPython list.
-        rubycall.rid(w_ci.mid)
+        rubycall.rid(mid)
         i = 0
         while i < nkw:
             rubycall.sym_value(kw_names[i])
@@ -391,19 +505,19 @@ def _kw_invoke(frame, w_ci, recv_at, argc, w_block):
     _drop(frame, recv_at)
     if w_block is not None:
         if w_ci.blockarg:
-            return _call_with_block(recv, w_ci.mid, args, w_block, pass_kw)
+            return _call_with_block(recv, mid, args, w_block, pass_kw)
         try:
-            return _call_with_block(recv, w_ci.mid, args, w_block, pass_kw)
+            return _call_with_block(recv, mid, args, w_block, pass_kw)
         except block_mod.BlockBreak, e:
             # As in invoke(): only the send the block was written at catches it.
             if e.w_block is not w_block:
                 raise
             return e.value
-    public_only = entry is not None and not w_ci.fcall
+    public_only = entry is not None and not fcall
     if pass_kw:
-        ret = rubycall.call_kw(recv, w_ci.mid, args, public_only)
+        ret = rubycall.call_kw(recv, mid, args, public_only)
     else:
-        ret = rubycall.call(recv, w_ci.mid, args, public_only)
+        ret = rubycall.call(recv, mid, args, public_only)
     _check_block_error()
     return ret
 
@@ -413,7 +527,7 @@ def _enter(frame, entry, recv, recv_at, argc, mid, w_block=None,
            kw_names=NO_KEYWORDS, kw_splat=False):
     """Move argc arguments into a fresh frame and run it; also invokesuper."""
     callee_iseq = entry.w_iseq
-    callee = Frame(callee_iseq, recv, 0, entry)
+    callee = Frame(callee_iseq, recv, None, entry)
     callee.block = w_block
     pc = 0
     if callee_iseq.simple_params and len(kw_names) == 0 and not kw_splat:
@@ -765,20 +879,20 @@ HASH_MERGE_PTR = symbols.intern('core#hash_merge_ptr')
 HASH_MERGE_KWD = symbols.intern('core#hash_merge_kwd')
 
 
-def _core_method(frame, w_ci, recv, recv_at, argc):
-    if argc != 3 and w_ci.mid == CORE_ALIAS:
+def _core_method(frame, mid, recv, recv_at, argc):
+    if argc != 3 and mid == CORE_ALIAS:
         raise UnsupportedOperation('core#set_method_alias needs 3 arguments')
-    if argc != 2 and w_ci.mid == CORE_UNDEF:
+    if argc != 2 and mid == CORE_UNDEF:
         raise UnsupportedOperation('core#undef_method needs 2 arguments')
     cbase = frame.stack[recv_at + 1]
     if value.is_immediate(cbase) or not boot.is_class(cbase):
         raise UnsupportedOperation('alias or undef outside a class body')
     name = _sym_mid(frame.stack[recv_at + 2])
-    if w_ci.mid == CORE_UNDEF:
+    if mid == CORE_UNDEF:
         dispatch.undefine(cbase, name)
         args = [cbase, frame.stack[recv_at + 2]]
         _drop(frame, recv_at)
-        ret = rubycall.call(recv, w_ci.mid, args)
+        ret = rubycall.call(recv, mid, args)
         helpers.refresh()
         return ret
     old = _sym_mid(frame.stack[recv_at + 3])
@@ -789,12 +903,13 @@ def _core_method(frame, w_ci, recv, recv_at, argc):
         if entry.kind != dispatch.KIND_ISEQ:
             dispatch.define_attr(cbase, name, entry.ivar, entry.kind)
         else:
-            dispatch.define(cbase, name, entry.w_iseq, entry.private)
+            dispatch.define(cbase, name, entry.w_iseq, entry.private,
+                            entry.cref, entry.lexical)
         _drop(frame, recv_at)
         return value.Q_NIL
     args = [cbase, frame.stack[recv_at + 2], frame.stack[recv_at + 3]]
     _drop(frame, recv_at)
-    ret = rubycall.call(recv, w_ci.mid, args)
+    ret = rubycall.call(recv, mid, args)
     helpers.refresh()
     return ret
 
@@ -952,7 +1067,7 @@ def _from_cruby(recv, mid, args, w_block):
     if entry.kind != dispatch.KIND_ISEQ:
         return _attr_from_cruby(entry, recv, args)
     callee_iseq = entry.w_iseq
-    callee = Frame(callee_iseq, recv, 0, entry)
+    callee = Frame(callee_iseq, recv, None, entry)
     callee.block = w_block
     pc = 0
     argc = len(args)
@@ -1068,7 +1183,7 @@ def _block_from_value(frame, v):
 
 
 @unroll_safe
-def _block_send(frame, w_ci, recv_at, argc, w_block,
+def _block_send(frame, mid, recv_at, argc, w_block,
                 kw_names=NO_KEYWORDS, kw_splat=False):
     """A send whose receiver stands for a block RPyYARV holds: the block-param proxy (compile.c:9564), or a Proc it materialised."""
     args = [0] * argc
@@ -1077,15 +1192,15 @@ def _block_send(frame, w_ci, recv_at, argc, w_block,
         args[i] = frame.stack[recv_at + 1 + i]
         i += 1
     _drop(frame, recv_at)
-    if _is_proxy_call(w_ci.mid):
+    if _is_proxy_call(mid):
         if w_block is None:
             raise UnsupportedOperation('the block parameter is nil')
         return call_block(w_block, args, kw_names, kw_splat)
     if len(kw_names) > 0:
         args = _kw_to_positional(args, kw_names)
     if len(kw_names) > 0 or kw_splat:
-        return rubycall.call_kw(_to_proc(w_block), w_ci.mid, args)
-    return rubycall.call(_to_proc(w_block), w_ci.mid, args)
+        return rubycall.call_kw(_to_proc(w_block), mid, args)
+    return rubycall.call(_to_proc(w_block), mid, args)
 
 
 @unroll_safe
@@ -1356,6 +1471,11 @@ def install():
     gcroots.register_blocks(blocks)
     # A Symbol, so it is an immediate no mark hook has to reach.
     proxy.value = boot.sym_new(PROXY_NAME)
+    # Asked before any Ruby code runs, so these are the pristine owners.
+    send_owners.kernel = dispatch.owner_of(
+        value.core_class(value.C_OBJECT), SEND)
+    send_owners.basic = dispatch.owner_of(
+        value.core_class(value.C_BASIC_OBJECT), SEND2)
 
 
 @unroll_safe
@@ -1521,50 +1641,73 @@ def _vm_core():
 
 
 def _const_path(frame, iseq, idx):
-    """A per-site memo of _const_walk, keyed on the cbase it was filled with; the global cache below it stays the fallback."""
+    """A per-site memo of _const_walk; the global cache below it stays the fallback."""
+    # Keyed on the innermost class, not the chain: _push_cref interns one node per (outer, class), and a site's outer is fixed by where its ISeq sits, so the two agree.
     base = _const_base(frame)
     entry = dispatch.const_site(iseq.path_sites[idx], dispatch.consts.version)
     if entry is not None and entry.base == base:
         return entry.value
-    return _const_path_miss(iseq.path_sites[idx], base, iseq.paths[idx])
+    return _const_path_miss(iseq.path_sites[idx], base, _cref_of(frame),
+                            iseq.paths[idx])
 
 
 @dont_look_inside
-def _const_path_miss(site, base, path):
-    v = _const_walk(base, path)
+def _const_path_miss(site, base, cref, path):
+    v = _const_walk(cref, path)
     dispatch.const_site_fill(site, base, v)
     return v
 
 
-def _const_walk(base, path):
+def _const_walk(cref, path):
     """vm_get_ev_const_chain; a leading empty segment is `::Foo`."""
-    i = 0
     # An id compare, not a name lookup: the dict read would stay in the trace.
     if path[0] == ROOT_CBASE:
         base = value.core_class(value.C_OBJECT)
-        i = 1
+    else:
+        base = _const_lexical(cref, path[0])
+    i = 1
     while i < len(path):
         base = dispatch.const_get(base, path[i])
         i += 1
     return base
 
 
+def _const_lexical(cref, mid):
+    """vm_get_ev_const with a nil cbase: each lexical scope's own table innermost outward, then the innermost scope's ancestors and Object."""
+    node = cref
+    # The outermost entry is the toplevel Object, which only the walk below covers.
+    while node.outer is not None:
+        v = dispatch.const_at(node.klass, mid)
+        if v != value.Q_UNDEF:
+            return v
+        node = node.outer
+    return dispatch.const_get(_cref_klass(cref), mid)
+
+
+def _cref_klass(cref):
+    if cref.klass == 0:
+        return value.core_class(value.C_OBJECT)
+    return cref.klass
+
+
 def _const_base(frame):
-    """The cref's constant base. TODO: no nested cref chain, so `class A; X=1; class B; def f; X` misses A's constant."""
-    if frame.cref != 0:
-        return frame.cref
+    """The cbase a `class Foo::Bar` or a setconstant resolves against."""
+    node = frame.cref
+    if node is not None and node.klass != 0:
+        return node.klass
     entry = frame.entry
     if entry is not None and entry.cref != 0:
         return entry.cref
     return value.core_class(value.C_OBJECT)
 
 
-def _defineclass(mid, w_body, cbase, super_v, is_module=False):
+def _defineclass(frame, mid, w_body, cbase, super_v, is_module=False):
     if is_module:
         klass = dispatch.define_module(cbase, mid)
     else:
         klass = dispatch.define_class(cbase, mid, super_v)
-    ret = execute(w_body, Frame(w_body, klass, klass))
+    body = Frame(w_body, klass, _push_cref(_cref_of(frame), klass))
+    ret = execute(w_body, body)
     # Reopening a class is where CRuby-side operator redefinitions show up.
     helpers.refresh()
     return ret
@@ -1948,7 +2091,7 @@ def _execute(iseq, frame, pc):
             if not flags & optable.DEFINECLASS_FLAG_HAS_SUPERCLASS:
                 super_v = 0
             frame.push(_defineclass(
-                mid, w_body, cbase, super_v,
+                frame, mid, w_body, cbase, super_v,
                 flags & optable.DEFINECLASS_TYPE_MASK
                 == optable.DEFINECLASS_TYPE_MODULE))
         elif opcode == insns.OPT_NEW:
@@ -1979,7 +2122,8 @@ def _execute(iseq, frame, pc):
             mid = code[pc]
             w_body = iseq.iseqs[code[pc + 1]]
             pc += 2
-            dispatch.define_singleton(frame.pop(), mid, w_body, frame.cref)
+            dispatch.define_singleton(frame.pop(), mid, w_body,
+                                      _const_base(frame), _cref_of(frame))
         elif opcode == insns.OPT_SEND_WITHOUT_BLOCK:
             idx = code[pc]
             pc += 1

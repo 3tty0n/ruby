@@ -79,8 +79,7 @@ def _mark_frame(f):
     _mark_array(f.locals)
     if not value.is_immediate(f.self_val):
         boot.gc_mark_value(f.self_val)
-    if not value.is_immediate(f.cref):
-        boot.gc_mark_value(f.cref)
+    # f.cref needs no mark: every class a Cref names went through dispatch.root_base, which roots it for good.
     if not value.is_immediate(f.pending_value):
         boot.gc_mark_value(f.pending_value)
     _mark_block_procs(f.block)
