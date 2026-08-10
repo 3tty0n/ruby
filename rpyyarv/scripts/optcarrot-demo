@@ -1,0 +1,18 @@
+#!/bin/sh
+# Launch optcarrot under rpyyarv-jit with a real SDL2 window.
+
+HERE=`cd "\`dirname "$0"\`/.." && pwd`
+BUILD=${RPYYARV_BUILD:-`cd "$HERE/.." && pwd`/build}
+GEMDIR=${OPTCARROT_GEMDIR:-`gem env gemdir 2>/dev/null`}
+OC="$HERE/ruby-bench/benchmarks/optcarrot"
+[ -d "$OC" ] || { echo "ruby-bench checkout not found at $OC" >&2; exit 1; }
+
+if [ $# -eq 0 ]; then
+    set -- --video=sdl2 --audio=none --input=sdl2 \
+           "$OC/examples/Lan_Master.nes"
+fi
+
+RPYYARV_BUILD=$BUILD RPYYARV_GEMS=1 GEM_HOME=$GEMDIR GEM_PATH=$GEMDIR \
+DYLD_LIBRARY_PATH=$BUILD DYLD_FALLBACK_LIBRARY_PATH=/opt/homebrew/lib \
+LD_LIBRARY_PATH=$BUILD \
+exec "$HERE/rpyyarv-jit" "$OC/bin/optcarrot" "$@"
