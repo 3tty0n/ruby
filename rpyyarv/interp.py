@@ -1098,6 +1098,38 @@ def _newarray(frame, n):
     return v
 
 
+# vm_core.h's enum vm_opt_newarray_send_type, indexed by method-1; the loader refuses the entries optable.NEWARRAY_SEND_ARGC marks unsupported.
+NEWARRAY_SEND_MID = [helpers.MAX, helpers.MIN, helpers.HASH, helpers.PACK,
+                     helpers.PACK, helpers.INCLUDE_P]
+
+
+@unroll_safe
+def _newarray_send(frame, n, meth):
+    """The temp array built and the method sent, as vm_opt_newarray_send falls back to; the trailing argument of include?/pack is not part of it."""
+    argc = optable.NEWARRAY_SEND_ARGC[meth - 1]
+    at = frame.sp - n
+    m = n - argc
+    if at < 0 or m < 0:
+        raise UnsupportedOperation('opt_newarray_send %d underflows the stack'
+                                   % n)
+    values = [0] * m
+    i = 0
+    while i < m:
+        values[i] = frame.stack[at + i]
+        i += 1
+    arg = 0
+    if argc == 1:
+        top = frame.sp - 1
+        assert top >= 0
+        arg = frame.stack[top]
+    v_ary = rubycall.ary_new(values)
+    _drop(frame, at)
+    frame.push(v_ary)
+    if argc == 1:
+        frame.push(arg)
+    return _opt_send(frame, NEWARRAY_SEND_MID[meth - 1], argc)
+
+
 @unroll_safe
 def _newhash(frame, n):
     """n/2 key/value pairs, left in the marked frame until each rb_hash_aset has copied them into the Hash."""
@@ -1819,6 +1851,28 @@ def _execute(iseq, frame, pc):
             b = frame.pop()
             a = frame.pop()
             frame.push(_binop(frame, a, b, helpers.LTLT))
+        elif opcode == insns.OPT_NIL_P:
+            recv = frame.pop()
+            v = helpers.nil_p(recv)
+            frame.push(v if v != value.Q_UNDEF
+                       else _unop(frame, recv, helpers.NIL_P))
+        elif opcode == insns.OPT_STR_FREEZE:
+            idx = code[pc]
+            pc += 1
+            v_str = iseq.consts[idx]
+            if helpers.str_freeze_pristine():
+                frame.push(v_str)
+            else:
+                frame.push(_unop(frame, rubycall.call0(v_str, DUP),
+                                 helpers.FREEZE))
+        elif opcode == insns.OPT_CASE_DISPATCH:
+            # No hash fast path: falling through runs the sequential when-tests the compiler emitted right after this.
+            frame.pop()
+        elif opcode == insns.OPT_NEWARRAY_SEND:
+            n = code[pc]
+            meth = code[pc + 1]
+            pc += 2
+            frame.push(_newarray_send(frame, n, meth))
         else:
             raise UnsupportedOperation('unknown opcode %d' % opcode)
 

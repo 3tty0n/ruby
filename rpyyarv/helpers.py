@@ -40,6 +40,13 @@ ABS = symbols.intern('abs')
 TO_ARY = symbols.intern('to_ary')
 TO_I = symbols.intern('to_i')
 UMINUS = symbols.intern('-@')
+NIL_P = symbols.intern('nil?')
+FREEZE = symbols.intern('freeze')
+MIN = symbols.intern('min')
+MAX = symbols.intern('max')
+HASH = symbols.intern('hash')
+PACK = symbols.intern('pack')
+INCLUDE_P = symbols.intern('include?')
 
 # RB_FIXABLE for a double (arithmetic/fixnum.h); both bounds are exact powers of two.
 FIXNUM_MAX_PLUS_1_DBL = float(value.FIXNUM_MAX + 1)
@@ -81,7 +88,9 @@ B_FLT_EQ = 31
 B_MATH_SQRT = 32
 B_ARY_NEW = 33
 B_ARY_INITIALIZE = 34
-B_COUNT = 35
+B_NIL_NIL_P = 35
+B_STR_FREEZE = 36
+B_COUNT = 37
 
 _INT_MID = [PLUS, MINUS, MULT, DIV, MOD, EQ, LT, LE, GT, GE, AND, OR, XOR,
             RSHIFT]
@@ -522,6 +531,22 @@ def ary_new_pristine(recv):
     return (recv == value.core_class(value.C_ARRAY)
             and _cruby_owns(B_ARY_NEW) and _cruby_owns(B_ARY_INITIALIZE)
             and dispatch.lookup_core(recv, INITIALIZE) is None)
+
+
+def nil_p(recv):
+    """vm_opt_nil_p's first arm; a non-nil receiver goes back to the send, since its own `nil?` may be redefined anywhere."""
+    if recv == value.Q_NIL and _cruby_owns(B_NIL_NIL_P) \
+            and dispatch.lookup_core(value.core_class(value.C_NILCLASS),
+                                     NIL_P) is None:
+        return value.Q_TRUE
+    return value.Q_UNDEF
+
+
+def str_freeze_pristine():
+    """String#freeze still CRuby's own, so opt_str_freeze may push the literal."""
+    return (_cruby_owns(B_STR_FREEZE)
+            and dispatch.lookup_core(value.core_class(value.C_STRING),
+                                     FREEZE) is None)
 
 
 def opt_not(recv):

@@ -1464,6 +1464,8 @@ rpyyarv_bop_mask(void)
     BOP(CLASS_OF(rb_mMath), "sqrt");
     BOP(CLASS_OF(rb_cArray), "new");
     BOP(rb_cArray, "initialize");
+    BOP(rb_cNilClass, "nil?");
+    BOP(rb_cString, "freeze");
 #undef BOP
 
     return (uintptr_t)i << RPYYARV_BOP_COUNT_SHIFT | mask;

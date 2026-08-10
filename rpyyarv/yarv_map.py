@@ -38,6 +38,10 @@ EMIT = {
     'opt_empty_p': [],
     'opt_not': [],
     'opt_ltlt': [],
+    'opt_nil_p': [],        # CALL_DATA dropped
+    'opt_str_freeze': [0],  # the literal, frozen once at load time
+    'opt_case_dispatch': [],  # CDHASH and else offset dropped, see interp.py
+    'opt_newarray_send': [0, 1],
     'expandarray': [0],     # flag is checked, only plain masgn
     'opt_plus': [],         # CALL_DATA dropped
     'opt_minus': [],
@@ -142,6 +146,9 @@ DEFINECLASS_TYPE_CLASS = 0x00
 DEFINECLASS_TYPE_SINGLETON_CLASS = 0x01
 DEFINECLASS_FLAG_SCOPED = 0x08
 DEFINECLASS_FLAG_HAS_SUPERCLASS = 0x10
+
+# vm_core.h, enum vm_opt_newarray_send_type, as argument counts indexed by method-1; -1 refuses PACK_BUFFER, whose buffer: is a keyword.
+NEWARRAY_SEND_ARGC = [0, 0, 0, 1, -1, 1]
 
 # vm_core.h, enum vm_special_object_type.
 SPECIAL_OBJECT_VMCORE = 1

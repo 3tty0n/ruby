@@ -382,6 +382,15 @@ class Loader(object):
                 raise UnsupportedOperation(
                     "putspecialobject %d in '%s' is not supported"
                     % (kind, raw.name))
+        elif op == insns.OPT_NEWARRAY_SEND:
+            meth = self.int_of(ops[1], op, raw, 'method')
+            argc = -1
+            if meth >= 1 and meth <= len(optable.NEWARRAY_SEND_ARGC):
+                argc = optable.NEWARRAY_SEND_ARGC[meth - 1]
+            if argc < 0 or self.int_of(ops[0], op, raw, 'length') < argc:
+                raise UnsupportedOperation(
+                    "opt_newarray_send %d in '%s' is not supported"
+                    % (meth, raw.name))
         elif op == insns.DEFINECLASS:
             flags = self.int_of(ops[2], op, raw, 'flags')
             kind = flags & optable.DEFINECLASS_TYPE_MASK
@@ -450,7 +459,11 @@ class Loader(object):
     def literal(self, operand, op, raw, pool):
         if operand.kind == rawiseq.OP_INT:
             return pool.add_fixnum(operand.intval)
-        return pool.add(self.literal_value(operand, op, raw))
+        v = self.literal_value(operand, op, raw)
+        if op == insns.OPT_STR_FREEZE:
+            # Frozen once here, so the instruction is just a push.
+            v = rubycall.call0(v, symbols.intern('freeze'))
+        return pool.add(v)
 
     def literal_value(self, operand, op, raw):
         """A real CRuby VALUE: until its pool is registered nothing CRuby scans reaches it, hence the keepalive."""

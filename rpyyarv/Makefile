@@ -95,7 +95,7 @@ gccheck:
 	          test/recursion.rb test/intabs.rb test/mixins.rb \
 	          test/floatops.rb \
 	          test/equality.rb \
-	          test/nulstr.rb \
+	          test/nulstr.rb test/opcodes4.rb \
 	          $(TOP)/benchmark/app_*.rb $(TOP)/benchmark/so_*.rb; do \
 	   n=`basename $$s`; \
 	   case $$s in test/*) \
