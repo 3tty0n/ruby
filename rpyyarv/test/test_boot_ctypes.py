@@ -25,7 +25,8 @@ SIGNATURES = {
     "rpyyarv_cleanup": ([ctypes.c_int], ctypes.c_int),
     "rpyyarv_iseqw_new": ([ctypes.c_void_p], VALUE),
     "rpyyarv_call0": ([VALUE, ctypes.c_char_p, INTP], VALUE),
-    "rpyyarv_cstr": ([VALUE], ctypes.c_char_p),
+    "rpyyarv_str_len": ([VALUE], ctypes.c_long),
+    "rpyyarv_str_ptr": ([VALUE], ctypes.c_void_p),
     "rpyyarv_inspect_cstr": ([VALUE], ctypes.c_char_p),
     "rpyyarv_ary_len": ([VALUE], ctypes.c_long),
     "rpyyarv_ary_entry": ([VALUE, ctypes.c_long], VALUE),
@@ -83,8 +84,9 @@ def check_layout(lib, ary, what):
         found = kind_of(lib, lib.rpyyarv_ary_entry(ary, index))
         assert found == kind, \
             "%s: to_a[%d] holds %s, expected %s" % (what, index, found, kind)
-    magic = lib.rpyyarv_cstr(
-        lib.rpyyarv_ary_entry(ary, to_a_layout.I_MAGIC)).decode()
+    magic_v = lib.rpyyarv_ary_entry(ary, to_a_layout.I_MAGIC)
+    magic = ctypes.string_at(lib.rpyyarv_str_ptr(magic_v),
+                             lib.rpyyarv_str_len(magic_v)).decode()
     assert magic == to_a_layout.MAGIC, "%s: to_a[0] is %r" % (what, magic)
 
 

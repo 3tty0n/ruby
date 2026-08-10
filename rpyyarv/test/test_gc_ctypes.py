@@ -19,12 +19,13 @@ SIGNATURES = {
     "rpyyarv_boot": ([ctypes.c_int, ctypes.POINTER(ctypes.c_char_p), INTP],
                      ctypes.c_void_p),
     "rpyyarv_cleanup": ([ctypes.c_int], ctypes.c_int),
-    "rpyyarv_cstr": ([VALUE], ctypes.c_char_p),
+    "rpyyarv_str_len": ([VALUE], ctypes.c_long),
+    "rpyyarv_str_ptr": ([VALUE], ctypes.c_void_p),
     "rpyyarv_is_string": ([VALUE], ctypes.c_int),
     "rpyyarv_gc_set_mark_hook": ([MARK_HOOK], None),
     "rpyyarv_gc_mark_value": ([VALUE], None),
     "rpyyarv_gc_start": ([], None),
-    "rpyyarv_str_new": ([ctypes.c_char_p], VALUE),
+    "rpyyarv_str_new": ([ctypes.c_char_p, ctypes.c_long], VALUE),
 }
 
 N_LIVE = 1000
@@ -49,7 +50,7 @@ def load_shim():
 
 
 def make_strings(lib, n):
-    return [lib.rpyyarv_str_new((PAYLOAD % i).encode()) for i in range(n)]
+    return [lib.rpyyarv_str_new((PAYLOAD % i).encode(), len(PAYLOAD % i)) for i in range(n)]
 
 
 def churn(lib):
@@ -57,7 +58,7 @@ def churn(lib):
     lib.rpyyarv_gc_start()
     lib.rpyyarv_gc_start()
     for i in range(N_GARBAGE):
-        lib.rpyyarv_str_new(("garbage-%d-filler" % i).encode())
+        lib.rpyyarv_str_new(("garbage-%d-filler" % i).encode(), len("garbage-%d-filler" % i))
     lib.rpyyarv_gc_start()
 
 
@@ -68,8 +69,11 @@ def survivors(lib, values):
     for i, v in enumerate(values):
         if not lib.rpyyarv_is_string(v):
             continue
-        s = lib.rpyyarv_cstr(v)
-        if s is not None and s.decode("utf-8", "replace") == PAYLOAD % i:
+        n = lib.rpyyarv_str_len(v)
+        if n < 0:
+            continue
+        s = ctypes.string_at(lib.rpyyarv_str_ptr(v), n)
+        if s.decode("utf-8", "replace") == PAYLOAD % i:
             alive.append(i)
     return alive
 
