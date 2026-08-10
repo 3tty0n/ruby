@@ -47,7 +47,8 @@ void rpyyarv_special_consts(uintptr_t *qfalse, uintptr_t *qnil,
 /* rb_iseq_t is incomplete here, so the ISeq crosses the FFI as void *. */
 uintptr_t rpyyarv_iseqw_new(void *iseq);
 
-const char *rpyyarv_cstr(uintptr_t str);
+long      rpyyarv_str_len(uintptr_t str);
+const char *rpyyarv_str_ptr(uintptr_t str);
 const char *rpyyarv_inspect_cstr(uintptr_t obj);
 
 long      rpyyarv_ary_len(uintptr_t ary);
@@ -83,7 +84,7 @@ void rpyyarv_set_method_hook(void (*fn)(void));
 
 void rpyyarv_gc_start(void);
 
-uintptr_t rpyyarv_str_new(const char *s);
+uintptr_t rpyyarv_str_new(const char *s, long n);
 
 /* Both copy their input onto the machine stack first, as funcallv does. */
 uintptr_t rpyyarv_ary_new(int n, const uintptr_t *elems);

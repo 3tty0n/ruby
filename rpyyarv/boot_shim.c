@@ -268,12 +268,18 @@ rpyyarv_iseqw_new(void *iseq)
     return (uintptr_t)v;
 }
 
-const char *
-rpyyarv_cstr(uintptr_t str)
+long
+rpyyarv_str_len(uintptr_t str)
 {
     VALUE v = (VALUE)str;
-    if (!RB_TYPE_P(v, T_STRING)) return NULL;
-    return rb_string_value_cstr(&v);
+    if (!RB_TYPE_P(v, T_STRING)) return -1;
+    return RSTRING_LEN(v);
+}
+
+const char *
+rpyyarv_str_ptr(uintptr_t str)
+{
+    return RSTRING_PTR((VALUE)str);
 }
 
 struct inspect_args {
@@ -425,9 +431,9 @@ rpyyarv_gc_start(void)
 }
 
 uintptr_t
-rpyyarv_str_new(const char *s)
+rpyyarv_str_new(const char *s, long n)
 {
-    return (uintptr_t)rb_str_new_cstr(s);
+    return (uintptr_t)rb_str_new(s, n);
 }
 
 uintptr_t

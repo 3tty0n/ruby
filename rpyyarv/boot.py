@@ -83,7 +83,8 @@ rb_cleanup = _ext('rpyyarv_cleanup', [rffi.INT], rffi.INT)
 rb_run_node = _ext('rpyyarv_run_node', [VOIDP], rffi.INT, reenters=True)
 rb_iseqw_new = _ext('rpyyarv_iseqw_new', [VOIDP], VALUE)
 rb_call0 = _ext('rpyyarv_call0', [VALUE, rffi.CCHARP, INTP], VALUE, reenters=True)
-rb_cstr = _ext('rpyyarv_cstr', [VALUE], rffi.CCHARP, reenters=True)
+rb_str_len = _ext('rpyyarv_str_len', [VALUE], rffi.LONG)
+rb_str_ptr = _ext('rpyyarv_str_ptr', [VALUE], rffi.CCHARP)
 rb_inspect_cstr = _ext('rpyyarv_inspect_cstr', [VALUE], rffi.CCHARP, reenters=True)
 rb_ary_len = _ext('rpyyarv_ary_len', [VALUE], rffi.LONG)
 rb_ary_entry = _ext('rpyyarv_ary_entry', [VALUE, rffi.LONG], VALUE, reenters=True)
@@ -110,7 +111,8 @@ rb_top_self = _ext('rpyyarv_top_self', [], VALUE)
 rb_int2inum = _ext('rpyyarv_int2inum', [rffi.LONG], VALUE, reenters=True)
 rb_float_new = _ext('rpyyarv_float_new', [rffi.DOUBLE], VALUE, reenters=True)
 rb_float_layout = _ext('rpyyarv_float_layout', [INTP], lltype.Void)
-rb_str_new = _ext('rpyyarv_str_new', [rffi.CCHARP], VALUE, reenters=True)
+rb_str_new = _ext('rpyyarv_str_new', [rffi.CCHARP, rffi.LONG], VALUE,
+                  reenters=True)
 rb_ary_new = _ext('rpyyarv_ary_new', [rffi.INT, VALUEP], VALUE, reenters=True)
 rb_str_concat = _ext('rpyyarv_str_concat', [rffi.INT, VALUEP], VALUE, reenters=True)
 rb_special_consts = _ext('rpyyarv_special_consts',
@@ -359,10 +361,11 @@ def hash_aref(hash_v, key):
 
 
 def str_of(v):
-    p = rb_cstr(_v(v))
-    if not p:
+    # Length-based read: rb_string_value_cstr raises on an embedded NUL, and that longjmp would cross the RPython frame unprotected.
+    n = rffi.cast(lltype.Signed, rb_str_len(_v(v)))
+    if n < 0:
         raise RubyError('to_s')
-    return rffi.charp2str(p)
+    return rffi.charpsize2str(rb_str_ptr(_v(v)), n)
 
 
 def sym_of(v):
@@ -629,8 +632,9 @@ def float_new(d):
 
 
 def str_new(s):
+    # Length-carrying, so a literal holding NUL bytes survives the round trip.
     with rffi.scoped_str2charp(s) as c_s:
-        return rffi.cast(lltype.Signed, rb_str_new(c_s))
+        return rffi.cast(lltype.Signed, rb_str_new(c_s, len(s)))
 
 
 def special_consts():
