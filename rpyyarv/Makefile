@@ -3,6 +3,8 @@ BUILD   := $(TOP)/build
 ARCHDIR := $(patsubst %/ruby/config.h,%,\
              $(firstword $(wildcard $(BUILD)/.ext/include/*/ruby/config.h)))
 OS      := $(shell uname -s)
+# The cruby reference needs this to find lib/ and the built extensions; rpyyarv derives the same set from RPYYARV_BUILD.
+UNINSTALLED_RUBYLIB := $(TOP)/lib:$(BUILD)/.ext/common:$(BUILD):$(BUILD)/.ext/$(notdir $(ARCHDIR))
 
 CFLAGS  += -Wall -Wextra -g -O0
 # $(TOP) and $(BUILD) are on the path for shape.h and the generated id.h.
@@ -83,6 +85,7 @@ awfy:
 # Compare stdout of both rpyyarv binaries against CRuby under a tight GC limit.
 gccheck:
 	@export $(LIBPATH); \
+	 export RPYYARV_BUILD=$(BUILD) RUBYLIB=$(UNINSTALLED_RUBYLIB); \
 	 lim() { RUBY_GC_MALLOC_LIMIT=$(GCLIMIT) perl -e 'alarm shift; exec @ARGV' $(GCTIMEOUT) "$$@" 2>/dev/null; }; \
 	 nolim() { ( perl -e 'alarm shift; exec @ARGV' $(GCTIMEOUT) "$$@" >/dev/null 2>&1 ) 2>/dev/null; }; \
 	 ok=0; skipped=0; failed=0; \
@@ -98,6 +101,7 @@ gccheck:
 	          test/nulstr.rb test/opcodes4.rb test/moduledefs.rb \
 	          test/kwargs.rb test/strops.rb \
 	          test/sendblock.rb test/crefconsts.rb \
+	          test/defaultgems.rb \
 	          $(TOP)/benchmark/app_*.rb $(TOP)/benchmark/so_*.rb; do \
 	   n=`basename $$s`; \
 	   case $$s in test/*) \

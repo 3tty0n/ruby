@@ -1,5 +1,6 @@
 #include <stdlib.h>
 #include <stddef.h>
+#include <locale.h>
 #include <ruby.h>
 
 /* In-tree, so the object-shape API libruby does not export is still reachable. */
@@ -58,6 +59,9 @@ rpyyarv_boot(int argc, char **argv, int *status_out)
 {
     /* On the machine stack: ruby_init_stack records its address as the lower bound of the conservative GC scan. */
     VALUE variable_in_this_stack_frame;
+
+    /* main.c does this before ruby_sysinit; without it the locale encoding is US-ASCII. */
+    setlocale(LC_CTYPE, "");
 
     ruby_sysinit(&argc, &argv);
     ruby_init_stack(&variable_in_this_stack_frame);

@@ -26,6 +26,10 @@ def _arch_include_dir():
         % base)
 
 
+# The arch name, not a path: which one the extensions were built for is fixed by the libruby this binary links against.
+_ARCH = os.path.basename(_arch_include_dir())
+
+
 def _libruby_name():
     for name in sorted(os.listdir(_BUILD)):
         for ext in ('.dylib', '.so'):
@@ -1143,8 +1147,32 @@ class _Node(object):
 node = _Node()
 
 
+def _uninstalled_dirs():
+    """CRuby derives its load path from the executable, and that is not $BUILD/ruby: the uninstalled build's lib/ and extensions, the same set ruby-runner.c puts in RUBYLIB."""
+    build = os.environ.get('RPYYARV_BUILD')
+    if build is None or build == '':
+        return []
+    cut = build.rfind('/')
+    if cut <= 0:
+        return []
+    ext = build + '/.ext'
+    # rbconfig.rb is generated into the build root, not into .ext/common.
+    return [build[:cut] + '/lib', ext + '/common', build, ext + '/' + _ARCH]
+
+
+def _boot_argv(argv):
+    """-I, not a setenv of RUBYLIB: allocating before ruby_init moves the heap enough to swing AWFY towers by 38%, and CRuby reads the two the same way."""
+    args = [argv[0]]
+    if os.environ.get('RPYYARV_GEMS') != '1':
+        args.append('--disable-gems')
+    for d in _uninstalled_dirs():
+        args.append('-I' + d)
+    return args + argv[1:]
+
+
 def boot(argv):
     """Return (iseqw, status). iseqw is 0 when there is no ISeq to run."""
+    argv = _boot_argv(argv)
     # Never freed: ruby_sysinit keeps this pointer in origarg (ruby.c) for the process lifetime.
     c_argv = rffi.liststr2charpp(argv)
     with lltype.scoped_alloc(INTP.TO, 1) as status:
