@@ -273,13 +273,16 @@ class Loader(object):
                 return True
         return False
 
-    # Everything the compiler may push between the FrozenCore receiver and the send that consumes it, for `alias` and `undef`.
+    # Everything the compiler may push between the FrozenCore receiver and the send that consumes it, for `alias`, `undef` and the keyword merges.
     VMCORE_PUSHES = [insns.PUTSPECIALOBJECT, insns.PUTOBJECT, insns.PUTNIL,
-                     insns.PUTSELF]
-    VMCORE_SENDS = ['core#set_method_alias', 'core#undef_method']
+                     insns.PUTSELF, insns.GETLOCAL, insns.NEWHASH,
+                     insns.DUPHASH, insns.SWAP]
+    # The merges build the one Hash a `**` or a bare `super` hands on; they are ordinary sends of a public method, so rb_funcallv runs them.
+    VMCORE_SENDS = ['core#set_method_alias', 'core#undef_method',
+                    'core#hash_merge_ptr', 'core#hash_merge_kwd']
 
     def check_vmcore(self, opcodes, operands, raw):
-        """FrozenCore receives `alias`, `undef`, `lambda` and `proc` alike (vm.c:4274); only the first two are implemented, so the send taking it must be one of them."""
+        """FrozenCore receives `alias`, `undef`, the keyword merges, `lambda` and `proc` alike (vm.c:4274); only the first three are implemented, so the send taking it must be one of them."""
         for i in range(len(opcodes)):
             if opcodes[i] != insns.PUTSPECIALOBJECT:
                 continue
@@ -590,26 +593,26 @@ class Loader(object):
         simple = (not operand.has_kwarg
                   and (flags & ~optable.SIMPLE_CALL_FLAGS) == 0)
         kw_names = []
+        kw_splat = (flags & optable.CALL_FLAG_KW_SPLAT) != 0
+        blockarg = (flags & optable.CALL_FLAG_ARGS_BLOCKARG) != 0
         if not simple:
             # Refused here, not at the send: an ISeq holding a call site the interpreter cannot make is one it cannot finish running.
-            if len(operand.kw_names) == 0 or \
-                    (flags & ~optable.KWARG_CALL_FLAGS) != 0 or \
-                    (flags & optable.CALL_FLAG_SUPER) != 0 or \
-                    op == insns.INVOKEBLOCK:
+            if (len(operand.kw_names) == 0 and not kw_splat) or \
+                    (len(operand.kw_names) > 0 and kw_splat) or \
+                    (flags & ~optable.KWARG_CALL_FLAGS) != 0:
                 raise UnsupportedOperation(
                     "the call to '%s' passes %s, which RPyYARV does not "
                     "support" % (operand.strval, self.call_flag_name(operand)))
             for name in operand.kw_names:
                 kw_names.append(symbols.intern(name))
-        blockarg = (flags & optable.CALL_FLAG_ARGS_BLOCKARG) != 0
         if blockarg and (flags & optable.CALL_FLAG_SUPER) != 0:
             raise UnsupportedOperation('super with a block is not supported')
-        # iseq.c:3537 reports orig_argc without them; on the stack they are the topmost arguments.
+        # iseq.c:3537 reports orig_argc without them; on the stack they are the topmost arguments. A **splat's one Hash is already counted.
         return W_CallInfo(symbols.intern(operand.strval),
                           operand.intval + len(kw_names),
                           simple, (flags & optable.CALL_FLAG_FCALL) != 0,
                           (flags & optable.CALL_FLAG_SUPER) != 0, blockarg,
-                          [m for m in kw_names])
+                          [m for m in kw_names], kw_splat)
 
     def call_flag_name(self, operand):
         for flag, name in optable.CALL_FLAG_NAMES:

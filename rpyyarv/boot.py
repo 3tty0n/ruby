@@ -191,6 +191,12 @@ rb_hash_new_capa = _ext('rpyyarv_hash_new_capa', [rffi.LONG, INTP], VALUE, reent
 rb_hash_aset_ = _ext('rpyyarv_hash_aset', [VALUE, VALUE, VALUE, INTP],
                      lltype.Void, reenters=True)
 rb_hash_resurrect = _ext('rpyyarv_hash_resurrect', [VALUE, INTP], VALUE, reenters=True)
+rb_hash_size = _ext('rpyyarv_hash_size', [VALUE], rffi.LONG)
+rb_hash_lookup = _ext('rpyyarv_hash_lookup', [VALUE, VALUE, INTP], VALUE, reenters=True)
+rb_hash_delete = _ext('rpyyarv_hash_delete', [VALUE, VALUE, INTP],
+                      lltype.Void, reenters=True)
+rb_hash_keys = _ext('rpyyarv_hash_keys', [VALUE, INTP], VALUE, reenters=True)
+rb_to_hash_type = _ext('rpyyarv_to_hash_type', [VALUE, INTP], VALUE, reenters=True)
 rb_splat_array = _ext('rpyyarv_splat_array', [VALUE, rffi.INT, INTP], VALUE, reenters=True)
 rb_vm_core = _ext('rpyyarv_vm_core', [], VALUE, reenters=True)
 rb_arity_error = _ext('rpyyarv_arity_error',
@@ -945,6 +951,49 @@ def hash_resurrect(hash_v):
     ret = rffi.cast(lltype.Signed, v)
     if failed:
         _failed('Hash#dup')
+    return ret
+
+
+def hash_size(hash_v):
+    return rffi.cast(lltype.Signed, rb_hash_size(_v(hash_v)))
+
+
+def hash_lookup(hash_v, key):
+    """Qundef when the key is absent."""
+    state = _enter_status()
+    v = rb_hash_lookup(_v(hash_v), _v(key), state)
+    failed = _leave_status(state)
+    ret = rffi.cast(lltype.Signed, v)
+    if failed:
+        _failed('Hash#[]')
+    return ret
+
+
+def hash_delete(hash_v, key):
+    state = _enter_status()
+    rb_hash_delete(_v(hash_v), _v(key), state)
+    failed = _leave_status(state)
+    if failed:
+        _failed('Hash#delete')
+
+
+def hash_keys(hash_v):
+    state = _enter_status()
+    v = rb_hash_keys(_v(hash_v), state)
+    failed = _leave_status(state)
+    ret = rffi.cast(lltype.Signed, v)
+    if failed:
+        _failed('Hash#keys')
+    return ret
+
+
+def to_hash_type(v):
+    state = _enter_status()
+    r = rb_to_hash_type(_v(v), state)
+    failed = _leave_status(state)
+    ret = rffi.cast(lltype.Signed, r)
+    if failed:
+        _failed('Hash()')
     return ret
 
 

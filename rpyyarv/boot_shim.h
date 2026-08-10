@@ -211,6 +211,14 @@ void rpyyarv_hash_aset(uintptr_t hash, uintptr_t key, uintptr_t val,
                        int *state);
 uintptr_t rpyyarv_hash_resurrect(uintptr_t hash, int *state);
 
+/* A **splat's Hash, read one declared keyword at a time; lookup answers Qundef for an absent key. */
+long rpyyarv_hash_size(uintptr_t hash);
+uintptr_t rpyyarv_hash_lookup(uintptr_t hash, uintptr_t key, int *state);
+void rpyyarv_hash_delete(uintptr_t hash, uintptr_t key, int *state);
+uintptr_t rpyyarv_hash_keys(uintptr_t hash, int *state);
+/* vm_caller_setup_keyword_hash: a ** that is not a Hash goes through to_hash. */
+uintptr_t rpyyarv_to_hash_type(uintptr_t v, int *state);
+
 uintptr_t rpyyarv_splat_array(uintptr_t ary, int flag, int *state);
 
 /* rb_mRubyVMFrozenCore, the receiver putspecialobject 1 pushes. */

@@ -187,6 +187,32 @@ def hash_resurrect(h):
 
 
 @dont_look_inside
+def hash_size(h):
+    return boot.hash_size(h)
+
+
+@dont_look_inside
+def hash_lookup(h, key):
+    """Qundef when the key is absent."""
+    return boot.hash_lookup(h, key)
+
+
+@dont_look_inside
+def hash_delete(h, key):
+    boot.hash_delete(h, key)
+
+
+@dont_look_inside
+def hash_keys(h):
+    return boot.hash_keys(h)
+
+
+@dont_look_inside
+def to_hash_type(v):
+    return boot.to_hash_type(v)
+
+
+@dont_look_inside
 def splat_array(ary, flag):
     return boot.splat_array(ary, 1 if flag else 0)
 

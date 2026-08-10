@@ -54,7 +54,7 @@ def invoke(frame, w_ci, w_block=None):
             "call to '%s' with %d argument(s) underflows the stack"
             % (symbols.name_of(w_ci.mid), argc))
     if not w_ci.simple:
-        if len(w_ci.kw_names) == 0:
+        if len(w_ci.kw_names) == 0 and not w_ci.kw_splat:
             raise UnsupportedOperation(
                 "call to '%s' passes arguments RPyYARV does not support"
                 % symbols.name_of(w_ci.mid))
@@ -121,8 +121,9 @@ def invoke(frame, w_ci, w_block=None):
         return _block_send(frame, w_ci, recv_at, argc, blocks.by_proc[recv])
     if w_ci.mid == CORE_ALIAS or w_ci.mid == CORE_UNDEF:
         return _core_method(frame, w_ci, recv, recv_at, argc)
-    if vm_core.value != 0 and recv == vm_core.value:
-        # #lambda and #proc would hand libruby a Proc over a block handle that dies with the call, and crash later.
+    if vm_core.value != 0 and recv == vm_core.value \
+            and w_ci.mid != HASH_MERGE_PTR and w_ci.mid != HASH_MERGE_KWD:
+        # #lambda and #proc would hand libruby a Proc over a block handle that dies with the call, and crash later; the keyword merges below are plain Hash work, so they go out to CRuby.
         raise UnsupportedOperation(
             "RubyVM::FrozenCore#%s is not supported"
             % symbols.name_of(w_ci.mid))
@@ -308,8 +309,26 @@ def _new_with_block(frame, entry, klass, recv_at, argc, w_block):
 
 
 @unroll_safe
+def _kw_splat_hash(frame, at):
+    """vm_caller_setup_keyword_hash: anything but a Hash goes through to_hash first, so every reader below sees one; nil stands for no keywords at all."""
+    # Restated so the codewriter sees the stack index as non-negative.
+    assert at >= 0
+    v = frame.stack[at]
+    if v == value.Q_NIL or (not value.is_immediate(v) and _is_hash(v)):
+        return
+    frame.stack[at] = rubycall.to_hash_type(v)
+
+
+@dont_look_inside
+def _is_hash(v):
+    return boot.is_hash(v)
+
+
+@unroll_safe
 def _kw_invoke(frame, w_ci, recv_at, argc, w_block):
-    """A send with literal keywords (VM_CALL_KWARG): their values are the topmost arguments, named by w_ci.kw_names."""
+    """A send with literal keywords (VM_CALL_KWARG), whose values are the topmost arguments named by w_ci.kw_names, or with a **splat (VM_CALL_KW_SPLAT), whose one Hash is the topmost argument."""
+    if w_ci.kw_splat:
+        _kw_splat_hash(frame, recv_at + argc)
     rubycall.gc_stress_point()
     recv = frame.stack[recv_at]
     klass = promote(value.class_of(recv))
@@ -320,14 +339,22 @@ def _kw_invoke(frame, w_ci, recv_at, argc, w_block):
             return _attr_send(frame, entry, recv, recv_at, argc)
         if w_block is None or w_ci.blockarg:
             return _enter(frame, entry, recv, recv_at, argc, w_ci.mid,
-                          w_block, w_ci.kw_names)
+                          w_block, w_ci.kw_names, w_ci.kw_splat)
         try:
             return _enter(frame, entry, recv, recv_at, argc, w_ci.mid,
-                          w_block, w_ci.kw_names)
+                          w_block, w_ci.kw_names, w_ci.kw_splat)
         except block_mod.BlockBreak, e:
             if e.w_block is not w_block:
                 raise
             return e.value
+    # As in invoke(): a block RPyYARV holds runs here, so its keyword parameters do not have to survive a round trip through libruby.
+    if proxy.value != 0 and recv == proxy.value:
+        return _block_send(frame, w_ci, recv_at, argc, frame.block,
+                           w_ci.kw_names, w_ci.kw_splat)
+    if len(blocks.by_proc) > 0 and _is_proxy_call(w_ci.mid) \
+            and recv in blocks.by_proc:
+        return _block_send(frame, w_ci, recv_at, argc, blocks.by_proc[recv],
+                           w_ci.kw_names, w_ci.kw_splat)
     # Left in the marked frame until rb_hash_aset has copied each one, as _newhash does.
     kw_names = w_ci.kw_names
     nkw = len(kw_names)
@@ -341,45 +368,55 @@ def _kw_invoke(frame, w_ci, recv_at, argc, w_block):
     while i < n:
         args.append(frame.stack[base + i])
         i += 1
-    # Resolved before the Hash exists: rb_intern allocates, and only the frame keeps a VALUE marked, never an RPython list.
-    rubycall.rid(w_ci.mid)
-    i = 0
-    while i < nkw:
-        rubycall.sym_value(kw_names[i])
-        i += 1
-    h = rubycall.hash_new(nkw)
-    i = 0
-    while i < nkw:
-        rubycall.hash_aset(h, rubycall.sym_value(kw_names[i]),
-                           frame.stack[base + n + i])
-        i += 1
-    args.append(h)
+    pass_kw = True
+    if w_ci.kw_splat:
+        # `**{}` compiles to a putnil, which stands for no keywords at all.
+        if n > 0 and args[n - 1] == value.Q_NIL:
+            args.pop()
+            pass_kw = False
+    else:
+        # Resolved before the Hash exists: rb_intern allocates, and only the frame keeps a VALUE marked, never an RPython list.
+        rubycall.rid(w_ci.mid)
+        i = 0
+        while i < nkw:
+            rubycall.sym_value(kw_names[i])
+            i += 1
+        h = rubycall.hash_new(nkw)
+        i = 0
+        while i < nkw:
+            rubycall.hash_aset(h, rubycall.sym_value(kw_names[i]),
+                               frame.stack[base + n + i])
+            i += 1
+        args.append(h)
     _drop(frame, recv_at)
     if w_block is not None:
         if w_ci.blockarg:
-            return _call_with_block(recv, w_ci.mid, args, w_block, True)
+            return _call_with_block(recv, w_ci.mid, args, w_block, pass_kw)
         try:
-            return _call_with_block(recv, w_ci.mid, args, w_block, True)
+            return _call_with_block(recv, w_ci.mid, args, w_block, pass_kw)
         except block_mod.BlockBreak, e:
             # As in invoke(): only the send the block was written at catches it.
             if e.w_block is not w_block:
                 raise
             return e.value
-    ret = rubycall.call_kw(recv, w_ci.mid, args,
-                           entry is not None and not w_ci.fcall)
+    public_only = entry is not None and not w_ci.fcall
+    if pass_kw:
+        ret = rubycall.call_kw(recv, w_ci.mid, args, public_only)
+    else:
+        ret = rubycall.call(recv, w_ci.mid, args, public_only)
     _check_block_error()
     return ret
 
 
 @unroll_safe
 def _enter(frame, entry, recv, recv_at, argc, mid, w_block=None,
-           kw_names=NO_KEYWORDS):
+           kw_names=NO_KEYWORDS, kw_splat=False):
     """Move argc arguments into a fresh frame and run it; also invokesuper."""
     callee_iseq = entry.w_iseq
     callee = Frame(callee_iseq, recv, 0, entry)
     callee.block = w_block
     pc = 0
-    if callee_iseq.simple_params and len(kw_names) == 0:
+    if callee_iseq.simple_params and len(kw_names) == 0 and not kw_splat:
         if argc != callee_iseq.nparams:
             _arity_error(argc, callee_iseq.nparams, callee_iseq.nparams)
         i = 0
@@ -394,7 +431,8 @@ def _enter(frame, entry, recv, recv_at, argc, mid, w_block=None,
         while i < argc:
             given[i] = frame.stack[recv_at + 1 + i]
             i += 1
-        pc = setup_params(callee_iseq, callee, given, False, kw_names)
+        pc = setup_params(callee_iseq, callee, given, False, kw_names,
+                          kw_splat)
     _drop(frame, recv_at)
     debug.count_native()
     if not debug.state.enabled:
@@ -418,11 +456,25 @@ def _refuse_iseq(w_iseq, mid):
 
 
 @unroll_safe
-def setup_params(w_iseq, callee, args, is_block, kw_names=NO_KEYWORDS):
+def setup_params(w_iseq, callee, args, is_block, kw_names=NO_KEYWORDS,
+                 kw_splat=False):
     """vm_args.c setup_parameters_complex; answers the pc the opt table names (vm_args.c:906)."""
     nkw = len(kw_names)
+    takes_kw = len(w_iseq.kw_table) > 0 or w_iseq.kwrest >= 0
+    # A **splat's Hash is the last argument. It becomes the keywords, stays a positional where the callee declares none, and vanishes when it is empty (vm_args.c:673); `**{}` compiles to a putnil that means the same thing.
+    splat_hash = 0
+    if kw_splat:
+        splat_hash = args[len(args) - 1]
+        empty = (splat_hash == value.Q_NIL
+                 or rubycall.hash_size(splat_hash) == 0)
+        if takes_kw or empty:
+            end = len(args) - 1
+            assert end >= 0
+            args = args[:end]
+        if not takes_kw or empty:
+            splat_hash = 0
     # Nowhere to place them: CRuby folds them into one trailing positional Hash instead (vm_args.c args_kw_argv_to_hash).
-    fold = nkw > 0 and len(w_iseq.kw_table) == 0 and w_iseq.kwrest < 0
+    fold = nkw > 0 and not takes_kw
     lead = w_iseq.nparams
     opt_num = len(w_iseq.opt_table) - 1
     if opt_num < 0:
@@ -500,8 +552,9 @@ def setup_params(w_iseq, callee, args, is_block, kw_names=NO_KEYWORDS):
     if kw_hash != 0:
         gcroots.release(kw_hash)
 
-    if len(w_iseq.kw_table) > 0 or w_iseq.kwrest >= 0:
-        _setup_keywords(w_iseq, callee, args, len(args) - nkw, kw_names)
+    if takes_kw:
+        _setup_keywords(w_iseq, callee, args, len(args) - nkw, kw_names,
+                        splat_hash)
 
     if opt_num > 0:
         return w_iseq.opt_table[filled]
@@ -531,7 +584,7 @@ def _kw_to_positional(args, kw_names):
 
 
 @unroll_safe
-def _setup_keywords(w_iseq, callee, args, base, kw_names):
+def _setup_keywords(w_iseq, callee, args, base, kw_names, splat_hash=0):
     """vm_args.c args_setup_kw_parameters: match by name, default the rest, and mark every unfilled optional in the kwbits local."""
     table = w_iseq.kw_table
     required = w_iseq.kw_required
@@ -539,6 +592,8 @@ def _setup_keywords(w_iseq, callee, args, base, kw_names):
     nkw = len(kw_names)
     taken = [False] * nkw
     missing = []
+    # A **splat is read a declared name at a time; this counts the keys so used up, so the leftovers can be told apart without walking the Hash.
+    used = 0
     bits = 0
     i = 0
     while i < len(table):
@@ -549,11 +604,19 @@ def _setup_keywords(w_iseq, callee, args, base, kw_names):
                 found = j
                 break
             j += 1
-        slot = start + i
-        assert slot >= 0
+        given = value.Q_UNDEF
         if found >= 0:
             taken[found] = True
-            callee.locals[slot] = args[base + found]
+            given = args[base + found]
+        elif splat_hash != 0:
+            given = rubycall.hash_lookup(splat_hash,
+                                         rubycall.sym_value(table[i]))
+            if given != value.Q_UNDEF:
+                used += 1
+        slot = start + i
+        assert slot >= 0
+        if given != value.Q_UNDEF:
+            callee.locals[slot] = given
         elif i < required:
             missing.append(table[i])
         elif w_iseq.kw_defaults[i] != value.Q_UNDEF:
@@ -570,7 +633,10 @@ def _setup_keywords(w_iseq, callee, args, base, kw_names):
         while j < nkw:
             rubycall.sym_value(kw_names[j])
             j += 1
-        rest = rubycall.hash_new(nkw)
+        if splat_hash != 0:
+            rest = _splat_leftovers(w_iseq, splat_hash, used)
+        else:
+            rest = rubycall.hash_new(nkw)
         j = 0
         while j < nkw:
             if not taken[j]:
@@ -589,11 +655,30 @@ def _setup_keywords(w_iseq, callee, args, base, kw_names):
             j += 1
         if len(unknown) > 0:
             _keyword_error('unknown', unknown)
+        if splat_hash != 0 and used != rubycall.hash_size(splat_hash):
+            _splat_unknown(w_iseq, splat_hash, used)
 
     if w_iseq.kw_bits >= 0:
         slot = w_iseq.kw_bits
         assert slot >= 0
         callee.locals[slot] = value.int2fix(bits)
+
+
+@dont_look_inside
+def _splat_leftovers(w_iseq, splat_hash, used):
+    """The **splat's keys that no declared keyword parameter took."""
+    rest = rubycall.hash_resurrect(splat_hash)
+    if used > 0:
+        for mid in w_iseq.kw_table:
+            rubycall.hash_delete(rest, rubycall.sym_value(mid))
+    return rest
+
+
+@dont_look_inside
+def _splat_unknown(w_iseq, splat_hash, used):
+    keys = rubycall.hash_keys(_splat_leftovers(w_iseq, splat_hash, used))
+    raise RubyException(rubycall.keyword_error('unknown', keys),
+                        'ArgumentError')
 
 
 @dont_look_inside
@@ -645,10 +730,12 @@ def invoke_super(frame, w_ci):
     if recv_at < 0:
         raise UnsupportedOperation(
             "super with %d argument(s) underflows the stack" % argc)
-    if not w_ci.simple:
+    if not w_ci.simple and len(w_ci.kw_names) == 0 and not w_ci.kw_splat:
         raise UnsupportedOperation(
             "super in '%s' passes arguments RPyYARV does not support"
             % symbols.name_of(entry.mid))
+    if w_ci.kw_splat:
+        _kw_splat_hash(frame, recv_at + argc)
 
     rubycall.gc_stress_point()
     recv = frame.stack[recv_at]
@@ -667,12 +754,15 @@ def invoke_super(frame, w_ci):
     if target.kind != dispatch.KIND_ISEQ:
         return _attr_send(frame, target, frame.stack[recv_at], recv_at, argc)
     return _enter(frame, target, frame.stack[recv_at], recv_at, argc,
-                  entry.mid)
+                  entry.mid, None, w_ci.kw_names, w_ci.kw_splat)
 
 
 # `alias` and `undef` compile to a send of one of these (vm.c); unseen, the registry shadows what they change in CRuby.
 CORE_ALIAS = symbols.intern('core#set_method_alias')
 CORE_UNDEF = symbols.intern('core#undef_method')
+# Literal keywords beside a **, and a bare `super` forwarding keywords (vm.c:4261).
+HASH_MERGE_PTR = symbols.intern('core#hash_merge_ptr')
+HASH_MERGE_KWD = symbols.intern('core#hash_merge_kwd')
 
 
 def _core_method(frame, w_ci, recv, recv_at, argc):
@@ -978,7 +1068,8 @@ def _block_from_value(frame, v):
 
 
 @unroll_safe
-def _block_send(frame, w_ci, recv_at, argc, w_block):
+def _block_send(frame, w_ci, recv_at, argc, w_block,
+                kw_names=NO_KEYWORDS, kw_splat=False):
     """A send whose receiver stands for a block RPyYARV holds: the block-param proxy (compile.c:9564), or a Proc it materialised."""
     args = [0] * argc
     i = 0
@@ -989,14 +1080,21 @@ def _block_send(frame, w_ci, recv_at, argc, w_block):
     if _is_proxy_call(w_ci.mid):
         if w_block is None:
             raise UnsupportedOperation('the block parameter is nil')
-        return call_block(w_block, args)
+        return call_block(w_block, args, kw_names, kw_splat)
+    if len(kw_names) > 0:
+        args = _kw_to_positional(args, kw_names)
+    if len(kw_names) > 0 or kw_splat:
+        return rubycall.call_kw(_to_proc(w_block), w_ci.mid, args)
     return rubycall.call(_to_proc(w_block), w_ci.mid, args)
 
 
 @unroll_safe
-def call_block(w_block, args):
+def call_block(w_block, args, kw_names=NO_KEYWORDS, kw_splat=False):
     """Run a block's ISeq in a frame whose locals chain to the defining one."""
+    keyed = len(kw_names) > 0 or kw_splat
     if w_block.kind != block_mod.KIND_ISEQ:
+        if keyed:
+            return _call_foreign_block_kw(w_block, args, kw_names, kw_splat)
         return _call_foreign_block(w_block, args)
     # Promoted here, not left to the merge point below: the frame's arrays then take constant sizes instead of an out-of-line malloc.
     b_iseq = promote(w_block.w_iseq)
@@ -1005,10 +1103,10 @@ def call_block(w_block, args):
     callee.defining_frame = outer
     callee.block = w_block.outer
     callee.own_block = w_block
-    if b_iseq.autosplat and len(args) == 1:
+    if b_iseq.autosplat and len(args) == 1 and not keyed:
         args = _autosplat(args)
     pc = 0
-    if b_iseq.simple_params:
+    if b_iseq.simple_params and not keyed:
         n = len(args)
         if n > b_iseq.nparams:
             n = b_iseq.nparams
@@ -1017,11 +1115,25 @@ def call_block(w_block, args):
             callee.locals[i] = args[i]
             i += 1
     else:
-        pc = setup_params(b_iseq, callee, args, True)
+        pc = setup_params(b_iseq, callee, args, True, kw_names, kw_splat)
     try:
         return execute(b_iseq, callee, pc)
     except block_mod.BlockNext, e:
         return e.value
+
+
+@dont_look_inside
+def _call_foreign_block_kw(w_block, args, kw_names, kw_splat):
+    """The same, handed the keywords as the one trailing Hash RB_PASS_KEYWORDS names."""
+    if w_block.kind != block_mod.KIND_PROC:
+        raise UnsupportedOperation('a &:symbol block takes no keywords')
+    if not kw_splat:
+        args = _kw_to_positional(args, kw_names)
+    elif len(args) > 0 and args[len(args) - 1] == value.Q_NIL:
+        end = len(args) - 1
+        assert end >= 0
+        return rubycall.call(w_block.proc_value, CALL, args[:end])
+    return rubycall.call_kw(w_block.proc_value, CALL, args)
 
 
 @dont_look_inside
@@ -1078,13 +1190,15 @@ def invoke_block(frame, w_ci):
     if at < 0:
         raise UnsupportedOperation(
             'yield with %d argument(s) underflows the stack' % argc)
+    if w_ci.kw_splat:
+        _kw_splat_hash(frame, at + argc - 1)
     args = [0] * argc
     i = 0
     while i < argc:
         args[i] = frame.stack[at + i]
         i += 1
     _drop(frame, at)
-    return call_block(w_block, args)
+    return call_block(w_block, args, w_ci.kw_names, w_ci.kw_splat)
 
 
 class Throw(object):

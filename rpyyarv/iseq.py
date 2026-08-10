@@ -93,12 +93,14 @@ class W_ISeq(object):
 
 class W_CallInfo(object):
     _immutable_fields_ = ['mid', 'argc', 'simple', 'fcall', 'is_super',
-                          'blockarg', 'kw_names[*]']
+                          'blockarg', 'kw_names[*]', 'kw_splat']
 
     def __init__(self, mid, argc, simple=True, fcall=True, is_super=False,
-                 blockarg=False, kw_names=None):
+                 blockarg=False, kw_names=None, kw_splat=False):
         # VM_CALL_KWARG: the last len(kw_names) of the argc values on the stack are keyword values, named here in push order.
         self.kw_names = kw_names if kw_names is not None else []
+        # VM_CALL_KW_SPLAT: instead, the topmost argument is a Hash of them.
+        self.kw_splat = kw_splat
         # CALL_FLAG_ARGS_BLOCKARG: one more value above the arguments, which vm_caller_setup_arg_block pops first (vm_args.c:1119).
         self.blockarg = blockarg
         # invokesuper's call data names no method: the running one is implied.

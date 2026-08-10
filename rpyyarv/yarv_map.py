@@ -141,8 +141,10 @@ SIMPLE_CALL_FLAGS = (CALL_FLAG_FCALL | CALL_FLAG_VCALL |
                      CALL_FLAG_SUPER | CALL_FLAG_ZSUPER |
                      CALL_FLAG_ARGS_BLOCKARG)
 
-# ...plus literal keywords, whose values ride above the positionals.
-KWARG_CALL_FLAGS = SIMPLE_CALL_FLAGS | CALL_FLAG_KWARG
+# ...plus literal keywords, whose values ride above the positionals, or a
+# **splat, whose one Hash is the topmost argument (MUT only says it is fresh).
+KWARG_CALL_FLAGS = (SIMPLE_CALL_FLAGS | CALL_FLAG_KWARG |
+                    CALL_FLAG_KW_SPLAT | CALL_FLAG_KW_SPLAT_MUT)
 
 # vm_core.h VM_KW_SPECIFIED_BITS_MAX: past this the kwbits local is a Hash.
 KW_SPECIFIED_BITS_MAX = 31

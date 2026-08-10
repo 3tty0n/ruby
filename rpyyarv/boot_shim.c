@@ -1370,6 +1370,86 @@ rpyyarv_hash_resurrect(uintptr_t hash, int *state)
     return (uintptr_t)r;
 }
 
+long
+rpyyarv_hash_size(uintptr_t hash)
+{
+    /* Not RHASH_SIZE: internal/hash.h undefines it. */
+    return (long)rb_hash_size_num((VALUE)hash);
+}
+
+static VALUE
+hash_lookup_body(VALUE argp)
+{
+    struct hash_args *p = (struct hash_args *)argp;
+    return rb_hash_lookup2(p->hash, p->key, Qundef);
+}
+
+uintptr_t
+rpyyarv_hash_lookup(uintptr_t hash, uintptr_t key, int *state)
+{
+    struct hash_args a;
+    a.hash = (VALUE)hash;
+    a.key = (VALUE)key;
+    *state = 0;
+    VALUE r = rb_protect(hash_lookup_body, (VALUE)&a, state);
+    if (*state) return (uintptr_t)Qundef;
+    return (uintptr_t)r;
+}
+
+static VALUE
+hash_delete_body(VALUE argp)
+{
+    struct hash_args *p = (struct hash_args *)argp;
+    return rb_hash_delete(p->hash, p->key);
+}
+
+void
+rpyyarv_hash_delete(uintptr_t hash, uintptr_t key, int *state)
+{
+    struct hash_args a;
+    a.hash = (VALUE)hash;
+    a.key = (VALUE)key;
+    *state = 0;
+    rb_protect(hash_delete_body, (VALUE)&a, state);
+}
+
+static VALUE
+to_hash_type_body(VALUE argp)
+{
+    struct hash_args *p = (struct hash_args *)argp;
+    /* What rb_to_hash_type is (hash.c:1869); that one is not exported. */
+    return rb_convert_type(p->hash, T_HASH, "Hash", "to_hash");
+}
+
+uintptr_t
+rpyyarv_to_hash_type(uintptr_t v, int *state)
+{
+    struct hash_args a;
+    a.hash = (VALUE)v;
+    *state = 0;
+    VALUE r = rb_protect(to_hash_type_body, (VALUE)&a, state);
+    if (*state) return (uintptr_t)Qnil;
+    return (uintptr_t)r;
+}
+
+static VALUE
+hash_keys_body(VALUE argp)
+{
+    struct hash_args *p = (struct hash_args *)argp;
+    return rb_funcall(p->hash, rb_intern("keys"), 0);
+}
+
+uintptr_t
+rpyyarv_hash_keys(uintptr_t hash, int *state)
+{
+    struct hash_args a;
+    a.hash = (VALUE)hash;
+    *state = 0;
+    VALUE r = rb_protect(hash_keys_body, (VALUE)&a, state);
+    if (*state) return (uintptr_t)Qnil;
+    return (uintptr_t)r;
+}
+
 struct splat_args {
     VALUE ary;
     int   flag;
