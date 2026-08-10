@@ -16,7 +16,7 @@ from frame import (Frame, PENDING_BREAK, PENDING_NEXT, PENDING_NONE,
                    PENDING_RAISE, PENDING_RETURN)
 from iseq import CATCH_ENSURE, CATCH_RESCUE, NO_BLOCK_ISEQ
 from rlib import (JitDriver, StackOverflow, always_inline, check_stack_overflow,
-                  dont_look_inside, promote, unroll_safe)
+                  dont_look_inside, promote, set_user_param, unroll_safe)
 
 TO_S = symbols.intern('to_s')
 DUP = symbols.intern('dup')
@@ -1040,8 +1040,16 @@ def _unwind(iseq, frame, throw, epc):
         epc = entry.cont
 
 
+def configure_jitparams():
+    """RPYYARV_JITPARAM tunes the JIT the way pypy's --jit does, so a parameter sweep costs no translation."""
+    spec = os.environ.get('RPYYARV_JITPARAM')
+    if spec:
+        set_user_param(jitdriver, spec)
+
+
 def install():
     configure_reselection()
+    configure_jitparams()
     boot.install_block_callback(block_callback)
     boot.install_trampoline_callback(trampoline_callback)
     gcroots.register_blocks(blocks)
