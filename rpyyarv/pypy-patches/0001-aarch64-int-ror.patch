@@ -1,0 +1,220 @@
+diff --git a/rpython/jit/backend/aarch64/codebuilder.py b/rpython/jit/backend/aarch64/codebuilder.py
+index a179e7d..78806cb 100644
+--- a/rpython/jit/backend/aarch64/codebuilder.py
++++ b/rpython/jit/backend/aarch64/codebuilder.py
+@@ -356,6 +356,12 @@ class AbstractAarch64Builder(object):
+         base = 0b1101001101
+         self.write32((base << 22) | (immr << 16) | (imms << 10) | (rn << 5) | rd)
+ 
++    def ROR_ri(self, rd, rn, shift):
++        # ROR Xd, Xn, #shift is EXTR Xd, Xn, Xn, #shift.
++        assert 0 < shift < 64
++        base = 0b10010011110
++        self.write32((base << 21) | (rn << 16) | (shift << 10) | (rn << 5) | rd)
++
+     def LSR_rr(self, rd, rn, rm):
+         base = 0b10011010110
+         self.write32((base << 21) | (rm << 16) | (0b001001 << 10) | (rn << 5) | rd)
+diff --git a/rpython/jit/backend/aarch64/opassembler.py b/rpython/jit/backend/aarch64/opassembler.py
+index 5d5b4fb..53cc474 100644
+--- a/rpython/jit/backend/aarch64/opassembler.py
++++ b/rpython/jit/backend/aarch64/opassembler.py
+@@ -122,6 +122,10 @@ class ResOpAssembler(BaseAssembler):
+         l0, l1, res = arglocs
+         self.mc.LSR_rr(res.value, l0.value, l1.value)
+ 
++    def emit_op_int_ror(self, op, arglocs):
++        l0, l1, res = arglocs
++        self.mc.ROR_ri(res.value, l0.value, l1.value)
++
+     def emit_op_uint_mul_high(self, op, arglocs):
+         l0, l1, res = arglocs
+         self.mc.UMULH_rr(res.value, l0.value, l1.value)
+diff --git a/rpython/jit/backend/aarch64/regalloc.py b/rpython/jit/backend/aarch64/regalloc.py
+index dfcfb2c..4fecca2 100644
+--- a/rpython/jit/backend/aarch64/regalloc.py
++++ b/rpython/jit/backend/aarch64/regalloc.py
+@@ -8,7 +8,7 @@ from rpython.jit.metainterp.history import (Const, ConstInt, ConstFloat,
+                                             ConstPtr,
+                                             INT, REF, FLOAT)
+ from rpython.jit.metainterp.history import TargetToken
+-from rpython.jit.metainterp.resoperation import rop
++from rpython.jit.metainterp.resoperation import rop, ResOperation
+ from rpython.jit.backend.llsupport.regalloc import FrameManager, \
+         RegisterManager, TempVar, compute_vars_longevity, BaseRegalloc, \
+         get_scale
+@@ -25,6 +25,112 @@ from rpython.rlib.rarithmetic import r_uint
+ from rpython.rtyper.lltypesystem.lloperation import llop
+ 
+ 
++def _count_uses(operations, uses):
++    for op in operations:
++        for i in range(op.numargs()):
++            a = op.getarg(i)
++            uses[a] = uses.get(a, 0) + 1
++        if op.is_guard():
++            failargs = op.getfailargs()
++            if failargs:
++                for a in failargs:
++                    if a is not None:
++                        uses[a] = uses.get(a, 0) + 1
++
++
++def _maybe_has_rotate(operations):
++    """Allocation-free prescan: most traces have no rotate and must not pay for one."""
++    seen_shift = False
++    for op in operations:
++        opnum = op.getopnum()
++        if opnum == rop.UINT_RSHIFT:
++            seen_shift = True
++        elif opnum == rop.INT_OR and seen_shift:
++            return True
++    return False
++
++
++def fuse_rotates(operations):
++    """Turn (x >>u k) | (x << 64-k) into one ROR; tagged-float codecs are full of them."""
++    if not _maybe_has_rotate(operations):
++        return operations
++    uses = {}
++    _count_uses(operations, uses)
++    shift_src = {}
++    shift_amount = {}
++    shift_right = {}
++    for op in operations:
++        opnum = op.getopnum()
++        if opnum == rop.UINT_RSHIFT or opnum == rop.INT_LSHIFT:
++            amount = op.getarg(1)
++            if isinstance(amount, ConstInt) and 0 < amount.getint() < 64:
++                shift_src[op] = op.getarg(0)
++                shift_amount[op] = amount.getint()
++                shift_right[op] = opnum == rop.UINT_RSHIFT
++    rename = {}                 # value -> value, for args and failargs
++    newop_of = {}               # op -> op, for the operation list itself
++    dropped = {}
++    for op in operations:
++        if op.getopnum() != rop.INT_OR:
++            continue
++        a = op.getarg(0)
++        b = op.getarg(1)
++        if a is b or a not in shift_src or b not in shift_src:
++            continue
++        if uses.get(a, 0) != 1 or uses.get(b, 0) != 1:
++            continue
++        if shift_src[a] is not shift_src[b]:
++            continue
++        if shift_right[a] == shift_right[b]:
++            continue
++        if shift_amount[a] + shift_amount[b] != 64:
++            continue
++        right = shift_amount[a] if shift_right[a] else shift_amount[b]
++        ror = ResOperation(rop.INT_ROR, [shift_src[a], ConstInt(right)])
++        newop_of[op] = ror
++        rename[op] = ror
++        dropped[a] = None
++        dropped[b] = None
++    if not newop_of:
++        return operations
++    newops = []
++    for op in operations:
++        if op in dropped:
++            continue
++        args = op.getarglist_copy()
++        changed = False
++        for i in range(len(args)):
++            arg = args[i]
++            if arg in rename:
++                args[i] = rename[arg]
++                changed = True
++        if op in newop_of:
++            ror = newop_of[op]
++            src = ror.getarg(0)
++            if src in rename:
++                ror.setarg(0, rename[src])
++            newops.append(ror)
++            continue
++        newfail = None
++        if op.is_guard():
++            failargs = op.getfailargs()
++            if failargs:
++                for a in failargs:
++                    if a in rename:
++                        newfail = [rename.get(f, f) for f in failargs]
++                        changed = True
++                        break
++        if not changed:
++            newops.append(op)
++            continue
++        newop = op.copy_and_change(op.getopnum(), args)
++        if newfail is not None:
++            newop.setfailargs(newfail)
++        rename[op] = newop
++        newops.append(newop)
++    return newops
++
++
+ class TempInt(TempVar):
+     type = INT
+ 
+@@ -187,6 +293,7 @@ class Regalloc(BaseRegalloc):
+         self.frame_manager = self.fm
+         operations = cpu.gc_ll_descr.rewrite_assembler(cpu, operations,
+                                                        allgcrefs)
++        operations = fuse_rotates(operations)
+         # compute longevity of variables
+         longevity = compute_vars_longevity(inputargs, operations)
+         self.longevity = longevity
+@@ -380,6 +487,11 @@ class Regalloc(BaseRegalloc):
+         resloc = self.force_allocate_reg(op, [op.getarg(0)])
+         return [argloc, resloc]
+ 
++    def prepare_op_int_ror(self, op):
++        argloc = self.make_sure_var_in_reg(op.getarg(0))
++        resloc = self.force_allocate_reg(op)
++        return [argloc, imm(op.getarg(1).getint()), resloc]
++
+     def prepare_op_int_signext(self, op):
+         argloc = self.make_sure_var_in_reg(op.getarg(0))
+         numbytes = op.getarg(1).getint()
+diff --git a/rpython/jit/backend/aarch64/runner.py b/rpython/jit/backend/aarch64/runner.py
+index 8cab649..9924496 100644
+--- a/rpython/jit/backend/aarch64/runner.py
++++ b/rpython/jit/backend/aarch64/runner.py
+@@ -34,6 +34,11 @@ class CPU_ARM64(AbstractLLCPU):
+         if self.HAS_CODEMAP:
+             self.codemap.setup()
+ 
++    # Without this the injected jit-backend-counts counters are never dumped.
++    def finish_once(self):
++        AbstractLLCPU.finish_once(self)
++        self.assembler.finish_once()
++
+     def compile_bridge(self, faildescr, inputargs, operations,
+                        original_loop_token, log=True, logger=None):
+         clt = original_loop_token.compiled_loop_token
+diff --git a/rpython/jit/metainterp/executor.py b/rpython/jit/metainterp/executor.py
+index 37473fc..e339b42 100644
+--- a/rpython/jit/metainterp/executor.py
++++ b/rpython/jit/metainterp/executor.py
+@@ -396,7 +396,8 @@ def _make_execute_list():
+                 if func is not None:
+                     execute[value] = func
+                     continue
+-            if value in (rop.FORCE_TOKEN,
++            if value in (rop.INT_ROR,      # only a backend peephole makes these
++                         rop.FORCE_TOKEN,
+                          rop.CALL_ASSEMBLER_R,
+                          rop.CALL_ASSEMBLER_F,
+                          rop.CALL_ASSEMBLER_I,
+diff --git a/rpython/jit/metainterp/resoperation.py b/rpython/jit/metainterp/resoperation.py
+index 13dad16..98bf88e 100644
+--- a/rpython/jit/metainterp/resoperation.py
++++ b/rpython/jit/metainterp/resoperation.py
+@@ -955,6 +955,7 @@ _oplist = [
+     'INT_RSHIFT/2/i',
+     'INT_LSHIFT/2/i',
+     'UINT_RSHIFT/2/i',
++    'INT_ROR/2/i',             # backend-only: a fused (x>>k)|(x<<64-k)
+     'INT_SIGNEXT/2/i',
+     'FLOAT_ADD/2/f',
+     'FLOAT_SUB/2/f',

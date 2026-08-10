@@ -144,6 +144,7 @@ build-jit: | $(PYPY)
 
 $(PYPY):
 	git clone --depth=1 https://github.com/pypy/pypy $@
+	cd $@ && git apply $(CURDIR)/pypy-patches/*.patch
 
 clean:
 	rm -f $(PROBE) $(SHIM) rpyyarv rpyyarv-jit
