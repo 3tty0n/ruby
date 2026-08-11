@@ -66,8 +66,8 @@ INTP = rffi.INTP
 VOIDP = rffi.VOIDP
 MARK_HOOK = lltype.Ptr(lltype.FuncType([], lltype.Void))
 CONST_HOOK = lltype.Ptr(lltype.FuncType([], lltype.Void))
-BLOCK_HOOK = lltype.Ptr(lltype.FuncType([lltype.Signed, rffi.INT, VALUEP],
-                                        VALUE))
+BLOCK_HOOK = lltype.Ptr(lltype.FuncType([lltype.Signed, rffi.INT, VALUEP,
+                                         VALUE], VALUE))
 # (self, mid, argc, argv, blockproc, status, errval) -> result
 TRAMP_HOOK = lltype.Ptr(lltype.FuncType(
     [VALUE, VALUE, rffi.INT, VALUEP, VALUE, INTP, VALUEP], VALUE))

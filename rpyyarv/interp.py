@@ -1376,8 +1376,13 @@ fiber = _Fiber()
 PROXY_NAME = '__rpyyarv_block_param_proxy__'
 
 
-def block_callback(handle, argc, argv):
-    """Called from C; no RPython exception may escape into libruby, so a failure is re-raised once the call has returned."""
+def _sub_self(cruby_self):
+    """Qundef leaves the block's own self alone; anything else is the self CRuby yielded under, which instance_eval substitutes."""
+    return boot.as_signed(cruby_self)
+
+
+def block_callback(handle, argc, argv, cruby_self):
+    """Called from C; no RPython exception may escape into libruby, so a failure is re-raised once the call has returned. cruby_self is Qundef unless the yielding frame substituted one, as instance_eval does."""
     if blocks.error is not None or blocks.exc is not None \
             or blocks.jump is not None:
         return boot.as_value(value.Q_NIL)
@@ -1389,7 +1394,9 @@ def block_callback(handle, argc, argv):
     args = boot.read_values(argv, argc)
     foreign = _enter_foreign_stack()
     try:
-        return boot.as_value(call_block(w_block, args))
+        # A cref of its own only comes from an instance_eval RPyYARV ran; here CRuby owns the frame, so the block keeps the one it was written with.
+        return boot.as_value(call_block(w_block, args, NO_KEYWORDS, False,
+                                        _sub_self(cruby_self)))
     except RubyException, e:
         # Held: the RPython field it waits in is not something CRuby scans.
         gcroots.hold(e.value)

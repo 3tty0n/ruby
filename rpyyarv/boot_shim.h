@@ -184,7 +184,7 @@ void rpyyarv_gvar_set(const char *name, uintptr_t val, int *state);
 
 /* A CRuby object refers back into RPyYARV only through an integer handle, since RPython's GC moves objects and a raw pointer must never reach C; the handle is valid only for the extent of the call. */
 typedef uintptr_t (*rpyyarv_block_fn)(long handle, int argc,
-                                      uintptr_t *argv);
+                                      uintptr_t *argv, uintptr_t sub_self);
 void rpyyarv_set_block_callback(rpyyarv_block_fn fn);
 /* kw != 0 means the last argument is a Hash the callee takes as keywords. */
 uintptr_t rpyyarv_call_with_block(uintptr_t recv, uintptr_t mid, int argc,
