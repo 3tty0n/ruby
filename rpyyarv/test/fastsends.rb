@@ -58,6 +58,44 @@ puts Array.new(2, 0).inspect
 puts String.new("ab")
 puts Struct.new(:a).new(3).a
 
+s = +"ab"
+s << "cd"
+s << ""
+puts s
+puts s.equal?(s << "e")
+s << s
+puts s
+puts(+"x" << 121)
+puts((+"a").force_encoding("ASCII-8BIT") << "b".force_encoding("UTF-8"))
+puts((+"a") << "é")
+begin
+  "frozen".freeze << "x"
+rescue FrozenError
+  puts "FrozenError"
+end
+class MyStr < String
+end
+m = MyStr.new("q")
+m << "r"
+puts m
+puts m.class
+
+puts nil.nil?
+puts 1.nil?
+puts "s".nil?
+puts :s.nil?
+puts 1.5.nil?
+puts Plain.new.nil?
+puts Plain.nil?
+puts false.nil?
+class Nilish
+  def nil? = true
+end
+puts Nilish.new.nil?
+o = Plain.new
+def o.nil? = "singleton-nil?"
+puts o.nil?
+
 # Every fast path above must give way to a redefinition.
 class Symbol
   def name = "redefined-name"
@@ -76,6 +114,12 @@ end
 class BasicObject
   def initialize = ::Kernel.puts("redefined-initialize")
 end
+class String
+  def <<(_o) = "redefined-ltlt"
+end
+module Kernel
+  def nil? = "redefined-nil?"
+end
 
 puts :abc.name
 puts 3.to_f
@@ -83,4 +127,7 @@ puts 2.5.to_f
 puts 2 ** 0.5
 puts 2.0 ** 0.5
 puts Math.cos(0)
+puts((+"a") << "b")
+puts 1.nil?
+puts nil.nil?
 Plain.new

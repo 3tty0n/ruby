@@ -108,7 +108,9 @@ B_INT_TO_F = 44
 B_FLT_TO_F = 45
 B_SYM_NAME = 46
 B_BASIC_INITIALIZE = 47
-B_COUNT = 48
+B_STR_LTLT = 48
+B_KERNEL_NIL_P = 49
+B_COUNT = 50
 
 _INT_MID = [PLUS, MINUS, MULT, DIV, MOD, EQ, LT, LE, GT, GE, AND, OR, XOR,
             RSHIFT]
@@ -130,6 +132,17 @@ class _Bops(object):
 
 
 bops = _Bops()
+
+
+class _Modules(object):
+    # Quasi-immutable: interp.install() writes it once, before any Ruby code runs.
+    _immutable_fields_ = ['kernel?']
+
+    def __init__(self):
+        self.kernel = 0
+
+
+modules = _Modules()
 
 
 def refresh():
@@ -587,15 +600,24 @@ def int_bitref(a, b):
     return value.int2fix((value.fix2int(a) >> s) & 1)
 
 
+def str_concat(a, b):
+    """String#<< appending another String in place; a frozen receiver, a codepoint argument and an encoding negotiation stay with CRuby's rb_str_concat."""
+    if not (value.is_plain_string(a) and value.is_plain_string(b)):
+        return value.Q_UNDEF
+    if not _core_op(value.C_STRING, B_STR_LTLT, LTLT):
+        return value.Q_UNDEF
+    return boot.str_append(a, b)
+
+
 def lshift(a, b):
-    """The Integer and Array arms of vm_opt_ltlt."""
+    """The Integer, Array and String arms of vm_opt_ltlt."""
     if value.is_plain_array(a) and _ary_op(B_ARY_LTLT):
         if value.is_immediate(b) and value.ary_append_immediate(a, b):
             return a
         rubycall.ary_store(a, value.ary_len(a), b)
         return a
     if not (value.is_fixnum(a) and value.is_fixnum(b)) or not _int_owns(LTLT):
-        return value.Q_UNDEF
+        return str_concat(a, b)
     n = value.fix2int(a)
     s = value.fix2int(b)
     if s < 0 or s > LONG_BIT - 2:
@@ -741,12 +763,23 @@ def ary_new_pristine(recv):
 
 
 def nil_p(recv):
-    """vm_opt_nil_p's first arm; a non-nil receiver goes back to the send, since its own `nil?` may be redefined anywhere."""
-    if recv == value.Q_NIL and _cruby_owns(B_NIL_NIL_P) \
-            and dispatch.lookup_core(value.core_class(value.C_NILCLASS),
-                                     NIL_P) is None:
-        return value.Q_TRUE
-    return value.Q_UNDEF
+    """vm_opt_nil_p's first arm, plus the false a receiver whose class still resolves nil? to Kernel's owes; the owner is the pristine Kernel, so redefining it anywhere in the chain is seen."""
+    if recv == value.Q_NIL:
+        if _cruby_owns(B_NIL_NIL_P) \
+                and dispatch.lookup_core(value.core_class(value.C_NILCLASS),
+                                         NIL_P) is None:
+            return value.Q_TRUE
+        return value.Q_UNDEF
+    klass = value.class_of(recv)
+    if klass == 0 or modules.kernel == 0 or not _cruby_owns(B_KERNEL_NIL_P):
+        return value.Q_UNDEF
+    klass = promote(klass)
+    # The registry too: a `nil?` RPyYARV defined in a module is invisible to CRuby's owner.
+    if dispatch.lookup(klass, NIL_P) is not None:
+        return value.Q_UNDEF
+    if dispatch.owner_of(klass, NIL_P) != modules.kernel:
+        return value.Q_UNDEF
+    return value.Q_FALSE
 
 
 def str_freeze_pristine():

@@ -1873,6 +1873,7 @@ def install():
     # Asked before any Ruby code runs, so these are the pristine owners.
     send_owners.kernel = dispatch.owner_of(
         value.core_class(value.C_OBJECT), SEND)
+    helpers.modules.kernel = send_owners.kernel
     send_owners.basic = dispatch.owner_of(
         value.core_class(value.C_BASIC_OBJECT), SEND2)
     send_owners.eval = dispatch.owner_of(

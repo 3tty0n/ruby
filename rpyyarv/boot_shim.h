@@ -119,6 +119,9 @@ int rpyyarv_responds(uintptr_t klass, uintptr_t sym);
 /* The frozen String Symbol#name returns, or Qundef for a dynamic symbol. */
 uintptr_t rpyyarv_sym_name(uintptr_t sym);
 
+/* String#<< of one String onto another of the same encoding, or Qundef when only rb_str_concat can do it. */
+uintptr_t rpyyarv_str_append(uintptr_t str, uintptr_t other);
+
 /* The heap Float the flonum encoding cannot represent, and the RFloat layout value.py reads by hand. */
 uintptr_t rpyyarv_float_new(double d);
 void rpyyarv_float_layout(int *out);

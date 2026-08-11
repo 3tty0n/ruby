@@ -1912,6 +1912,8 @@ rpyyarv_bop_mask(void)
     BOP(rb_cFloat, "to_f");
     BOP(rb_cSymbol, "name");
     BOP(rb_cBasicObject, "initialize");
+    BOP(rb_cString, "<<");
+    BOP(rb_mKernel, "nil?");
 #undef BOP
 
     return (uintptr_t)i << RPYYARV_BOP_COUNT_SHIFT | mask;
@@ -2022,6 +2024,18 @@ rpyyarv_str_getbyte(uintptr_t str, uintptr_t index)
     if (offset < 0) offset += len;
     if (offset < 0 || offset >= len) return (uintptr_t)Qnil;
     return (uintptr_t)INT2FIX((unsigned char)RSTRING_PTR(s)[offset]);
+}
+
+uintptr_t
+rpyyarv_str_append(uintptr_t str, uintptr_t other)
+{
+    VALUE s = (VALUE)str;
+    VALUE o = (VALUE)other;
+    if (!RB_TYPE_P(s, T_STRING) || !RB_TYPE_P(o, T_STRING)) return (uintptr_t)Qundef;
+    if (RB_OBJ_FROZEN_RAW(s)) return (uintptr_t)Qundef;
+    /* Same encoding: rb_str_buf_append would otherwise negotiate one and can raise. */
+    if (ENCODING_GET(s) != ENCODING_GET(o)) return (uintptr_t)Qundef;
+    return (uintptr_t)rb_str_buf_append(s, o);
 }
 
 uintptr_t

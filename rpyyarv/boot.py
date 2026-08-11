@@ -254,6 +254,8 @@ rb_method_defined = _ext('rpyyarv_method_defined',
 rb_str_getbyte = _ext('rpyyarv_str_getbyte', [VALUE, VALUE], VALUE)
 rb_str_setbyte = _ext('rpyyarv_str_setbyte', [VALUE, VALUE, VALUE], VALUE,
                       reenters=True)
+rb_str_append = _ext('rpyyarv_str_append', [VALUE, VALUE], VALUE,
+                     reenters=True)
 # No reenters: the barrier sets bits in preallocated page bitmaps and reaches no mark callback; see the comment on rpyyarv_obj_written.
 rb_obj_written = _ext('rpyyarv_obj_written', [VALUE, VALUE], lltype.Void)
 rb_wb_direct = _ext('rpyyarv_wb_direct', [], rffi.INT)
@@ -825,6 +827,11 @@ def method_defined(obj, rid, include_private):
 
 def str_getbyte(string, index):
     return rffi.cast(lltype.Signed, rb_str_getbyte(_v(string), _v(index)))
+
+
+def str_append(string, other):
+    """String#<< of one String onto another, or Qundef when only rb_str_concat can do it."""
+    return rffi.cast(lltype.Signed, rb_str_append(_v(string), _v(other)))
 
 
 def str_setbyte(string, index, v):
