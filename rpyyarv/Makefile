@@ -103,7 +103,7 @@ gccheck:
 	          test/attrs.rb test/fastops.rb test/floats.rb test/ivars.rb \
 	          test/aset.rb \
 	          test/consts.rb test/arynew.rb \
-	          test/recursion.rb test/intabs.rb test/mixins.rb \
+	          test/recursion.rb test/intabs.rb test/intbits.rb test/mixins.rb \
 	          test/floatops.rb \
 	          test/equality.rb \
 	          test/nulstr.rb test/opcodes4.rb test/moduledefs.rb \

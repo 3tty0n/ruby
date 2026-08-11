@@ -449,6 +449,51 @@ def int_abs(recv):
     return value.int2fix(-n)
 
 
+def _int_owns(mid):
+    """No BOP flag watches these, so ask CRuby who owns them, as int_abs does."""
+    klass = value.core_class(value.C_INTEGER)
+    return (dispatch.owner_of(klass, mid) == klass
+            and dispatch.lookup_core(klass, mid) is None)
+
+
+def int_uminus(recv):
+    """Integer#-@ for a Fixnum; the fixnum minimum negates to a Bignum, which only CRuby builds."""
+    if not value.is_fixnum(recv) or not _int_owns(UMINUS):
+        return value.Q_UNDEF
+    n = -value.fix2int(recv)
+    if not value.fixable(n):
+        return value.Q_UNDEF
+    return value.int2fix(n)
+
+
+def int_bitref(a, b):
+    """Integer#[] for a non-negative Fixnum index; a Range or negative index (rb_int_aref, numeric.c:5001) goes back to CRuby."""
+    if not (value.is_fixnum(a) and value.is_fixnum(b)) or not _int_owns(AREF):
+        return value.Q_UNDEF
+    s = value.fix2int(b)
+    if s < 0:
+        return value.Q_UNDEF
+    # A fixnum is under 63 bits, so any wider index reads the sign.
+    if s >= LONG_BIT - 1:
+        s = LONG_BIT - 1
+    return value.int2fix((value.fix2int(a) >> s) & 1)
+
+
+def lshift(a, b):
+    """Integer#<< for a non-negative fixnum shift; a result CRuby would widen to a Bignum, and a negative shift, go back to CRuby."""
+    if not (value.is_fixnum(a) and value.is_fixnum(b)) or not _int_owns(LTLT):
+        return value.Q_UNDEF
+    n = value.fix2int(a)
+    s = value.fix2int(b)
+    if s < 0 or s > LONG_BIT - 2:
+        return value.Q_UNDEF
+    # Bound the operand instead of shifting first: an overflowing shift is undefined in RPython.
+    limit = 1 << (LONG_BIT - 2 - s)
+    if n >= limit or n < -limit:
+        return value.Q_UNDEF
+    return value.int2fix(n << s)
+
+
 def _flt_owns(mid):
     """No BOP flag watches these, so ask CRuby who owns them, as int_abs does."""
     klass = value.core_class(value.C_FLOAT)
@@ -483,7 +528,10 @@ def zero_arg(recv, mid):
     if mid == TO_I:
         return flt_to_i(recv)
     if mid == UMINUS:
-        return flt_uminus(recv)
+        v = flt_uminus(recv)
+        if v != value.Q_UNDEF:
+            return v
+        return int_uminus(recv)
     return range_part(recv, mid)
 
 
@@ -527,7 +575,7 @@ def aref(recv, idx):
         if i >= 0 and i < n:
             return value.ary_at(recv, i)
         return value.Q_NIL
-    return value.Q_UNDEF
+    return int_bitref(recv, idx)
 
 
 def aset(recv, idx, val):

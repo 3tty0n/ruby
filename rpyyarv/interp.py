@@ -351,6 +351,10 @@ def _native_binop(recv, arg, mid):
         return helpers.xor(recv, arg)
     if mid == helpers.RSHIFT:
         return helpers.rshift(recv, arg)
+    if mid == helpers.LTLT:
+        return helpers.lshift(recv, arg)
+    if mid == helpers.AREF:
+        return helpers.int_bitref(recv, arg)
     if mid == helpers.SQRT:
         return helpers.math_sqrt(recv, arg)
     if (mid == helpers.EQ or mid == helpers.NEQ or mid == helpers.EQUAL_P) \
@@ -2591,7 +2595,9 @@ def _execute(iseq, frame, pc):
         elif opcode == insns.OPT_LTLT:
             b = frame.pop()
             a = frame.pop()
-            frame.push(_binop(frame, a, b, helpers.LTLT))
+            v = helpers.lshift(a, b)
+            frame.push(v if v != value.Q_UNDEF
+                       else _binop(frame, a, b, helpers.LTLT))
         elif opcode == insns.OPT_NIL_P:
             recv = frame.pop()
             v = helpers.nil_p(recv)
