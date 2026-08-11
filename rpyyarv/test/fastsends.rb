@@ -68,6 +68,13 @@ puts s
 puts(+"x" << 121)
 puts((+"a").force_encoding("ASCII-8BIT") << "b".force_encoding("UTF-8"))
 puts((+"a") << "é")
+b = (+"").force_encoding("ASCII-8BIT")
+b << 0 << 65 << 255 << 10
+puts b.bytes.inspect
+puts b.encoding
+puts((+"u") << 233)
+puts((+"u").force_encoding("ASCII-8BIT") << 256) rescue puts "RangeError"
+puts((+"u").force_encoding("ASCII-8BIT") << -1) rescue puts "RangeError"
 begin
   "frozen".freeze << "x"
 rescue FrozenError

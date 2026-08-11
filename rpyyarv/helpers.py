@@ -618,8 +618,10 @@ def int_bitref(a, b):
 
 
 def str_concat(a, b):
-    """String#<< appending another String in place; a frozen receiver, a codepoint argument and an encoding negotiation stay with CRuby's rb_str_concat."""
-    if not (value.is_plain_string(a) and value.is_plain_string(b)):
+    """String#<< appending a String, or a byte to a binary String; a frozen receiver and an encoding negotiation stay with CRuby's rb_str_concat."""
+    if not value.is_plain_string(a):
+        return value.Q_UNDEF
+    if not (value.is_plain_string(b) or value.is_fixnum(b)):
         return value.Q_UNDEF
     if not _core_op(value.C_STRING, B_STR_LTLT, LTLT):
         return value.Q_UNDEF

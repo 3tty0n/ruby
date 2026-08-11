@@ -682,6 +682,17 @@ def _ary_entry(ary, i):
 
 
 @unroll_safe
+def _splat_trailing(frame, args, at, npos, trailing):
+    i = 0
+    while i < trailing:
+        j = at + npos + i
+        assert j >= 0
+        args.append(frame.stack[j])
+        i += 1
+    return args
+
+
+@unroll_safe
 def _splat_args(frame, at, npos, trailing):
     """The arguments of a *splat call as a list: the Array is the last positional (the compiler pushed anything after it into the Array itself), and it stays on the frame's stack, which is what keeps its elements marked."""
     # Restated so the codewriter sees every stack index as non-negative.
@@ -696,6 +707,14 @@ def _splat_args(frame, at, npos, trailing):
     splat_at = at + npos - 1
     assert splat_at >= 0
     ary = frame.stack[splat_at]
+    if value.is_plain_array(ary):
+        # Read in place, as opt_aref does: a call per element would force the virtualizable on every splat call.
+        n = promote(value.ary_len(ary))
+        i = 0
+        while i < n:
+            args.append(value.ary_at(ary, i))
+            i += 1
+        return _splat_trailing(frame, args, at, npos, trailing)
     # Promoted: the expansion's length is what makes args a fixed-size list the trace can keep virtual.
     n = promote(_ary_len(ary))
     i = 0

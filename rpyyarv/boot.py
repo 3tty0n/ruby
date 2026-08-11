@@ -1231,7 +1231,7 @@ def set_block_unwind():
     rb_set_block_unwind()
 
 
-BOP_COUNT_SHIFT = 32
+BOP_COUNT_SHIFT = 56
 
 
 def bop_mask():

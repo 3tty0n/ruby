@@ -1969,6 +1969,8 @@ rpyyarv_bop_mask(void)
     BOP(rb_cBasicObject, "instance_exec");
 #undef BOP
 
+    /* 0 fails helpers.refresh()'s count check loudly, rather than folding a pair's bit into the count. */
+    if (i > RPYYARV_BOP_COUNT_SHIFT) return 0;
     return (uintptr_t)i << RPYYARV_BOP_COUNT_SHIFT | mask;
 }
 
@@ -2084,8 +2086,17 @@ rpyyarv_str_append(uintptr_t str, uintptr_t other)
 {
     VALUE s = (VALUE)str;
     VALUE o = (VALUE)other;
-    if (!RB_TYPE_P(s, T_STRING) || !RB_TYPE_P(o, T_STRING)) return (uintptr_t)Qundef;
-    if (RB_OBJ_FROZEN_RAW(s)) return (uintptr_t)Qundef;
+    if (!RB_TYPE_P(s, T_STRING) || RB_OBJ_FROZEN_RAW(s)) return (uintptr_t)Qundef;
+    if (RB_FIXNUM_P(o)) {
+        /* rb_str_concat's codepoint arm, only where a codepoint is one byte: a binary receiver and a byte value. */
+        long n = FIX2LONG(o);
+        char c;
+        if (n < 0 || n > 0xff) return (uintptr_t)Qundef;
+        if (ENCODING_GET(s) != rb_ascii8bit_encindex()) return (uintptr_t)Qundef;
+        c = (char)n;
+        return (uintptr_t)rb_str_cat(s, &c, 1);
+    }
+    if (!RB_TYPE_P(o, T_STRING)) return (uintptr_t)Qundef;
     /* Same encoding: rb_str_buf_append would otherwise negotiate one and can raise. */
     if (ENCODING_GET(s) != ENCODING_GET(o)) return (uintptr_t)Qundef;
     return (uintptr_t)rb_str_buf_append(s, o);

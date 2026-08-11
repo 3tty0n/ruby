@@ -151,7 +151,8 @@ def _operand(pending, owners, v, me):
     if boot.is_symbol(v):
         return rawiseq.RawOperand(rawiseq.OP_SYM, 0, boot.sym_of(v))
     if boot.is_string(v):
-        return rawiseq.RawOperand(rawiseq.OP_STR, 0, boot.str_of(v))
+        # The VALUE itself, not its bytes: rb_str_new would hand back an ASCII-8BIT copy and the literal would lose its encoding.
+        return rawiseq.RawOperand(rawiseq.OP_VALUE, v, boot.str_of(v))
     if boot.is_array(v):
         if is_iseq(v):
             pending.append(v)

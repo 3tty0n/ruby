@@ -261,7 +261,8 @@ uintptr_t rpyyarv_arity_error(int given, int min, int max, int *state);
 uintptr_t rpyyarv_keyword_error(const char *kind, uintptr_t keys, int *state);
 
 /* One bit per (class, basic operator) pair, set when the pair is no longer CRuby's own definition; the pair count rides above the bits so a caller can refuse a shim it disagrees with. */
-#define RPYYARV_BOP_COUNT_SHIFT 32
+/* Above every bit the table below sets: a pair whose bit landed in the count field would read as never redefined. */
+#define RPYYARV_BOP_COUNT_SHIFT 56
 uintptr_t rpyyarv_bop_mask(void);
 
 /* One field of a direct Range instance, or Qundef for anything else. */
