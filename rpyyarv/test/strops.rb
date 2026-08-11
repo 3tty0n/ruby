@@ -84,10 +84,30 @@ puts frozen.length
 puts frozen.size
 puts frozen[2]
 
+bytes = "abc"
+puts bytes.getbyte(0)
+puts bytes.getbyte(-1)
+puts bytes.getbyte(99).inspect
+puts bytes.setbyte(1, 300)
+puts bytes.bytes.inspect
+begin
+  frozen.setbyte(0, 1)
+rescue FrozenError
+  puts "FrozenError on setbyte"
+end
+
 # A subclass may redefine anything, so it takes the send.
 class MyStr < String
   def length
     42
+  end
+
+  def getbyte(index)
+    999
+  end
+
+  def setbyte(index, value)
+    :setbyte
   end
 end
 sub = MyStr.new("abcd")
@@ -97,6 +117,8 @@ puts sub == "abcd"
 puts "abcd" == sub
 puts sub[1]
 puts sub.class
+puts sub.getbyte(0)
+puts sub.setbyte(0, 1)
 
 n = 0
 i = 0
@@ -134,6 +156,14 @@ class String
   def ==(other)
     :eq
   end
+
+  def getbyte(index)
+    :getbyte
+  end
+
+  def setbyte(index, value)
+    :setbyte
+  end
 end
 
 puts a.length
@@ -141,4 +171,6 @@ puts a.size
 puts a[0].inspect
 puts (a == b).inspect
 puts (a != b).inspect
+puts a.getbyte(0)
+puts a.setbyte(0, 1)
 p :"dynamic-#{1}"

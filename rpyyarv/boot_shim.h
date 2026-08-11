@@ -263,6 +263,8 @@ uintptr_t rpyyarv_class_ivar_get(uintptr_t obj, uintptr_t id);
 int rpyyarv_ivar_defined(uintptr_t obj, uintptr_t id);
 int rpyyarv_const_defined(uintptr_t klass, uintptr_t id, int inherit);
 int rpyyarv_method_defined(uintptr_t obj, uintptr_t id, int include_private);
+uintptr_t rpyyarv_str_getbyte(uintptr_t str, uintptr_t index);
+uintptr_t rpyyarv_str_setbyte(uintptr_t str, uintptr_t index, uintptr_t value);
 
 /* Resolved the way load.c's search_required does but with the public API only; *path_out is the expanded path on RPYYARV_REQ_RB. */
 #define RPYYARV_REQ_LOADED   0  /* $LOADED_FEATURES already has it */

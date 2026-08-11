@@ -143,6 +143,21 @@ def invoke(frame, w_ci, w_block=None):
         _drop(frame, recv_at)
         debug.count_native()
         return recv
+    if mid == GETBYTE and argc == 1 and \
+            dispatch.owner_of(klass, GETBYTE) == send_owners.string_getbyte:
+        v = boot.str_getbyte(recv, frame.stack[recv_at + 1])
+        if v != value.Q_UNDEF:
+            _drop(frame, recv_at)
+            debug.count_native()
+            return v
+    if mid == SETBYTE and argc == 2 and \
+            dispatch.owner_of(klass, SETBYTE) == send_owners.string_setbyte:
+        v = boot.str_setbyte(recv, frame.stack[recv_at + 1],
+                             frame.stack[recv_at + 2])
+        if v != value.Q_UNDEF:
+            _drop(frame, recv_at)
+            debug.count_native()
+            return v
     if entry is None and argc <= 1:
         # A send an opt_* instruction would have caught if YARV had one for it.
         if argc == 1:
@@ -317,6 +332,8 @@ REVERSE_EACH = symbols.intern('reverse_each')
 INDEX = symbols.intern('index')
 SUCC = symbols.intern('succ')
 BUFFER = symbols.intern('buffer')
+GETBYTE = symbols.intern('getbyte')
+SETBYTE = symbols.intern('setbyte')
 
 DEFINED_IVAR = 2
 DEFINED_GVAR = 4
@@ -343,12 +360,15 @@ MATCH = symbols.intern('=~')
 
 class _SendOwners(object):
     # Quasi-immutable: install() writes it once, before any Ruby code runs.
-    _immutable_fields_ = ['kernel?', 'basic?']
+    _immutable_fields_ = ['kernel?', 'basic?', 'string_getbyte?',
+                          'string_setbyte?']
 
     def __init__(self):
         self.kernel = 0
         self.basic = 0
         self.eval = 0
+        self.string_getbyte = 0
+        self.string_setbyte = 0
 
 
 # Kernel#send and BasicObject#__send__, so a class that overrides either is seen.
@@ -1845,6 +1865,10 @@ def install():
         value.core_class(value.C_BASIC_OBJECT), SEND2)
     send_owners.eval = dispatch.owner_of(
         value.core_class(value.C_OBJECT), EVAL)
+    send_owners.string_getbyte = dispatch.owner_of(
+        value.core_class(value.C_STRING), GETBYTE)
+    send_owners.string_setbyte = dispatch.owner_of(
+        value.core_class(value.C_STRING), SETBYTE)
 
 
 @unroll_safe
@@ -2821,7 +2845,9 @@ def _execute(iseq, frame, pc):
             frame.push(v if v != value.Q_UNDEF
                        else _unop(frame, recv, helpers.NIL_P))
         elif opcode == insns.OPT_SUCC:
-            frame.push(_unop(frame, frame.pop(), SUCC))
+            recv = frame.pop()
+            v = helpers.add(recv, value.int2fix(1))
+            frame.push(v if v != value.Q_UNDEF else _unop(frame, recv, SUCC))
         elif opcode == insns.OPT_STR_FREEZE:
             idx = code[pc]
             pc += 1

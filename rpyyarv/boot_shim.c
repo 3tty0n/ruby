@@ -1965,6 +1965,41 @@ rpyyarv_method_defined(uintptr_t obj, uintptr_t id, int include_private)
 }
 
 uintptr_t
+rpyyarv_str_getbyte(uintptr_t str, uintptr_t index)
+{
+    VALUE s = (VALUE)str;
+    VALUE i = (VALUE)index;
+    long offset;
+    long len;
+    if (!RB_TYPE_P(s, T_STRING) || !RB_FIXNUM_P(i)) return (uintptr_t)Qundef;
+    offset = FIX2LONG(i);
+    len = RSTRING_LEN(s);
+    if (offset < 0) offset += len;
+    if (offset < 0 || offset >= len) return (uintptr_t)Qnil;
+    return (uintptr_t)INT2FIX((unsigned char)RSTRING_PTR(s)[offset]);
+}
+
+uintptr_t
+rpyyarv_str_setbyte(uintptr_t str, uintptr_t index, uintptr_t value)
+{
+    VALUE s = (VALUE)str;
+    VALUE i = (VALUE)index;
+    VALUE v = (VALUE)value;
+    long offset;
+    long len;
+    if (!RB_TYPE_P(s, T_STRING) || !RB_FIXNUM_P(i) || !RB_FIXNUM_P(v) ||
+        RB_OBJ_FROZEN_RAW(s)) return (uintptr_t)Qundef;
+    offset = FIX2LONG(i);
+    len = RSTRING_LEN(s);
+    if (offset < 0) offset += len;
+    if (offset < 0 || offset >= len) return (uintptr_t)Qundef;
+    rb_str_modify(s);
+    RSTRING_PTR(s)[offset] = (char)(FIX2LONG(v) & 0xff);
+    ENC_CODERANGE_CLEAR(s);
+    return (uintptr_t)v;
+}
+
+uintptr_t
 rpyyarv_str_concat(int n, const uintptr_t *parts)
 {
     VALUE buf[RPYYARV_MAX_ARGC];
