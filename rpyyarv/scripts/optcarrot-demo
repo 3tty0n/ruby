@@ -1,18 +1,98 @@
-#!/bin/sh
-# Launch optcarrot under rpyyarv-jit with a real SDL2 window.
+#!/usr/bin/env ruby
+# frozen_string_literal: true
 
-HERE=`cd "\`dirname "$0"\`/.." && pwd`
-BUILD=${RPYYARV_BUILD:-`cd "$HERE/.." && pwd`/build}
-GEMDIR=${OPTCARROT_GEMDIR:-`gem env gemdir 2>/dev/null`}
-OC="$HERE/ruby-bench/benchmarks/optcarrot"
-[ -d "$OC" ] || { echo "ruby-bench checkout not found at $OC" >&2; exit 1; }
+here = File.dirname(File.expand_path(__FILE__))
+root = File.dirname(here)
+top = File.dirname(root)
+build = ENV.fetch("RPYYARV_BUILD", File.join(top, "build"))
+optcarrot = File.join(root, "ruby-bench", "benchmarks", "optcarrot")
+display = File.join(here, "optcarrot-display.rb")
+abort "ruby-bench checkout not found at #{optcarrot}" unless Dir.exist?(optcarrot)
 
-if [ $# -eq 0 ]; then
-    set -- --video=sdl2 --audio=none --input=sdl2 \
-           "$OC/examples/Lan_Master.nes"
-fi
+engines = [
+  ["cruby", [File.join(build, "ruby"), "--disable-gems"]],
+  ["cruby+yjit", [File.join(build, "ruby"), "--disable-gems", "--yjit"]],
+  ["cruby+zjit", [File.join(build, "ruby"), "--disable-gems", "--zjit"]],
+  ["rpyyarv-jit", [File.join(root, "rpyyarv-jit")]]
+]
 
-RPYYARV_BUILD=$BUILD RPYYARV_GEMS=1 GEM_HOME=$GEMDIR GEM_PATH=$GEMDIR \
-DYLD_LIBRARY_PATH=$BUILD DYLD_FALLBACK_LIBRARY_PATH=/opt/homebrew/lib \
-LD_LIBRARY_PATH=$BUILD \
-exec "$HERE/rpyyarv-jit" "$OC/bin/optcarrot" "$@"
+def choose(label, choices, default)
+  puts "Select #{label}:"
+  choices.each_with_index { |choice, index| puts format("  %d) %s", index + 1, choice) }
+  print "number [#{default + 1}]: "
+  answer = $stdin.gets&.strip
+  return default if !answer || answer.empty?
+
+  index = Integer(answer, exception: false)
+  abort "invalid #{label}: #{answer}" unless index&.between?(1, choices.size)
+  index - 1
+end
+
+default_launch = ARGV.empty?
+interactive = default_launch && $stdin.tty?
+engine_name = ENV["OPTCARROT_ENGINE"]
+rom = ENV["OPTCARROT_ROM"]
+args = []
+
+until ARGV.empty?
+  arg = ARGV.shift
+  case arg
+  when /\A--engine=(.+)\z/ then engine_name = Regexp.last_match(1)
+  when "--engine" then engine_name = ARGV.shift || abort("--engine requires a value")
+  when /\A--rom=(.+)\z/ then rom = Regexp.last_match(1)
+  when "--rom" then rom = ARGV.shift || abort("--rom requires a value")
+  when "-h", "--help"
+    puts "usage: optcarrot-demo [--engine NAME] [--rom FILE] [optcarrot options]"
+    puts "engines: #{engines.map(&:first).join(', ')}"
+    exit
+  else
+    args << arg
+  end
+end
+
+if interactive
+  engine_index = choose("engine", engines.map(&:first), 3)
+  engine_name = engines[engine_index][0]
+
+  roms = Dir.glob(File.join(optcarrot, "examples", "*.{nes,NES,zip,ZIP}"))
+            .map { |path| File.expand_path(path) }.uniq.sort
+  default_rom = roms.index { |path| File.basename(path) == "Lan_Master.nes" } || 0
+  rom = roms[choose("ROM", roms.map { |path| File.basename(path) }, default_rom)]
+end
+
+rom ||= File.join(optcarrot, "examples", "Lan_Master.nes") if default_launch
+
+engine_name ||= "rpyyarv-jit"
+engine = engines.find { |name, _| name == engine_name }
+abort "unknown engine #{engine_name.inspect} (choose #{engines.map(&:first).join(', ')})" unless engine
+abort "engine is not executable: #{engine[1][0]}" unless File.executable?(engine[1][0])
+
+if default_launch || rom
+  abort "ROM not found: #{rom}" unless File.file?(rom)
+  args = ["--video=sdl2", "--audio=none", "--input=sdl2", "--opt", "--fps-limit=0"] + args
+  args << rom unless args.include?(rom)
+end
+
+gemdir = ENV.fetch("OPTCARROT_GEMDIR") do
+  IO.popen(["gem", "env", "gemdir"], err: File::NULL, &:read).strip
+end
+ffi_file = IO.popen(["gem", "which", "ffi"], err: File::NULL, &:read).strip
+abort "ffi gem not found" if ffi_file.empty?
+ffi_lib = File.dirname(ffi_file)
+extension_common = File.join(build, ".ext", "common")
+zlib_bundle = Dir.glob(File.join(build, ".ext", "*", "zlib.{bundle,so}")).first
+extension_arch = File.dirname(zlib_bundle) if zlib_bundle
+library_var = RUBY_PLATFORM.include?("darwin") ? "DYLD_LIBRARY_PATH" : "LD_LIBRARY_PATH"
+env = {
+  "RPYYARV_BUILD" => build,
+  "RPYYARV_GEMS" => "1",
+  "OPTCARROT_DIR" => optcarrot,
+  "GEM_HOME" => gemdir,
+  "GEM_PATH" => gemdir,
+  "RUBYLIB" => [build, extension_common, extension_arch, ffi_lib, ENV["RUBYLIB"]]
+                 .compact.join(File::PATH_SEPARATOR),
+  library_var => [build, ENV[library_var]].compact.join(File::PATH_SEPARATOR)
+}
+env["DYLD_FALLBACK_LIBRARY_PATH"] = "/opt/homebrew/lib" if RUBY_PLATFORM.include?("darwin")
+
+exec(env, *engine[1], display, *args)
