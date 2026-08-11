@@ -256,6 +256,9 @@ rb_str_setbyte = _ext('rpyyarv_str_setbyte', [VALUE, VALUE, VALUE], VALUE,
                       reenters=True)
 rb_str_append = _ext('rpyyarv_str_append', [VALUE, VALUE], VALUE,
                      reenters=True)
+rb_call_super = _ext('rpyyarv_call_super',
+                     [VALUE, VALUE, VALUE, rffi.INT, VALUEP, INTP], VALUE,
+                     reenters=True)
 # No reenters: the barrier sets bits in preallocated page bitmaps and reaches no mark callback; see the comment on rpyyarv_obj_written.
 rb_obj_written = _ext('rpyyarv_obj_written', [VALUE, VALUE], lltype.Void)
 rb_wb_direct = _ext('rpyyarv_wb_direct', [], rffi.INT)
@@ -827,6 +830,28 @@ def method_defined(obj, rid, include_private):
 
 def str_getbyte(string, index):
     return rffi.cast(lltype.Signed, rb_str_getbyte(_v(string), _v(index)))
+
+
+def call_super(owner, recv, rid, args, mid):
+    """owner's own copy of mid, called on recv; where `super` lands when CRuby owns the superclass method."""
+    argc = len(args)
+    if argc > MAX_ARGC:
+        raise RubyError(symbols.name_of(mid))
+    argv = _enter_argv(argc)
+    i = 0
+    while i < argc:
+        argv[i] = rffi.cast(VALUE, args[i])
+        i += 1
+    state = _enter_status()
+    v = rb_call_super(rffi.cast(VALUE, owner), rffi.cast(VALUE, recv),
+                      rffi.cast(VALUE, rid), rffi.cast(rffi.INT, argc),
+                      argv, state)
+    failed = _leave_status(state)
+    ret = rffi.cast(lltype.Signed, v)
+    _leave_argv(argv)
+    if failed:
+        _failed_mid(mid)
+    return ret
 
 
 def str_append(string, other):

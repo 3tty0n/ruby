@@ -31,24 +31,28 @@ NO_KEYWORDS = []
 
 class Cref(object):
     """One lexical scope, chained as CRuby's rb_cref_t is; klass 0 is the toplevel Object."""
-    _immutable_fields_ = ['klass', 'outer']
+    _immutable_fields_ = ['klass', 'outer', 'by_eval']
 
-    def __init__(self, klass, outer):
+    def __init__(self, klass, outer, by_eval=False):
         self.klass = klass
         self.outer = outer
+        # CREF_PUSHED_BY_EVAL: a `def` lands on this class, but a constant lookup steps over it.
+        self.by_eval = by_eval
         # klass -> Cref, so re-running a class body reuses the node a const site's guard holds.
         self.inner = {}
+        self.eval_inner = {}
 
 
 TOP_CREF = Cref(0, None)
 
 
-def _push_cref(outer, klass):
-    node = outer.inner.get(klass, None)
+def _push_cref(outer, klass, by_eval=False):
+    table = outer.eval_inner if by_eval else outer.inner
+    node = table.get(klass, None)
     if node is None:
         dispatch.root_base(klass)
-        node = Cref(klass, outer)
-        outer.inner[klass] = node
+        node = Cref(klass, outer, by_eval)
+        table[klass] = node
     return node
 
 
@@ -234,6 +238,14 @@ def invoke(frame, w_ci, w_block=None):
             and recv in blocks.by_proc:
         # A Proc RPyYARV made: run its block here instead of out to CRuby and back through the block callback.
         return _block_send(frame, mid, recv_at, argc, blocks.by_proc[recv])
+    if w_block is not None and entry is None \
+            and (mid == INSTANCE_EVAL or mid == INSTANCE_EXEC) \
+            and w_block.kind == block_mod.KIND_ISEQ \
+            and (mid == INSTANCE_EXEC or argc == 0) \
+            and helpers.instance_eval_pristine(mid) \
+            and dispatch.owner_of(klass, mid) \
+            == value.core_class(value.C_BASIC_OBJECT):
+        return _instance_eval(frame, mid, recv, recv_at, argc, w_block)
     if mid == MODULE_FUNCTION and fcall and _in_body_of(frame, recv):
         return _module_function(frame, recv, recv_at, argc)
     if mid == CORE_ALIAS or mid == CORE_UNDEF:
@@ -1128,6 +1140,29 @@ def _opt_send(frame, mid, argc):
     return rubycall.call(recv, mid, args)
 
 
+def _super_to_cruby(frame, owner, mid, recv_at, argc, kw_splat):
+    """`super` landing on a method CRuby owns: bound to owner, so it is that implementation and not this one again."""
+    if kw_splat:
+        raise UnsupportedOperation(
+            "super from '%s' passes keywords to a method CRuby owns"
+            % symbols.name_of(mid))
+    recv = frame.stack[recv_at]
+    if mid == INITIALIZE and argc == 0 \
+            and owner == value.core_class(value.C_BASIC_OBJECT) \
+            and helpers.basic_initialize_pristine():
+        _drop(frame, recv_at)
+        return value.Q_NIL
+    args = []
+    i = 0
+    while i < argc:
+        args.append(frame.stack[recv_at + 1 + i])
+        i += 1
+    _drop(frame, recv_at)
+    ret = rubycall.call_super(owner, recv, mid, args)
+    _check_block_error()
+    return ret
+
+
 @unroll_safe
 def invoke_super(frame, w_ci):
     """A send's lookup, resumed above the running method's owner."""
@@ -1156,11 +1191,13 @@ def invoke_super(frame, w_ci):
     if owner != value.Q_NIL:
         target = dispatch.lookup_owned(owner, entry.mid)
     if target is None:
-        # rb_call_super needs a CRuby frame, which RPyYARV never has.
-        raise UnsupportedOperation(
-            "super from '%s' reaches a method RPyYARV did not define; "
-            "calling CRuby's implementation of a superclass method is not "
-            "supported" % symbols.name_of(entry.mid))
+        if owner == value.Q_NIL:
+            # No super method at all; rb_call_super's NoMethodError needs a CRuby frame, which RPyYARV never has.
+            raise UnsupportedOperation(
+                "super from '%s' has no superclass method"
+                % symbols.name_of(entry.mid))
+        return _super_to_cruby(frame, owner, entry.mid, recv_at, argc,
+                               w_ci.kw_splat)
     if target.kind != dispatch.KIND_ISEQ:
         return _attr_send(frame, target, frame.stack[recv_at], recv_at, argc)
     return _enter(frame, target, frame.stack[recv_at], recv_at, argc,
@@ -1176,6 +1213,35 @@ HASH_MERGE_KWD = symbols.intern('core#hash_merge_kwd')
 
 
 MODULE_FUNCTION = symbols.intern('module_function')
+INSTANCE_EVAL = symbols.intern('instance_eval')
+INSTANCE_EXEC = symbols.intern('instance_exec')
+
+
+@dont_look_inside
+def _singleton_of(recv):
+    """The singleton class instance_eval pushes as its cref, or 0 for a receiver that cannot have one, whose `def` then lands where the block was written."""
+    if value.is_immediate(recv):
+        return 0
+    return boot.singleton_class(recv)
+
+
+@unroll_safe
+def _instance_eval(frame, mid, recv, recv_at, argc, w_block):
+    """instance_eval/instance_exec with a block: run it here with self rebound, since out through CRuby the block keeps the self it was written with."""
+    args = []
+    if mid == INSTANCE_EXEC:
+        i = 0
+        while i < argc:
+            args.append(frame.stack[recv_at + 1 + i])
+            i += 1
+    else:
+        args.append(recv)
+    sing = _singleton_of(recv)
+    cref = None
+    if sing != 0:
+        cref = _push_cref(_cref_of(frame), sing, True)
+    _drop(frame, recv_at)
+    return call_block(w_block, args, NO_KEYWORDS, False, recv, cref)
 
 
 def _in_body_of(frame, recv):
@@ -1593,8 +1659,9 @@ def _block_send_args(mid, w_block, args, kw_names=NO_KEYWORDS,
 
 
 @unroll_safe
-def call_block(w_block, args, kw_names=NO_KEYWORDS, kw_splat=False):
-    """Run a block's ISeq in a frame whose locals chain to the defining one."""
+def call_block(w_block, args, kw_names=NO_KEYWORDS, kw_splat=False,
+               self_val=value.Q_UNDEF, cref=None):
+    """Run a block's ISeq in a frame whose locals chain to the defining one; instance_eval passes the self and cref it rebinds them to."""
     keyed = len(kw_names) > 0 or kw_splat
     if w_block.kind != block_mod.KIND_ISEQ:
         if keyed:
@@ -1603,7 +1670,11 @@ def call_block(w_block, args, kw_names=NO_KEYWORDS, kw_splat=False):
     # Promoted here, not left to the merge point below: the frame's arrays then take constant sizes instead of an out-of-line malloc.
     b_iseq = promote(w_block.w_iseq)
     outer = w_block.frame
-    callee = Frame(b_iseq, outer.self_val, outer.cref, outer.entry)
+    if self_val == value.Q_UNDEF:
+        self_val = outer.self_val
+    if cref is None:
+        cref = outer.cref
+    callee = Frame(b_iseq, self_val, cref, outer.entry)
     callee.defining_frame = outer
     callee.block = w_block.outer
     callee.own_block = w_block
@@ -2121,14 +2192,18 @@ def _const_lexical(cref, mid):
     node = cref
     # The outermost entry is the toplevel Object, which only the walk below covers.
     while node.outer is not None:
-        v = dispatch.const_at(node.klass, mid)
-        if v != value.Q_UNDEF:
-            return v
+        if not node.by_eval:
+            v = dispatch.const_at(node.klass, mid)
+            if v != value.Q_UNDEF:
+                return v
         node = node.outer
     return dispatch.const_get(_cref_klass(cref), mid)
 
 
 def _cref_klass(cref):
+    # vm_get_const_base: a scope instance_eval pushed names no constants of its own.
+    while cref.by_eval and cref.outer is not None:
+        cref = cref.outer
     if cref.klass == 0:
         return value.core_class(value.C_OBJECT)
     return cref.klass
@@ -2137,6 +2212,8 @@ def _cref_klass(cref):
 def _const_base(frame):
     """The cbase a `class Foo::Bar` or a setconstant resolves against."""
     node = frame.cref
+    while node is not None and node.by_eval:
+        node = node.outer
     if node is not None and node.klass != 0:
         return node.klass
     entry = frame.entry

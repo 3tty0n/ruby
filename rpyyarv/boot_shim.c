@@ -726,6 +726,50 @@ responds_body(VALUE argp)
                       ID2SYM(p->id));
 }
 
+struct super_call_args {
+    VALUE owner;
+    VALUE recv;
+    ID    id;
+    int   argc;
+    const VALUE *argv;
+};
+
+static VALUE
+call_super_body(VALUE argp)
+{
+    struct super_call_args *p = (struct super_call_args *)argp;
+    VALUE args[RPYYARV_MAX_ARGC + 1];
+    int i;
+    /* UnboundMethod#bind_call, not rb_call_super: super needs a CRuby control frame, binding one method does not. */
+    VALUE m = rb_funcall(p->owner, rb_intern("instance_method"), 1,
+                         ID2SYM(p->id));
+    args[0] = p->recv;
+    for (i = 0; i < p->argc; i++) args[i + 1] = p->argv[i];
+    return rb_funcallv(m, rb_intern("bind_call"), p->argc + 1, args);
+}
+
+uintptr_t
+rpyyarv_call_super(uintptr_t owner, uintptr_t recv, uintptr_t id, int argc,
+                   const uintptr_t *argv, int *state)
+{
+    struct super_call_args a;
+    VALUE local[RPYYARV_MAX_ARGC];
+    int i;
+    if (argc > RPYYARV_MAX_ARGC) {
+        *state = -1;
+        return (uintptr_t)Qnil;
+    }
+    /* argv may live in memory CRuby never scans, so it is copied to the machine stack first, as funcallv does. */
+    for (i = 0; i < argc; i++) local[i] = (VALUE)argv[i];
+    a.owner = (VALUE)owner;
+    a.recv = (VALUE)recv;
+    a.id = (ID)id;
+    a.argc = argc;
+    a.argv = local;
+    *state = 0;
+    return (uintptr_t)rb_protect(call_super_body, (VALUE)&a, state);
+}
+
 uintptr_t
 rpyyarv_sym_name(uintptr_t sym)
 {
@@ -1914,6 +1958,8 @@ rpyyarv_bop_mask(void)
     BOP(rb_cBasicObject, "initialize");
     BOP(rb_cString, "<<");
     BOP(rb_mKernel, "nil?");
+    BOP(rb_cBasicObject, "instance_eval");
+    BOP(rb_cBasicObject, "instance_exec");
 #undef BOP
 
     return (uintptr_t)i << RPYYARV_BOP_COUNT_SHIFT | mask;

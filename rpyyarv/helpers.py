@@ -54,6 +54,8 @@ POW = symbols.intern('**')
 TO_F = symbols.intern('to_f')
 NAME = symbols.intern('name')
 COS = symbols.intern('cos')
+INSTANCE_EVAL = symbols.intern('instance_eval')
+INSTANCE_EXEC = symbols.intern('instance_exec')
 
 # RB_FIXABLE for a double (arithmetic/fixnum.h); both bounds are exact powers of two.
 FIXNUM_MAX_PLUS_1_DBL = float(value.FIXNUM_MAX + 1)
@@ -110,7 +112,9 @@ B_SYM_NAME = 46
 B_BASIC_INITIALIZE = 47
 B_STR_LTLT = 48
 B_KERNEL_NIL_P = 49
-B_COUNT = 50
+B_BASIC_INSTANCE_EVAL = 50
+B_BASIC_INSTANCE_EXEC = 51
+B_COUNT = 52
 
 _INT_MID = [PLUS, MINUS, MULT, DIV, MOD, EQ, LT, LE, GT, GE, AND, OR, XOR,
             RSHIFT]
@@ -370,9 +374,22 @@ def sym_name(recv):
     return dispatch.sym_name(recv)
 
 
+def instance_eval_pristine(mid):
+    """BasicObject#instance_eval/#instance_exec are still CRuby's own; a `def` on BasicObject is invisible to a walk from the receiver's class, so the registry is asked too."""
+    if mid == INSTANCE_EVAL:
+        return _core_op(value.C_BASIC_OBJECT, B_BASIC_INSTANCE_EVAL,
+                        INSTANCE_EVAL)
+    return _core_op(value.C_BASIC_OBJECT, B_BASIC_INSTANCE_EXEC, INSTANCE_EXEC)
+
+
+def basic_initialize_pristine():
+    """BasicObject#initialize is still rb_obj_dummy_initialize: no argument, no effect, nil."""
+    return _cruby_owns(B_BASIC_INITIALIZE)
+
+
 def basic_initialize(klass):
     """The receiver inherits BasicObject#initialize, which takes no argument and does nothing."""
-    return (_cruby_owns(B_BASIC_INITIALIZE)
+    return (basic_initialize_pristine()
             and dispatch.owner_of(klass, INITIALIZE)
             == value.core_class(value.C_BASIC_OBJECT))
 

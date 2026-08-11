@@ -138,6 +138,12 @@ def call2(recv, mid, a, b):
 
 
 @dont_look_inside
+def call_super(owner, recv, mid, args):
+    debug.count_foreign(mid)
+    return boot.call_super(owner, recv, rid(mid), args, mid)
+
+
+@dont_look_inside
 def call_with_block(recv, mid, args, handle, kw=False):
     debug.count_foreign(mid)
     return boot.call_with_block(recv, rid(mid), args, handle, mid, kw)
