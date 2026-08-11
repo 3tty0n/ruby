@@ -39,7 +39,6 @@ define fix_install_name
 endef
 endif
 
-PROBE   := test/probe
 SHIM    := librpyyarv_boot.$(SOEXT)
 PYPY    ?= ./pypy
 RUBY_BENCH ?= $(CURDIR)/ruby-bench
@@ -62,11 +61,6 @@ link: $(SHIM)
 $(SHIM): boot_shim.c boot_shim.h
 	@test -n "$(ARCHDIR)" || { echo "ERROR: build CRuby first (--enable-shared)"; exit 1; }
 	$(CC) $(CFLAGS) $(CPPFLAGS) $(SHARED) -o $@ boot_shim.c $(LDFLAGS) $(LDLIBS)
-	$(call fix_install_name,$@)
-
-$(PROBE): test/probe.c
-	@test -n "$(ARCHDIR)" || { echo "ERROR: build CRuby first (--enable-shared)"; exit 1; }
-	$(CC) $(CFLAGS) $(CPPFLAGS) -o $@ $< $(LDFLAGS) $(LDLIBS)
 	$(call fix_install_name,$@)
 
 # TODO: test_interp/test_debug/test_loader are parked on this branch; they
