@@ -3,6 +3,7 @@
 from rpyyarv import boot
 from rpyyarv import gcroots
 from rpyyarv import rubycall
+from rpyyarv import symbols
 from rpyyarv import value
 from rpyyarv.error import RubyException, UnsupportedOperation
 from rpyyarv.rlib import (elidable, dont_look_inside, intmask, promote, r_uint,
@@ -507,6 +508,37 @@ def owner_of(klass, mid):
     return got
 
 
+class _StructSlots(object):
+    def __init__(self):
+        self.tab = {}
+
+
+struct_slots = _StructSlots()
+
+
+@elidable
+def _struct_index(klass, mid, version):
+    return struct_slots.tab.get((klass, mid), IV_UNKNOWN)
+
+
+@dont_look_inside
+def _fill_struct_index(klass, mid):
+    name = symbols.name_of(mid)
+    if name.endswith('='):
+        name = name[:-1]
+    struct_slots.tab[(klass, mid)] = \
+        boot.struct_member_index(klass, boot.intern(name))
+
+
+def struct_member_index(klass, mid):
+    """A Struct-generated reader/writer's slot, or -1 for another method."""
+    got = _struct_index(klass, mid, registry.version)
+    if got == IV_UNKNOWN:
+        _fill_struct_index(klass, mid)
+        got = _struct_index(klass, mid, registry.version)
+    return got
+
+
 @elidable
 def _super_owner(klass, owner, mid, version):
     return owners.stab.get((klass, owner, mid), OWNER_UNKNOWN)
@@ -568,6 +600,11 @@ def ivar_get(obj, mid):
     """T_OBJECT reads compile to a shape guard plus a raw field load, and a typed T_DATA to the same over its fields object."""
     if obj != 0 and (obj & value.IMMEDIATE_MASK) == 0:
         flags = raw_word(obj, value.FLAGS_WORD)
+        kind = flags & value.T_MASK
+        if kind == value.T_CLASS or kind == value.T_MODULE:
+            got = boot.class_ivar_get(obj, rubycall.const_rid(mid))
+            if got != value.Q_UNDEF:
+                return got
         fields = obj
         # One promoted word, so the three tests below fold into its one guard.
         hdr = promote(flags & value.IV_HEADER_MASK)

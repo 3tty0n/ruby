@@ -1,5 +1,3 @@
-# frozen_string_literal: true
-#
 # Stand-in for ruby-bench's harness/harness.rb that rpyyarv can run natively.
 # Mirrors upstream ruby-bench/harness/harness.rb (WARMUP_ITRS, MIN_BENCH_ITRS,
 # MIN_BENCH_TIME) without the CSV/RSS/JIT-stats parts; upstream harness/loader.rb

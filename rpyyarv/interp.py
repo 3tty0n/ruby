@@ -16,7 +16,7 @@ from rpyyarv.frame import (Frame, PENDING_BREAK, PENDING_NEXT, PENDING_NONE,
                    PENDING_RAISE, PENDING_RETURN)
 from rpyyarv.iseq import CATCH_ENSURE, CATCH_RESCUE, NO_BLOCK_ISEQ
 from rpyyarv.rlib import (JitDriver, StackOverflow, always_inline, check_stack_overflow,
-                  dont_look_inside, on_foreign_stack, promote, set_user_param,
+                  dont_look_inside, on_foreign_stack, promote, raw_word, set_user_param,
                   unchecked_stack_start, unchecked_stack_stop, unroll_safe)
 
 TO_S = symbols.intern('to_s')
@@ -138,6 +138,11 @@ def invoke(frame, w_ci, w_block=None):
                 raise
             return e.value
 
+    if mid == ITSELF and argc == 0 and dispatch.owner_of(klass, ITSELF) == \
+            send_owners.kernel:
+        _drop(frame, recv_at)
+        debug.count_native()
+        return recv
     if entry is None and argc <= 1:
         # A send an opt_* instruction would have caught if YARV had one for it.
         if argc == 1:
@@ -176,6 +181,32 @@ def invoke(frame, w_ci, w_block=None):
         entry = dispatch.lookup(promote(recv), INITIALIZE)
         if entry is not None and entry.kind == dispatch.KIND_ISEQ:
             return _new_with_block(frame, entry, recv, recv_at, argc, w_block)
+    if w_block is not None and entry is None and argc == 0 \
+            and value.is_plain_array(recv) and value.ary_len(recv) == 0 \
+            and dispatch.owner_of(klass, mid) == value.core_class(value.C_ARRAY):
+        if mid == REVERSE_EACH:
+            _drop(frame, recv_at)
+            return recv
+        if mid == INDEX:
+            _drop(frame, recv_at)
+            return value.Q_NIL
+    if entry is None and w_block is None and not value.is_immediate(recv) \
+            and (raw_word(recv, value.FLAGS_WORD) & value.T_MASK) == \
+            value.T_STRUCT:
+        writer = symbols.name_of(mid).endswith('=')
+        if (argc == 1 and writer) or (argc == 0 and not writer):
+            index = dispatch.struct_member_index(klass, mid)
+            if index >= 0:
+                if argc == 0:
+                    out = boot.struct_get(recv, index)
+                    if out != value.Q_UNDEF:
+                        _drop(frame, recv_at)
+                        return out
+                elif (raw_word(recv, value.FLAGS_WORD) & value.FL_FREEZE) == 0:
+                    out = frame.stack[recv_at + 1]
+                    boot.struct_set(recv, index, out)
+                    _drop(frame, recv_at)
+                    return out
     if proxy.value != 0 and recv == proxy.value:
         return _block_send(frame, mid, recv_at, argc, frame.block)
     if len(blocks.by_proc) > 0 and _is_proxy_call(mid) \
@@ -281,6 +312,19 @@ def _array_new_block(frame, recv_at, argc, w_block):
 NEW = symbols.intern('new')
 INITIALIZE = symbols.intern('initialize')
 BLOCK_GIVEN = symbols.intern('block_given?')
+ITSELF = symbols.intern('itself')
+REVERSE_EACH = symbols.intern('reverse_each')
+INDEX = symbols.intern('index')
+SUCC = symbols.intern('succ')
+BUFFER = symbols.intern('buffer')
+
+DEFINED_IVAR = 2
+DEFINED_GVAR = 4
+DEFINED_CONST = 6
+DEFINED_METHOD = 7
+DEFINED_YIELD = 8
+DEFINED_FUNC = 16
+DEFINED_CONST_FROM = 17
 ATTR_READER = symbols.intern('attr_reader')
 ATTR_WRITER = symbols.intern('attr_writer')
 ATTR_ACCESSOR = symbols.intern('attr_accessor')
@@ -1776,8 +1820,11 @@ def _unwind(iseq, frame, throw, epc):
 def configure_jitparams():
     """RPYYARV_JITPARAM tunes the JIT the way pypy's --jit does, so a parameter sweep costs no translation."""
     spec = os.environ.get('RPYYARV_JITPARAM')
-    if spec:
-        set_user_param(jitdriver, spec)
+    # Ruby methods commonly become hot before a loop backedge does. PyPy's
+    # generic default (1619) left even repeatedly-called 30k-method workloads
+    # interpreted; 100 captures them without the broad compile-time regressions
+    # seen at 30. An explicit environment setting still replaces this default.
+    set_user_param(jitdriver, spec if spec else 'function_threshold=100')
 
 
 def install():
@@ -1870,6 +1917,24 @@ NEWARRAY_SEND_MID = [helpers.MAX, helpers.MIN, helpers.HASH, helpers.PACK,
 def _newarray_send(frame, n, meth):
     """The temp array built and the method sent, as vm_opt_newarray_send falls back to; the trailing argument of include?/pack is not part of it."""
     argc = optable.NEWARRAY_SEND_ARGC[meth - 1]
+    if argc == 2:
+        buffer = frame.pop()
+        arg = frame.pop()
+        count = n - 2
+        at = frame.sp - count
+        if at < 0 or count < 0:
+            raise UnsupportedOperation(
+                'opt_newarray_send %d underflows the stack' % n)
+        values = [0] * count
+        i = 0
+        while i < count:
+            values[i] = frame.stack[at + i]
+            i += 1
+        v_ary = rubycall.ary_new(values)
+        _drop(frame, at)
+        kwargs = boot.hash_new(1)
+        boot.hash_aset(kwargs, rubycall.sym_value(BUFFER), buffer)
+        return rubycall.call_kw(v_ary, helpers.PACK, [arg, kwargs])
     at = frame.sp - n
     m = n - argc
     if at < 0 or m < 0:
@@ -2043,6 +2108,35 @@ def _const_base(frame):
     return value.core_class(value.C_OBJECT)
 
 
+def _defined_const(cref, rid):
+    node = cref
+    while node.outer is not None:
+        if boot.const_defined(node.klass, rid, 0):
+            return True
+        node = node.outer
+    return boot.const_defined(_cref_klass(cref), rid, 1)
+
+
+def _defined(frame, kind, obj, recv):
+    mid = _name_mid(obj)
+    if mid == rubycall.NO_MID:
+        return False
+    rid = rubycall.rid(mid)
+    if kind == DEFINED_IVAR:
+        return boot.ivar_defined(frame.self_val, rid)
+    if kind == DEFINED_CONST:
+        return _defined_const(_cref_of(frame), rid)
+    if kind == DEFINED_CONST_FROM:
+        return recv != value.Q_NIL and boot.const_defined(recv, rid, 1)
+    if kind == DEFINED_FUNC:
+        return boot.method_defined(recv, rid, 1)
+    if kind == DEFINED_METHOD:
+        return boot.method_defined(recv, rid, 0)
+    if kind == DEFINED_YIELD:
+        return frame.block is not None
+    raise UnsupportedOperation('defined? type %d is not implemented' % kind)
+
+
 def _defineclass(frame, mid, w_body, cbase, super_v, is_module=False):
     if is_module:
         klass = dispatch.define_module(cbase, mid)
@@ -2051,6 +2145,14 @@ def _defineclass(frame, mid, w_body, cbase, super_v, is_module=False):
     body = Frame(w_body, klass, _push_cref(_cref_of(frame), klass))
     ret = execute(w_body, body)
     # Reopening a class is where CRuby-side operator redefinitions show up.
+    helpers.refresh()
+    return ret
+
+
+def _definesingletonclass(frame, w_body, obj):
+    klass = boot.singleton_class(obj)
+    body = Frame(w_body, klass, _push_cref(_cref_of(frame), klass))
+    ret = execute(w_body, body)
     helpers.refresh()
     return ret
 
@@ -2424,6 +2526,20 @@ def _execute(iseq, frame, pc):
             mid = code[pc]
             pc += 1
             dispatch.ivar_set(frame.self_val, mid, frame.pop())
+        elif opcode == insns.DEFINED:
+            kind = code[pc]
+            obj = iseq.consts[code[pc + 1]]
+            pushval = iseq.consts[code[pc + 2]]
+            pc += 3
+            recv = frame.pop()
+            frame.push(pushval if _defined(frame, kind, obj, recv)
+                       else value.Q_NIL)
+        elif opcode == insns.DEFINEDIVAR:
+            mid = code[pc]
+            pushval = iseq.consts[code[pc + 1]]
+            pc += 2
+            frame.push(pushval if boot.ivar_defined(
+                frame.self_val, rubycall.rid(mid)) else value.Q_NIL)
         elif opcode == insns.GETCONSTANT:
             mid = code[pc]
             pc += 1
@@ -2459,10 +2575,13 @@ def _execute(iseq, frame, pc):
             cbase = frame.pop()
             if not flags & optable.DEFINECLASS_FLAG_HAS_SUPERCLASS:
                 super_v = 0
-            frame.push(_defineclass(
-                frame, mid, w_body, cbase, super_v,
-                flags & optable.DEFINECLASS_TYPE_MASK
-                == optable.DEFINECLASS_TYPE_MODULE))
+            kind = flags & optable.DEFINECLASS_TYPE_MASK
+            if kind == optable.DEFINECLASS_TYPE_SINGLETON_CLASS:
+                frame.push(_definesingletonclass(frame, w_body, cbase))
+            else:
+                frame.push(_defineclass(
+                    frame, mid, w_body, cbase, super_v,
+                    kind == optable.DEFINECLASS_TYPE_MODULE))
         elif opcode == insns.OPT_NEW:
             w_ci = iseq.callinfos[code[pc]]
             target = code[pc + 1]
@@ -2540,6 +2659,15 @@ def _execute(iseq, frame, pc):
             target = code[pc]
             pc += 1
             if not value.is_true(frame.pop()):
+                backward = target < pc
+                pc = target
+                if backward:
+                    _tick_reselection()
+                    jitdriver.can_enter_jit(iseq=iseq, pc=pc, frame=frame)
+        elif opcode == insns.BRANCHNIL:
+            target = code[pc]
+            pc += 1
+            if frame.pop() == value.Q_NIL:
                 backward = target < pc
                 pc = target
                 if backward:
@@ -2692,6 +2820,8 @@ def _execute(iseq, frame, pc):
             v = helpers.nil_p(recv)
             frame.push(v if v != value.Q_UNDEF
                        else _unop(frame, recv, helpers.NIL_P))
+        elif opcode == insns.OPT_SUCC:
+            frame.push(_unop(frame, frame.pop(), SUCC))
         elif opcode == insns.OPT_STR_FREEZE:
             idx = code[pc]
             pc += 1
@@ -2701,6 +2831,12 @@ def _execute(iseq, frame, pc):
             else:
                 frame.push(_unop(frame, rubycall.call0(v_str, DUP),
                                  helpers.FREEZE))
+        elif opcode == insns.OPT_ARY_FREEZE or \
+                opcode == insns.OPT_HASH_FREEZE:
+            idx = code[pc]
+            pc += 1
+            frame.push(_unop(frame, rubycall.call0(iseq.consts[idx], DUP),
+                             helpers.FREEZE))
         elif opcode == insns.OPT_CASE_DISPATCH:
             table = code[pc]
             else_pc = code[pc + 1]

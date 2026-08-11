@@ -50,6 +50,12 @@ def _require(mid, arg):
         base = _current_dir()
         if base == '':
             return rubycall.NOT_HANDLED
+        candidate = os.path.join(base, boot.str_of(arg))
+        if not os.path.exists(candidate) and \
+                not os.path.exists(candidate + '.rb'):
+            # A delegated CRuby frame called through the hook; its real frame
+            # has the authoritative base directory.
+            return rubycall.NOT_HANDLED
         fname = boot.absolute_path(arg, boot.str_new(base))
     # Held, not pinned: a require in a loop would pin one string per turn.
     gcroots.hold(fname)
@@ -133,10 +139,10 @@ def _current_dir():
     # The calling ISeq's own file when the send stamped one: a require_relative in a method body runs long after its file's toplevel left the stack.
     path = rubycall.relative.path
     rubycall.relative.path = ''
+    # No stamp means CRuby called require_relative while executing a file we
+    # delegated. Let its real control frame resolve the path.
     if path == '':
-        if len(files.stack) == 0:
-            return ''
-        path = files.stack[len(files.stack) - 1]
+        return ''
     at = path.rfind('/')
     if at < 0:
         return ''

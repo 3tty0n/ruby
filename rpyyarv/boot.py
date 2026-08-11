@@ -237,6 +237,17 @@ rb_super_owner = _ext('rpyyarv_super_owner', [VALUE, VALUE, VALUE], VALUE,
                       reenters=True)
 # No reenters: reads two struct fields after a type test, allocating nothing.
 rb_range_part = _ext('rpyyarv_range_part', [VALUE, rffi.INT], VALUE)
+rb_struct_member_index = _ext('rpyyarv_struct_member_index',
+                              [VALUE, VALUE], rffi.INT, reenters=True)
+rb_struct_get = _ext('rpyyarv_struct_get', [VALUE, rffi.INT], VALUE)
+rb_struct_set = _ext('rpyyarv_struct_set', [VALUE, rffi.INT, VALUE],
+                     lltype.Void)
+rb_class_ivar_get = _ext('rpyyarv_class_ivar_get', [VALUE, VALUE], VALUE)
+rb_ivar_defined = _ext('rpyyarv_ivar_defined', [VALUE, VALUE], rffi.INT)
+rb_const_defined = _ext('rpyyarv_const_defined',
+                        [VALUE, VALUE, rffi.INT], rffi.INT)
+rb_method_defined = _ext('rpyyarv_method_defined',
+                         [VALUE, VALUE, rffi.INT], rffi.INT, reenters=True)
 # No reenters: the barrier sets bits in preallocated page bitmaps and reaches no mark callback; see the comment on rpyyarv_obj_written.
 rb_obj_written = _ext('rpyyarv_obj_written', [VALUE, VALUE], lltype.Void)
 rb_wb_direct = _ext('rpyyarv_wb_direct', [], rffi.INT)
@@ -772,6 +783,38 @@ def range_part(v, which):
     """One Range field, or Qundef when v is not a direct Range."""
     return rffi.cast(lltype.Signed,
                      rb_range_part(_v(v), rffi.cast(rffi.INT, which)))
+
+
+def struct_member_index(klass, rid):
+    return rffi.cast(lltype.Signed,
+                     rb_struct_member_index(_v(klass), _v(rid)))
+
+
+def struct_get(obj, index):
+    return rffi.cast(lltype.Signed,
+                     rb_struct_get(_v(obj), rffi.cast(rffi.INT, index)))
+
+
+def struct_set(obj, index, v):
+    rb_struct_set(_v(obj), rffi.cast(rffi.INT, index), _v(v))
+
+
+def class_ivar_get(obj, rid):
+    return rffi.cast(lltype.Signed, rb_class_ivar_get(_v(obj), _v(rid)))
+
+
+def ivar_defined(obj, rid):
+    return rffi.cast(lltype.Signed, rb_ivar_defined(_v(obj), _v(rid))) != 0
+
+
+def const_defined(klass, rid, inherit):
+    return rffi.cast(lltype.Signed,
+                     rb_const_defined(_v(klass), _v(rid), inherit)) != 0
+
+
+def method_defined(obj, rid, include_private):
+    return rffi.cast(lltype.Signed,
+                     rb_method_defined(_v(obj), _v(rid), include_private)) != 0
 
 
 def method_owner(klass, rid):

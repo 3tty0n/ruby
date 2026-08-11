@@ -45,7 +45,10 @@ EMIT = {
     'opt_not': [],
     'opt_ltlt': [],
     'opt_nil_p': [],        # CALL_DATA dropped
+    'opt_succ': [],         # CALL_DATA dropped
     'opt_str_freeze': [0],  # the literal, frozen once at load time
+    'opt_ary_freeze': [0],
+    'opt_hash_freeze': [0],
     'opt_case_dispatch': [0, 1],
     'opt_newarray_send': [0, 1],
     'expandarray': [0],     # flag is checked, only plain masgn
@@ -62,6 +65,8 @@ EMIT = {
     'opt_neq': [],          # both CALL_DATA dropped
     'getinstancevariable': [0],     # IVC dropped
     'setinstancevariable': [0],
+    'defined': [0, 1, 2],
+    'definedivar': [0, 2],          # IVC dropped
     'getconstant': [0],             # dynamic A::B; base and lexical flag are stack values
     'opt_getconstant_path': [0],    # IC carries the constant path segments
     'setconstant': [0],
@@ -76,6 +81,7 @@ EMIT = {
     'jump': [0],
     'branchif': [0],
     'branchunless': [0],
+    'branchnil': [0],
     'definemethod': [0, 1],
     'definesmethod': [0, 1],
     'opt_send_without_block': [0],
@@ -173,7 +179,7 @@ DEFINECLASS_FLAG_SCOPED = 0x08
 DEFINECLASS_FLAG_HAS_SUPERCLASS = 0x10
 
 # vm_core.h, enum vm_opt_newarray_send_type, as argument counts indexed by method-1; -1 refuses PACK_BUFFER, whose buffer: is a keyword.
-NEWARRAY_SEND_ARGC = [0, 0, 0, 1, -1, 1]
+NEWARRAY_SEND_ARGC = [0, 0, 0, 1, 2, 1]
 
 # vm_core.h, enum vm_special_object_type.
 SPECIAL_OBJECT_VMCORE = 1

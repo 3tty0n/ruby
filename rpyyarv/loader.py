@@ -303,10 +303,12 @@ class Loader(object):
             if j < len(opcodes) and (opcodes[j] == insns.SEND or
                                      opcodes[j] == insns.OPT_SEND_WITHOUT_BLOCK):
                 mid = operands[j][0].strval
-            if mid not in self.VMCORE_SENDS:
+            # A keyword/hash value can contain arbitrary sends between the
+            # FrozenCore push and core#hash_merge_*. The runtime still guards
+            # the actual FrozenCore receiver, so defer an inconclusive scan.
+            if mid != '' and mid not in self.VMCORE_SENDS:
                 raise UnsupportedOperation(
-                    "RubyVM::FrozenCore#%s is not supported"
-                    % (mid if mid != '' else '<unknown>'))
+                    "RubyVM::FrozenCore#%s is not supported" % mid)
 
     def opt_table(self, raw, labels):
         """iseq.c:3425 writes opt_num+1 labels; anything shorter is not a table vm_args.c:906 could index."""
@@ -453,13 +455,9 @@ class Loader(object):
         elif op == insns.DEFINECLASS:
             flags = self.int_of(ops[2], op, raw, 'flags')
             kind = flags & optable.DEFINECLASS_TYPE_MASK
-            if kind == optable.DEFINECLASS_TYPE_SINGLETON_CLASS:
-                # `def self.x` is definesmethod and runs; a `class << self` body needs the singleton class as a cref, which these frames do not carry.
-                raise UnsupportedOperation(
-                    "'%s' opens a singleton class body, which RPyYARV does "
-                    "not support" % raw.name)
             if kind != optable.DEFINECLASS_TYPE_CLASS and \
-                    kind != optable.DEFINECLASS_TYPE_MODULE:
+                    kind != optable.DEFINECLASS_TYPE_MODULE and \
+                    kind != optable.DEFINECLASS_TYPE_SINGLETON_CLASS:
                 raise UnsupportedOperation(
                     "'%s' uses defineclass type %d, which RPyYARV does not "
                     "support" % (raw.name, kind))

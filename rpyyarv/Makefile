@@ -95,6 +95,7 @@ gccheck:
 	          test/requires.rb test/trampoline.rb \
 	          test/definesmethod.rb test/nonlocal_return.rb \
 	          test/attrs.rb test/fastops.rb test/floats.rb test/ivars.rb \
+	          test/benchpaths.rb \
 	          test/aset.rb \
 	          test/consts.rb test/arynew.rb \
 	          test/recursion.rb test/intabs.rb test/intbits.rb test/mixins.rb \

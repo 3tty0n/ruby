@@ -1887,6 +1887,83 @@ rpyyarv_range_part(uintptr_t range, int which)
     }
 }
 
+struct struct_member_args {
+    VALUE klass;
+    ID id;
+};
+
+static VALUE
+struct_member_index_body(VALUE argp)
+{
+    struct struct_member_args *a = (struct struct_member_args *)argp;
+    VALUE members = rb_struct_s_members(a->klass);
+    long i;
+    for (i = 0; i < RARRAY_LEN(members); i++) {
+        if (SYM2ID(RARRAY_AREF(members, i)) == a->id) return LONG2FIX(i);
+    }
+    return INT2FIX(-1);
+}
+
+int
+rpyyarv_struct_member_index(uintptr_t klass, uintptr_t id)
+{
+    struct struct_member_args a;
+    int state = 0;
+    VALUE out;
+    a.klass = (VALUE)klass;
+    a.id = (ID)id;
+    out = rb_protect(struct_member_index_body, (VALUE)&a, &state);
+    if (state) {
+        rb_set_errinfo(Qnil);
+        return -1;
+    }
+    return FIX2INT(out);
+}
+
+uintptr_t
+rpyyarv_struct_get(uintptr_t obj, int index)
+{
+    VALUE st = (VALUE)obj;
+    if (SPECIAL_CONST_P(st) || !RB_TYPE_P(st, T_STRUCT) ||
+        index < 0 || index >= RSTRUCT_LEN(st)) return (uintptr_t)Qundef;
+    return (uintptr_t)RSTRUCT_GET(st, index);
+}
+
+void
+rpyyarv_struct_set(uintptr_t obj, int index, uintptr_t val)
+{
+    RSTRUCT_SET((VALUE)obj, index, (VALUE)val);
+}
+
+uintptr_t
+rpyyarv_class_ivar_get(uintptr_t obj, uintptr_t id)
+{
+    VALUE recv = (VALUE)obj;
+    if (SPECIAL_CONST_P(recv) ||
+        !(RB_TYPE_P(recv, T_CLASS) || RB_TYPE_P(recv, T_MODULE)))
+        return (uintptr_t)Qundef;
+    return (uintptr_t)rb_attr_get(recv, (ID)id);
+}
+
+int
+rpyyarv_ivar_defined(uintptr_t obj, uintptr_t id)
+{
+    return RTEST(rb_ivar_defined((VALUE)obj, (ID)id)) ? 1 : 0;
+}
+
+int
+rpyyarv_const_defined(uintptr_t klass, uintptr_t id, int inherit)
+{
+    return (inherit ? rb_const_defined((VALUE)klass, (ID)id)
+                    : rb_const_defined_at((VALUE)klass, (ID)id)) ? 1 : 0;
+}
+
+int
+rpyyarv_method_defined(uintptr_t obj, uintptr_t id, int include_private)
+{
+    return rb_obj_respond_to((VALUE)obj, (ID)id, include_private) ? 1 : 0;
+}
+
 uintptr_t
 rpyyarv_str_concat(int n, const uintptr_t *parts)
 {

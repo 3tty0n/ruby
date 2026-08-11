@@ -69,6 +69,12 @@ def base_env
   { LIBVAR => BUILD + File::PATH_SEPARATOR + (ENV[LIBVAR] || "") }
 end
 
+def uninstalled_rubylib
+  arch = Dir[File.join(BUILD, ".ext", "*", "zlib.{bundle,so}")].first
+  [File.join(TOP, "lib"), File.join(BUILD, ".ext", "common"), BUILD,
+   arch && File.dirname(arch), ENV["RUBYLIB"]].compact.join(File::PATH_SEPARATOR)
+end
+
 # Only the probe gets this; see the header note on cd 172 vs 200 ms.
 COVERAGE_ENV = { "RPYYARV_COVERAGE" => "1" }.freeze
 
@@ -267,11 +273,20 @@ class RubyBenchSuite
     warm = probe ? 0 : @warm
     meas = probe ? 1 : @meas
     src = File.read(paths[bench]).gsub(/^\s*require_relative\s+['"][.\/]*harness\/loader['"].*$/, "")
+    # Fiber.new crosses into CRuby with an RPyYARV block. optcarrot's --opt
+    # replaces that loop with generated methods, which are the configuration
+    # this project benchmarks and can execute natively.
+    src = src.sub('["--headless", rom_path]', '["--headless", "--opt", rom_path]') if bench == "optcarrot"
     path = File.join(File.dirname(paths[bench]), "#{DRV_PREFIX}#{bench}_#{Process.pid}.rb")
     File.write(path, File.read(File.join(SHIM_DIR, "harness.rb")) + "\n" + src)
     env = base_env.merge("WARMUP_ITRS" => warm.to_s,
                          "MIN_BENCH_ITRS" => meas.to_s,
-                         "MIN_BENCH_TIME" => "0")
+                         "MIN_BENCH_TIME" => "0",
+                         "RUBYLIB" => uninstalled_rubylib)
+    # Let CRuby own Bundler/RubyGems loading. Their require_relative callbacks
+    # need CRuby control frames; the benchmark driver itself still runs in
+    # RPyYARV, and gem method calls are measured through the normal boundary.
+    env["RPYYARV_NO_REQUIRE"] = "1" if gems?(bench)
     yield path, env, warm
   ensure
     File.unlink(path) if path && File.exist?(path)
@@ -292,13 +307,16 @@ end
 def probe(suite, bench)
   suite.with_script(bench, probe: true) do |script, env, _warm|
     _times, err, info = run_once([File.join(ROOT, "rpyyarv")], script, env.merge(COVERAGE_ENV), 90)
+    failure = info["why"].to_s
     status = case err
              when nil then "NATIVE"
              when "PUNT" then "PUNT"
              when "TIMEOUT" then "TIMEOUT"
-             else suite.gems?(bench) ? "NEEDS-GEMS" : "CRASH"
+             else suite.gems?(bench) &&
+                  failure.match?(/Bundler|Could not find|cannot load such file/) ? "NEEDS-GEMS" : "CRASH"
              end
-    why = status == "NEEDS-GEMS" ? "bundle install in #{File.dirname(suite.paths[bench])}" : (info["punt"] || info["why"])
+    why = info["punt"] || info["why"]
+    why = "#{why}; bundle install in #{File.dirname(suite.paths[bench])}" if status == "NEEDS-GEMS"
     return { "status" => status, "why" => why, "iseqs" => info["iseqs"] }
   end
 end

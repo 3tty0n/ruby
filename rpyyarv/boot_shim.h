@@ -256,6 +256,13 @@ uintptr_t rpyyarv_bop_mask(void);
 #define RPYYARV_RANGE_END  1
 #define RPYYARV_RANGE_EXCL 2
 uintptr_t rpyyarv_range_part(uintptr_t range, int which);
+int rpyyarv_struct_member_index(uintptr_t klass, uintptr_t id);
+uintptr_t rpyyarv_struct_get(uintptr_t obj, int index);
+void rpyyarv_struct_set(uintptr_t obj, int index, uintptr_t value);
+uintptr_t rpyyarv_class_ivar_get(uintptr_t obj, uintptr_t id);
+int rpyyarv_ivar_defined(uintptr_t obj, uintptr_t id);
+int rpyyarv_const_defined(uintptr_t klass, uintptr_t id, int inherit);
+int rpyyarv_method_defined(uintptr_t obj, uintptr_t id, int include_private);
 
 /* Resolved the way load.c's search_required does but with the public API only; *path_out is the expanded path on RPYYARV_REQ_RB. */
 #define RPYYARV_REQ_LOADED   0  /* $LOADED_FEATURES already has it */
