@@ -235,6 +235,9 @@ rb_method_owner = _ext('rpyyarv_method_owner', [VALUE, VALUE], VALUE,
                        reenters=True)
 rb_super_owner = _ext('rpyyarv_super_owner', [VALUE, VALUE, VALUE], VALUE,
                       reenters=True)
+rb_responds = _ext('rpyyarv_responds', [VALUE, VALUE], rffi.INT,
+                   reenters=True)
+rb_sym_name = _ext('rpyyarv_sym_name', [VALUE], VALUE, reenters=True)
 # No reenters: reads two struct fields after a type test, allocating nothing.
 rb_range_part = _ext('rpyyarv_range_part', [VALUE, rffi.INT], VALUE)
 rb_struct_member_index = _ext('rpyyarv_struct_member_index',
@@ -832,6 +835,16 @@ def str_setbyte(string, index, v):
 def method_owner(klass, rid):
     """The module klass resolves rid through, or Qnil when it has none."""
     return rffi.cast(lltype.Signed, rb_method_owner(_v(klass), _v(rid)))
+
+
+def sym_name(sym):
+    """The frozen String Symbol#name returns, or Qundef for a dynamic symbol."""
+    return rffi.cast(lltype.Signed, rb_sym_name(_v(sym)))
+
+
+def responds(klass, sym):
+    """Whether every instance of klass responds to sym: 1 yes, 0 no, -1 unanswerable per class."""
+    return rffi.cast(lltype.Signed, rb_responds(_v(klass), _v(sym)))
 
 
 def super_owner(klass, owner, rid):

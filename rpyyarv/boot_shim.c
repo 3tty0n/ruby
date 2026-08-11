@@ -717,6 +717,44 @@ rpyyarv_super_owner(uintptr_t klass, uintptr_t owner, uintptr_t id)
     return (uintptr_t)r;
 }
 
+static VALUE
+responds_body(VALUE argp)
+{
+    struct owner_args *p = (struct owner_args *)argp;
+    /* respond_to? excludes protected as well as private (rb_method_boundp with BOUND_RESPONDS). */
+    return rb_funcall(p->klass, rb_intern("public_method_defined?"), 1,
+                      ID2SYM(p->id));
+}
+
+uintptr_t
+rpyyarv_sym_name(uintptr_t sym)
+{
+    if (!RB_STATIC_SYM_P((VALUE)sym)) return (uintptr_t)Qundef;
+    /* rb_sym2str is the symbol's own frozen name; Symbol#name returns exactly this object. */
+    return (uintptr_t)rb_sym2str((VALUE)sym);
+}
+
+int
+rpyyarv_responds(uintptr_t klass, uintptr_t sym)
+{
+    struct owner_args a;
+    int state = 0;
+    VALUE r;
+    if (!RB_STATIC_SYM_P((VALUE)sym)) return -1;
+    a.klass = (VALUE)klass;
+    a.id = SYM2ID((VALUE)sym);
+    /* An overridden respond_to? or respond_to_missing? can answer per receiver, so no per-class answer exists. */
+    if (!rb_method_basic_definition_p(a.klass, rb_intern("respond_to?")) ||
+        !rb_method_basic_definition_p(a.klass, rb_intern("respond_to_missing?")))
+        return -1;
+    r = rb_protect(responds_body, (VALUE)&a, &state);
+    if (state) {
+        rb_set_errinfo(Qnil);
+        return -1;
+    }
+    return RTEST(r) ? 1 : 0;
+}
+
 struct obj_args {
     VALUE a;
     VALUE b;
@@ -1867,6 +1905,13 @@ rpyyarv_bop_mask(void)
     BOP(rb_mKernel, "send");
     BOP(rb_cBasicObject, "__send__");
     BOP(rb_cArray, "<<");
+    BOP(rb_cFloat, "**");
+    BOP(rb_cInteger, "**");
+    BOP(CLASS_OF(rb_mMath), "cos");
+    BOP(rb_cInteger, "to_f");
+    BOP(rb_cFloat, "to_f");
+    BOP(rb_cSymbol, "name");
+    BOP(rb_cBasicObject, "initialize");
 #undef BOP
 
     return (uintptr_t)i << RPYYARV_BOP_COUNT_SHIFT | mask;

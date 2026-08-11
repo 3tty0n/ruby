@@ -469,6 +469,7 @@ class _Owners(object):
     def __init__(self):
         self.tab = {}       # (klass VALUE, mid) -> owning module VALUE
         self.stab = {}      # the same, for the module above that one
+        self.rtab = {}      # (klass VALUE, Symbol VALUE) -> respond_to? for every instance
 
 
 owners = _Owners()
@@ -478,10 +479,11 @@ OWNER_UNKNOWN = -1
 
 def invalidate_owners():
     """CRuby's rb_clear_method_cache, by way of the shim's method hook: every def, undef, alias, include and prepend reaches it."""
-    if len(owners.tab) == 0 and len(owners.stab) == 0:
+    if len(owners.tab) == 0 and len(owners.stab) == 0 and len(owners.rtab) == 0:
         return
     owners.tab = {}
     owners.stab = {}
+    owners.rtab = {}
     registry.version = Version()
 
 
@@ -505,6 +507,63 @@ def owner_of(klass, mid):
     if got == OWNER_UNKNOWN:
         _fill_owner(klass, mid)
         got = _owner_of(klass, mid, registry.version)
+    return got
+
+
+RESPONDS_UNKNOWN = -2
+RESPONDS_RECV = -1
+
+
+@elidable
+def _responds(klass, sym, version):
+    return owners.rtab.get((klass, sym), RESPONDS_UNKNOWN)
+
+
+@dont_look_inside
+def _fill_responds(klass, sym):
+    got = boot.responds(klass, sym)
+    gcroots.register_class(klass)
+    owners.rtab[(klass, sym)] = got
+    registry.version = Version()
+
+
+def responds(klass, sym):
+    """respond_to? answered from the class alone, or RESPONDS_RECV when an overridden respond_to?/respond_to_missing? makes it a per-receiver question."""
+    got = _responds(klass, sym, registry.version)
+    if got == RESPONDS_UNKNOWN:
+        _fill_responds(klass, sym)
+        got = _responds(klass, sym, registry.version)
+    return got
+
+
+class _SymNames(object):
+    def __init__(self):
+        self.tab = {}       # Symbol VALUE -> its frozen String VALUE
+
+
+sym_names = _SymNames()
+
+
+@elidable
+def _sym_name(sym, version):
+    return sym_names.tab.get(sym, 0)
+
+
+@dont_look_inside
+def _fill_sym_name(sym):
+    v = boot.sym_name(sym)
+    # Held, not registered as a class: it is a String, and no frame covers this table.
+    gcroots.hold(v)
+    sym_names.tab[sym] = v
+    registry.version = Version()
+
+
+def sym_name(sym):
+    """The String Symbol#name returns; one per symbol for the life of the process, so the entry is only ever filled."""
+    got = _sym_name(sym, registry.version)
+    if got == 0:
+        _fill_sym_name(sym)
+        got = _sym_name(sym, registry.version)
     return got
 
 

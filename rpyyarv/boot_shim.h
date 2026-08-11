@@ -113,6 +113,12 @@ uintptr_t rpyyarv_method_owner(uintptr_t klass, uintptr_t id);
 /* The module `super` from owner's copy of id reaches next, along klass's chain; Qnil when there is none. */
 uintptr_t rpyyarv_super_owner(uintptr_t klass, uintptr_t owner, uintptr_t id);
 
+/* respond_to? for every instance of klass: 1 yes, 0 no, -1 only the receiver can answer. */
+int rpyyarv_responds(uintptr_t klass, uintptr_t sym);
+
+/* The frozen String Symbol#name returns, or Qundef for a dynamic symbol. */
+uintptr_t rpyyarv_sym_name(uintptr_t sym);
+
 /* The heap Float the flonum encoding cannot represent, and the RFloat layout value.py reads by hand. */
 uintptr_t rpyyarv_float_new(double d);
 void rpyyarv_float_layout(int *out);

@@ -293,6 +293,25 @@ class RubyBenchSuite
   end
 end
 
+# --- coverage ---------------------------------------------------------------
+
+# What each benchmark still hands to CRuby, ranked. This is a probe, never a
+# timed run: RPYYARV_COVERAGE=1 changes what the JIT selects (see the header).
+def foreign_report(suite, names, top)
+  names.each do |bench|
+    suite.with_script(bench, probe: true) do |script, env, _warm|
+      out, err, = Open3.capture3(env.merge(COVERAGE_ENV),
+                                 *timeout_argv(suite.timeout, [File.join(ROOT, "rpyyarv"), script]))
+      text = (out + err).scrub
+      sends = text[/sends: rpyyarv (\d+), cruby (\d+)/, 0] || "sends: -"
+      puts format("%-24s %s", bench, sends)
+      text.scan(/^\[rpyyarv\]   cruby (?:send|site): (.*)$/).flatten.first(top).each do |l|
+        puts format("  %-22s %s", "", l)
+      end
+    end
+  end
+end
+
 # --- inventory --------------------------------------------------------------
 
 def load_inventory
@@ -477,6 +496,7 @@ def main(argv)
   extra_engines = []
   opts = {}
   inventory_only = false
+  foreign_top = nil
   refresh = false
   until argv.empty?
     arg = argv.shift
@@ -501,6 +521,7 @@ def main(argv)
       return 2 unless path
       extra_engines << [n, [File.expand_path(path)]]
     when "--compare" then extra_engines << ["alt", [File.expand_path(argv.shift.to_s)]]
+    when /\A--foreign(?:=(\d+))?\z/ then foreign_top = (Regexp.last_match(1) || 12).to_i
     when "--inventory" then inventory_only = true
     when "--refresh-inventory" then refresh = true
     when "-h", "--help"
@@ -508,6 +529,9 @@ def main(argv)
         usage: bench.rb [--suite awfy|ruby-bench|all] [--procs N] [--filter SUBSTRING]...
                         [--ruby-bench DIR] [--warmup N] [--iters N] [--raw FILE]
                         [--engine NAME=PATH]... [--compare BIN] [--inventory] [--refresh-inventory]
+                        [--foreign[=N]]
+        --foreign runs the coverage probe only and ranks what each benchmark still
+        sends to CRuby; it prints no timings, since coverage perturbs them.
         --engine/--compare add an engine that is timed interleaved with the others and
         gets its own ratio column against rpyyarv-jit.
       USAGE
@@ -538,6 +562,10 @@ def main(argv)
       next
     end
     names = suite.benchmarks.select { |n| filters.empty? || filters.any? { |f| n.include?(f) } }
+    if foreign_top
+      foreign_report(suite, names, foreign_top)
+      next
+    end
     if suite.is_a?(RubyBenchSuite)
       inv = inventory_for(suite, names, refresh || inventory_only)
       # Punting benchmarks are still timed (the punt gate reports them per engine);

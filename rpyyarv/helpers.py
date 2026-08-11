@@ -49,6 +49,11 @@ MAX = symbols.intern('max')
 HASH = symbols.intern('hash')
 PACK = symbols.intern('pack')
 INCLUDE_P = symbols.intern('include?')
+RESPOND_TO_P = symbols.intern('respond_to?')
+POW = symbols.intern('**')
+TO_F = symbols.intern('to_f')
+NAME = symbols.intern('name')
+COS = symbols.intern('cos')
 
 # RB_FIXABLE for a double (arithmetic/fixnum.h); both bounds are exact powers of two.
 FIXNUM_MAX_PLUS_1_DBL = float(value.FIXNUM_MAX + 1)
@@ -96,7 +101,14 @@ B_STR_EQ = 37
 B_KERNEL_SEND = 38
 B_BASIC_SEND = 39
 B_ARY_LTLT = 40
-B_COUNT = 41
+B_FLT_POW = 41
+B_INT_POW = 42
+B_MATH_COS = 43
+B_INT_TO_F = 44
+B_FLT_TO_F = 45
+B_SYM_NAME = 46
+B_BASIC_INITIALIZE = 47
+B_COUNT = 48
 
 _INT_MID = [PLUS, MINUS, MULT, DIV, MOD, EQ, LT, LE, GT, GE, AND, OR, XOR,
             RSHIFT]
@@ -286,6 +298,72 @@ def ge(a, b):
     return value.Q_UNDEF
 
 
+def math_cos(recv, arg):
+    """Math.cos of a Float or Fixnum; cos is total over the reals, so only the receiver and the argument type are tested."""
+    if recv != value.core_class(value.C_MATH) or not _cruby_owns(B_MATH_COS):
+        return value.Q_UNDEF
+    if not (value.is_float(arg) or value.is_fixnum(arg)):
+        return value.Q_UNDEF
+    return _from_dbl(math.cos(_dbl(arg)))
+
+
+def _core_op(klass_i, bit, mid):
+    """CRuby still has its own definition and RPyYARV has not defined one over it, as _int_op tests the operators."""
+    return (_cruby_owns(bit)
+            and dispatch.lookup_core(value.core_class(klass_i), mid) is None)
+
+
+def flt_pow(a, b):
+    """x ** y with a Float operand; a negative base with a fractional exponent is a Complex in Ruby, and an overflow raises here, so both go back to CRuby."""
+    if not (value.is_float(a) or value.is_fixnum(a)):
+        return value.Q_UNDEF
+    if not (value.is_float(b) or value.is_fixnum(b)):
+        return value.Q_UNDEF
+    if value.is_float(a):
+        if not _core_op(value.C_FLOAT, B_FLT_POW, POW):
+            return value.Q_UNDEF
+    else:
+        # Integer ** Integer is exact and a negative exponent gives a Rational.
+        if not value.is_float(b):
+            return value.Q_UNDEF
+        if not _core_op(value.C_INTEGER, B_INT_POW, POW):
+            return value.Q_UNDEF
+    x = _dbl(a)
+    if x < 0.0:
+        return value.Q_UNDEF
+    try:
+        return _from_dbl(math.pow(x, _dbl(b)))
+    except (OverflowError, ValueError):
+        return value.Q_UNDEF
+
+
+def to_f(recv):
+    """Integer#to_f and Float#to_f; a Bignum's magnitude is CRuby's to convert."""
+    if value.is_float(recv):
+        if _core_op(value.C_FLOAT, B_FLT_TO_F, TO_F):
+            return recv
+        return value.Q_UNDEF
+    if value.is_fixnum(recv) and _core_op(value.C_INTEGER, B_INT_TO_F, TO_F):
+        return _from_dbl(float(value.fix2int(recv)))
+    return value.Q_UNDEF
+
+
+def sym_name(recv):
+    """Symbol#name is the symbol's own frozen String, one per symbol (symbol.c), so the cache is as permanent as the symbol."""
+    if (recv & value.SYMBOL_MASK) != value.SYMBOL_FLAG:
+        return value.Q_UNDEF
+    if not _core_op(value.C_SYMBOL, B_SYM_NAME, NAME):
+        return value.Q_UNDEF
+    return dispatch.sym_name(recv)
+
+
+def basic_initialize(klass):
+    """The receiver inherits BasicObject#initialize, which takes no argument and does nothing."""
+    return (_cruby_owns(B_BASIC_INITIALIZE)
+            and dispatch.owner_of(klass, INITIALIZE)
+            == value.core_class(value.C_BASIC_OBJECT))
+
+
 def math_sqrt(recv, arg):
     """Math.sqrt of a non-negative Float or Fixnum; a negative one keeps CRuby's Math::DomainError (math.c:765)."""
     if recv != value.core_class(value.C_MATH) or not _cruby_owns(B_MATH_SQRT):
@@ -329,6 +407,19 @@ def identity_send(recv, mid):
     if mid != EQUAL_P and _sym_eq(recv, mid):
         return True
     return identity_op(recv, mid)
+
+
+def responds_to(recv, sym):
+    """Object#respond_to? cached per (class, symbol), so a promoted receiver folds it to a constant; a class that overrides respond_to? or respond_to_missing? answers per receiver and goes back to CRuby."""
+    if (sym & value.SYMBOL_MASK) != value.SYMBOL_FLAG:
+        return value.Q_UNDEF
+    klass = value.class_of(recv)
+    if klass == 0:
+        return value.Q_UNDEF
+    got = dispatch.responds(promote(klass), sym)
+    if got < 0:
+        return value.Q_UNDEF
+    return value.newbool(got == 1)
 
 
 def _ary_eq_false(a, b):
@@ -549,6 +640,10 @@ def zero_arg(recv, mid):
         return int_abs(recv)
     if mid == TO_I:
         return flt_to_i(recv)
+    if mid == TO_F:
+        return to_f(recv)
+    if mid == NAME:
+        return sym_name(recv)
     if mid == UMINUS:
         v = flt_uminus(recv)
         if v != value.Q_UNDEF:

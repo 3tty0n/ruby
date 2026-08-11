@@ -179,6 +179,12 @@ def invoke(frame, w_ci, w_block=None):
     if _is_attr_mid(mid) and argc > 0 \
             and not value.is_immediate(recv) and dispatch.is_known_class(recv):
         return _define_attrs(frame, mid, recv, recv_at, argc)
+    if mid == INITIALIZE and argc == 0 and entry is None and w_block is None \
+            and helpers.basic_initialize(klass):
+        # rb_obj_dummy_initialize: no argument, no effect, nil (object.c:118).
+        _drop(frame, recv_at)
+        debug.count_native()
+        return value.Q_NIL
     if mid == BLOCK_GIVEN and fcall and argc == 0:
         # rb_f_block_given_p reads the *caller's* frame (vm.c:1862); through rb_funcallv it would find a CRuby one.
         _drop(frame, recv_at)
@@ -433,6 +439,12 @@ def _native_binop(recv, arg, mid):
         return helpers.int_bitref(recv, arg)
     if mid == helpers.SQRT:
         return helpers.math_sqrt(recv, arg)
+    if mid == helpers.COS:
+        return helpers.math_cos(recv, arg)
+    if mid == helpers.POW:
+        return helpers.flt_pow(recv, arg)
+    if mid == helpers.RESPOND_TO_P:
+        return helpers.responds_to(recv, arg)
     if (mid == helpers.EQ or mid == helpers.NEQ or mid == helpers.EQUAL_P) \
             and helpers.identity_send(recv, mid):
         same = recv == arg
