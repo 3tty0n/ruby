@@ -23,6 +23,14 @@ uintptr_t rpyyarv_intern(const char *name);
 
 uintptr_t rpyyarv_sym_new(const char *name);
 
+/* $~ or one of its captures from the active CRuby frame. */
+uintptr_t rpyyarv_getspecial(int type, int *state);
+
+uintptr_t rpyyarv_str_intern(uintptr_t str, int *state);
+
+uintptr_t rpyyarv_toregexp(int opt, int n, const uintptr_t *parts,
+                           int *state);
+
 /* Largest argc rpyyarv_funcallv* copies onto the machine stack. */
 #define RPYYARV_MAX_ARGC 32
 
@@ -59,6 +67,7 @@ long      rpyyarv_ary_len(uintptr_t ary);
 uintptr_t rpyyarv_ary_entry(uintptr_t ary, long idx);
 
 int rpyyarv_is_array(uintptr_t v);
+void rpyyarv_patch_method_equality(void);
 int rpyyarv_is_symbol(uintptr_t v);
 int rpyyarv_is_fixnum(uintptr_t v);
 int rpyyarv_is_string(uintptr_t v);
@@ -137,7 +146,7 @@ int rpyyarv_shape_add_ivar_fits(unsigned int before, unsigned int after,
                                 uintptr_t id, int *index);
 
 /* Likewise RArray, for the opt_aref/opt_aset/opt_length fast paths. */
-#define RPYYARV_ARRAY_LAYOUT_N 8
+#define RPYYARV_ARRAY_LAYOUT_N 10
 void rpyyarv_array_layout(int *out);
 
 /* rb_str_equal's String-argument half, which neither allocates nor raises. */

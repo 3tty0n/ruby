@@ -21,6 +21,7 @@ from rpyyarv.rlib import (JitDriver, StackOverflow, always_inline, check_stack_o
 
 TO_S = symbols.intern('to_s')
 DUP = symbols.intern('dup')
+EVAL = symbols.intern('eval')
 # The empty leading segment the loader puts in a `::Foo` constant path.
 ROOT_CBASE = symbols.intern('')
 
@@ -143,6 +144,14 @@ def invoke(frame, w_ci, w_block=None):
             v = _native_binop(recv, frame.stack[recv_at + 1], mid)
         else:
             v = helpers.zero_arg(recv, mid)
+        if v != value.Q_UNDEF:
+            _drop(frame, recv_at)
+            debug.count_native()
+            return v
+    if entry is None and mid == EVAL and fcall \
+            and (argc == 1 or (argc == 3 \
+                              and frame.stack[recv_at + 2] == value.Q_NIL)):
+        v = _eval_rpy(frame, klass, recv, frame.stack[recv_at + 1])
         if v != value.Q_UNDEF:
             _drop(frame, recv_at)
             debug.count_native()
@@ -295,6 +304,7 @@ class _SendOwners(object):
     def __init__(self):
         self.kernel = 0
         self.basic = 0
+        self.eval = 0
 
 
 # Kernel#send and BasicObject#__send__, so a class that overrides either is seen.
@@ -347,6 +357,8 @@ def _shift_off(frame, recv_at):
 
 def _native_binop(recv, arg, mid):
     """A one-argument send RPyYARV answers itself, or Qundef."""
+    if mid == helpers.EQQ:
+        return helpers.int_eqq(recv, arg)
     if mid == helpers.XOR:
         return helpers.xor(recv, arg)
     if mid == helpers.RSHIFT:
@@ -420,6 +432,32 @@ def _attr_name(v):
     if not value.is_immediate(v) and boot.is_string(v):
         return boot.str_of(v)
     return ''
+
+
+@dont_look_inside
+def _eval_rpy(frame, klass, recv, source):
+    """The two binding-free eval forms used by optcarrot's code generator."""
+    if value.is_immediate(source) or not boot.is_string(source):
+        return value.Q_UNDEF
+    if dispatch.owner_of(klass, EVAL) != send_owners.eval:
+        return value.Q_UNDEF
+    name = boot.str_of(source)
+    if name.startswith('def self.run'):
+        from rpyyarv import bootiseq
+        from rpyyarv import loader
+        from rpyyarv import prelude
+        w_iseq = loader.load_strict(bootiseq.load(prelude._compile(name)))
+        return execute(w_iseq, Frame(w_iseq, recv, frame.cref, frame.entry))
+    if len(name) == 0 or name[0] < 'A' or name[0] > 'Z':
+        return value.Q_UNDEF
+    i = 1
+    while i < len(name):
+        c = name[i]
+        if not ((c >= 'A' and c <= 'Z') or (c >= 'a' and c <= 'z')
+                or (c >= '0' and c <= '9') or c == '_'):
+            return value.Q_UNDEF
+        i += 1
+    return _const_lexical(_cref_of(frame), symbols.intern(name))
 
 
 def _new_with_block(frame, entry, klass, recv_at, argc, w_block):
@@ -1183,6 +1221,16 @@ class _Proxy(object):
 # rb_block_param_proxy's stand-in, pushed instead of a Proc (insns.def:144): a Symbol, so unmarked, and it never leaves those sites.
 proxy = _Proxy()
 
+
+class _Fiber(object):
+    _immutable_fields_ = ['value?']
+
+    def __init__(self):
+        self.value = 0
+
+
+fiber = _Fiber()
+
 PROXY_NAME = '__rpyyarv_block_param_proxy__'
 
 
@@ -1357,6 +1405,9 @@ def _attr_from_cruby(entry, recv, args):
 
 @dont_look_inside
 def _call_with_block(recv, mid, args, w_block, kw=False):
+    if recv == fiber.value and mid == NEW and not kw:
+        raise UnsupportedOperation(
+            'Fiber.new with an RPyYARV block is not supported')
     handle = _alloc_handle(w_block)
     ret = value.Q_NIL
     try:
@@ -1732,16 +1783,21 @@ def configure_jitparams():
 def install():
     configure_reselection()
     configure_jitparams()
+    boot.rb_patch_method_equality()
     boot.install_block_callback(block_callback)
     boot.install_trampoline_callback(trampoline_callback)
     gcroots.register_blocks(blocks)
     # A Symbol, so it is an immediate no mark hook has to reach.
     proxy.value = boot.sym_new(PROXY_NAME)
+    fiber.value = dispatch.const_get(value.core_class(value.C_OBJECT),
+                                     symbols.intern('Fiber'))
     # Asked before any Ruby code runs, so these are the pristine owners.
     send_owners.kernel = dispatch.owner_of(
         value.core_class(value.C_OBJECT), SEND)
     send_owners.basic = dispatch.owner_of(
         value.core_class(value.C_BASIC_OBJECT), SEND2)
+    send_owners.eval = dispatch.owner_of(
+        value.core_class(value.C_OBJECT), EVAL)
 
 
 @unroll_safe
@@ -1890,16 +1946,16 @@ def _reverse(frame, n):
         i += 1
 
 
-@dont_look_inside
+@unroll_safe
 def _expand(frame, v, n):
-    if value.is_immediate(v) or not boot.is_array(v):
+    if not value.is_array(v):
         raise UnsupportedOperation('expandarray needs an Array, got %s'
                                    % value.repr_of(v))
-    size = boot.ary_len(v)
+    size = value.ary_len(v)
     i = n - 1
     while i >= 0:
         if i < size:
-            frame.push(boot.ary_entry(v, i))
+            frame.push(value.ary_at(v, i))
         else:
             frame.push(value.Q_NIL)
         i -= 1
@@ -2324,6 +2380,24 @@ def _execute(iseq, frame, pc):
                 parts[i] = frame.pop()
                 i -= 1
             frame.push(_concat(parts))
+        elif opcode == insns.TOREGEXP:
+            opt = code[pc]
+            n = code[pc + 1]
+            pc += 2
+            at = frame.sp - n
+            if at < 0:
+                raise UnsupportedOperation(
+                    'toregexp with %d part(s) underflows the stack' % n)
+            parts = [0] * n
+            i = 0
+            while i < n:
+                parts[i] = frame.stack[at + i]
+                i += 1
+            regexp = boot.toregexp(opt, parts)
+            _drop(frame, at)
+            frame.push(regexp)
+        elif opcode == insns.INTERN:
+            frame.push(boot.str_intern(frame.pop()))
         elif opcode == insns.OPT_DIV:
             b = frame.pop()
             a = frame.pop()
@@ -2350,6 +2424,15 @@ def _execute(iseq, frame, pc):
             mid = code[pc]
             pc += 1
             dispatch.ivar_set(frame.self_val, mid, frame.pop())
+        elif opcode == insns.GETCONSTANT:
+            mid = code[pc]
+            pc += 1
+            allow_nil = frame.pop()
+            cbase = frame.pop()
+            if allow_nil == value.Q_TRUE and cbase == value.Q_NIL:
+                frame.push(_const_lexical(_cref_of(frame), mid))
+            else:
+                frame.push(dispatch.const_get(cbase, mid))
         elif opcode == insns.PUTSPECIALOBJECT:
             kind = code[pc]
             pc += 1
@@ -2558,6 +2641,12 @@ def _execute(iseq, frame, pc):
             mid = code[pc]
             pc += 1
             rubycall.gvar_set(mid, frame.pop())
+        elif opcode == insns.GETSPECIAL:
+            key = code[pc]
+            type = code[pc + 1]
+            pc += 2
+            assert key == 1
+            frame.push(boot.getspecial(type))
         elif opcode == insns.OPT_AREF:
             idx = frame.pop()
             recv = frame.pop()
@@ -2613,8 +2702,13 @@ def _execute(iseq, frame, pc):
                 frame.push(_unop(frame, rubycall.call0(v_str, DUP),
                                  helpers.FREEZE))
         elif opcode == insns.OPT_CASE_DISPATCH:
-            # No hash fast path: falling through runs the sequential when-tests the compiler emitted right after this.
-            frame.pop()
+            table = code[pc]
+            else_pc = code[pc + 1]
+            pc += 2
+            key = frame.pop()
+            if value.is_fixnum(key) and helpers.int_eqq_pristine():
+                target = iseq.case_tables[table].get(value.fix2int(key), -1)
+                pc = else_pc if target < 0 else target
         elif opcode == insns.OPT_NEWARRAY_SEND:
             n = code[pc]
             meth = code[pc + 1]

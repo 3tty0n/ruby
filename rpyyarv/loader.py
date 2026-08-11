@@ -28,6 +28,7 @@ class ConstPool(object):
         self.iseqs = []
         self.callinfos = []
         self.paths = []         # constant paths, one list of ids each
+        self.case_tables = []   # Integer literal -> destination pc
         self.fixnums = {}       # integer -> index
 
     def add(self, v):
@@ -45,6 +46,10 @@ class ConstPool(object):
     def add_path(self, ids):
         self.paths.append(ids)
         return len(self.paths) - 1
+
+    def add_case_table(self, table):
+        self.case_tables.append(table)
+        return len(self.case_tables) - 1
 
     def add_fixnum(self, n):
         if n in self.fixnums:
@@ -251,7 +256,8 @@ class Loader(object):
                         returns, returns and raw.type in self.RETURN_TARGETS,
                         [dispatch.new_const_site() for _ in pool.paths],
                         kw_table, kw_defaults, raw.kw_required, kw_start,
-                        raw.kw_bits, raw.kwrest, self.program.path)
+                        raw.kw_bits, raw.kwrest, self.program.path,
+                        [t for t in pool.case_tables])
         gcroots.register_consts(consts)
         return w_iseq
 
@@ -424,6 +430,12 @@ class Loader(object):
                 raise UnsupportedOperation(
                     "putspecialobject %d in '%s' is not supported"
                     % (kind, raw.name))
+        elif op == insns.GETSPECIAL:
+            key = self.int_of(ops[0], op, raw, 'key')
+            if key != 1:
+                raise UnsupportedOperation(
+                    "getspecial key %d in '%s' is not supported"
+                    % (key, raw.name))
         elif op == insns.OPT_DUPARRAY_SEND:
             if self.int_of(ops[2], op, raw, 'argc') != 1:
                 raise UnsupportedOperation(
@@ -481,6 +493,9 @@ class Loader(object):
             return mid
         if t == insns.T_IC:
             return self.const_path(operand, op, raw, pool)
+        if t == insns.T_CDHASH:
+            return pool.add_case_table(
+                self.case_table(operand, op, raw, labels))
         if t == insns.T_ISEQ:
             if operand.kind == rawiseq.OP_NIL:
                 return NO_BLOCK_ISEQ      # no block at this call site
@@ -496,6 +511,21 @@ class Loader(object):
                         "yarv_map.py supports but the loader does not"
                         % (insns.NAMES[op], raw.name, insns.TYPE_NAMES[t]))
 
+    def case_table(self, operand, op, raw, labels):
+        """The Fixnum entries of CRuby's alternating [literal, label] CDHASH."""
+        if operand.kind != rawiseq.OP_ARRAY or len(operand.items) % 2 != 0:
+            raise LoadError("%s in '%s' has a malformed case table"
+                            % (insns.NAMES[op], raw.name))
+        table = {}
+        i = 0
+        while i < len(operand.items):
+            key = operand.items[i]
+            target = operand.items[i + 1]
+            if key.kind == rawiseq.OP_INT and key.intval not in table:
+                table[key.intval] = self.label(target, op, raw, labels)
+            i += 2
+        return table
+
     def const_path(self, operand, op, raw, pool):
         """An IC reaches to_a as one Symbol per path segment (iseq.c:3503); an absolute `::Foo` has the empty name first."""
         if operand.kind != rawiseq.OP_ARRAY:
@@ -507,11 +537,6 @@ class Loader(object):
         ids = []
         for item in operand.items:
             name = self.sym_of(item, op, raw)
-            if name == 'Fiber':
-                # Fiber.new stores its block and resume switches machine stacks, neither of which RPyYARV's own frames survive.
-                raise UnsupportedOperation(
-                    "'%s' names Fiber, which RPyYARV does not support"
-                    % raw.name)
             ids.append(symbols.intern(name))
         return pool.add_path(ids)
 

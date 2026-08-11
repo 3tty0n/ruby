@@ -29,7 +29,7 @@ class W_ISeq(object):
     _immutable_fields_ = ['name', 'code[*]', 'consts[*]', 'iseqs[*]',
                           'callinfos[*]', 'nlocals', 'stack_max', 'nparams',
                           'simple_params', 'catches[*]', 'paths[*]',
-                          'path_sites[*]',
+                          'path_sites[*]', 'case_tables[*]',
                           'opt_table[*]', 'rest_start', 'post_start',
                           'post_num', 'unsupported', 'autosplat',
                           'has_return_throw', 'catches_return',
@@ -42,7 +42,8 @@ class W_ISeq(object):
                  post_num=0, unsupported='', autosplat=False,
                  has_return_throw=False, catches_return=False,
                  path_sites=None, kw_table=None, kw_defaults=None,
-                 kw_required=0, kw_start=-1, kw_bits=-1, kwrest=-1, path=''):
+                 kw_required=0, kw_start=-1, kw_bits=-1, kwrest=-1, path='',
+                 case_tables=None):
         # The file this ISeq was compiled from; require_relative in a method body resolves against it, since no CRuby frame carries it.
         self.path = path
         self.name = name
@@ -88,6 +89,8 @@ class W_ISeq(object):
         self.paths = paths if paths is not None else []
         # One inline cache slot per entry of paths, parallel to it.
         self.path_sites = path_sites if path_sites is not None else []
+        # Integer literal -> destination pc for opt_case_dispatch.
+        self.case_tables = case_tables if case_tables is not None else []
 
     def repr(self):
         return '<W_ISeq %s>' % self.name

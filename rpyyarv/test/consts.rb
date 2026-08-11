@@ -243,3 +243,7 @@ while i < 100
   i += 1
 end
 puts sum
+# A dynamic namespace compiles to getconstant rather than opt_getconstant_path.
+scope = Object
+p scope::String
+p eval("String")

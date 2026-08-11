@@ -17,6 +17,7 @@ GT = symbols.intern('>')
 LE = symbols.intern('<=')
 GE = symbols.intern('>=')
 EQ = symbols.intern('==')
+EQQ = symbols.intern('===')
 NEQ = symbols.intern('!=')
 EQUAL_P = symbols.intern('equal?')
 DIV = symbols.intern('/')
@@ -94,7 +95,8 @@ B_STR_FREEZE = 36
 B_STR_EQ = 37
 B_KERNEL_SEND = 38
 B_BASIC_SEND = 39
-B_COUNT = 40
+B_ARY_LTLT = 40
+B_COUNT = 41
 
 _INT_MID = [PLUS, MINUS, MULT, DIV, MOD, EQ, LT, LE, GT, GE, AND, OR, XOR,
             RSHIFT]
@@ -149,9 +151,13 @@ def _int_op(bit):
 
 
 def _ary_op(bit):
+    if bit == B_ARY_LTLT:
+        mid = LTLT
+    else:
+        mid = _ARY_MID[bit - B_ARY_AREF]
     return (_cruby_owns(bit)
             and dispatch.lookup_core(value.core_class(value.C_ARRAY),
-                                     _ARY_MID[bit - B_ARY_AREF]) is None)
+                                     mid) is None)
 
 
 def _sym_op(bit):
@@ -367,6 +373,17 @@ def eq(a, b):
     return value.Q_UNDEF
 
 
+def int_eqq(a, b):
+    """Integer#=== for two Fixnums; unlike ==, === has no CRuby BOP flag."""
+    if value.is_fixnum(a) and value.is_fixnum(b) and _int_owns(EQQ):
+        return value.newbool(a == b)
+    return value.Q_UNDEF
+
+
+def int_eqq_pristine():
+    return _int_owns(EQQ)
+
+
 def neq(a, b):
     # BOP_NEQ is never flagged: vm_opt_neq resolves `!=` to BasicObject#!= then asks opt_equality, so Integer#== is the definition that counts.
     if _fix2(a, b, B_INT_EQ):
@@ -480,7 +497,12 @@ def int_bitref(a, b):
 
 
 def lshift(a, b):
-    """Integer#<< for a non-negative fixnum shift; a result CRuby would widen to a Bignum, and a negative shift, go back to CRuby."""
+    """The Integer and Array arms of vm_opt_ltlt."""
+    if value.is_plain_array(a) and _ary_op(B_ARY_LTLT):
+        if value.is_immediate(b) and value.ary_append_immediate(a, b):
+            return a
+        rubycall.ary_store(a, value.ary_len(a), b)
+        return a
     if not (value.is_fixnum(a) and value.is_fixnum(b)) or not _int_owns(LTLT):
         return value.Q_UNDEF
     n = value.fix2int(a)
@@ -672,5 +694,6 @@ def check_array_layout():
     want = [value.ARY_EMBED_FLAG, value.ARY_EMBED_LEN_SHIFT,
             value.ARY_EMBED_LEN_MASK, value.ARY_HEAP_LEN_WORD,
             value.ARY_HEAP_PTR_WORD, value.ARY_EMBED_WORD,
-            value.ARY_SHARED_FLAG, value.ARY_SHARED_ROOT_FLAG]
+            value.ARY_SHARED_FLAG, value.ARY_SHARED_ROOT_FLAG,
+            value.ARY_HEAP_CAPA_WORD, value.T_ARRAY]
     return got == want

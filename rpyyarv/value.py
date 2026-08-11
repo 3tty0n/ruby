@@ -34,6 +34,7 @@ ROBJECT_HEAP = 1 << 16          # RUBY_FL_USER4: ivars spilled to a heap buffer
 FIELDS_WORD = 2                 # struct RObject: as.ary / as.heap.fields
 T_MASK = 0x1f
 T_OBJECT = 0x01
+T_ARRAY = 0x07
 FL_FREEZE = 1 << 11             # RUBY_FL_FREEZE, the bit rb_check_frozen reads
 T_DATA = 0x0c
 FL_TYPED_DATA = 1 << 6          # RUBY_TYPED_FL_IS_TYPED_DATA: RData keeps a function pointer where RTypedData keeps fields_obj
@@ -48,6 +49,7 @@ ARY_EMBED_FLAG = 1 << 13         # RUBY_FL_USER1
 ARY_EMBED_LEN_SHIFT = 15         # RUBY_FL_USHIFT + 3
 ARY_EMBED_LEN_MASK = 0x7f << ARY_EMBED_LEN_SHIFT
 ARY_HEAP_LEN_WORD = 2
+ARY_HEAP_CAPA_WORD = 3
 ARY_HEAP_PTR_WORD = 4
 ARY_EMBED_WORD = 2
 ARY_SHARED_FLAG = 1 << 12        # RUBY_ELTS_SHARED: the elements belong to a shared root
@@ -191,6 +193,11 @@ def is_plain_array(v):
             and raw_word(v, KLASS_WORD) == core_class(C_ARRAY))
 
 
+def is_array(v):
+    return (v != 0 and (v & IMMEDIATE_MASK) == 0
+            and raw_word(v, FLAGS_WORD) & T_MASK == T_ARRAY)
+
+
 def is_plain_string(v):
     """A direct String instance: a subclass may have redefined #==."""
     return (v != 0 and (v & IMMEDIATE_MASK) == 0
@@ -225,6 +232,21 @@ def ary_set(v, i, val):
         set_raw_word(v, ARY_EMBED_WORD + i, val)
     else:
         set_raw_word(raw_word(v, ARY_HEAP_PTR_WORD), i, val)
+
+
+def ary_append_immediate(v, val):
+    """Append without CRuby when the existing RArray storage has room."""
+    flags = raw_word(v, FLAGS_WORD)
+    if flags & (FL_FREEZE | ARY_SHARED_FLAG | ARY_SHARED_ROOT_FLAG):
+        return False
+    n = ary_len(v)
+    if flags & ARY_EMBED_FLAG:
+        return False
+    if n >= raw_word(v, ARY_HEAP_CAPA_WORD):
+        return False
+    set_raw_word(raw_word(v, ARY_HEAP_PTR_WORD), n, val)
+    set_raw_word(v, ARY_HEAP_LEN_WORD, n + 1)
+    return True
 
 
 def repr_of(v):

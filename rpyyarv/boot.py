@@ -93,6 +93,8 @@ rb_inspect_cstr = _ext('rpyyarv_inspect_cstr', [VALUE], rffi.CCHARP, reenters=Tr
 rb_ary_len = _ext('rpyyarv_ary_len', [VALUE], rffi.LONG)
 rb_ary_entry = _ext('rpyyarv_ary_entry', [VALUE, rffi.LONG], VALUE, reenters=True)
 rb_is_array = _ext('rpyyarv_is_array', [VALUE], rffi.INT)
+rb_patch_method_equality = _ext('rpyyarv_patch_method_equality', [], lltype.Void,
+                                reenters=True)
 rb_is_symbol = _ext('rpyyarv_is_symbol', [VALUE], rffi.INT)
 rb_is_fixnum = _ext('rpyyarv_is_fixnum', [VALUE], rffi.INT)
 rb_is_string = _ext('rpyyarv_is_string', [VALUE], rffi.INT)
@@ -106,6 +108,13 @@ rb_sym_cstr = _ext('rpyyarv_sym_cstr', [VALUE], rffi.CCHARP, reenters=True)
 # No reenters: the codewriter rejects it inside an elidable; safe -- neither this nor rb_shape_iv_index allocates, and elidable calls never survive into an optimized trace.
 rb_intern_ = _ext('rpyyarv_intern', [rffi.CCHARP], VALUE)
 rb_sym_new = _ext('rpyyarv_sym_new', [rffi.CCHARP], VALUE, reenters=True)
+rb_getspecial = _ext('rpyyarv_getspecial', [rffi.INT, INTP], VALUE,
+                     reenters=True)
+rb_str_intern = _ext('rpyyarv_str_intern', [VALUE, INTP], VALUE,
+                     reenters=True)
+rb_toregexp = _ext('rpyyarv_toregexp',
+                   [rffi.INT, rffi.INT, VALUEP, INTP], VALUE,
+                   reenters=True)
 rb_funcallv_id = _ext('rpyyarv_funcallv_id',
                       [VALUE, VALUE, rffi.INT, VALUEP, INTP], VALUE, reenters=True)
 rb_funcallv_public_id = _ext('rpyyarv_funcallv_public_id',
@@ -405,6 +414,46 @@ def intern(name):
 def sym_new(name):
     with rffi.scoped_str2charp(name) as c_name:
         return rffi.cast(lltype.Signed, rb_sym_new(c_name))
+
+
+def getspecial(type):
+    state = _enter_status()
+    v = rb_getspecial(rffi.cast(rffi.INT, type), state)
+    failed = _leave_status(state)
+    ret = rffi.cast(lltype.Signed, v)
+    if failed:
+        _failed('$~')
+    return ret
+
+
+def str_intern(v):
+    state = _enter_status()
+    out = rb_str_intern(rffi.cast(VALUE, v), state)
+    failed = _leave_status(state)
+    ret = rffi.cast(lltype.Signed, out)
+    if failed:
+        _failed('intern')
+    return ret
+
+
+def toregexp(opt, parts):
+    n = len(parts)
+    if n > MAX_ARGC:
+        raise RubyError('toregexp')
+    buf = _enter_argv(n)
+    i = 0
+    while i < n:
+        buf[i] = rffi.cast(VALUE, parts[i])
+        i += 1
+    state = _enter_status()
+    out = rb_toregexp(rffi.cast(rffi.INT, opt), rffi.cast(rffi.INT, n),
+                      buf, state)
+    failed = _leave_status(state)
+    ret = rffi.cast(lltype.Signed, out)
+    _leave_argv(buf)
+    if failed:
+        _failed('toregexp')
+    return ret
 
 
 def funcallv(recv, rid, args, mid, public_only=False):
@@ -861,7 +910,7 @@ def float_layout():
     return out
 
 
-ARRAY_LAYOUT_N = 8
+ARRAY_LAYOUT_N = 10
 
 
 def array_layout():

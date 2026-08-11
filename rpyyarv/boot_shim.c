@@ -134,6 +134,89 @@ rpyyarv_sym_new(const char *name)
     return (uintptr_t)ID2SYM(rb_intern(name));
 }
 
+static VALUE
+getspecial_body(VALUE type)
+{
+    VALUE backref = rb_backref_get();
+    int t = FIX2INT(type);
+
+    if (t == 0) return backref;
+    if (!(t & 1)) return rb_reg_nth_match(t >> 1, backref);
+    switch (t >> 1) {
+      case '&': return rb_reg_last_match(backref);
+      case '`': return rb_reg_match_pre(backref);
+      case '\'': return rb_reg_match_post(backref);
+      case '+': return rb_reg_match_last(backref);
+      default: rb_bug("unexpected back-ref");
+    }
+}
+
+uintptr_t
+rpyyarv_getspecial(int type, int *state)
+{
+    *state = 0;
+    VALUE r = rb_protect(getspecial_body, INT2FIX(type), state);
+    if (*state) return (uintptr_t)Qnil;
+    return (uintptr_t)r;
+}
+
+static VALUE
+str_intern_body(VALUE str)
+{
+    return rb_str_intern(str);
+}
+
+uintptr_t
+rpyyarv_str_intern(uintptr_t str, int *state)
+{
+    *state = 0;
+    VALUE r = rb_protect(str_intern_body, (VALUE)str, state);
+    if (*state) return (uintptr_t)Qnil;
+    return (uintptr_t)r;
+}
+
+struct toregexp_args {
+    int opt;
+    int n;
+    const VALUE *parts;
+};
+
+static VALUE
+toregexp_body(VALUE argp)
+{
+    struct toregexp_args *a = (struct toregexp_args *)argp;
+    VALUE src;
+    VALUE re;
+    int i;
+
+    if (a->n == 0) rb_raise(rb_eArgError, "no arguments given");
+    src = rb_str_new3(a->parts[0]);
+    for (i = 1; i < a->n; i++) rb_str_buf_append(src, a->parts[i]);
+    re = rb_reg_new_str(src, a->opt);
+    return rb_obj_freeze(re);
+}
+
+uintptr_t
+rpyyarv_toregexp(int opt, int n, const uintptr_t *parts, int *state)
+{
+    VALUE buf[RPYYARV_MAX_ARGC];
+    struct toregexp_args a;
+    int i;
+
+    if (n < 0 || n > RPYYARV_MAX_ARGC) {
+        *state = -1;
+        return (uintptr_t)Qnil;
+    }
+    for (i = 0; i < n; i++) buf[i] = (VALUE)parts[i];
+    a.opt = opt;
+    a.n = n;
+    a.parts = buf;
+    *state = 0;
+    VALUE r = rb_protect(toregexp_body, (VALUE)&a, state);
+    if (*state) return (uintptr_t)Qnil;
+    return (uintptr_t)r;
+}
+
 struct funcallv_args {
     VALUE recv;
     ID    mid;
@@ -378,6 +461,56 @@ int rpyyarv_is_hash(uintptr_t v)   { return RB_TYPE_P((VALUE)v, T_HASH) ? 1 : 0;
 int rpyyarv_is_nil(uintptr_t v)    { return NIL_P((VALUE)v) ? 1 : 0; }
 int rpyyarv_is_true(uintptr_t v)   { return (VALUE)v == Qtrue ? 1 : 0; }
 int rpyyarv_is_false(uintptr_t v)  { return (VALUE)v == Qfalse ? 1 : 0; }
+
+static ID id_method_original_name;
+static ID id_method_original_eq;
+static ID id_method_original_eql;
+static ID id_method_original_hash;
+
+static VALUE
+rpyyarv_method_eq(VALUE self, VALUE other)
+{
+    VALUE klass = rb_path2class("Method");
+    if (rb_obj_class(other) != klass) return Qfalse;
+    if (rb_funcall(self, id_method_original_name, 0) !=
+        rb_funcall(other, id_method_original_name, 0)) return Qfalse;
+    return rb_funcall(self, id_method_original_eq, 1, other);
+}
+
+static VALUE
+rpyyarv_method_eql(VALUE self, VALUE other)
+{
+    VALUE klass = rb_path2class("Method");
+    if (rb_obj_class(other) != klass) return Qfalse;
+    if (rb_funcall(self, id_method_original_name, 0) !=
+        rb_funcall(other, id_method_original_name, 0)) return Qfalse;
+    return rb_funcall(self, id_method_original_eql, 1, other);
+}
+
+static VALUE
+rpyyarv_method_hash(VALUE self)
+{
+    VALUE parts[2];
+    parts[0] = rb_funcall(self, id_method_original_hash, 0);
+    parts[1] = rb_funcall(self, id_method_original_name, 0);
+    return rb_funcall(rb_ary_new_from_values(2, parts), rb_intern("hash"), 0);
+}
+
+void
+rpyyarv_patch_method_equality(void)
+{
+    VALUE klass = rb_path2class("Method");
+    id_method_original_name = rb_intern("original_name");
+    id_method_original_eq = rb_intern("__rpyyarv_original_equal__");
+    id_method_original_eql = rb_intern("__rpyyarv_original_eql__");
+    id_method_original_hash = rb_intern("__rpyyarv_original_hash__");
+    rb_alias(klass, id_method_original_eq, rb_intern("=="));
+    rb_alias(klass, id_method_original_eql, rb_intern("eql?"));
+    rb_alias(klass, id_method_original_hash, rb_intern("hash"));
+    rb_define_method(klass, "==", rpyyarv_method_eq, 1);
+    rb_define_method(klass, "eql?", rpyyarv_method_eql, 1);
+    rb_define_method(klass, "hash", rpyyarv_method_hash, 0);
+}
 
 long
 rpyyarv_num2long(uintptr_t v)
@@ -890,6 +1023,8 @@ rpyyarv_array_layout(int *out)
     out[5] = (int)(offsetof(struct RArray, as.ary) / SIZEOF_VALUE);
     out[6] = (int)RARRAY_SHARED_FLAG;
     out[7] = (int)RARRAY_SHARED_ROOT_FLAG;
+    out[8] = (int)(offsetof(struct RArray, as.heap.aux.capa) / SIZEOF_VALUE);
+    out[9] = (int)T_ARRAY;
 }
 
 /* vm_opt_str_eq's arm (vm_insnhelper.c:2540); Qundef when the argument is no String, which helpers.py answers for. No rb_protect: rb_str_eql_internal neither allocates nor raises. */
@@ -1731,6 +1866,7 @@ rpyyarv_bop_mask(void)
     BOP(rb_cString, "==");
     BOP(rb_mKernel, "send");
     BOP(rb_cBasicObject, "__send__");
+    BOP(rb_cArray, "<<");
 #undef BOP
 
     return (uintptr_t)i << RPYYARV_BOP_COUNT_SHIFT | mask;

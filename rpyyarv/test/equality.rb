@@ -18,12 +18,27 @@ p nil == false
 p 1 == 1.0
 p 1.0 == 1
 p 1 == 2
+p 1 === 1
+p 1 === 2
 p :a == :a
 p :a == "a"
 p "a" == :a
 p "a" == "a"
 p 1 == nil
 p nil == 1
+
+class MethodEquality
+  def a; end
+  def b; end
+end
+method_owner = MethodEquality.new
+method_a = method_owner.method(:a)
+method_b = method_owner.method(:b)
+p [method_a.name, method_b.name, method_a.equal?(method_b)]
+p method_a == method_owner.method(:a)
+p method_a == method_b
+method_hash = { method_a => :a, method_b => :b }
+p [method_hash.size, method_hash[method_a], method_hash[method_b]]
 
 class EqBox
   def initialize(n); @n = n; end

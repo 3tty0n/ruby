@@ -141,3 +141,4 @@ puts a.size
 puts a[0].inspect
 puts (a == b).inspect
 puts (a != b).inspect
+p :"dynamic-#{1}"

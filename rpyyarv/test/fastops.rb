@@ -27,6 +27,16 @@ while i < 3
 end
 puts n
 
+ary = []
+same = nil
+10.times { |v| same = (ary << v) }
+puts [ary, same.equal?(ary)].inspect
+begin
+  [1].freeze << 2
+rescue FrozenError => e
+  puts e.class
+end
+
 # ---- Integer ^ ----
 
 puts(5 ^ 3)
@@ -179,6 +189,13 @@ end
 puts((1..5).begin)
 puts((1..5).end)
 puts((1..5).exclude_end?)
+
+class Array
+  def <<(_other)
+    :array_push_redefined
+  end
+end
+puts([1] << 2)
 
 class Symbol
   def ==(_other)

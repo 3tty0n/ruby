@@ -36,6 +36,7 @@ EMIT = {
     'newrange': [0],
     'getglobal': [0],
     'setglobal': [0],
+    'getspecial': [0, 1],   # $~ and its captures; CRuby owns the current backref
     'opt_aref': [],         # CALL_DATA dropped
     'opt_aset': [],
     'opt_length': [],
@@ -45,7 +46,7 @@ EMIT = {
     'opt_ltlt': [],
     'opt_nil_p': [],        # CALL_DATA dropped
     'opt_str_freeze': [0],  # the literal, frozen once at load time
-    'opt_case_dispatch': [],  # CDHASH and else offset dropped, see interp.py
+    'opt_case_dispatch': [0, 1],
     'opt_newarray_send': [0, 1],
     'expandarray': [0],     # flag is checked, only plain masgn
     'opt_plus': [],         # CALL_DATA dropped
@@ -61,6 +62,7 @@ EMIT = {
     'opt_neq': [],          # both CALL_DATA dropped
     'getinstancevariable': [0],     # IVC dropped
     'setinstancevariable': [0],
+    'getconstant': [0],             # dynamic A::B; base and lexical flag are stack values
     'opt_getconstant_path': [0],    # IC carries the constant path segments
     'setconstant': [0],
     'putspecialobject': [0],
@@ -69,6 +71,8 @@ EMIT = {
     'objtostring': [],      # CALL_DATA dropped: to_s is resolved inline
     'anytostring': [],
     'concatstrings': [0],
+    'toregexp': [0, 1],     # options and number of interpolated fragments
+    'intern': [],            # interpolated Symbol
     'jump': [0],
     'branchif': [0],
     'branchunless': [0],
@@ -84,7 +88,7 @@ EMIT = {
     'leave': [],
 }
 
-# Operand types the loader can transform (else silently mis-decoded): VALUE->pool idx, lindex_t->EP-relative local slot, OFFSET->label to pc, rb_num_t->int, ID->interned id (symbols.py), ISEQ->nested iseq pool idx, CALL_DATA->W_CallInfo (non-SIMPLE flags clear .simple), IC->constant path segments (iseq.c).
+# Operand types the loader can transform (else silently mis-decoded): VALUE->pool idx, lindex_t->EP-relative local slot, OFFSET->label to pc, rb_num_t->int, ID->interned id (symbols.py), ISEQ->nested iseq pool idx, CALL_DATA->W_CallInfo (non-SIMPLE flags clear .simple), IC->constant path segments (iseq.c), CDHASH->integer case-dispatch table.
 SUPPORTED_OPERAND_TYPES = frozenset([
     'VALUE',
     'lindex_t',
@@ -94,6 +98,7 @@ SUPPORTED_OPERAND_TYPES = frozenset([
     'ISEQ',
     'CALL_DATA',
     'IC',
+    'CDHASH',
 ])
 
 # CRuby's inline caches, which the meta-tracing JIT rediscovers instead.

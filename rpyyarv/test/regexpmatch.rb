@@ -9,6 +9,10 @@ end
 p m("xabbbcy")
 p m("nope")
 
+p("abc123xyz".sub(/([a-z]+)(\d+)([a-z]+)/) { [$1, $2, $3, $&, $`, $', $+].join("|") })
+x = "b+"
+p(/a#{x}c/ =~ "abbbc")
+
 # concatarray / concattoarray
 b = [1, 2]
 p [0, *b, 3]
