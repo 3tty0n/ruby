@@ -80,11 +80,21 @@ class Array
 end
 
 class Range
-  # Integer bounds only; a String or Float range needs succ, not + 1.
   def each
     return to_enum(:each) unless block_given?
     i = self.begin
     hi = self.end
+    # Only an Integer range steps by +1; a String one needs succ, so CRuby's
+    # own Range#to_a walks it and this only drives the block.
+    unless i.is_a?(Integer) && hi.is_a?(Integer)
+      a = self.to_a
+      j = 0
+      while j < a.length
+        yield a[j]
+        j = j + 1
+      end
+      return self
+    end
     if self.exclude_end?
       while i < hi
         yield i
