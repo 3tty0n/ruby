@@ -107,6 +107,7 @@ gccheck:
 	          test/regexpmatch.rb \
 	          test/sendblock.rb test/crefconsts.rb test/respondto.rb \
 	          test/fastsends.rb test/supercruby.rb test/instanceeval.rb \
+	          test/enumerators.rb \
 	          test/defaultgems.rb \
 	          $(TOP)/benchmark/app_*.rb $(TOP)/benchmark/so_*.rb; do \
 	   n=`basename $$s`; \
