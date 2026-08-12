@@ -78,6 +78,17 @@ end
 # Only the probe gets this; see the header note on cd 172 vs 200 ms.
 COVERAGE_ENV = { "RPYYARV_COVERAGE" => "1" }.freeze
 
+# The gem set scripts/bench-setup filled, so Bundler.setup finds the versions
+# each Gemfile.lock pins rather than whatever is installed globally.
+BENCH_GEMS = ENV.fetch("BENCH_GEMS", File.join(ROOT, ".bench-gems"))
+
+def bench_gems_env
+  return {} unless File.directory?(BENCH_GEMS)
+  { "GEM_HOME" => BENCH_GEMS, "GEM_PATH" => BENCH_GEMS,
+    "BUNDLE_PATH" => BENCH_GEMS,
+    "BUNDLE_APP_CONFIG" => File.join(BENCH_GEMS, ".bundle") }
+end
+
 def rubylib
   ENV["AWFY_RUBYLIB"].to_s
 end
@@ -283,7 +294,7 @@ class RubyBenchSuite
     env = base_env.merge("WARMUP_ITRS" => warm.to_s,
                          "MIN_BENCH_ITRS" => meas.to_s,
                          "MIN_BENCH_TIME" => "0",
-                         "RUBYLIB" => uninstalled_rubylib)
+                         "RUBYLIB" => uninstalled_rubylib).merge(bench_gems_env)
     # CRuby owns Bundler/RubyGems loading. RPyYARV can load a gem's own tree
     # (--gem-require turns that on), but not RubyGems' -- re-running the files
     # CRuby already loaded at boot redefines Gem's constants and then crashes.

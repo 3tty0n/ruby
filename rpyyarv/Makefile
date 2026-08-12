@@ -54,7 +54,7 @@ RUBY    ?= $(BUILD)/ruby
 GCLIMIT   ?= 16384
 GCTIMEOUT ?= 60
 
-.PHONY: all test microbench awfy bench gccheck build-interp build-jit link clean
+.PHONY: all test microbench awfy bench bench-setup gccheck build-interp build-jit link clean
 
 link: $(SHIM)
 
@@ -79,10 +79,18 @@ awfy:
 
 # Both suites through one driver; RUBY_BENCH points at the ruby-bench checkout.
 bench:
-	RPYYARV_BUILD=$(BUILD) AWFY_RUBYLIB=$(AWFY_RUBYLIB) RUBY_BENCH=$(RUBY_BENCH) $(RUBY_CMD) scripts/bench.rb $(BENCHFLAGS)
+	RPYYARV_BUILD=$(BUILD) AWFY_RUBYLIB=$(AWFY_RUBYLIB) RUBY_BENCH=$(RUBY_BENCH) \
+	  BENCH_GEMS=$(BENCH_GEMS) $(RUBY_CMD) scripts/bench.rb $(BENCHFLAGS)
 
 $(RUBY_BENCH):
 	git clone --depth=1 https://github.com/ruby/ruby-bench $@
+
+# Each benchmark's Gemfile.lock, installed by the CRuby under test into
+# $(BENCH_GEMS), so another machine resolves the same versions.
+BENCH_GEMS ?= $(CURDIR)/.bench-gems
+bench-setup: | $(RUBY_BENCH)
+	RPYYARV_BUILD=$(BUILD) RUBY_BENCH=$(RUBY_BENCH) BENCH_GEMS=$(BENCH_GEMS) \
+	  scripts/bench-setup $(BENCH)
 
 # Compare stdout of both rpyyarv binaries against CRuby under a tight GC limit.
 gccheck:

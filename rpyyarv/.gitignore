@@ -16,3 +16,4 @@ awfy/
 /ruby-bench/
 /yjit-bench/
 .bench-inventory.json
+.bench-gems/

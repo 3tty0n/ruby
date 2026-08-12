@@ -1,0 +1,59 @@
+#!/bin/sh
+# bundle install every ruby-bench benchmark, with the CRuby under test, into a
+# gem set inside the checkout.
+#
+#   make bench-setup            # all of them
+#   make bench-setup BENCH=mail # one
+#
+# Why not `gem install`: each benchmark ships a Gemfile.lock, so bundler is what
+# pins the versions another machine will resolve to. And the gems must be built
+# by the ruby that will load them -- a C extension compiled against a different
+# libruby fails to dlopen, which is what a global `gem install` gives you.
+
+set -e
+HERE=`cd "\`dirname "$0"\`/.." && pwd`
+TOP=`cd "$HERE/.." && pwd`
+BUILD=${RPYYARV_BUILD:-$TOP/build}
+BENCH=${RUBY_BENCH:-$HERE/ruby-bench}
+GEMS=${BENCH_GEMS:-$HERE/.bench-gems}
+ARCH=`ls -d "$BUILD"/.ext/*/ 2>/dev/null | grep -v common | head -1`
+
+[ -x "$BUILD/ruby" ] || { echo "build CRuby first: no $BUILD/ruby" >&2; exit 1; }
+[ -d "$BENCH/benchmarks" ] || { echo "no ruby-bench checkout at $BENCH" >&2; exit 1; }
+[ -f "$TOP/libexec/bundle" ] || { echo "no $TOP/libexec/bundle" >&2; exit 1; }
+
+# The uninstalled load path: $BUILD/ruby has no install prefix to find lib/ in.
+RUBYLIB="$TOP/lib:$BUILD/.ext/common:$BUILD:${ARCH%/}"
+export RUBYLIB
+export DYLD_LIBRARY_PATH=$BUILD LD_LIBRARY_PATH=$BUILD
+# extconf otherwise shells out to the install prefix baked into this build's
+# RbConfig (/usr/local/bin/ruby), which does not exist for an uninstalled ruby.
+export RUBYOPT="-r$HERE/scripts/ruby-build-rbconfig"
+
+export GEM_HOME=$GEMS GEM_PATH=$GEMS
+export BUNDLE_PATH=$GEMS BUNDLE_APP_CONFIG=$GEMS/.bundle
+mkdir -p "$GEMS/log"
+
+ok=0; skipped=0; failed=0
+for gf in "$BENCH"/benchmarks/*/Gemfile; do
+    [ -f "$gf" ] || continue
+    d=`dirname "$gf"`
+    name=`basename "$d"`
+    if [ -n "$1" ] && [ "$1" != "$name" ]; then continue; fi
+    if ( cd "$d" && "$BUILD/ruby" "$TOP/libexec/bundle" check ) >/dev/null 2>&1; then
+        echo "ok        $name"
+        ok=`expr $ok + 1`
+        continue
+    fi
+    if ( cd "$d" && "$BUILD/ruby" "$TOP/libexec/bundle" install ) \
+            >"$GEMS/log/$name.log" 2>&1; then
+        echo "installed $name"
+        ok=`expr $ok + 1`
+    else
+        echo "FAILED    $name  ($GEMS/log/$name.log)"
+        failed=`expr $failed + 1`
+    fi
+done
+echo
+echo "bench-setup: $ok ready, $failed failed, gem set in $GEMS"
+[ $failed -eq 0 ] || exit 1
