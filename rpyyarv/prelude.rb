@@ -99,3 +99,18 @@ class Range
     self
   end
 end
+
+module Kernel
+  # splay!'s tree descent is a `loop do`, whose every iteration would otherwise
+  # cross into rb_block_call and back through the ifunc bridge.
+  def loop
+    return to_enum(:loop) unless block_given?
+    begin
+      while true
+        yield
+      end
+    rescue StopIteration => e
+      e.result
+    end
+  end
+end
