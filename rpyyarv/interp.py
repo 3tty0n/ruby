@@ -31,13 +31,18 @@ NO_KEYWORDS = []
 
 class Cref(object):
     """One lexical scope, chained as CRuby's rb_cref_t is; klass 0 is the toplevel Object."""
-    _immutable_fields_ = ['klass', 'outer', 'by_eval']
+    _immutable_fields_ = ['klass', 'outer', 'by_eval', 'const_base']
 
     def __init__(self, klass, outer, by_eval=False):
         self.klass = klass
         self.outer = outer
         # CREF_PUSHED_BY_EVAL: a `def` lands on this class, but a constant lookup steps over it.
         self.by_eval = by_eval
+        # Resolved once here, not walked per lookup: _const_base is on the hot path of every constant read.
+        if by_eval and outer is not None:
+            self.const_base = outer.const_base
+        else:
+            self.const_base = klass
         # klass -> Cref, so re-running a class body reuses the node a const site's guard holds.
         self.inner = {}
         self.eval_inner = {}
@@ -2227,21 +2232,17 @@ def _const_lexical(cref, mid):
 
 
 def _cref_klass(cref):
-    # vm_get_const_base: a scope instance_eval pushed names no constants of its own.
-    while cref.by_eval and cref.outer is not None:
-        cref = cref.outer
-    if cref.klass == 0:
+    # const_base, not klass: a scope instance_eval pushed names no constants of its own (vm_get_const_base).
+    if cref.const_base == 0:
         return value.core_class(value.C_OBJECT)
-    return cref.klass
+    return cref.const_base
 
 
 def _const_base(frame):
     """The cbase a `class Foo::Bar` or a setconstant resolves against."""
     node = frame.cref
-    while node is not None and node.by_eval:
-        node = node.outer
-    if node is not None and node.klass != 0:
-        return node.klass
+    if node is not None and node.const_base != 0:
+        return node.const_base
     entry = frame.entry
     if entry is not None and entry.cref != 0:
         return entry.cref
