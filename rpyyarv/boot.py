@@ -237,7 +237,16 @@ rb_super_owner = _ext('rpyyarv_super_owner', [VALUE, VALUE, VALUE], VALUE,
                       reenters=True)
 rb_responds = _ext('rpyyarv_responds', [VALUE, VALUE], rffi.INT,
                    reenters=True)
+rb_ary_to_ary = _ext('rpyyarv_ary_to_ary', [VALUE, INTP], VALUE,
+                     reenters=True)
 rb_sym_name = _ext('rpyyarv_sym_name', [VALUE], VALUE, reenters=True)
+rb_dir_of = _ext('rpyyarv_dir_of', [VALUE], VALUE, reenters=True)
+rb_cvar_get = _ext('rpyyarv_cvar_get', [VALUE, VALUE, INTP], VALUE,
+                   reenters=True)
+rb_cvar_set = _ext('rpyyarv_cvar_set', [VALUE, VALUE, VALUE, INTP],
+                   lltype.Void, reenters=True)
+rb_is_singleton_class = _ext('rpyyarv_is_singleton_class', [VALUE], rffi.INT,
+                             reenters=True)
 # No reenters: reads two struct fields after a type test, allocating nothing.
 rb_range_part = _ext('rpyyarv_range_part', [VALUE, rffi.INT], VALUE)
 rb_struct_member_index = _ext('rpyyarv_struct_member_index',
@@ -869,6 +878,32 @@ def method_owner(klass, rid):
     return rffi.cast(lltype.Signed, rb_method_owner(_v(klass), _v(rid)))
 
 
+def cvar_get(klass, rid):
+    state = _enter_status()
+    v = rb_cvar_get(_v(klass), _v(rid), state)
+    failed = _leave_status(state)
+    ret = rffi.cast(lltype.Signed, v)
+    if failed:
+        _failed('class variable')
+    return ret
+
+
+def cvar_set(klass, rid, val):
+    state = _enter_status()
+    rb_cvar_set(_v(klass), _v(rid), _v(val), state)
+    if _leave_status(state):
+        _failed('class variable')
+
+
+def is_singleton_class(klass):
+    return rffi.cast(lltype.Signed, rb_is_singleton_class(_v(klass))) != 0
+
+
+def dir_of(path):
+    """dirname(realpath(path)), what __dir__ answers for a file; Qundef when it has no realpath."""
+    return rffi.cast(lltype.Signed, rb_dir_of(_v(path)))
+
+
 def sym_name(sym):
     """The frozen String Symbol#name returns, or Qundef for a dynamic symbol."""
     return rffi.cast(lltype.Signed, rb_sym_name(_v(sym)))
@@ -877,6 +912,17 @@ def sym_name(sym):
 def responds(klass, sym):
     """Whether every instance of klass responds to sym: 1 yes, 0 no, -1 unanswerable per class."""
     return rffi.cast(lltype.Signed, rb_responds(_v(klass), _v(sym)))
+
+
+def ary_to_ary(obj):
+    """rb_ary_to_ary: to_ary when the object has one, otherwise a one-element Array."""
+    state = _enter_status()
+    v = rb_ary_to_ary(_v(obj), state)
+    failed = _leave_status(state)
+    ret = rffi.cast(lltype.Signed, v)
+    if failed:
+        _failed('to_ary')
+    return ret
 
 
 def super_owner(klass, owner, rid):

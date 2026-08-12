@@ -198,6 +198,12 @@ def invoke(frame, w_ci, w_block=None):
         # rb_f_block_given_p reads the *caller's* frame (vm.c:1862); through rb_funcallv it would find a CRuby one.
         _drop(frame, recv_at)
         return value.newbool(frame.block is not None)
+    if mid == DIR_UNDERSCORE and fcall and argc == 0:
+        # Likewise f_dir: the running file is this frame's ISeq, not any CRuby frame's.
+        v = _dir_of(frame)
+        if v != value.Q_UNDEF:
+            _drop(frame, recv_at)
+            return v
     if mid == NEW and helpers.ary_new_pristine(promote(recv)):
         if w_block is None:
             v = _array_new(frame, recv_at, argc)
@@ -350,6 +356,16 @@ def _array_new_block(frame, recv_at, argc, w_block):
 NEW = symbols.intern('new')
 INITIALIZE = symbols.intern('initialize')
 BLOCK_GIVEN = symbols.intern('block_given?')
+DIR_UNDERSCORE = symbols.intern('__dir__')
+
+
+@dont_look_inside
+def _dir_of(frame):
+    """__dir__ for the file this frame's ISeq came from; Qundef for an ISeq with no file, which goes back to CRuby."""
+    path = frame.w_iseq.path
+    if path == '' or path.startswith('<'):
+        return value.Q_UNDEF
+    return boot.dir_of(boot.str_new(path))
 ITSELF = symbols.intern('itself')
 REVERSE_EACH = symbols.intern('reverse_each')
 INDEX = symbols.intern('index')
@@ -2153,8 +2169,8 @@ def _reverse(frame, n):
 @unroll_safe
 def _expand(frame, v, n):
     if not value.is_array(v):
-        raise UnsupportedOperation('expandarray needs an Array, got %s'
-                                   % value.repr_of(v))
+        # vm_expandarray: a plain masgn takes whatever rb_ary_to_ary answers.
+        v = boot.ary_to_ary(v)
     size = value.ary_len(v)
     i = n - 1
     while i >= 0:
@@ -2236,6 +2252,30 @@ def _cref_klass(cref):
     if cref.const_base == 0:
         return value.core_class(value.C_OBJECT)
     return cref.const_base
+
+
+@dont_look_inside
+def _cvar_base(frame):
+    """vm_get_cvar_base: the innermost lexical scope that is a real class, so a `class << self` or an instance_eval scope steps aside."""
+    node = _cref_of(frame)
+    while node is not None:
+        if node.klass != 0 and not node.by_eval \
+                and not boot.is_singleton_class(node.klass):
+            return node.klass
+        if node.outer is None:
+            break
+        node = node.outer
+    return value.core_class(value.C_OBJECT)
+
+
+@dont_look_inside
+def _cvar_get(frame, mid):
+    return boot.cvar_get(_cvar_base(frame), rubycall.rid(mid))
+
+
+@dont_look_inside
+def _cvar_set(frame, mid, v):
+    boot.cvar_set(_cvar_base(frame), rubycall.rid(mid), v)
 
 
 def _const_base(frame):
@@ -2667,6 +2707,14 @@ def _execute(iseq, frame, pc):
             mid = code[pc]
             pc += 1
             dispatch.ivar_set(frame.self_val, mid, frame.pop())
+        elif opcode == insns.GETCLASSVARIABLE:
+            mid = code[pc]
+            pc += 1
+            frame.push(_cvar_get(frame, mid))
+        elif opcode == insns.SETCLASSVARIABLE:
+            mid = code[pc]
+            pc += 1
+            _cvar_set(frame, mid, frame.pop())
         elif opcode == insns.DEFINED:
             kind = code[pc]
             obj = iseq.consts[code[pc + 1]]

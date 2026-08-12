@@ -770,6 +770,80 @@ rpyyarv_call_super(uintptr_t owner, uintptr_t recv, uintptr_t id, int argc,
     return (uintptr_t)rb_protect(call_super_body, (VALUE)&a, state);
 }
 
+static VALUE
+dir_of_body(VALUE argp)
+{
+    VALUE path = *(VALUE *)argp;
+    /* __dir__ is dirname(realpath(the running file)) (vm_eval.c's f_dir). */
+    VALUE real = rb_funcall(rb_cFile, rb_intern("realpath"), 1, path);
+    return rb_funcall(rb_cFile, rb_intern("dirname"), 1, real);
+}
+
+struct cvar_args {
+    VALUE klass;
+    VALUE val;
+    ID    id;
+};
+
+static VALUE
+cvar_get_body(VALUE argp)
+{
+    struct cvar_args *p = (struct cvar_args *)argp;
+    return rb_cvar_get(p->klass, p->id);
+}
+
+static VALUE
+cvar_set_body(VALUE argp)
+{
+    struct cvar_args *p = (struct cvar_args *)argp;
+    rb_cvar_set(p->klass, p->id, p->val);
+    return Qnil;
+}
+
+uintptr_t
+rpyyarv_cvar_get(uintptr_t klass, uintptr_t id, int *state)
+{
+    struct cvar_args a;
+    a.klass = (VALUE)klass;
+    a.id = (ID)id;
+    a.val = Qnil;
+    *state = 0;
+    return (uintptr_t)rb_protect(cvar_get_body, (VALUE)&a, state);
+}
+
+void
+rpyyarv_cvar_set(uintptr_t klass, uintptr_t id, uintptr_t val, int *state)
+{
+    struct cvar_args a;
+    a.klass = (VALUE)klass;
+    a.id = (ID)id;
+    a.val = (VALUE)val;
+    *state = 0;
+    rb_protect(cvar_set_body, (VALUE)&a, state);
+}
+
+/* A `class << self` scope names no class variables of its own (vm_get_cvar_base). */
+int
+rpyyarv_is_singleton_class(uintptr_t klass)
+{
+    VALUE k = (VALUE)klass;
+    if (SPECIAL_CONST_P(k) || !RB_TYPE_P(k, T_CLASS)) return 0;
+    return RTEST(rb_funcall(k, rb_intern("singleton_class?"), 0)) ? 1 : 0;
+}
+
+uintptr_t
+rpyyarv_dir_of(uintptr_t path)
+{
+    VALUE p = (VALUE)path;
+    int state = 0;
+    VALUE r = rb_protect(dir_of_body, (VALUE)&p, &state);
+    if (state) {
+        rb_set_errinfo(Qnil);
+        return (uintptr_t)Qundef;
+    }
+    return (uintptr_t)r;
+}
+
 uintptr_t
 rpyyarv_sym_name(uintptr_t sym)
 {
@@ -797,6 +871,20 @@ rpyyarv_responds(uintptr_t klass, uintptr_t sym)
         return -1;
     }
     return RTEST(r) ? 1 : 0;
+}
+
+static VALUE
+ary_to_ary_body(VALUE obj)
+{
+    return rb_ary_to_ary(obj);
+}
+
+/* vm_expandarray's conversion: to_ary when the object has one, else a one-element Array. */
+uintptr_t
+rpyyarv_ary_to_ary(uintptr_t obj, int *state)
+{
+    *state = 0;
+    return (uintptr_t)rb_protect(ary_to_ary_body, (VALUE)obj, state);
 }
 
 struct obj_args {
@@ -2199,7 +2287,9 @@ rpyyarv_require_resolve(uintptr_t fname, uintptr_t *path_out, int *state)
 static VALUE
 provide_body(VALUE argp)
 {
-    rb_provide(RSTRING_PTR(rb_get_path((VALUE)argp)));
+    /* Not rb_provide: rb_fstring_cstr keeps the caller's bytes, and these belong to a String the GC frees under it. */
+    rb_ary_push(rb_gv_get("$LOADED_FEATURES"),
+                rb_str_new_frozen(rb_get_path((VALUE)argp)));
     return Qnil;
 }
 

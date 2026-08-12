@@ -116,8 +116,19 @@ uintptr_t rpyyarv_super_owner(uintptr_t klass, uintptr_t owner, uintptr_t id);
 /* respond_to? for every instance of klass: 1 yes, 0 no, -1 only the receiver can answer. */
 int rpyyarv_responds(uintptr_t klass, uintptr_t sym);
 
+/* rb_ary_to_ary: what expandarray expands a non-Array into. */
+uintptr_t rpyyarv_ary_to_ary(uintptr_t obj, int *state);
+
 /* The frozen String Symbol#name returns, or Qundef for a dynamic symbol. */
 uintptr_t rpyyarv_sym_name(uintptr_t sym);
+
+/* dirname(realpath(path)), which is what __dir__ answers for a file; Qundef when the path has no realpath. */
+uintptr_t rpyyarv_dir_of(uintptr_t path);
+
+/* Class variables, resolved against the cbase the caller picked; *state is non-zero when the read raised. */
+uintptr_t rpyyarv_cvar_get(uintptr_t klass, uintptr_t id, int *state);
+void rpyyarv_cvar_set(uintptr_t klass, uintptr_t id, uintptr_t val, int *state);
+int rpyyarv_is_singleton_class(uintptr_t klass);
 
 /* String#<< of one String onto another of the same encoding, or Qundef when only rb_str_concat can do it. */
 uintptr_t rpyyarv_str_append(uintptr_t str, uintptr_t other);
