@@ -52,3 +52,8 @@ class BlockBreak(BlockJump):
     def __init__(self, w_block, value):
         BlockJump.__init__(self, value)
         self.w_block = w_block
+
+
+class BlockRetry(Exception):
+    """A rescue body's `retry`, caught by the enclosing ISeq's retry entry."""
+    pass

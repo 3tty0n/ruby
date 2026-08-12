@@ -125,6 +125,17 @@ def loop_rescue(n)
   total
 end
 
+def retried
+  attempts = 0
+  begin
+    attempts += 1
+    raise "again" if attempts < 3
+  rescue RuntimeError
+    retry if attempts < 3
+  end
+  attempts
+end
+
 simple
 rescued
 puts matching(TypeError.new("t"))
@@ -137,4 +148,5 @@ puts ensure_on_break
 reraised
 unmatched
 puts loop_rescue(20)
+puts "retried #{retried}"
 puts "done"

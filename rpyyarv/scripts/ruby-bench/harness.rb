@@ -17,8 +17,21 @@ end
 
 # harness-common's use_gemfile without the `bundle install` shell-out: gems must already be installed.
 def use_gemfile(*_rest)
-  require "bundler"
-  Bundler.setup
+  # RubyGems and Bundler initialized the embedded CRuby before RPyYARV starts.
+  # Let CRuby own their bootstrap requires, then restore interception so the
+  # benchmark gem's Ruby files are compiled and executed by RPyYARV.
+  previous = ENV["RPYYARV_FOREIGN_REQUIRE"]
+  ENV["RPYYARV_FOREIGN_REQUIRE"] = "1"
+  begin
+    require "bundler"
+    Bundler.setup
+  ensure
+    if previous
+      ENV["RPYYARV_FOREIGN_REQUIRE"] = previous
+    else
+      ENV.delete("RPYYARV_FOREIGN_REQUIRE")
+    end
+  end
 end
 
 def run_benchmark(_num_itrs_hint, *_rest)

@@ -8,6 +8,7 @@ NO_BLOCK_ISEQ = -1
 # The catch-table entry kinds RPyYARV interprets; see loader.py for the rest.
 CATCH_RESCUE = 1
 CATCH_ENSURE = 2
+CATCH_RETRY = 3
 
 
 class W_Catch(object):

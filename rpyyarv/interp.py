@@ -13,8 +13,9 @@ from rpyyarv import symbols
 from rpyyarv import value
 from rpyyarv.error import RPyYarvError, RubyException, UnsupportedOperation
 from rpyyarv.frame import (Frame, PENDING_BREAK, PENDING_NEXT, PENDING_NONE,
-                   PENDING_RAISE, PENDING_RETURN)
-from rpyyarv.iseq import CATCH_ENSURE, CATCH_RESCUE, NO_BLOCK_ISEQ
+                   PENDING_RAISE, PENDING_RETRY, PENDING_RETURN)
+from rpyyarv.iseq import (CATCH_ENSURE, CATCH_RESCUE, CATCH_RETRY,
+                          NO_BLOCK_ISEQ)
 from rpyyarv.rlib import (JitDriver, StackOverflow, always_inline, check_stack_overflow,
                   dont_look_inside, on_foreign_stack, promote, raw_word, set_user_param,
                   unchecked_stack_start, unchecked_stack_stop, unroll_safe)
@@ -167,6 +168,20 @@ def invoke(frame, w_ci, w_block=None):
             _drop(frame, recv_at)
             debug.count_native()
             return v
+    if mid == SLICE and argc == 2 and entry is None and \
+            value.is_plain_array(recv) and \
+            dispatch.owner_of(klass, SLICE) == value.core_class(value.C_ARRAY):
+        beg = frame.stack[recv_at + 1]
+        length = frame.stack[recv_at + 2]
+        if value.is_fixnum(beg) and value.is_fixnum(length):
+            ibeg = value.fix2int(beg)
+            if ibeg < 0:
+                ibeg += value.ary_len(recv)
+            v = value.Q_NIL if ibeg < 0 else \
+                boot.ary_subseq(recv, ibeg, value.fix2int(length))
+            _drop(frame, recv_at)
+            debug.count_native()
+            return v
     if entry is None and argc <= 1:
         # A send an opt_* instruction would have caught if YARV had one for it.
         if argc == 1:
@@ -227,6 +242,19 @@ def invoke(frame, w_ci, w_block=None):
         if mid == INDEX:
             _drop(frame, recv_at)
             return value.Q_NIL
+    if w_block is not None and mid == EACH_SLICE and argc == 1 and \
+            entry is None and value.is_plain_array(recv) and \
+            dispatch.owner_of(klass, EACH_SLICE) == \
+            send_owners.array_each_slice:
+        size = frame.stack[recv_at + 1]
+        if value.is_fixnum(size) and value.fix2int(size) > 0:
+            _drop(frame, recv_at)
+            try:
+                return _array_each_slice(recv, value.fix2int(size), w_block)
+            except block_mod.BlockBreak, e:
+                if e.w_block is not w_block:
+                    raise
+                return e.value
     if entry is None and w_block is None and not value.is_immediate(recv) \
             and (raw_word(recv, value.FLAGS_WORD) & value.T_MASK) == \
             value.T_STRUCT:
@@ -354,6 +382,18 @@ def _array_new_block(frame, recv_at, argc, w_block):
     return ary
 
 
+def _array_each_slice(ary, size, w_block):
+    """Enumerable#each_slice for a plain Array, without one CRuby callback per slice."""
+    at = 0
+    while at < value.ary_len(ary):
+        remaining = value.ary_len(ary) - at
+        count = size if size < remaining else remaining
+        part = boot.ary_subseq(ary, at, count)
+        call_block(w_block, [part])
+        at += count
+    return ary
+
+
 NEW = symbols.intern('new')
 INITIALIZE = symbols.intern('initialize')
 BLOCK_GIVEN = symbols.intern('block_given?')
@@ -369,6 +409,7 @@ def _dir_of(frame):
     return boot.dir_of(boot.str_new(path))
 ITSELF = symbols.intern('itself')
 REVERSE_EACH = symbols.intern('reverse_each')
+EACH_SLICE = symbols.intern('each_slice')
 INDEX = symbols.intern('index')
 SUCC = symbols.intern('succ')
 BUFFER = symbols.intern('buffer')
@@ -401,7 +442,7 @@ MATCH = symbols.intern('=~')
 class _SendOwners(object):
     # Quasi-immutable: install() writes it once, before any Ruby code runs.
     _immutable_fields_ = ['kernel?', 'basic?', 'string_getbyte?',
-                          'string_setbyte?']
+                          'string_setbyte?', 'array_each_slice?']
 
     def __init__(self):
         self.kernel = 0
@@ -409,6 +450,7 @@ class _SendOwners(object):
         self.eval = 0
         self.string_getbyte = 0
         self.string_setbyte = 0
+        self.array_each_slice = 0
 
 
 # Kernel#send and BasicObject#__send__, so a class that overrides either is seen.
@@ -1673,6 +1715,7 @@ CALL = symbols.intern('call')
 YIELD = symbols.intern('yield')
 AREF = symbols.intern('[]')
 EQQ_ = symbols.intern('===')
+SLICE = symbols.intern('slice')
 
 
 def _is_proxy_call(mid):
@@ -1882,6 +1925,8 @@ def _rethrow(throw):
         raise block_mod.BlockBreak(throw.w_block, throw.value)
     if throw.kind == PENDING_RETURN:
         raise block_mod.BlockReturn(throw.target, throw.value)
+    if throw.kind == PENDING_RETRY:
+        raise block_mod.BlockRetry()
     raise block_mod.BlockNext(throw.value)
 
 
@@ -1931,7 +1976,7 @@ def _throw(frame, throw_state, v):
         _rethrow(Throw(frame.pending_kind, frame.pending_value,
                        frame.pending_block, 'raise', frame.pending_frame))
     if tag == optable.TAG_RETRY:
-        raise UnsupportedOperation('retry is not supported')
+        raise block_mod.BlockRetry()
     raise UnsupportedOperation(
         'throw with tag %d (redo) is not supported' % tag)
 
@@ -1943,7 +1988,9 @@ def _catch_for(iseq, epc, kind):
     while i < len(catches):
         entry = catches[i]
         if entry.start < epc and epc <= entry.end:
-            if entry.kind == CATCH_ENSURE or kind == PENDING_RAISE:
+            if entry.kind == CATCH_ENSURE or \
+                    (entry.kind == CATCH_RESCUE and kind == PENDING_RAISE) or \
+                    (entry.kind == CATCH_RETRY and kind == PENDING_RETRY):
                 return entry
         i += 1
     return None
@@ -1984,6 +2031,8 @@ def _unwind(iseq, frame, throw, epc):
         if entry is None:
             _rethrow(throw)
         frame.reset_sp(entry.sp)
+        if entry.kind == CATCH_RETRY:
+            return entry.cont
         frame.pc = entry.cont
         try:
             result = _run_catch(frame, entry, throw)
@@ -1995,6 +2044,8 @@ def _unwind(iseq, frame, throw, epc):
             throw = Throw(PENDING_RETURN, e.value, None, 'return', e.frame)
         except block_mod.BlockNext, e:
             throw = Throw(PENDING_NEXT, e.value)
+        except block_mod.BlockRetry:
+            throw = Throw(PENDING_RETRY, value.Q_NIL)
         else:
             frame.reset_sp(entry.sp)
             frame.push(result)
@@ -2036,6 +2087,8 @@ def install():
         value.core_class(value.C_STRING), GETBYTE)
     send_owners.string_setbyte = dispatch.owner_of(
         value.core_class(value.C_STRING), SETBYTE)
+    send_owners.array_each_slice = dispatch.owner_of(
+        value.core_class(value.C_ARRAY), EACH_SLICE)
 
 
 @unroll_safe

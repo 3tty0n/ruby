@@ -11,14 +11,16 @@ from rpyyarv import rubycall
 from rpyyarv import symbols
 from rpyyarv import value
 from rpyyarv.error import LoadError, UnsupportedOperation
-from rpyyarv.iseq import (CATCH_ENSURE, CATCH_RESCUE, NO_BLOCK_ISEQ, W_Catch,
+from rpyyarv.iseq import (CATCH_ENSURE, CATCH_RESCUE, CATCH_RETRY,
+                          NO_BLOCK_ISEQ, W_Catch,
                   W_CallInfo, W_ISeq)
 
 
 # break/next/redo unwind as RPython exceptions; retry is here because the compiler emits an entry around every rescue clause regardless, and `throw` with the retry tag refuses it.
-IGNORED_CATCH_TYPES = ['break', 'next', 'redo', 'retry']
+IGNORED_CATCH_TYPES = ['break', 'next', 'redo']
 
-CATCH_KINDS = {'rescue': CATCH_RESCUE, 'ensure': CATCH_ENSURE}
+CATCH_KINDS = {'rescue': CATCH_RESCUE, 'ensure': CATCH_ENSURE,
+               'retry': CATCH_RETRY}
 
 
 class ConstPool(object):
@@ -278,7 +280,7 @@ class Loader(object):
             if w_child.has_return_throw:
                 return True
         for entry in catches:
-            if entry.w_iseq.has_return_throw:
+            if entry.w_iseq is not None and entry.w_iseq.has_return_throw:
                 return True
         return False
 
@@ -374,20 +376,35 @@ class Loader(object):
 
     def catches(self, raw, labels, parents):
         """A catch ISeq reads the enclosing locals at level 1, so raw itself is its parent, the way a block's is."""
-        out = []
+        n = 0
+        for entry in raw.catches:
+            if entry.kind in CATCH_KINDS:
+                n += 1
+        out = [None] * n
+        at = 0
         for entry in raw.catches:
             if entry.kind not in CATCH_KINDS:
+                continue
+            if entry.kind == 'retry':
+                out[at] = W_Catch(
+                    CATCH_RETRY,
+                    self.catch_label(entry.start, raw, labels),
+                    self.catch_label(entry.end, raw, labels),
+                    self.catch_label(entry.cont, raw, labels),
+                    entry.sp, None)
+                at += 1
                 continue
             if entry.iseq_index < 0:
                 raise LoadError("a %s catch-table entry in '%s' has no ISeq"
                                 % (entry.kind, raw.name))
-            out.append(W_Catch(
+            out[at] = W_Catch(
                 CATCH_KINDS[entry.kind],
                 self.catch_label(entry.start, raw, labels),
                 self.catch_label(entry.end, raw, labels),
                 self.catch_label(entry.cont, raw, labels),
                 entry.sp,
-                self.load_iseq(entry.iseq_index, [raw] + parents)))
+                self.load_iseq(entry.iseq_index, [raw] + parents))
+            at += 1
         return out
 
     def catch_label(self, name, raw, labels):
@@ -419,8 +436,6 @@ class Loader(object):
         elif op == insns.THROW:
             tag = self.int_of(ops[0], op, raw, 'throw state') & \
                 optable.TAG_MASK
-            if tag == optable.TAG_RETRY:
-                raise UnsupportedOperation('retry is not supported')
             if tag == optable.TAG_REDO:
                 raise UnsupportedOperation('redo is not supported')
         elif op == insns.INVOKESUPER:

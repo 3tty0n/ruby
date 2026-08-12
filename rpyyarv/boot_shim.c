@@ -453,6 +453,12 @@ rpyyarv_ary_entry(uintptr_t ary, long idx)
     return (uintptr_t)rb_ary_entry((VALUE)ary, idx);
 }
 
+uintptr_t
+rpyyarv_ary_subseq(uintptr_t ary, long beg, long len)
+{
+    return (uintptr_t)rb_ary_subseq((VALUE)ary, beg, len);
+}
+
 int rpyyarv_is_array(uintptr_t v)  { return RB_TYPE_P((VALUE)v, T_ARRAY) ? 1 : 0; }
 int rpyyarv_is_symbol(uintptr_t v) { return SYMBOL_P((VALUE)v) ? 1 : 0; }
 int rpyyarv_is_fixnum(uintptr_t v) { return FIXNUM_P((VALUE)v) ? 1 : 0; }

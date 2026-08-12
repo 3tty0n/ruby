@@ -101,6 +101,7 @@ uintptr_t rpyyarv_str_new(const char *s, long n);
 
 /* Both copy their input onto the machine stack first, as funcallv does. */
 uintptr_t rpyyarv_ary_new(int n, const uintptr_t *elems);
+uintptr_t rpyyarv_ary_subseq(uintptr_t ary, long beg, long len);
 uintptr_t rpyyarv_str_concat(int n, const uintptr_t *parts);
 
 /* Fetched once at boot so class_of() needs no rb_* call; slot order is value.py's C_* constants. */

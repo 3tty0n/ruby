@@ -16,6 +16,7 @@ from rpyyarv.frame import Frame
 
 COMPILE_FILE = 'compile_file'
 COMPILE_FILE_MID = symbols.intern(COMPILE_FILE)
+FOREIGN_REQUIRE_ENV = 'RPYYARV_FOREIGN_REQUIRE'
 
 
 class _Files(object):
@@ -33,6 +34,11 @@ files = _Files()
 
 class _Hook(rubycall.RequireHook):
     def handle(self, mid, arg):
+        # Bootstrap code such as RubyGems/Bundler is already active in the
+        # embedded CRuby.  Re-running that tree under RPyYARV redefines global
+        # state; callers may temporarily leave only those requires to CRuby.
+        if os.environ.get(FOREIGN_REQUIRE_ENV) == '1':
+            return rubycall.NOT_HANDLED
         if value.is_immediate(arg) or not boot.is_string(arg):
             return rubycall.NOT_HANDLED
         return _require(mid, arg)

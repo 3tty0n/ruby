@@ -92,6 +92,8 @@ rb_str_ptr = _ext('rpyyarv_str_ptr', [VALUE], rffi.CCHARP)
 rb_inspect_cstr = _ext('rpyyarv_inspect_cstr', [VALUE], rffi.CCHARP, reenters=True)
 rb_ary_len = _ext('rpyyarv_ary_len', [VALUE], rffi.LONG)
 rb_ary_entry = _ext('rpyyarv_ary_entry', [VALUE, rffi.LONG], VALUE, reenters=True)
+rb_ary_subseq = _ext('rpyyarv_ary_subseq', [VALUE, rffi.LONG, rffi.LONG],
+                     VALUE, reenters=True)
 rb_is_array = _ext('rpyyarv_is_array', [VALUE], rffi.INT)
 rb_patch_method_equality = _ext('rpyyarv_patch_method_equality', [], lltype.Void,
                                 reenters=True)
@@ -419,6 +421,12 @@ def ary_len(v):
 def ary_entry(v, i):
     return rffi.cast(lltype.Signed,
                      rb_ary_entry(_v(v), rffi.cast(rffi.LONG, i)))
+
+
+def ary_subseq(v, beg, length):
+    return rffi.cast(lltype.Signed,
+                     rb_ary_subseq(_v(v), rffi.cast(rffi.LONG, beg),
+                                   rffi.cast(rffi.LONG, length)))
 
 
 def hash_aref(hash_v, key):
