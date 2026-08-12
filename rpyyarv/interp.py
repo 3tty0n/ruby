@@ -1793,7 +1793,18 @@ def _call_foreign_block(w_block, args):
 def _autosplat(args):
     """One yielded value spread over block parameters. TODO: CRuby asks for to_ary (vm_args.c:863), this only takes a real Array."""
     v = args[0]
-    if value.is_immediate(v) or not boot.is_array(v):
+    if value.is_immediate(v):
+        return args
+    if value.is_plain_array(v):
+        # Read in place: this runs once per yielded element, and a call per element showed up in the profile.
+        n = value.ary_len(v)
+        out = [0] * n
+        i = 0
+        while i < n:
+            out[i] = value.ary_at(v, i)
+            i += 1
+        return out
+    if not boot.is_array(v):
         return args
     n = boot.ary_len(v)
     out = [0] * n

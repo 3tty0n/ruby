@@ -1443,7 +1443,7 @@ block_yielder(RB_BLOCK_CALL_FUNC_ARGLIST(yielded, callback_arg))
     /* On the machine stack, so the yielded values stay scannable until the RPython side copies them into a frame the mark hook reaches. */
     VALUE buf[RPYYARV_MAX_ARGC];
     int i, n = argc;
-    VALUE r;
+    VALUE r, here;
 
     (void)yielded;
     (void)blockarg;
@@ -1452,11 +1452,11 @@ block_yielder(RB_BLOCK_CALL_FUNC_ARGLIST(yielded, callback_arg))
     if (n > RPYYARV_MAX_ARGC) n = RPYYARV_MAX_ARGC;
     for (i = 0; i < n; i++) buf[i] = argv[i];
     /* callback_arg is [handle, the self this block was handed over under]; instance_eval yields with another one, and that substitution is the only reason to override the block's own self. */
+    here = rb_current_receiver();
     r = (VALUE)block_callback((long)FIX2LONG(RARRAY_AREF(callback_arg, 0)), n,
                               (uintptr_t *)buf,
-                              (uintptr_t)(rb_current_receiver()
-                                          == RARRAY_AREF(callback_arg, 1)
-                                          ? Qundef : rb_current_receiver()));
+                              (uintptr_t)(here == RARRAY_AREF(callback_arg, 1)
+                                          ? Qundef : here));
     /* The block left early and parked why; abort the CRuby method running it instead of letting it iterate on. */
     if (block_unwind) {
         block_unwind = 0;
