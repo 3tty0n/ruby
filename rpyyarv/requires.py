@@ -24,6 +24,8 @@ class _Files(object):
         self.stack = []
         # Expanded paths whose load has not finished, so a cycle answers false instead of recurring.
         self.loading = {}
+        # RPYYARV_DELEGATE_FILES: substrings of paths to leave to CRuby. Code whose hot path is C calls runs faster there, and which files those are is a measured, per-workload fact.
+        self.delegated = []
 
 
 files = _Files()
@@ -40,6 +42,9 @@ def install(main_path):
     """RPYYARV_NO_REQUIRE=1 leaves every require to CRuby, as before."""
     if os.environ.get('RPYYARV_NO_REQUIRE') == '1':
         return
+    spec = os.environ.get('RPYYARV_DELEGATE_FILES')
+    if spec is not None and spec != '':
+        files.delegated = spec.split(',')
     files.stack.append(main_path)
     rubycall.hooks.require = _Hook()
 
@@ -83,6 +88,12 @@ def _load_rb(fname, path):
     name = boot.str_of(path)
     if name in files.loading:
         return value.Q_FALSE
+    i = 0
+    while i < len(files.delegated):
+        if files.delegated[i] in name:
+            return _punt(fname, name, 0, 0,
+                         'RPYYARV_DELEGATE_FILES names it')
+        i += 1
 
     try:
         result = _compile(path)
