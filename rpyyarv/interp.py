@@ -200,6 +200,14 @@ def invoke(frame, w_ci, w_block=None):
             _drop(frame, recv_at)
             debug.count_native()
             return v
+    if entry is None and (mid == CLASS_EVAL or mid == MODULE_EVAL) and \
+            w_block is None and argc >= 1 and argc <= 3 and \
+            (dispatch.is_known_class(recv) or dispatch.is_known_module(recv)):
+        v = _module_eval_rpy(frame, recv, frame.stack[recv_at + 1])
+        if v != value.Q_UNDEF:
+            _drop(frame, recv_at)
+            debug.count_native()
+            return v
     if _is_attr_mid(mid) and argc > 0 and not value.is_immediate(recv) \
             and (dispatch.is_known_class(recv)
                  or dispatch.is_known_module(recv)):
@@ -418,6 +426,7 @@ SETBYTE = symbols.intern('setbyte')
 
 DEFINED_IVAR = 2
 DEFINED_GVAR = 4
+DEFINED_CVAR = 5
 DEFINED_CONST = 6
 DEFINED_METHOD = 7
 DEFINED_YIELD = 8
@@ -618,6 +627,20 @@ def _eval_rpy(frame, klass, recv, source):
             return value.Q_UNDEF
         i += 1
     return _const_lexical(_cref_of(frame), symbols.intern(name))
+
+
+@dont_look_inside
+def _module_eval_rpy(frame, recv, source):
+    """String class_eval/module_eval with the caller's lexical CREF preserved."""
+    if value.is_immediate(source) or not boot.is_string(source):
+        return value.Q_UNDEF
+    from rpyyarv import bootiseq
+    from rpyyarv import loader
+    from rpyyarv import prelude
+    text = boot.str_of(source)
+    w_iseq = loader.load_strict(bootiseq.load(prelude._compile(text)))
+    cref = _push_cref(_cref_of(frame), recv, True)
+    return execute(w_iseq, Frame(w_iseq, recv, cref, frame.entry))
 
 
 def _new_with_block(frame, entry, klass, recv_at, argc, w_block):
@@ -1311,6 +1334,8 @@ HASH_MERGE_KWD = symbols.intern('core#hash_merge_kwd')
 MODULE_FUNCTION = symbols.intern('module_function')
 INSTANCE_EVAL = symbols.intern('instance_eval')
 INSTANCE_EXEC = symbols.intern('instance_exec')
+CLASS_EVAL = symbols.intern('class_eval')
+MODULE_EVAL = symbols.intern('module_eval')
 
 
 @dont_look_inside
@@ -2404,6 +2429,8 @@ def _defined(frame, kind, obj, recv):
     rid = rubycall.rid(mid)
     if kind == DEFINED_IVAR:
         return boot.ivar_defined(frame.self_val, rid)
+    if kind == DEFINED_CVAR:
+        return boot.cvar_defined(_cvar_base(frame), rid)
     if kind == DEFINED_CONST:
         return _defined_const(_cref_of(frame), rid)
     if kind == DEFINED_CONST_FROM:

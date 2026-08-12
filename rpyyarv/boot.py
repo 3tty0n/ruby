@@ -251,6 +251,8 @@ rb_cvar_get = _ext('rpyyarv_cvar_get', [VALUE, VALUE, INTP], VALUE,
                    reenters=True)
 rb_cvar_set = _ext('rpyyarv_cvar_set', [VALUE, VALUE, VALUE, INTP],
                    lltype.Void, reenters=True)
+rb_cvar_defined = _ext('rpyyarv_cvar_defined', [VALUE, VALUE], rffi.INT,
+                       reenters=True)
 rb_is_singleton_class = _ext('rpyyarv_is_singleton_class', [VALUE], rffi.INT,
                              reenters=True)
 # No reenters: reads two struct fields after a type test, allocating nothing.
@@ -910,6 +912,11 @@ def cvar_set(klass, rid, val):
     rb_cvar_set(_v(klass), _v(rid), _v(val), state)
     if _leave_status(state):
         _failed('class variable')
+
+
+def cvar_defined(klass, rid):
+    return rffi.cast(lltype.Signed,
+                     rb_cvar_defined(_v(klass), _v(rid))) != 0
 
 
 def is_singleton_class(klass):

@@ -841,6 +841,12 @@ rpyyarv_cvar_set(uintptr_t klass, uintptr_t id, uintptr_t val, int *state)
     rb_protect(cvar_set_body, (VALUE)&a, state);
 }
 
+int
+rpyyarv_cvar_defined(uintptr_t klass, uintptr_t id)
+{
+    return rb_cvar_defined((VALUE)klass, (ID)id) ? 1 : 0;
+}
+
 /* A `class << self` scope names no class variables of its own (vm_get_cvar_base). */
 int
 rpyyarv_is_singleton_class(uintptr_t klass)

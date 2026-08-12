@@ -135,6 +135,7 @@ uintptr_t rpyyarv_dir_of(uintptr_t path);
 /* Class variables, resolved against the cbase the caller picked; *state is non-zero when the read raised. */
 uintptr_t rpyyarv_cvar_get(uintptr_t klass, uintptr_t id, int *state);
 void rpyyarv_cvar_set(uintptr_t klass, uintptr_t id, uintptr_t val, int *state);
+int rpyyarv_cvar_defined(uintptr_t klass, uintptr_t id);
 int rpyyarv_is_singleton_class(uintptr_t klass);
 
 /* String#<< of one String onto another of the same encoding, or Qundef when only rb_str_concat can do it. */
