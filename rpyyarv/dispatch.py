@@ -54,6 +54,8 @@ class Registry(object):
     def __init__(self):
         self.methods = {}       # klass VALUE -> {mid: MethodEntry}
         self.supers = {}        # klass VALUE -> superclass VALUE
+        # Modules RPyYARV defined; they are never in supers, which only holds a walkable superclass chain.
+        self.modules = {}
         self.version = Version()
         # Set once RPyYARV defines a module, which is the only way an entry can sit outside registry.supers; until then _lookup skips the owner detour entirely.
         self.module_owned = False
@@ -186,6 +188,16 @@ def is_known_class(klass):
     return _is_known_class(klass, registry.version)
 
 
+@elidable
+def _is_known_module(mod, version):
+    return mod in registry.modules
+
+
+def is_known_module(mod):
+    """A module RPyYARV's own `module` body made; is_known_class cannot answer, since a module has no superclass to record."""
+    return _is_known_module(mod, registry.version)
+
+
 def _walk(klass, mid):
     methods = registry.methods
     supers = registry.supers
@@ -316,6 +328,8 @@ def define_module(cbase, mid):
     """No entry in registry.supers: a module has no superclass to walk, and nothing is ever an instance of one."""
     mod = boot.define_module(cbase, rubycall.rid(mid))
     registry.module_owned = True
+    registry.modules[mod] = True
+    registry.version = Version()
     boot.gc_register(mod)
     gcroots.register_class(mod)
     # `def self.x` and module_function land on the singleton class.

@@ -185,8 +185,9 @@ def invoke(frame, w_ci, w_block=None):
             _drop(frame, recv_at)
             debug.count_native()
             return v
-    if _is_attr_mid(mid) and argc > 0 \
-            and not value.is_immediate(recv) and dispatch.is_known_class(recv):
+    if _is_attr_mid(mid) and argc > 0 and not value.is_immediate(recv) \
+            and (dispatch.is_known_class(recv)
+                 or dispatch.is_known_module(recv)):
         return _define_attrs(frame, mid, recv, recv_at, argc)
     if mid == INITIALIZE and argc == 0 and entry is None and w_block is None \
             and helpers.basic_initialize(klass):
