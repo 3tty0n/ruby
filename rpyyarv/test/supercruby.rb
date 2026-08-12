@@ -95,3 +95,23 @@ class Sub < Struct.new(:a, :b)
   end
 end
 puts Sub.new(1, 2).to_a.inspect
+
+# super from a prepended module reaches the class's own method, which
+# instance_method(owner) would resolve straight back to the prepended one.
+class Pre
+  def hi = "base"
+end
+module Louder
+  def hi = "LOUD " + super
+end
+Pre.prepend(Louder)
+p Pre.new.hi
+
+class PreStr < String
+  def to_s = "wrapped:" + super
+end
+module Twice
+  def to_s = super + "!"
+end
+PreStr.prepend(Twice)
+p PreStr.new("x").to_s

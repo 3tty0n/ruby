@@ -1180,8 +1180,8 @@ def _opt_send(frame, mid, argc):
     return rubycall.call(recv, mid, args)
 
 
-def _super_to_cruby(frame, owner, mid, recv_at, argc, kw_splat):
-    """`super` landing on a method CRuby owns: bound to owner, so it is that implementation and not this one again."""
+def _super_to_cruby(frame, klass, owner, mid, recv_at, argc, kw_splat):
+    """`super` landing on a method CRuby owns: the method after owner's along klass's chain, bound to the receiver."""
     if kw_splat:
         raise UnsupportedOperation(
             "super from '%s' passes keywords to a method CRuby owns"
@@ -1198,7 +1198,11 @@ def _super_to_cruby(frame, owner, mid, recv_at, argc, kw_splat):
         args.append(frame.stack[recv_at + 1 + i])
         i += 1
     _drop(frame, recv_at)
-    ret = rubycall.call_super(owner, recv, mid, args)
+    ret = rubycall.call_super(klass, owner, recv, mid, args)
+    if ret == value.Q_UNDEF:
+        raise UnsupportedOperation(
+            "super from '%s' reaches a method its owner does not define"
+            % symbols.name_of(mid))
     _check_block_error()
     return ret
 
@@ -1236,7 +1240,8 @@ def invoke_super(frame, w_ci):
             raise UnsupportedOperation(
                 "super from '%s' has no superclass method"
                 % symbols.name_of(entry.mid))
-        return _super_to_cruby(frame, owner, entry.mid, recv_at, argc,
+        return _super_to_cruby(frame, promote(value.class_of(recv)),
+                               entry.owner, entry.mid, recv_at, argc,
                                w_ci.kw_splat)
     if target.kind != dispatch.KIND_ISEQ:
         return _attr_send(frame, target, frame.stack[recv_at], recv_at, argc)

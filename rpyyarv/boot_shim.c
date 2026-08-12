@@ -727,6 +727,7 @@ responds_body(VALUE argp)
 }
 
 struct super_call_args {
+    VALUE klass;
     VALUE owner;
     VALUE recv;
     ID    id;
@@ -740,17 +741,28 @@ call_super_body(VALUE argp)
     struct super_call_args *p = (struct super_call_args *)argp;
     VALUE args[RPYYARV_MAX_ARGC + 1];
     int i;
-    /* UnboundMethod#bind_call, not rb_call_super: super needs a CRuby control frame, binding one method does not. */
-    VALUE m = rb_funcall(p->owner, rb_intern("instance_method"), 1,
+    ID owner_id = rb_intern("owner");
+    ID super_id = rb_intern("super_method");
+    /* The method after the running one along the receiver's own chain, which is
+       the only walk that sees a prepended module; instance_method(owner) would
+       resolve back to the prepended copy and recurse forever. */
+    VALUE m = rb_funcall(p->klass, rb_intern("instance_method"), 1,
                          ID2SYM(p->id));
+    while (!NIL_P(m)) {
+        VALUE found = rb_funcall(m, owner_id, 0);
+        m = rb_funcall(m, super_id, 0);
+        if (found == p->owner) break;
+    }
+    if (NIL_P(m)) return Qundef;
+    /* UnboundMethod#bind_call, not rb_call_super: super needs a CRuby control frame, binding one method does not. */
     args[0] = p->recv;
     for (i = 0; i < p->argc; i++) args[i + 1] = p->argv[i];
     return rb_funcallv(m, rb_intern("bind_call"), p->argc + 1, args);
 }
 
 uintptr_t
-rpyyarv_call_super(uintptr_t owner, uintptr_t recv, uintptr_t id, int argc,
-                   const uintptr_t *argv, int *state)
+rpyyarv_call_super(uintptr_t klass, uintptr_t owner, uintptr_t recv,
+                   uintptr_t id, int argc, const uintptr_t *argv, int *state)
 {
     struct super_call_args a;
     VALUE local[RPYYARV_MAX_ARGC];
@@ -761,6 +773,7 @@ rpyyarv_call_super(uintptr_t owner, uintptr_t recv, uintptr_t id, int argc,
     }
     /* argv may live in memory CRuby never scans, so it is copied to the machine stack first, as funcallv does. */
     for (i = 0; i < argc; i++) local[i] = (VALUE)argv[i];
+    a.klass = (VALUE)klass;
     a.owner = (VALUE)owner;
     a.recv = (VALUE)recv;
     a.id = (ID)id;
