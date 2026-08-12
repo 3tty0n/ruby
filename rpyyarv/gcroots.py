@@ -141,6 +141,14 @@ def mark_roots():
         while k < len(table):
             _mark_block_deep(table[k])
             k += 1
+        # The self each handed-over block was given, which nothing else roots.
+        selves = b.selves
+        k = 0
+        while k < len(selves):
+            v = selves[k]
+            if not value.is_immediate(v):
+                boot.gc_mark_value(v)
+            k += 1
     # Reading a virtualizable's fields from here forces it, which jit-summary counts as "virtualizables forced".
     f = state.top
     while f is not None:

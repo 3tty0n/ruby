@@ -242,6 +242,8 @@ rb_class_le = _ext('rpyyarv_class_le', [VALUE, VALUE], rffi.INT,
 rb_ary_to_ary = _ext('rpyyarv_ary_to_ary', [VALUE, INTP], VALUE,
                      reenters=True)
 rb_sym_name = _ext('rpyyarv_sym_name', [VALUE], VALUE, reenters=True)
+rb_current_receiver = _ext('rpyyarv_current_receiver', [], VALUE,
+                           reenters=True)
 rb_dir_of = _ext('rpyyarv_dir_of', [VALUE], VALUE, reenters=True)
 rb_cvar_get = _ext('rpyyarv_cvar_get', [VALUE, VALUE, INTP], VALUE,
                    reenters=True)
@@ -909,6 +911,11 @@ def is_singleton_class(klass):
 def dir_of(path):
     """dirname(realpath(path)), what __dir__ answers for a file; Qundef when it has no realpath."""
     return rffi.cast(lltype.Signed, rb_dir_of(_v(path)))
+
+
+def current_receiver():
+    """The self of the frame running now."""
+    return rffi.cast(lltype.Signed, rb_current_receiver())
 
 
 def sym_name(sym):

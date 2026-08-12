@@ -122,6 +122,9 @@ int rpyyarv_responds(uintptr_t klass, uintptr_t sym);
 /* rb_ary_to_ary: what expandarray expands a non-Array into. */
 uintptr_t rpyyarv_ary_to_ary(uintptr_t obj, int *state);
 
+/* The self of the frame running now; a block RPyYARV hands over records it, so a later yield can tell whether instance_eval substituted another. */
+uintptr_t rpyyarv_current_receiver(void);
+
 /* The frozen String Symbol#name returns, or Qundef for a dynamic symbol. */
 uintptr_t rpyyarv_sym_name(uintptr_t sym);
 

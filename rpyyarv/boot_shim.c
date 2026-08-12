@@ -858,6 +858,12 @@ rpyyarv_dir_of(uintptr_t path)
 }
 
 uintptr_t
+rpyyarv_current_receiver(void)
+{
+    return (uintptr_t)rb_current_receiver();
+}
+
+uintptr_t
 rpyyarv_sym_name(uintptr_t sym)
 {
     if (!RB_STATIC_SYM_P((VALUE)sym)) return (uintptr_t)Qundef;
@@ -1451,12 +1457,10 @@ block_yielder(RB_BLOCK_CALL_FUNC_ARGLIST(yielded, callback_arg))
     if (n < 0) n = 0;
     if (n > RPYYARV_MAX_ARGC) n = RPYYARV_MAX_ARGC;
     for (i = 0; i < n; i++) buf[i] = argv[i];
-    /* callback_arg is [handle, the self this block was handed over under]; instance_eval yields with another one, and that substitution is the only reason to override the block's own self. */
+    /* The self this yield runs under; RPyYARV holds the one the block was handed over with and compares, so callback_arg stays the bare handle. */
     here = rb_current_receiver();
-    r = (VALUE)block_callback((long)FIX2LONG(RARRAY_AREF(callback_arg, 0)), n,
-                              (uintptr_t *)buf,
-                              (uintptr_t)(here == RARRAY_AREF(callback_arg, 1)
-                                          ? Qundef : here));
+    r = (VALUE)block_callback((long)FIX2LONG(callback_arg), n,
+                              (uintptr_t *)buf, (uintptr_t)here);
     /* The block left early and parked why; abort the CRuby method running it instead of letting it iterate on. */
     if (block_unwind) {
         block_unwind = 0;
@@ -1480,9 +1484,7 @@ call_with_block_body(VALUE argp)
 {
     struct blockcall_args *a = (struct blockcall_args *)argp;
     return rb_block_call_kw(a->recv, a->mid, a->argc, a->argv, block_yielder,
-                            rb_ary_new_from_args(2, LONG2FIX(a->handle),
-                                                 rb_current_receiver()),
-                            a->kw_splat);
+                            LONG2FIX(a->handle), a->kw_splat);
 }
 
 uintptr_t
@@ -1584,9 +1586,8 @@ rpyyarv_define_method(uintptr_t klass, uintptr_t mid, int is_private,
 static VALUE
 proc_new_body(VALUE handle)
 {
-    /* An ifunc Proc: calling it reaches block_yielder with the same pair rb_block_call passes. */
-    return rb_proc_new(block_yielder,
-                       rb_ary_new_from_args(2, handle, rb_current_receiver()));
+    /* An ifunc Proc: calling it reaches block_yielder with the same LONG2FIX'd handle rb_block_call passes. */
+    return rb_proc_new(block_yielder, handle);
 }
 
 uintptr_t

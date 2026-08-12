@@ -1382,6 +1382,8 @@ class _Blocks(object):
     """Blocks C refers to by integer handle only, since RPython's GC moves objects; a Proc's handle is never given back, as the Proc outlives every frame."""
     def __init__(self):
         self.table = []         # handle -> W_Block, None for a free slot
+        # handle -> the self the block was handed over under, so a yield can tell an instance_eval substitution from the ordinary case.
+        self.selves = []
         self.free = []          # handles the transient path gave back
         self.by_proc = {}       # a materialised Proc -> the block behind it
         self.error = None       # an RPython error the callback could not raise
@@ -1393,16 +1395,20 @@ blocks = _Blocks()
 
 
 def _alloc_handle(w_block):
+    here = boot.current_receiver()
     if len(blocks.free) > 0:
         h = blocks.free.pop()
         blocks.table[h] = w_block
+        blocks.selves[h] = here
         return h
     blocks.table.append(w_block)
+    blocks.selves.append(here)
     return len(blocks.table) - 1
 
 
 def _release_handle(h):
     blocks.table[h] = None
+    blocks.selves[h] = 0
     blocks.free.append(h)
 
 
@@ -1430,9 +1436,12 @@ fiber = _Fiber()
 PROXY_NAME = '__rpyyarv_block_param_proxy__'
 
 
-def _sub_self(cruby_self):
-    """Qundef leaves the block's own self alone; anything else is the self CRuby yielded under, which instance_eval substitutes."""
-    return boot.as_signed(cruby_self)
+def _sub_self(handle, cruby_self):
+    """Q_UNDEF leaves the block's own self alone; another value is the self CRuby yielded under, which only instance_eval substitutes."""
+    v = boot.as_signed(cruby_self)
+    if v == blocks.selves[handle]:
+        return value.Q_UNDEF
+    return v
 
 
 def block_callback(handle, argc, argv, cruby_self):
@@ -1450,7 +1459,7 @@ def block_callback(handle, argc, argv, cruby_self):
     try:
         # A cref of its own only comes from an instance_eval RPyYARV ran; here CRuby owns the frame, so the block keeps the one it was written with.
         return boot.as_value(call_block(w_block, args, NO_KEYWORDS, False,
-                                        _sub_self(cruby_self)))
+                                        _sub_self(handle, cruby_self)))
     except RubyException, e:
         # Held: the RPython field it waits in is not something CRuby scans.
         gcroots.hold(e.value)
