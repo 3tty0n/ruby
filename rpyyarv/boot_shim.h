@@ -213,7 +213,7 @@ void rpyyarv_set_block_unwind(void);
 
 typedef uintptr_t (*rpyyarv_tramp_fn)(uintptr_t self, uintptr_t mid, int argc,
                                       uintptr_t *argv, uintptr_t blockproc,
-                                      int *status, uintptr_t *errval);
+                                      int kw, int *status, uintptr_t *errval);
 void rpyyarv_set_trampoline_callback(rpyyarv_tramp_fn fn);
 void rpyyarv_define_method(uintptr_t klass, uintptr_t mid, int is_private,
                            int *state);

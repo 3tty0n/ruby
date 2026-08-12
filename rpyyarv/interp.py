@@ -1475,7 +1475,7 @@ TRAMP_UNSUPPORTED = 2
 TRAMP_UNWIND = 3
 
 
-def trampoline_callback(self_v, rid, argc, argv, blockv, statusp, errp):
+def trampoline_callback(self_v, rid, argc, argv, blockv, kw, statusp, errp):
     """Called from C when CRuby dispatched to an RPyYARV method; no RPython exception may reach libruby, so failures leave via statusp/errp."""
     boot.store_int(statusp, TRAMP_OK)
     boot.store_value(errp, value.Q_NIL)
@@ -1489,7 +1489,8 @@ def trampoline_callback(self_v, rid, argc, argv, blockv, statusp, errp):
         w_block = block_mod.from_proc(proc_v)
     foreign = _enter_foreign_stack()
     try:
-        return boot.as_value(_from_cruby(recv, mid, args, w_block))
+        return boot.as_value(_from_cruby(recv, mid, args, w_block,
+                                         boot.as_int(kw) != 0))
     except RubyException, e:
         boot.store_int(statusp, TRAMP_RAISE)
         boot.store_value(errp, e.value)
@@ -1547,8 +1548,8 @@ def _tramp_failed(statusp, errp, msg):
     boot.store_value(errp, boot.str_new('[rpyyarv] %s' % msg))
 
 
-def _from_cruby(recv, mid, args, w_block):
-    """The send half of the trampoline: the registry's own lookup, with the arguments CRuby already parsed."""
+def _from_cruby(recv, mid, args, w_block, kw_splat=False):
+    """The send half of the trampoline: the registry's own lookup, with the arguments CRuby already parsed; kw_splat says its last one is a keyword Hash."""
     if mid == rubycall.NO_MID:
         raise UnsupportedOperation(
             'CRuby dispatched a method name RPyYARV never interned')
@@ -1564,7 +1565,7 @@ def _from_cruby(recv, mid, args, w_block):
     callee.block = w_block
     pc = 0
     argc = len(args)
-    if callee_iseq.simple_params:
+    if callee_iseq.simple_params and not kw_splat:
         if argc != callee_iseq.nparams:
             _arity_error(argc, callee_iseq.nparams, callee_iseq.nparams)
         i = 0
@@ -1573,7 +1574,8 @@ def _from_cruby(recv, mid, args, w_block):
             i += 1
     else:
         _refuse_iseq(callee_iseq, mid)
-        pc = setup_params(callee_iseq, callee, args, False)
+        pc = setup_params(callee_iseq, callee, args, False, NO_KEYWORDS,
+                          kw_splat)
     debug.count_native()
     return execute(callee_iseq, callee, pc)
 

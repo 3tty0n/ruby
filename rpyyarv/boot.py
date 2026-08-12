@@ -68,9 +68,9 @@ MARK_HOOK = lltype.Ptr(lltype.FuncType([], lltype.Void))
 CONST_HOOK = lltype.Ptr(lltype.FuncType([], lltype.Void))
 BLOCK_HOOK = lltype.Ptr(lltype.FuncType([lltype.Signed, rffi.INT, VALUEP,
                                          VALUE], VALUE))
-# (self, mid, argc, argv, blockproc, status, errval) -> result
+# (self, mid, argc, argv, blockproc, kw, status, errval) -> result
 TRAMP_HOOK = lltype.Ptr(lltype.FuncType(
-    [VALUE, VALUE, rffi.INT, VALUEP, VALUE, INTP, VALUEP], VALUE))
+    [VALUE, VALUE, rffi.INT, VALUEP, VALUE, rffi.INT, INTP, VALUEP], VALUE))
 
 MAX_ARGC = 32
 
@@ -625,6 +625,11 @@ def define_method_entry(klass, rid, private):
 
 
 def as_signed(v):
+    return rffi.cast(lltype.Signed, v)
+
+
+def as_int(v):
+    """An rffi.INT the shim passed; too small for RPython arithmetic until it is widened."""
     return rffi.cast(lltype.Signed, v)
 
 

@@ -1514,6 +1514,8 @@ rpyyarv_trampoline(int argc, VALUE *argv, VALUE self)
     /* argv points into CRuby's VM stack, which rb_execution_context_mark already covers for the extent of the call; no second root here. */
     ID mid = rb_frame_this_func();
     VALUE blockproc = rb_block_given_p() ? rb_block_proc() : Qnil;
+    /* A cfunc taking -1 arguments is handed the keyword Hash as its last positional; only this says the caller meant it as keywords. */
+    int kw = rb_keyword_given_p() ? 1 : 0;
     int status = RPYYARV_TRAMP_OK;
     VALUE err = Qnil;
     VALUE r;
@@ -1522,7 +1524,7 @@ rpyyarv_trampoline(int argc, VALUE *argv, VALUE self)
         rb_raise(rb_eRuntimeError, "rpyyarv: no trampoline callback");
     }
     r = (VALUE)tramp_callback((uintptr_t)self, (uintptr_t)mid, argc,
-                              (uintptr_t *)argv, (uintptr_t)blockproc,
+                              (uintptr_t *)argv, (uintptr_t)blockproc, kw,
                               &status, (uintptr_t *)&err);
     /* Raised here, not on the RPython side: unwinding an RPython exception through this C frame back into libruby is undefined. */
     if (status == RPYYARV_TRAMP_RAISE) rb_exc_raise(err);
