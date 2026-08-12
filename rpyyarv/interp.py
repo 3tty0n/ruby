@@ -470,6 +470,9 @@ def _native_binop(recv, arg, mid):
     if mid == helpers.LTLT:
         return helpers.lshift(recv, arg)
     if mid == helpers.AREF:
+        v = helpers.hash_aref(recv, arg)
+        if v != value.Q_UNDEF:
+            return v
         return helpers.int_bitref(recv, arg)
     if mid == helpers.SQRT:
         return helpers.math_sqrt(recv, arg)

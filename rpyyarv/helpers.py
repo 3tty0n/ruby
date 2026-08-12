@@ -7,7 +7,8 @@ from rpyyarv import dispatch
 from rpyyarv import rubycall
 from rpyyarv import symbols
 from rpyyarv import value
-from rpyyarv.rlib import INFINITY, LONG_BIT, NAN, ovfcheck, promote
+from rpyyarv.rlib import (INFINITY, LONG_BIT, NAN, ovfcheck, promote,
+                          raw_word)
 
 PLUS = symbols.intern('+')
 MINUS = symbols.intern('-')
@@ -52,6 +53,7 @@ INCLUDE_P = symbols.intern('include?')
 RESPOND_TO_P = symbols.intern('respond_to?')
 POW = symbols.intern('**')
 TO_F = symbols.intern('to_f')
+TO_S = symbols.intern('to_s')
 NAME = symbols.intern('name')
 COS = symbols.intern('cos')
 INSTANCE_EVAL = symbols.intern('instance_eval')
@@ -114,7 +116,9 @@ B_STR_LTLT = 48
 B_KERNEL_NIL_P = 49
 B_BASIC_INSTANCE_EVAL = 50
 B_BASIC_INSTANCE_EXEC = 51
-B_COUNT = 52
+B_HASH_AREF = 52
+B_STR_TO_S = 53
+B_COUNT = 54
 
 _INT_MID = [PLUS, MINUS, MULT, DIV, MOD, EQ, LT, LE, GT, GE, AND, OR, XOR,
             RSHIFT]
@@ -363,6 +367,25 @@ def to_f(recv):
     if value.is_fixnum(recv) and _core_op(value.C_INTEGER, B_INT_TO_F, TO_F):
         return _from_dbl(float(value.fix2int(recv)))
     return value.Q_UNDEF
+
+
+def hash_aref(recv, key):
+    """Hash#[] straight to the lookup, skipping the send; a miss goes back to CRuby, which is what applies the default value or proc."""
+    if value.is_immediate(recv) \
+            or raw_word(recv, value.KLASS_WORD) != value.core_class(value.C_HASH):
+        return value.Q_UNDEF
+    if not _core_op(value.C_HASH, B_HASH_AREF, AREF):
+        return value.Q_UNDEF
+    return boot.hash_lookup(recv, key)
+
+
+def str_to_s(recv):
+    """String#to_s is the receiver itself, but only for a direct String: a subclass answers a new String (string.c:11845)."""
+    if not value.is_plain_string(recv):
+        return value.Q_UNDEF
+    if not _core_op(value.C_STRING, B_STR_TO_S, TO_S):
+        return value.Q_UNDEF
+    return recv
 
 
 def sym_name(recv):
@@ -685,6 +708,8 @@ def zero_arg(recv, mid):
         return to_f(recv)
     if mid == NAME:
         return sym_name(recv)
+    if mid == TO_S:
+        return str_to_s(recv)
     if mid == UMINUS:
         v = flt_uminus(recv)
         if v != value.Q_UNDEF:
@@ -723,7 +748,10 @@ def mod(a, b):
 
 
 def aref(recv, idx):
-    """Array[Fixnum] reads the elements in place."""
+    """Array[Fixnum] reads the elements in place; a Hash goes straight to the lookup."""
+    v = hash_aref(recv, idx)
+    if v != value.Q_UNDEF:
+        return v
     if value.is_plain_array(recv) and value.is_fixnum(idx) \
             and _ary_op(B_ARY_AREF):
         i = value.fix2int(idx)

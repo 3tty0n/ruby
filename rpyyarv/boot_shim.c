@@ -2070,6 +2070,8 @@ rpyyarv_bop_mask(void)
     BOP(rb_mKernel, "nil?");
     BOP(rb_cBasicObject, "instance_eval");
     BOP(rb_cBasicObject, "instance_exec");
+    BOP(rb_cHash, "[]");
+    BOP(rb_cString, "to_s");
 #undef BOP
 
     /* 0 fails helpers.refresh()'s count check loudly, rather than folding a pair's bit into the count. */
