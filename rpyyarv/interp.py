@@ -2262,6 +2262,16 @@ def _cref_klass(cref):
     return cref.const_base
 
 
+def _run_once(frame, iseq, idx):
+    """The body of a `once` instruction, run in a frame chained to this one as a block's is; the result is cached for every later execution."""
+    body = iseq.iseqs[idx]
+    callee = Frame(body, frame.self_val, _cref_of(frame), frame.entry)
+    callee.defining_frame = frame
+    v = execute(body, callee)
+    iseq.once_cache[idx] = v
+    return v
+
+
 @dont_look_inside
 def _cvar_base(frame):
     """vm_get_cvar_base: the innermost lexical scope that is a real class, so a `class << self` or an instance_eval scope steps aside."""
@@ -2715,6 +2725,13 @@ def _execute(iseq, frame, pc):
             mid = code[pc]
             pc += 1
             dispatch.ivar_set(frame.self_val, mid, frame.pop())
+        elif opcode == insns.ONCE:
+            idx = code[pc]
+            pc += 1
+            v = iseq.once_cache[idx]
+            if v == value.Q_UNDEF:
+                v = _run_once(frame, iseq, idx)
+            frame.push(v)
         elif opcode == insns.GETCLASSVARIABLE:
             mid = code[pc]
             pc += 1

@@ -35,6 +35,7 @@ class W_ISeq(object):
                           'has_return_throw', 'catches_return',
                           'kw_table[*]', 'kw_defaults[*]', 'kw_required',
                           'kw_start', 'kw_bits', 'kwrest', 'path']
+    # once_cache is written once per body and is deliberately not immutable.
 
     def __init__(self, name, code, consts, iseqs, callinfos, nlocals,
                  stack_max, nparams=0, simple_params=True, catches=None,
@@ -89,6 +90,8 @@ class W_ISeq(object):
         self.paths = paths if paths is not None else []
         # One inline cache slot per entry of paths, parallel to it.
         self.path_sites = path_sites if path_sites is not None else []
+        # One slot per nested ISeq; `once` fills its body's, Q_UNDEF meaning unrun.
+        self.once_cache = [0x24] * len(self.iseqs)
         # Integer literal -> destination pc for opt_case_dispatch.
         self.case_tables = case_tables if case_tables is not None else []
 

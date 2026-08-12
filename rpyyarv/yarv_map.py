@@ -67,6 +67,7 @@ EMIT = {
     'setinstancevariable': [0],
     'getclassvariable': [0],        # ICVARC dropped
     'setclassvariable': [0],
+    'once': [0],                    # IC dropped: the cache is a slot per body ISeq
     'defined': [0, 1, 2],
     'definedivar': [0, 2],          # IVC dropped
     'getconstant': [0],             # dynamic A::B; base and lexical flag are stack values

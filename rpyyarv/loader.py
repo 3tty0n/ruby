@@ -259,6 +259,8 @@ class Loader(object):
                         raw.kw_bits, raw.kwrest, self.program.path,
                         [t for t in pool.case_tables])
         gcroots.register_consts(consts)
+        # The values `once` caches live here, and the mark hook walks the list itself.
+        gcroots.register_consts(w_iseq.once_cache)
         return w_iseq
 
     # The ISeq types a non-local return may name; a class body gets LocalJumpError instead (vm_insnhelper.c:1893).

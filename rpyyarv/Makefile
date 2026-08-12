@@ -117,6 +117,7 @@ gccheck:
 	          test/fastsends.rb test/supercruby.rb test/instanceeval.rb \
 	          test/enumerators.rb test/loopiter.rb test/classvars.rb \
 	          test/scopedclass.rb test/trampolinekw.rb test/moduleattrs.rb \
+	          test/once.rb \
 	          test/defaultgems.rb \
 	          $(TOP)/benchmark/app_*.rb $(TOP)/benchmark/so_*.rb; do \
 	   n=`basename $$s`; \
