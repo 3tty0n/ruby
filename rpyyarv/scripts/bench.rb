@@ -3,18 +3,18 @@
 #
 # One driver for both benchmark suites: AWFY and ruby-bench (formerly
 # Shopify/yjit-bench). Each suite only supplies how a benchmark is located and
-# what script to run; timing, the punt gate, the tables and the aggregation are
+# what script to run; timing, the fallback, the tables and the aggregation are
 # shared.
 #
 # Neither suite's own harness is usable here: AWFY's run.rb uses getspecial and
-# ruby-bench's harness/loader.rb uses retry, so rpyyarv punts the whole file to
+# ruby-bench's harness/loader.rb uses retry, so rpyyarv fallbacks the whole file to
 # CRuby and the run silently measures CRuby. Both suites therefore run through a
 # generated driver / a shim harness that speaks the same ITER/DONE protocol.
 #
 # A TIMED RUN MUST NEVER CARRY INSTRUMENTATION ENV. RPYYARV_COVERAGE=1 alone
 # moved cd from 200 ms to 172 ms -- coverage counting changes what the tracing
 # JIT selects, so instrumented numbers are a different configuration and are not
-# comparable with anything else on this project. The punt gate therefore runs as
+# comparable with anything else on this project. The fallback therefore runs as
 # a separate cheap probe with coverage on, and the timed series runs clean.
 
 require "open3"
@@ -103,7 +103,7 @@ def timeout_argv(secs, argv)
   ["perl", "-e", "alarm shift; exec @ARGV", secs.to_s] + argv
 end
 
-# One process. Returns [times, err, info]; a punt is an error, never a number.
+# One process. Returns [times, err, info]; a fallback is an error, never a number.
 def run_once(argv, script, env, timeout)
   out, err, status = Open3.capture3(env, *timeout_argv(timeout, argv + [script]))
   # Benchmarks emit binary data; scrub before any regex touches it.
@@ -111,8 +111,8 @@ def run_once(argv, script, env, timeout)
   err = err.scrub
   text = out + err
   info = coverage_of(text)
-  if text.include?("punted to cruby:") || text.include?("running under CRuby instead")
-    return [nil, "PUNT", info.merge("punt" => first_punt(text))]
+  if text.include?("fallbacked to cruby:") || text.include?("running under CRuby instead")
+    return [nil, "FALLBACK", info.merge("fallback" => first_fallback(text))]
   end
   unless status.success?
     return [nil, status.exitstatus == 142 ? "TIMEOUT" : "FAIL", info.merge("why" => why(err, status))]
@@ -134,16 +134,16 @@ end
 def coverage_of(text)
   info = {}
   info["iseqs"] = Regexp.last_match(1) if text =~ /iseqs: (\d+\/\d+)/
-  if text =~ /files: rpyyarv (\d+), punted to cruby (\d+)/
+  if text =~ /files: rpyyarv (\d+), fallbacked to cruby (\d+)/
     info["files_native"] = Regexp.last_match(1).to_i
-    info["files_punted"] = Regexp.last_match(2).to_i
+    info["files_fallbacked"] = Regexp.last_match(2).to_i
   end
   info
 end
 
-def first_punt(text)
-  return Regexp.last_match(1).strip.sub(/\A.*?\.rb: /, "") if text =~ /punted to cruby: (.*)/
-  "punted"
+def first_fallback(text)
+  return Regexp.last_match(1).strip.sub(/\A.*?\.rb: /, "") if text =~ /fallbacked to cruby: (.*)/
+  "fallbacked"
 end
 
 def why(err, status)
@@ -199,7 +199,7 @@ class AwfySuite
 
   # Yields [script, env, warmup] and cleans up the generated driver; a probe
   # script runs one iteration at the real inner count, enough to load the file
-  # (where punts are decided) without paying for the full series.
+  # (where fallbacks are decided) without paying for the full series.
   def with_script(bench, probe: false)
     klass, inner, warm, meas = AWFY_BENCHMARKS[bench]
     src = <<~RUBY
@@ -234,6 +234,7 @@ class RubyBenchSuite
     @name = "ruby-bench"
     @warm = opts[:warmup] || 5
     @meas = opts[:iters] || 5
+    @gem_require = opts[:gem_require]
     # An explicit --ruby-bench is used as given, never silently replaced by a fallback.
     candidates = opts[:dir] ? [opts[:dir]] : [ENV["RUBY_BENCH"], File.join(ROOT, "ruby-bench"),
                                               File.join(ROOT, "yjit-bench")].compact
@@ -267,7 +268,7 @@ class RubyBenchSuite
   def gems?(bench) = File.exist?(File.join(File.dirname(paths[bench]), "Gemfile"))
 
   # The shim is inlined ahead of the benchmark and its harness/loader require
-  # dropped: loading upstream loader.rb punts the run (it uses retry). The driver
+  # dropped: loading upstream loader.rb fallbacks the run (it uses retry). The driver
   # sits in the benchmark's own dir so __dir__ and sibling requires still resolve.
   def with_script(bench, probe: false)
     warm = probe ? 0 : @warm
@@ -283,10 +284,10 @@ class RubyBenchSuite
                          "MIN_BENCH_ITRS" => meas.to_s,
                          "MIN_BENCH_TIME" => "0",
                          "RUBYLIB" => uninstalled_rubylib)
-    # Let CRuby own Bundler/RubyGems loading. Their require_relative callbacks
-    # need CRuby control frames; the benchmark driver itself still runs in
-    # RPyYARV, and gem method calls are measured through the normal boundary.
-    env["RPYYARV_NO_REQUIRE"] = "1" if gems?(bench)
+    # CRuby owns Bundler/RubyGems loading. RPyYARV can load a gem's own tree
+    # (--gem-require turns that on), but not RubyGems' -- re-running the files
+    # CRuby already loaded at boot redefines Gem's constants and then crashes.
+    env["RPYYARV_NO_REQUIRE"] = "1" if !@gem_require && gems?(bench)
     yield path, env, warm
   ensure
     File.unlink(path) if path && File.exist?(path)
@@ -320,7 +321,7 @@ rescue JSON::ParserError
   {}
 end
 
-# Classify under the plain interpreter: NATIVE / PUNT / CRASH / TIMEOUT / NEEDS-GEMS.
+# Classify under the plain interpreter: NATIVE / FALLBACK / CRASH / TIMEOUT / NEEDS-GEMS.
 # A Gemfile alone is not a verdict -- some bundled benchmarks (optcarrot) run
 # natively anyway -- so it only explains a failure.
 def probe(suite, bench)
@@ -329,12 +330,12 @@ def probe(suite, bench)
     failure = info["why"].to_s
     status = case err
              when nil then "NATIVE"
-             when "PUNT" then "PUNT"
+             when "FALLBACK" then "FALLBACK"
              when "TIMEOUT" then "TIMEOUT"
              else suite.gems?(bench) &&
                   failure.match?(/Bundler|Could not find|cannot load such file/) ? "NEEDS-GEMS" : "CRASH"
              end
-    why = info["punt"] || info["why"]
+    why = info["fallback"] || info["why"]
     why = "#{why}; bundle install in #{File.dirname(suite.paths[bench])}" if status == "NEEDS-GEMS"
     return { "status" => status, "why" => why, "iseqs" => info["iseqs"] }
   end
@@ -379,7 +380,7 @@ def run_suite(suite, names, engines, procs, raw)
       rows << [bench, suite.label(bench), {}, skip]
       next
     end
-    # The punt verdict and the coverage counts come from an instrumented probe;
+    # The fallback verdict and the coverage counts come from an instrumented probe;
     # the timed series below runs without it.
     probes = {}
     suite.with_script(bench, probe: true) do |script, env, _warm|
@@ -455,7 +456,7 @@ def summarize(all_rows, engines)
   ratios = ratio_columns(engines)
   puts
   puts "== combined summary =="
-  headers = ["suite", "n native", "n punted", "n excluded"] + ratios.map { |h, _, _| "geomean #{h}" }
+  headers = ["suite", "n native", "n fallbacked", "n excluded"] + ratios.map { |h, _, _| "geomean #{h}" }
   table = []
   totals = Hash.new { |h, k| h[k] = [] }
   all_rows.each do |suite_name, rows|
@@ -463,9 +464,9 @@ def summarize(all_rows, engines)
     primary = engines.map(&:first).include?("rpyyarv-jit") ? "rpyyarv-jit" : engines.first.first
     verdicts = rows.map { |_b, _l, r, s| s ? "SKIP" : (r[primary] && r[primary][:status]) }
     native = verdicts.count(&:nil?)
-    punted = verdicts.count("PUNT")
-    excluded = verdicts.size - native - punted
-    cells = [suite_name, native.to_s, punted.to_s, excluded.to_s]
+    fallbacked = verdicts.count("FALLBACK")
+    excluded = verdicts.size - native - fallbacked
+    cells = [suite_name, native.to_s, fallbacked.to_s, excluded.to_s]
     ratios.each do |h, num, den|
       vals = rows.filter_map do |_b, _l, r, s|
         next if s
@@ -485,7 +486,7 @@ def summarize(all_rows, engines)
   end
   table << overall
   render_table(headers, table)
-  puts "geometric mean over benchmarks that produced a number under both engines; PUNT/FAIL rows are counted, not dropped"
+  puts "geometric mean over benchmarks that produced a number under both engines; FALLBACK/FAIL rows are counted, not dropped"
 end
 
 def main(argv)
@@ -522,6 +523,7 @@ def main(argv)
       extra_engines << [n, [File.expand_path(path)]]
     when "--compare" then extra_engines << ["alt", [File.expand_path(argv.shift.to_s)]]
     when /\A--foreign(?:=(\d+))?\z/ then foreign_top = (Regexp.last_match(1) || 12).to_i
+    when "--gem-require" then opts[:gem_require] = true
     when "--inventory" then inventory_only = true
     when "--refresh-inventory" then refresh = true
     when "-h", "--help"
@@ -529,7 +531,9 @@ def main(argv)
         usage: bench.rb [--suite awfy|ruby-bench|all] [--procs N] [--filter SUBSTRING]...
                         [--ruby-bench DIR] [--warmup N] [--iters N] [--raw FILE]
                         [--engine NAME=PATH]... [--compare BIN] [--inventory] [--refresh-inventory]
-                        [--foreign[=N]]
+                        [--foreign[=N]] [--gem-require]
+        --gem-require lets RPyYARV own the requires in a Gemfile benchmark
+        instead of leaving them to CRuby; RubyGems' own tree still crashes it.
         --foreign runs the coverage probe only and ranks what each benchmark still
         sends to CRuby; it prints no timings, since coverage perturbs them.
         --engine/--compare add an engine that is timed interleaved with the others and
@@ -568,11 +572,11 @@ def main(argv)
     end
     if suite.is_a?(RubyBenchSuite)
       inv = inventory_for(suite, names, refresh || inventory_only)
-      # Punting benchmarks are still timed (the punt gate reports them per engine);
+      # Fallbacking benchmarks are still timed (the fallback reports them per engine);
       # only ones that cannot run at all become rows with their classification.
       suite.define_singleton_method(:skip_reason) do |bench|
         s = inv[bench] && inv[bench]["status"]
-        s && !%w[NATIVE PUNT].include?(s) ? "#{s}: #{inv[bench]['why']}" : nil
+        s && !%w[NATIVE FALLBACK].include?(s) ? "#{s}: #{inv[bench]['why']}" : nil
       end
       next if inventory_only
     end

@@ -461,10 +461,6 @@ class Loader(object):
                 raise UnsupportedOperation(
                     "'%s' uses defineclass type %d, which RPyYARV does not "
                     "support" % (raw.name, kind))
-            if flags & optable.DEFINECLASS_FLAG_SCOPED:
-                raise UnsupportedOperation(
-                    "'%s' defines a class under an explicit scope, which "
-                    "RPyYARV does not support" % raw.name)
 
     def operand(self, op, pos, ops, raw, pool, labels, parents):
         operand = ops[pos]

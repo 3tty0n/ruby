@@ -65,6 +65,8 @@ EMIT = {
     'opt_neq': [],          # both CALL_DATA dropped
     'getinstancevariable': [0],     # IVC dropped
     'setinstancevariable': [0],
+    'getclassvariable': [0],        # ICVARC dropped
+    'setclassvariable': [0],
     'defined': [0, 1, 2],
     'definedivar': [0, 2],          # IVC dropped
     'getconstant': [0],             # dynamic A::B; base and lexical flag are stack values
