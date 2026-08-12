@@ -224,7 +224,7 @@ rb_local_jump_error = _ext('rpyyarv_local_jump_error',
                            [rffi.CCHARP, VALUE, rffi.INT, INTP], VALUE,
                            reenters=True)
 rb_set_block_unwind = _ext('rpyyarv_set_block_unwind', [], lltype.Void)
-rb_bop_mask = _ext('rpyyarv_bop_mask', [], VALUE, reenters=True)
+rb_bop_mask = _ext('rpyyarv_bop_mask', [INTP], VALUE, reenters=True)
 rb_require_resolve = _ext('rpyyarv_require_resolve', [VALUE, VALUEP, INTP],
                           rffi.INT, reenters=True)
 rb_provide_ = _ext('rpyyarv_provide', [VALUE, INTP], lltype.Void,
@@ -236,6 +236,8 @@ rb_method_owner = _ext('rpyyarv_method_owner', [VALUE, VALUE], VALUE,
 rb_super_owner = _ext('rpyyarv_super_owner', [VALUE, VALUE, VALUE], VALUE,
                       reenters=True)
 rb_responds = _ext('rpyyarv_responds', [VALUE, VALUE], rffi.INT,
+                   reenters=True)
+rb_class_le = _ext('rpyyarv_class_le', [VALUE, VALUE], rffi.INT,
                    reenters=True)
 rb_ary_to_ary = _ext('rpyyarv_ary_to_ary', [VALUE, INTP], VALUE,
                      reenters=True)
@@ -914,6 +916,11 @@ def sym_name(sym):
     return rffi.cast(lltype.Signed, rb_sym_name(_v(sym)))
 
 
+def class_le(klass, target):
+    """Module#<=: 1 below or equal, 0 not, -1 when target is not a Module."""
+    return rffi.cast(lltype.Signed, rb_class_le(_v(klass), _v(target)))
+
+
 def responds(klass, sym):
     """Whether every instance of klass responds to sym: 1 yes, 0 no, -1 unanswerable per class."""
     return rffi.cast(lltype.Signed, rb_responds(_v(klass), _v(sym)))
@@ -1282,13 +1289,14 @@ def set_block_unwind():
     rb_set_block_unwind()
 
 
-BOP_COUNT_SHIFT = 56
 
 
 def bop_mask():
-    """(pair count, one bit per redefined pair) as the shim orders them."""
-    v = rffi.cast(lltype.Signed, rb_bop_mask())
-    return v >> BOP_COUNT_SHIFT, v & ((1 << BOP_COUNT_SHIFT) - 1)
+    """(pair count, one bit per redefined pair) as the shim orders them; the count is separate so the mask may use every bit."""
+    with lltype.scoped_alloc(INTP.TO, 1) as count:
+        count[0] = rffi.cast(rffi.INT, 0)
+        v = rffi.cast(lltype.Signed, rb_bop_mask(count))
+        return rffi.cast(lltype.Signed, count[0]), v
 
 
 def require_resolve(fname):

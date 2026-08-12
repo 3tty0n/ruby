@@ -113,6 +113,9 @@ uintptr_t rpyyarv_method_owner(uintptr_t klass, uintptr_t id);
 /* The module `super` from owner's copy of id reaches next, along klass's chain; Qnil when there is none. */
 uintptr_t rpyyarv_super_owner(uintptr_t klass, uintptr_t owner, uintptr_t id);
 
+/* Module#<=: 1 when klass is target or below it, 0 when it is not or they are unrelated, -1 when the question is not a module's. */
+int rpyyarv_class_le(uintptr_t klass, uintptr_t target);
+
 /* respond_to? for every instance of klass: 1 yes, 0 no, -1 only the receiver can answer. */
 int rpyyarv_responds(uintptr_t klass, uintptr_t sym);
 
@@ -273,9 +276,7 @@ uintptr_t rpyyarv_arity_error(int given, int min, int max, int *state);
 uintptr_t rpyyarv_keyword_error(const char *kind, uintptr_t keys, int *state);
 
 /* One bit per (class, basic operator) pair, set when the pair is no longer CRuby's own definition; the pair count rides above the bits so a caller can refuse a shim it disagrees with. */
-/* Above every bit the table below sets: a pair whose bit landed in the count field would read as never redefined. */
-#define RPYYARV_BOP_COUNT_SHIFT 56
-uintptr_t rpyyarv_bop_mask(void);
+uintptr_t rpyyarv_bop_mask(int *count);
 
 /* One field of a direct Range instance, or Qundef for anything else. */
 #define RPYYARV_RANGE_BEG  0

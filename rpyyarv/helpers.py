@@ -56,6 +56,8 @@ TO_F = symbols.intern('to_f')
 TO_S = symbols.intern('to_s')
 NAME = symbols.intern('name')
 COS = symbols.intern('cos')
+KIND_OF_P = symbols.intern('kind_of?')
+IS_A_P = symbols.intern('is_a?')
 INSTANCE_EVAL = symbols.intern('instance_eval')
 INSTANCE_EXEC = symbols.intern('instance_exec')
 
@@ -118,7 +120,10 @@ B_BASIC_INSTANCE_EVAL = 50
 B_BASIC_INSTANCE_EXEC = 51
 B_HASH_AREF = 52
 B_STR_TO_S = 53
-B_COUNT = 54
+B_KERNEL_EQQ = 54
+B_KERNEL_KIND_OF = 55
+B_KERNEL_IS_A = 56
+B_COUNT = 57
 
 _INT_MID = [PLUS, MINUS, MULT, DIV, MOD, EQ, LT, LE, GT, GE, AND, OR, XOR,
             RSHIFT]
@@ -460,6 +465,33 @@ def identity_send(recv, mid):
     if mid != EQUAL_P and _sym_eq(recv, mid):
         return True
     return identity_op(recv, mid)
+
+
+def kind_of(recv, target, mid):
+    """Kernel#kind_of?/#is_a? cached per (class, module), so a promoted receiver folds it to a constant."""
+    bit = B_KERNEL_KIND_OF if mid == KIND_OF_P else B_KERNEL_IS_A
+    if not _cruby_owns(bit):
+        return value.Q_UNDEF
+    if value.is_immediate(target):
+        return value.Q_UNDEF
+    klass = value.class_of(recv)
+    if klass == 0:
+        return value.Q_UNDEF
+    got = dispatch.kind_of(promote(klass), target)
+    if got < 0:
+        return value.Q_UNDEF
+    return value.newbool(got == 1)
+
+
+def sym_eqq(a, b):
+    """Symbol#=== is Kernel's, which is ==, which for a Symbol compares the words."""
+    if value.class_of(a) != value.core_class(value.C_SYMBOL):
+        return value.Q_UNDEF
+    if not _cruby_owns(B_KERNEL_EQQ) or not _sym_op(B_SYM_EQ):
+        return value.Q_UNDEF
+    if dispatch.lookup_core(value.core_class(value.C_SYMBOL), EQQ) is not None:
+        return value.Q_UNDEF
+    return value.newbool(a == b)
 
 
 def responds_to(recv, sym):

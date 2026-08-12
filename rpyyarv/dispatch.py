@@ -484,6 +484,7 @@ class _Owners(object):
         self.tab = {}       # (klass VALUE, mid) -> owning module VALUE
         self.stab = {}      # the same, for the module above that one
         self.rtab = {}      # (klass VALUE, Symbol VALUE) -> respond_to? for every instance
+        self.ktab = {}      # (klass VALUE, module VALUE) -> kind_of? for every instance
 
 
 owners = _Owners()
@@ -493,11 +494,13 @@ OWNER_UNKNOWN = -1
 
 def invalidate_owners():
     """CRuby's rb_clear_method_cache, by way of the shim's method hook: every def, undef, alias, include and prepend reaches it."""
-    if len(owners.tab) == 0 and len(owners.stab) == 0 and len(owners.rtab) == 0:
+    if len(owners.tab) == 0 and len(owners.stab) == 0 \
+            and len(owners.rtab) == 0 and len(owners.ktab) == 0:
         return
     owners.tab = {}
     owners.stab = {}
     owners.rtab = {}
+    owners.ktab = {}
     registry.version = Version()
 
 
@@ -578,6 +581,29 @@ def sym_name(sym):
     if got == 0:
         _fill_sym_name(sym)
         got = _sym_name(sym, registry.version)
+    return got
+
+
+@elidable
+def _kind_of(klass, target, version):
+    return owners.ktab.get((klass, target), RESPONDS_UNKNOWN)
+
+
+@dont_look_inside
+def _fill_kind_of(klass, target):
+    got = boot.class_le(klass, target)
+    gcroots.register_class(klass)
+    gcroots.register_class(target)
+    owners.ktab[(klass, target)] = got
+    registry.version = Version()
+
+
+def kind_of(klass, target):
+    """kind_of? answered from the two classes; every instance of klass gives the same answer, and an include or prepend clears the table."""
+    got = _kind_of(klass, target, registry.version)
+    if got == RESPONDS_UNKNOWN:
+        _fill_kind_of(klass, target)
+        got = _kind_of(klass, target, registry.version)
     return got
 
 

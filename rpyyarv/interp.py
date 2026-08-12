@@ -462,7 +462,12 @@ def _shift_off(frame, recv_at):
 def _native_binop(recv, arg, mid):
     """A one-argument send RPyYARV answers itself, or Qundef."""
     if mid == helpers.EQQ:
-        return helpers.int_eqq(recv, arg)
+        v = helpers.int_eqq(recv, arg)
+        if v != value.Q_UNDEF:
+            return v
+        return helpers.sym_eqq(recv, arg)
+    if mid == helpers.KIND_OF_P or mid == helpers.IS_A_P:
+        return helpers.kind_of(recv, arg, mid)
     if mid == helpers.XOR:
         return helpers.xor(recv, arg)
     if mid == helpers.RSHIFT:

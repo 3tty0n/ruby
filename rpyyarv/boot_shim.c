@@ -2005,7 +2005,7 @@ rpyyarv_arity_error(int given, int min, int max, int *state)
 
 /* ruby_vm_redefined_flag is hidden in libruby so BASIC_OP_UNREDEFINED_P is unreachable; rb_method_basic_definition_p asks the same question per entry (vm.c:2341), one bit per (class, operator) pair in the order helpers.py names them. */
 uintptr_t
-rpyyarv_bop_mask(void)
+rpyyarv_bop_mask(int *count)
 {
     uintptr_t mask = 0;
     int i = 0;
@@ -2072,11 +2072,14 @@ rpyyarv_bop_mask(void)
     BOP(rb_cBasicObject, "instance_exec");
     BOP(rb_cHash, "[]");
     BOP(rb_cString, "to_s");
+    BOP(rb_mKernel, "===");
+    BOP(rb_mKernel, "kind_of?");
+    BOP(rb_mKernel, "is_a?");
 #undef BOP
 
-    /* 0 fails helpers.refresh()'s count check loudly, rather than folding a pair's bit into the count. */
-    if (i > RPYYARV_BOP_COUNT_SHIFT) return 0;
-    return (uintptr_t)i << RPYYARV_BOP_COUNT_SHIFT | mask;
+    /* The count is an out-parameter, so every bit of the word stays available to the mask. */
+    *count = i;
+    return mask;
 }
 
 /* Qundef for anything but a direct Range instance, so an overriding subclass falls back to normal dispatch; fields come from internal/range.h, so no RRange layout is compiled into the RPython side. */
@@ -2184,6 +2187,31 @@ rpyyarv_str_getbyte(uintptr_t str, uintptr_t index)
     if (offset < 0) offset += len;
     if (offset < 0 || offset >= len) return (uintptr_t)Qnil;
     return (uintptr_t)INT2FIX((unsigned char)RSTRING_PTR(s)[offset]);
+}
+
+static VALUE
+class_le_body(VALUE argp)
+{
+    struct owner_args *p = (struct owner_args *)argp;
+    /* Module#<= is kind_of? asked of the class instead of an instance: true when klass is the target or below it, nil when they are unrelated. */
+    return rb_funcall(p->klass, rb_intern("<="), 1, (VALUE)p->id);
+}
+
+int
+rpyyarv_class_le(uintptr_t klass, uintptr_t target)
+{
+    struct owner_args a;
+    int state = 0;
+    VALUE r;
+    a.klass = (VALUE)klass;
+    a.id = (ID)target;
+    r = rb_protect(class_le_body, (VALUE)&a, &state);
+    if (state) {
+        rb_set_errinfo(Qnil);
+        return -1;
+    }
+    if (NIL_P(r)) return 0;
+    return RTEST(r) ? 1 : 0;
 }
 
 uintptr_t
