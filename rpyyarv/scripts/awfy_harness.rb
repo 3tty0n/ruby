@@ -3,7 +3,7 @@
 #
 # Drop-in replacement for AWFY's harness.rb + run.rb that rpyyarv runs natively.
 #
-# The original punts: run.rb's class-name fallback uses $1/$2, and getspecial is
+# The original delegates: run.rb's class-name fallback uses $1/$2, and getspecial is
 # unimplemented, so rpyyarv sends the whole file -- and every benchmark it
 # requires -- to CRuby. Stdout here is byte-identical to the original apart from
 # the timing numbers.

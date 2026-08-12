@@ -1,5 +1,5 @@
 # The keyword shapes RPyYARV still hands back to CRuby. Deliberately kept out
-# of the Makefile's gccheck list: its punt gate fails a punted file by design.
+# of the Makefile's gccheck list: its gate fails a delegated file by design.
 #
 #   1. a ** under a &block, which puts an unimplemented splatkw between them
 #   2. more than 31 keyword parameters, whose unspecified mask is a Hash

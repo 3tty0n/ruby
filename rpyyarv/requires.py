@@ -91,7 +91,7 @@ def _load_rb(fname, path):
     i = 0
     while i < len(files.delegated):
         if files.delegated[i] in name:
-            return _punt(fname, name, 0, 0,
+            return _delegate_file(fname, name, 0, 0,
                          'RPYYARV_DELEGATE_FILES names it')
         i += 1
 
@@ -99,10 +99,10 @@ def _load_rb(fname, path):
         result = _compile(path)
     except RubyException:
         # A syntax error reads better out of CRuby's own require.
-        return _punt(fname, name, 0, 0,
+        return _delegate_file(fname, name, 0, 0,
                      'the embedded CRuby would not compile it')
     if len(result.reasons) > 0:
-        return _punt(fname, name, result.total, result.supported,
+        return _delegate_file(fname, name, result.total, result.supported,
                      result.reasons[0])
 
     files.loading[name] = True
@@ -133,7 +133,7 @@ def _compile(path):
         gcroots.release(iseqw)
 
 
-def _punt(fname, name, total, supported, reason):
+def _delegate_file(fname, name, total, supported, reason):
     """This one file to CRuby; the file that required it stays on RPyYARV."""
     debug.record_file(name, total, supported, reason)
     return _delegate(fname)

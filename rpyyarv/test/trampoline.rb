@@ -99,8 +99,8 @@ puts bag.sort_by { |x| -x }.inspect
 # A method RPyYARV defined, called from a file CRuby executed, reached through
 # a natively loaded file in between.
 require_relative "trampoline_chain"
-puts punted_report(t)
-puts PuntSub.new.describe
+puts delegated_report(t)
+puts DelegatedSub.new.describe
 
 # An exception raised inside an RPyYARV method, caught in Ruby, through both
 # an RPyYARV send and a CRuby-driven one.

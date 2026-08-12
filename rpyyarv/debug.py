@@ -58,7 +58,7 @@ class _Coverage(object):
         self.files_cruby = 0
         self.iseqs_total = 0
         self.iseqs_native = 0
-        self.punted = []        # 'path: why RPyYARV would not run it'
+        self.delegated = []     # 'path: why RPyYARV would not run it'
         self.by_name = {}       # method name -> foreign sends of it
         self.by_site = {}       # (mid, receiver class, argument class) -> the same
 
@@ -96,7 +96,7 @@ def configure_coverage():
 
 
 def record_file(path, total, supported, reason):
-    """One .rb file's outcome; a non-empty reason means RPyYARV punted it to CRuby, whose method definitions its own dispatch never sees."""
+    """One .rb file's outcome; a non-empty reason means RPyYARV delegated it to CRuby, whose method definitions its own dispatch never sees."""
     if not coverage.enabled:
         return
     coverage.iseqs_total += total
@@ -105,7 +105,7 @@ def record_file(path, total, supported, reason):
         coverage.files_native += 1
     else:
         coverage.files_cruby += 1
-        coverage.punted.append('%s: %s' % (path, reason))
+        coverage.delegated.append('%s: %s' % (path, reason))
 
 
 def report():
@@ -113,15 +113,15 @@ def report():
     if not coverage.enabled:
         return
     note('sends: rpyyarv %d, cruby %d' % (coverage.native, coverage.foreign))
-    note('files: rpyyarv %d, punted to cruby %d'
+    note('files: rpyyarv %d, delegated to cruby %d'
          % (coverage.files_native, coverage.files_cruby))
     percent = (100 * coverage.iseqs_native // coverage.iseqs_total
                if coverage.iseqs_total > 0 else 0)
     note('iseqs: %d/%d (%d%%) across %d file(s)'
          % (coverage.iseqs_native, coverage.iseqs_total, percent,
             coverage.files_native + coverage.files_cruby))
-    for i in range(len(coverage.punted)):
-        note('  punted to cruby: %s' % coverage.punted[i])
+    for i in range(len(coverage.delegated)):
+        note('  delegated to cruby: %s' % coverage.delegated[i])
     for name, n in _top_foreign():
         note('  cruby send: %s %d' % (name, n))
     for key, n in _top_sites():

@@ -91,7 +91,7 @@ end
 puts Calc.double(21)
 puts Calc.quad(3)
 
-# module_function punts the whole file, so a module's own methods use def self.
+# module_function delegates the whole file, so a module's own methods use def self.
 module Util
   def self.twice(n)
     n + n
