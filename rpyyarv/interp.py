@@ -229,6 +229,10 @@ def invoke(frame, w_ci, w_block=None):
         # rb_f_block_given_p reads the *caller's* frame (vm.c:1862); through rb_funcallv it would find a CRuby one.
         _drop(frame, recv_at)
         return value.newbool(frame.block is not None)
+    if mid == BACKTRACE_PRIM and fcall and argc == 0:
+        _drop(frame, recv_at)
+        debug.count_native()
+        return _backtrace()
     if mid == DIR_UNDERSCORE and fcall and argc == 0:
         # Likewise f_dir: the running file is this frame's ISeq, not any CRuby frame's.
         v = _dir_of(frame)
@@ -434,6 +438,41 @@ NEW = symbols.intern('new')
 INITIALIZE = symbols.intern('initialize')
 BLOCK_GIVEN = symbols.intern('block_given?')
 DIR_UNDERSCORE = symbols.intern('__dir__')
+BACKTRACE_PRIM = symbols.intern('__rpyyarv_backtrace__')
+
+
+# A deeper chain than this is a runaway; caller only ever reads the top anyway.
+MAX_BACKTRACE = 4096
+# What RubyVM::InstructionSequence.compile names a source with no file, which is how prelude.rb is built; its frames are RPyYARV's own and no caller ever wrote them.
+COMPILED_PATH = '<compiled>'
+
+
+@dont_look_inside
+def _backtrace():
+    """path, line and label of every live RPyYARV frame, innermost first, flattened into one Array; the prelude's Kernel#caller turns it into what CRuby answers. CRuby's own caller_locations sees none of these frames, since RPyYARV pushes no CRuby control frame."""
+    ary = rubycall.ary_new([])
+    # Held: the strings below allocate, and an RPython list is no GC root.
+    gcroots.hold(ary)
+    try:
+        f = gcroots.state.top
+        n = 0
+        at = 0
+        while f is not None and n < MAX_BACKTRACE:
+            n += 1
+            w_iseq = f.w_iseq
+            path = w_iseq.path
+            if path == COMPILED_PATH or path == '':
+                f = f.prev_frame
+                continue
+            rubycall.ary_store(ary, at, boot.str_new(path))
+            rubycall.ary_store(ary, at + 1,
+                               value.int2fix(w_iseq.line_for(f.pc)))
+            rubycall.ary_store(ary, at + 2, boot.str_new(w_iseq.name))
+            at += 3
+            f = f.prev_frame
+    finally:
+        gcroots.release(ary)
+    return ary
 
 
 @dont_look_inside

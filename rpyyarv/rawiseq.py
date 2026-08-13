@@ -92,6 +92,9 @@ class RawISeq(object):
         self.kw_bits = kw_bits
         self.kwrest = kwrest
         self.insns = []
+        # Source line of each entry of insns; the bare Integers in iseq_data_to_ary's body set it.
+        self.lines = []
+        self.cur_line = 0
         # label name -> index into insns; the loader turns it into a pc.
         self.labels = {}
         # Enclosing ISeq, -1 for the outermost; the naming scope a getlocal at level 1 reaches. Only bootiseq.py fills it in.
@@ -99,6 +102,10 @@ class RawISeq(object):
 
     def add_insn(self, insn):
         self.insns.append(insn)
+        self.lines.append(self.cur_line)
+
+    def set_line(self, n):
+        self.cur_line = n
 
     def add_label(self, name):
         self.labels[name] = len(self.insns)

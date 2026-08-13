@@ -35,7 +35,8 @@ class W_ISeq(object):
                           'post_num', 'unsupported', 'autosplat',
                           'has_return_throw', 'catches_return',
                           'kw_table[*]', 'kw_defaults[*]', 'kw_required',
-                          'kw_start', 'kw_bits', 'kwrest', 'path']
+                          'kw_start', 'kw_bits', 'kwrest', 'path',
+                          'line_pcs[*]', 'line_nums[*]']
     # once_cache is written once per body and is deliberately not immutable.
 
     def __init__(self, name, code, consts, iseqs, callinfos, nlocals,
@@ -45,7 +46,10 @@ class W_ISeq(object):
                  has_return_throw=False, catches_return=False,
                  path_sites=None, kw_table=None, kw_defaults=None,
                  kw_required=0, kw_start=-1, kw_bits=-1, kwrest=-1, path='',
-                 case_tables=None):
+                 case_tables=None, line_pcs=None, line_nums=None):
+        # Source lines, one pair per line change rather than per instruction; line_for walks them.
+        self.line_pcs = line_pcs if line_pcs is not None else []
+        self.line_nums = line_nums if line_nums is not None else []
         # The file this ISeq was compiled from; require_relative in a method body resolves against it, since no CRuby frame carries it.
         self.path = path
         self.name = name
@@ -95,6 +99,17 @@ class W_ISeq(object):
         self.once_cache = [0x24] * len(self.iseqs)
         # Integer literal -> destination pc for opt_case_dispatch.
         self.case_tables = case_tables if case_tables is not None else []
+
+    def line_for(self, pc):
+        """The source line of the instruction at pc, or 0 when the ISeq carries none."""
+        found = 0
+        i = 0
+        while i < len(self.line_pcs):
+            if self.line_pcs[i] > pc:
+                break
+            found = self.line_nums[i]
+            i += 1
+        return found
 
     def repr(self):
         return '<W_ISeq %s>' % self.name

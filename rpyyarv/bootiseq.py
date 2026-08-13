@@ -126,6 +126,9 @@ def _read_iseq(program, pending, owners, ary, parent):
             name = boot.sym_of(e)
             if not name.startswith(EVENT_PREFIX):
                 raw.add_label(name)
+        elif boot.is_fixnum(e):
+            # A bare Integer in the body is the source line the instructions after it come from (iseq.c iseq_data_to_ary).
+            raw.set_line(boot.num2long(e))
 
 
 def _insn(pending, owners, e, me):

@@ -216,6 +216,15 @@ class Loader(object):
             at = raw.labels[name]
             labels[name] = pc if at >= len(starts) else starts[at]
 
+        # Only where the line changes, so a long ISeq costs one pair per source line rather than one per instruction.
+        line_pcs = []
+        line_nums = []
+        for i in range(len(starts)):
+            n = raw.lines[i] if i < len(raw.lines) else 0
+            if len(line_nums) == 0 or line_nums[len(line_nums) - 1] != n:
+                line_pcs.append(starts[i])
+                line_nums.append(n)
+
         # W_ISeq declares code and consts immutable, so neither may ever be resized; pc already holds the final length.
         pool = ConstPool()
         code = [0] * pc
@@ -259,7 +268,8 @@ class Loader(object):
                         [dispatch.new_const_site() for _ in pool.paths],
                         kw_table, kw_defaults, raw.kw_required, kw_start,
                         raw.kw_bits, raw.kwrest, self.program.path,
-                        [t for t in pool.case_tables])
+                        [t for t in pool.case_tables],
+                        [p for p in line_pcs], [n for n in line_nums])
         gcroots.register_consts(consts)
         # The values `once` caches live here, and the mark hook walks the list itself.
         gcroots.register_consts(w_iseq.once_cache)

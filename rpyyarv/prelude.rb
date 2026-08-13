@@ -159,3 +159,61 @@ module Kernel
   end
 end
 
+# CRuby's own caller/caller_locations see no Ruby frames, since RPyYARV runs
+# them without pushing a CRuby control frame: they answer [] or nil, and a
+# `caller_locations(1, 1).first` (ActiveSupport does this per delegated method)
+# raises. These read RPyYARV's own frame chain instead.
+module RPyYARV
+  # A Struct, not a class of its own: prelude methods get no CRuby trampoline
+  # (enable_trampolines runs after this file), so an `initialize` defined here
+  # would be invisible to the Class#new that CRuby runs. Nothing here is a real
+  # Thread::Backtrace::Location; only #path and #lineno are widely read.
+  Location = Struct.new(:path, :lineno, :label)
+
+  class Location
+    def absolute_path = path
+    def base_label = label
+    def to_s = "#{path}:#{lineno}:in '#{label}'"
+  end
+
+  # Every frame, innermost first. The primitive already drops this file's own
+  # frames, so index 0 is the caller of Kernel#caller_locations below.
+  def self.locations
+    raw = __rpyyarv_backtrace__
+    out = []
+    i = 0
+    while i < raw.length
+      out << Location.new(raw[i], raw[i + 1], raw[i + 2])
+      i = i + 3
+    end
+    out
+  end
+end
+
+module Kernel
+  def caller_locations(start = 1, length = nil)
+    if start.is_a?(Range)
+      length = start.size
+      start = start.begin
+    end
+    all = RPyYARV.locations
+    # nil only once start walks off the stack, as rb_f_caller_locations answers it.
+    return nil if start > all.length
+    out = all[start..]
+    length ? out[0, length] : out
+  end
+
+  def caller(start = 1, length = nil)
+    locs = caller_locations(start, length)
+    return nil unless locs
+    out = []
+    i = 0
+    while i < locs.length
+      l = locs[i]
+      out << "#{l.path}:#{l.lineno}:in '#{l.label}'"
+      i = i + 1
+    end
+    out
+  end
+end
+
