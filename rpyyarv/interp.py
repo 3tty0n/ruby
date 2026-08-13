@@ -652,16 +652,24 @@ def _eval_rpy(frame, klass, recv, source):
 
 @dont_look_inside
 def _module_eval_rpy(frame, recv, source):
-    """String class_eval/module_eval with the caller's lexical CREF preserved."""
+    """String class_eval/module_eval with the caller's lexical CREF preserved; a string RPyYARV cannot compile or load goes back to CRuby's module_eval."""
     if value.is_immediate(source) or not boot.is_string(source):
         return value.Q_UNDEF
     from rpyyarv import bootiseq
     from rpyyarv import loader
     from rpyyarv import prelude
     text = boot.str_of(source)
-    w_iseq = loader.load_strict(bootiseq.load(prelude._compile(text)))
+    try:
+        result = loader.load(bootiseq.load(prelude._compile(text)))
+    except RubyException:
+        return value.Q_UNDEF
+    except RPyYarvError:
+        return value.Q_UNDEF
+    if len(result.reasons) > 0:
+        return value.Q_UNDEF
     cref = _push_cref(_cref_of(frame), recv, True)
-    return execute(w_iseq, Frame(w_iseq, recv, cref, frame.entry))
+    return execute(result.w_iseq, Frame(result.w_iseq, recv, cref,
+                                        frame.entry))
 
 
 def _new_with_block(frame, entry, klass, recv_at, argc, w_block):
