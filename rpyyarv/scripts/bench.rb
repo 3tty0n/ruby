@@ -283,10 +283,30 @@ class RubyBenchSuite
 
   def gems?(bench) = File.exist?(File.join(File.dirname(paths[bench]), "Gemfile"))
 
+  # Whether RPyYARV compiles and runs this benchmark's gems itself, rather than
+  # leaving their requires to CRuby. Probed once per benchmark and cached: a
+  # gem tree RPyYARV cannot load must not turn a timing into a crash.
+  def native_requires?(bench)
+    return @gem_require unless @gem_require.nil?
+    @native ||= {}
+    return @native[bench] if @native.key?(bench)
+    @native[bench] = probe_native_requires(bench)
+  end
+
+  def probe_native_requires(bench)
+    ok = false
+    with_script(bench, probe: true, force_native: true) do |script, env, _w|
+      _t, err, = run_once([File.join(ROOT, "rpyyarv")], script, env, 120)
+      ok = err.nil?
+    end
+    puts format("  %-24s gems: %s", bench, ok ? "rpyyarv" : "cruby")
+    ok
+  end
+
   # The shim is inlined ahead of the benchmark and its harness/loader require
   # dropped: loading upstream loader.rb delegates the run (it uses retry). The driver
   # sits in the benchmark's own dir so __dir__ and sibling requires still resolve.
-  def with_script(bench, probe: false)
+  def with_script(bench, probe: false, force_native: false)
     warm = probe ? 0 : @warm
     meas = probe ? 1 : @meas
     src = File.read(paths[bench]).gsub(/^\s*require_relative\s+['"][.\/]*harness\/loader['"].*$/, "")
@@ -302,10 +322,14 @@ class RubyBenchSuite
                          "MIN_BENCH_ITRS" => meas.to_s,
                          "MIN_BENCH_TIME" => probe ? "0" : "1",
                          "RUBYLIB" => uninstalled_rubylib).merge(bench_gems_env)
-    # CRuby owns Bundler/RubyGems loading. RPyYARV can load a gem's own tree
-    # (--gem-require turns that on), but not RubyGems' -- re-running the files
-    # CRuby already loaded at boot redefines Gem's constants and then crashes.
-    env["RPYYARV_NO_REQUIRE"] = "1" if !@gem_require && gems?(bench)
+    # CRuby owns Bundler/RubyGems loading; RPyYARV can load a gem's own tree,
+    # but not RubyGems' -- re-running the files CRuby already loaded at boot
+    # redefines Gem's constants and then crashes. Which gems RPyYARV can own is
+    # per benchmark, so it is probed rather than assumed: --gem-require forces
+    # it on, --no-gem-require off, and the default is what the probe found.
+    if gems?(bench) && !force_native && !native_requires?(bench)
+      env["RPYYARV_NO_REQUIRE"] = "1"
+    end
     yield path, env, warm
   ensure
     File.unlink(path) if path && File.exist?(path)
@@ -545,6 +569,7 @@ def main(argv)
     when "--compare" then extra_engines << ["alt", [File.expand_path(argv.shift.to_s)]]
     when /\A--foreign(?:=(\d+))?\z/ then foreign_top = (Regexp.last_match(1) || 12).to_i
     when "--gem-require" then opts[:gem_require] = true
+    when "--no-gem-require" then opts[:gem_require] = false
     when "--inventory" then inventory_only = true
     when "--refresh-inventory" then refresh = true
     when "-h", "--help"
@@ -552,9 +577,11 @@ def main(argv)
         usage: bench.rb [--suite awfy|ruby-bench|all] [--procs N] [--filter SUBSTRING]...
                         [--ruby-bench DIR] [--warmup N] [--iters N] [--raw FILE]
                         [--engine NAME=PATH]... [--compare BIN] [--inventory] [--refresh-inventory]
-                        [--foreign[=N]] [--gem-require]
-        --gem-require lets RPyYARV own the requires in a Gemfile benchmark
-        instead of leaving them to CRuby; RubyGems' own tree still crashes it.
+                        [--foreign[=N]] [--gem-require|--no-gem-require]
+        By default each Gemfile benchmark is probed once for whether RPyYARV can
+        own its gem requires, and timed the way the probe says. --gem-require
+        forces it on for every benchmark, --no-gem-require leaves every require
+        to CRuby; RubyGems' own tree crashes RPyYARV either way.
         --foreign runs the coverage probe only and ranks what each benchmark still
         sends to CRuby; it prints no timings, since coverage perturbs them.
         --engine/--compare add an engine that is timed interleaved with the others and
