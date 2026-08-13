@@ -77,6 +77,40 @@ class Array
   def at(i)
     self[i]
   end
+
+  def map
+    return to_enum(:map) unless block_given?
+    out = []
+    i = 0
+    while i < self.length
+      out << yield(self[i])
+      i = i + 1
+    end
+    out
+  end
+
+  # The block arm only; liquid's scope walk calls it per variable lookup.
+  def find_index(*args)
+    if args.length == 0
+      return to_enum(:find_index) unless block_given?
+      i = 0
+      while i < self.length
+        return i if yield self[i]
+        i = i + 1
+      end
+      nil
+    elsif args.length == 1
+      obj = args[0]
+      i = 0
+      while i < self.length
+        return i if self[i] == obj
+        i = i + 1
+      end
+      nil
+    else
+      raise ArgumentError, "wrong number of arguments (given #{args.length}, expected 0..1)"
+    end
+  end
 end
 
 class Range
