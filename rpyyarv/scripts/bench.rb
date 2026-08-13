@@ -323,7 +323,12 @@ class RubyBenchSuite
                          # Same wall-clock warmup floor for every engine; a tracing JIT is not warm after 5 short iterations.
                          "WARMUP_TIME" => probe ? "0" : "5",
                          "MIN_BENCH_ITRS" => meas.to_s,
-                         "MIN_BENCH_TIME" => probe ? "0" : "1",
+                         # Seconds of measured series. Long enough that periodic
+                         # stalls -- rpyyarv-jit has ~300 ms ones on liquid every
+                         # few dozen iterations -- land in every window rather
+                         # than in some, which is what made the median jump 3x
+                         # between runs.
+                         "MIN_BENCH_TIME" => probe ? "0" : "5",
                          "RUBYLIB" => uninstalled_rubylib).merge(bench_gems_env)
     # CRuby owns Bundler/RubyGems loading; RPyYARV can load a gem's own tree,
     # but not RubyGems' -- re-running the files CRuby already loaded at boot
