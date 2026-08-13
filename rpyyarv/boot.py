@@ -195,6 +195,7 @@ rb_gvar_get_ = _ext('rpyyarv_gvar_get', [rffi.CCHARP, INTP], VALUE, reenters=Tru
 rb_gvar_set_ = _ext('rpyyarv_gvar_set', [rffi.CCHARP, VALUE, INTP],
                     lltype.Void, reenters=True)
 rb_proc_new = _ext('rpyyarv_proc_new', [rffi.LONG, INTP], VALUE, reenters=True)
+rb_pop_dead_handle = _ext('rpyyarv_pop_dead_handle', [], rffi.LONG)
 rb_is_proc = _ext('rpyyarv_is_proc', [VALUE], rffi.INT)
 rb_is_class = _ext('rpyyarv_is_class', [VALUE], rffi.INT)
 rb_gc_register = _ext('rpyyarv_gc_register_mark_object', [VALUE], lltype.Void, reenters=True)
@@ -1144,6 +1145,10 @@ def proc_new(handle):
     if failed:
         _failed('Proc.new')
     return ret
+
+
+def pop_dead_handle():
+    return rffi.cast(lltype.Signed, rb_pop_dead_handle())
 
 
 def is_proc(v):

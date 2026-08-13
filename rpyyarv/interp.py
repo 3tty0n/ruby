@@ -282,7 +282,8 @@ def invoke(frame, w_ci, w_block=None):
                     return out
     if proxy.value != 0 and recv == proxy.value:
         return _block_send(frame, mid, recv_at, argc, frame.block)
-    if len(blocks.by_proc) > 0 and _is_proxy_call(mid) \
+    if len(blocks.by_proc) > 0 \
+            and (_is_proxy_call(mid) or mid == ARITY or mid == LAMBDA_P) \
             and recv in blocks.by_proc:
         # A Proc RPyYARV made: run its block here instead of out to CRuby and back through the block callback.
         return _block_send(frame, mid, recv_at, argc, blocks.by_proc[recv])
@@ -294,13 +295,33 @@ def invoke(frame, w_ci, w_block=None):
             and dispatch.owner_of(klass, mid) \
             == value.core_class(value.C_BASIC_OBJECT):
         return _instance_eval(frame, mid, recv, recv_at, argc, w_block)
+    if w_block is not None and entry is None and fcall and argc == 0 \
+            and not w_ci.blockarg \
+            and (mid == CORE_LAMBDA or mid == KERNEL_PROC) \
+            and w_block.kind == block_mod.KIND_ISEQ \
+            and helpers.modules.kernel != 0 \
+            and dispatch.owner_of(klass, mid) == helpers.modules.kernel:
+        # Kernel#lambda / Kernel#proc with a literal block: through rb_funcall_with_block the Proc would wrap a transient handle that dies with the call.
+        _drop(frame, recv_at)
+        debug.count_native()
+        if mid == CORE_LAMBDA:
+            return _to_proc(block_mod.W_Block(
+                w_block.w_iseq, w_block.frame, w_block.outer, is_lambda=True))
+        return _to_proc(w_block)
     if mid == MODULE_FUNCTION and fcall and _in_body_of(frame, recv):
         return _module_function(frame, recv, recv_at, argc)
     if mid == CORE_ALIAS or mid == CORE_UNDEF:
         return _core_method(frame, mid, recv, recv_at, argc)
     if vm_core.value != 0 and recv == vm_core.value \
             and mid != HASH_MERGE_PTR and mid != HASH_MERGE_KWD:
-        # #lambda and #proc would hand libruby a Proc over a block handle that dies with the call, and crash later; the keyword merges below are plain Hash work, so they go out to CRuby.
+        if mid == CORE_LAMBDA and w_block is not None \
+                and w_block.kind == block_mod.KIND_ISEQ:
+            # `->`: the same block re-tagged as a lambda, over a persistent handle the mark hook keeps deep-marked.
+            _drop(frame, recv_at)
+            debug.count_native()
+            return _to_proc(block_mod.W_Block(
+                w_block.w_iseq, w_block.frame, w_block.outer,
+                is_lambda=True))
         raise UnsupportedOperation(
             "RubyVM::FrozenCore#%s is not supported"
             % symbols.name_of(mid))
@@ -1336,6 +1357,8 @@ INSTANCE_EVAL = symbols.intern('instance_eval')
 INSTANCE_EXEC = symbols.intern('instance_exec')
 CLASS_EVAL = symbols.intern('class_eval')
 MODULE_EVAL = symbols.intern('module_eval')
+CORE_LAMBDA = symbols.intern('lambda')
+KERNEL_PROC = symbols.intern('proc')
 
 
 @dont_look_inside
@@ -1451,7 +1474,7 @@ class _Blocks(object):
         self.table = []         # handle -> W_Block, None for a free slot
         # handle -> the self the block was handed over under, so a yield can tell an instance_eval substitution from the ordinary case.
         self.selves = []
-        self.free = []          # handles the transient path gave back
+        self.free = []          # handles whose GC owner died
         self.by_proc = {}       # a materialised Proc -> the block behind it
         self.error = None       # an RPython error the callback could not raise
         self.exc = None         # likewise, a Ruby exception
@@ -1462,6 +1485,12 @@ blocks = _Blocks()
 
 
 def _alloc_handle(w_block):
+    # Slots come back only when their GC owner died, so a stored block (Hash default_proc, a saved callback) stays callable.
+    while True:
+        h = boot.pop_dead_handle()
+        if h < 0:
+            break
+        _release_handle(h)
     here = boot.current_receiver()
     if len(blocks.free) > 0:
         h = blocks.free.pop()
@@ -1690,16 +1719,13 @@ def _call_with_block(recv, mid, args, w_block, kw=False):
         raise UnsupportedOperation(
             'Fiber.new with an RPyYARV block is not supported')
     handle = _alloc_handle(w_block)
-    ret = value.Q_NIL
+    # No release here: the handle's owner object dies with the ifunc, and _alloc_handle reclaims the slot then.
     try:
-        try:
-            ret = rubycall.call_with_block(recv, mid, args, handle, kw)
-        except RubyException:
-            # The CRuby method failed; whatever the block parked before that is the reason, and takes precedence.
-            _check_block_error()
-            raise
-    finally:
-        _release_handle(handle)
+        ret = rubycall.call_with_block(recv, mid, args, handle, kw)
+    except RubyException:
+        # The CRuby method failed; whatever the block parked before that is the reason, and takes precedence.
+        _check_block_error()
+        raise
     _check_block_error()
     return ret
 
@@ -1748,6 +1774,25 @@ def _is_proxy_call(mid):
     return mid == CALL or mid == YIELD or mid == AREF or mid == EQQ_
 
 
+ARITY = symbols.intern('arity')
+LAMBDA_P = symbols.intern('lambda?')
+
+
+def _iseq_arity(w_iseq):
+    """rb_proc_arity over iseq_min_max_arity (proc.c:1120): min when fixed, -(min+1) otherwise."""
+    opt_num = len(w_iseq.opt_table) - 1
+    if opt_num < 0:
+        opt_num = 0
+    has_kw = len(w_iseq.kw_table) > 0 or w_iseq.kwrest >= 0
+    min_argc = w_iseq.nparams + w_iseq.post_num \
+        + (1 if w_iseq.kw_required > 0 else 0)
+    if w_iseq.rest_start >= 0:
+        return -min_argc - 1
+    max_argc = w_iseq.nparams + opt_num + w_iseq.post_num \
+        + (1 if has_kw else 0)
+    return min_argc if min_argc == max_argc else -min_argc - 1
+
+
 @dont_look_inside
 def _block_from_value(frame, v):
     """The block a `&arg` call site passes on, as vm_caller_setup_arg_block reads it (vm_args.c:1116)."""
@@ -1791,6 +1836,13 @@ def _block_send_args(mid, w_block, args, kw_names=NO_KEYWORDS,
         if w_block is None:
             raise UnsupportedOperation('the block parameter is nil')
         return call_block(w_block, args, kw_names, kw_splat)
+    if w_block is not None and w_block.kind == block_mod.KIND_ISEQ \
+            and len(args) == 0 and len(kw_names) == 0 and not kw_splat:
+        # The materialised Proc wraps a C yielder, so these must come from the ISeq it stands for.
+        if mid == ARITY:
+            return value.int2fix(_iseq_arity(w_block.w_iseq))
+        if mid == LAMBDA_P:
+            return value.newbool(w_block.is_lambda)
     if len(kw_names) > 0:
         args = _kw_to_positional(args, kw_names)
     if len(kw_names) > 0 or kw_splat:
@@ -1818,6 +1870,8 @@ def call_block(w_block, args, kw_names=NO_KEYWORDS, kw_splat=False,
     callee.defining_frame = outer
     callee.block = w_block.outer
     callee.own_block = w_block
+    if w_block.is_lambda:
+        return _run_lambda(w_block, b_iseq, callee, args, kw_names, kw_splat)
     if b_iseq.autosplat and len(args) == 1 and not keyed:
         args = _autosplat(args)
     pc = 0
@@ -1835,6 +1889,27 @@ def call_block(w_block, args, kw_names=NO_KEYWORDS, kw_splat=False,
         return execute(b_iseq, callee, pc)
     except block_mod.BlockNext, e:
         return e.value
+
+
+@unroll_safe
+def _run_lambda(w_block, b_iseq, callee, args, kw_names, kw_splat):
+    """arg_setup_method, not arg_setup_block: exact arity, no autosplat; return and break leave the lambda itself (vm_insnhelper.c:1832)."""
+    pc = setup_params(b_iseq, callee, args, False, kw_names, kw_splat)
+    try:
+        return execute(b_iseq, callee, pc)
+    except block_mod.BlockNext, e:
+        return e.value
+    except block_mod.BlockReturn, e:
+        if e.frame is not callee:
+            raise
+        return e.value
+    except block_mod.BlockBreak, e:
+        if e.w_block is not w_block:
+            raise
+        return e.value
+    finally:
+        # A later return aimed here from an escaped inner proc is the orphaned LocalJumpError.
+        callee.dead = True
 
 
 @dont_look_inside
@@ -1960,10 +2035,14 @@ MAX_SCOPES = 256
 
 
 def _return_target(frame):
-    """The frame a non-local return leaves: the outermost of the block's chain, CRuby's local EP (vm_insnhelper.c:1834)."""
+    """The frame a non-local return leaves: the nearest lambda frame, else the outermost of the block's chain, CRuby's local EP (vm_insnhelper.c:1834)."""
     f = frame
     n = 0
-    while f.defining_frame is not None and n < MAX_SCOPES:
+    while n < MAX_SCOPES:
+        if f.own_block is not None and f.own_block.is_lambda:
+            return f
+        if f.defining_frame is None:
+            return f
         f = f.defining_frame
         n += 1
     return f
@@ -1977,7 +2056,8 @@ def _local_jump_error(mesg, v, reason):
 def _return(frame, v):
     """`return` from a block; a dead target or one that is not a method is the orphaned-Proc LocalJumpError (vm_insnhelper.c:1926)."""
     target = _return_target(frame)
-    if target.dead or not target.w_iseq.catches_return:
+    is_lambda = target.own_block is not None and target.own_block.is_lambda
+    if target.dead or not (target.w_iseq.catches_return or is_lambda):
         raise _local_jump_error('unexpected return', v, optable.TAG_RETURN)
     raise block_mod.BlockReturn(target, v)
 

@@ -290,10 +290,11 @@ class Loader(object):
                      insns.DUPHASH, insns.SWAP]
     # The merges build the one Hash a `**` or a bare `super` hands on; they are ordinary sends of a public method, so rb_funcallv runs them.
     VMCORE_SENDS = ['core#set_method_alias', 'core#undef_method',
-                    'core#hash_merge_ptr', 'core#hash_merge_kwd']
+                    'core#hash_merge_ptr', 'core#hash_merge_kwd',
+                    'lambda']
 
     def check_vmcore(self, opcodes, operands, raw):
-        """FrozenCore receives `alias`, `undef`, the keyword merges, `lambda` and `proc` alike (vm.c:4274); only the first three are implemented, so the send taking it must be one of them."""
+        """FrozenCore receives `alias`, `undef`, the keyword merges and `lambda` alike (vm.c:4274); the send taking it must be one of the implemented ones."""
         for i in range(len(opcodes)):
             if opcodes[i] != insns.PUTSPECIALOBJECT:
                 continue

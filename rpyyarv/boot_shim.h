@@ -229,6 +229,9 @@ void rpyyarv_define_method(uintptr_t klass, uintptr_t mid, int is_private,
 
 /* A Proc over the same handle: it must stay valid as long as the Proc is reachable, so RPyYARV's handle table never releases one of these. */
 uintptr_t rpyyarv_proc_new(long handle, int *state);
+
+/* One handle whose GC owner died, or -1 when none are pending. */
+long rpyyarv_pop_dead_handle(void);
 int rpyyarv_is_proc(uintptr_t v);
 
 int rpyyarv_is_class(uintptr_t v);

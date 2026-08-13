@@ -6,10 +6,11 @@ KIND_SYM = 2
 
 
 class W_Block(object):
-    _immutable_fields_ = ['kind', 'w_iseq', 'frame', 'outer', 'mid']
+    _immutable_fields_ = ['kind', 'w_iseq', 'frame', 'outer', 'mid',
+                          'is_lambda']
 
     def __init__(self, w_iseq, frame, outer, kind=KIND_ISEQ, proc_value=0,
-                 mid=0):
+                 mid=0, is_lambda=False):
         self.kind = kind
         self.w_iseq = w_iseq
         self.frame = frame
@@ -18,6 +19,8 @@ class W_Block(object):
         # KIND_PROC: the Proc itself. KIND_ISEQ: the Proc getblockparam materialises for it, once one exists; the handle table owns it.
         self.proc_value = proc_value
         self.mid = mid
+        # A lambda checks arity like a method and owns its `return` (VM_FRAME_FLAG_LAMBDA).
+        self.is_lambda = is_lambda
 
 
 def from_proc(v):

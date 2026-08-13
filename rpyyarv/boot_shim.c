@@ -1455,6 +1455,35 @@ rpyyarv_set_block_callback(rpyyarv_block_fn fn)
     block_callback = fn;
 }
 
+/* A handle's owner: kept alive by the ifunc (imemo.c marks ifunc->data), so it dies only when nothing in CRuby can call the block any more; its dfree queues the handle for reuse instead of the eager release that broke stored blocks (Hash default_proc, Liquid callbacks). */
+static long *dead_handles;
+static int n_dead, cap_dead;
+
+static void
+handle_owner_dfree(void *p)
+{
+    if (n_dead == cap_dead) {
+        int cap = cap_dead ? cap_dead * 2 : 64;
+        long *grown = realloc(dead_handles, cap * sizeof(long));
+        if (!grown) return; /* leak the slot rather than crash in sweep */
+        dead_handles = grown;
+        cap_dead = cap;
+    }
+    dead_handles[n_dead++] = (long)(uintptr_t)p - 1;
+}
+
+static const rb_data_type_t handle_owner_type = {
+    "rpyyarv/block_handle",
+    { 0, handle_owner_dfree, 0 },
+    0, 0, RUBY_TYPED_FREE_IMMEDIATELY
+};
+
+long
+rpyyarv_pop_dead_handle(void)
+{
+    return n_dead ? dead_handles[--n_dead] : -1;
+}
+
 static VALUE
 block_yielder(RB_BLOCK_CALL_FUNC_ARGLIST(yielded, callback_arg))
 {
@@ -1469,10 +1498,12 @@ block_yielder(RB_BLOCK_CALL_FUNC_ARGLIST(yielded, callback_arg))
     if (n < 0) n = 0;
     if (n > RPYYARV_MAX_ARGC) n = RPYYARV_MAX_ARGC;
     for (i = 0; i < n; i++) buf[i] = argv[i];
-    /* The self this yield runs under; RPyYARV holds the one the block was handed over with and compares, so callback_arg stays the bare handle. */
+    /* The self this yield runs under; RPyYARV holds the one the block was handed over with and compares. A Fixnum arg is a permanent handle (rpyyarv_proc_new); a TypedData one is GC-owned. */
     here = rb_current_receiver();
-    r = (VALUE)block_callback((long)FIX2LONG(callback_arg), n,
-                              (uintptr_t *)buf, (uintptr_t)here);
+    r = (VALUE)block_callback(FIXNUM_P(callback_arg)
+                              ? (long)FIX2LONG(callback_arg)
+                              : (long)(uintptr_t)RTYPEDDATA_DATA(callback_arg) - 1,
+                              n, (uintptr_t *)buf, (uintptr_t)here);
     /* The block left early and parked why; abort the CRuby method running it instead of letting it iterate on. */
     if (block_unwind) {
         block_unwind = 0;
@@ -1495,8 +1526,10 @@ static VALUE
 call_with_block_body(VALUE argp)
 {
     struct blockcall_args *a = (struct blockcall_args *)argp;
+    VALUE owner = TypedData_Wrap_Struct(0, &handle_owner_type,
+                                        (void *)(uintptr_t)(a->handle + 1));
     return rb_block_call_kw(a->recv, a->mid, a->argc, a->argv, block_yielder,
-                            LONG2FIX(a->handle), a->kw_splat);
+                            owner, a->kw_splat);
 }
 
 uintptr_t
