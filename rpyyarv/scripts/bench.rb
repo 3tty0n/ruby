@@ -309,6 +309,9 @@ class RubyBenchSuite
   def with_script(bench, probe: false, force_native: false)
     warm = probe ? 0 : @warm
     meas = probe ? 1 : @meas
+    # Before the driver is written: probing runs with_script again for the same
+    # benchmark, and its ensure would delete the file out from under this call.
+    no_require = gems?(bench) && !force_native && !native_requires?(bench)
     src = File.read(paths[bench]).gsub(/^\s*require_relative\s+['"][.\/]*harness\/loader['"].*$/, "")
     # Fiber.new crosses into CRuby with an RPyYARV block. optcarrot's --opt
     # replaces that loop with generated methods, which are the configuration
@@ -327,9 +330,7 @@ class RubyBenchSuite
     # redefines Gem's constants and then crashes. Which gems RPyYARV can own is
     # per benchmark, so it is probed rather than assumed: --gem-require forces
     # it on, --no-gem-require off, and the default is what the probe found.
-    if gems?(bench) && !force_native && !native_requires?(bench)
-      env["RPYYARV_NO_REQUIRE"] = "1"
-    end
+    env["RPYYARV_NO_REQUIRE"] = "1" if no_require
     yield path, env, warm
   ensure
     File.unlink(path) if path && File.exist?(path)
