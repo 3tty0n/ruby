@@ -137,6 +137,7 @@ def run_once(argv, script, env, timeout)
     when /\AITER \d+ (\S+) (\S+)/
       return [nil, "FAIL", info.merge("why" => "bad verdict #{Regexp.last_match(2)}")] if Regexp.last_match(2) != "true"
       times << Regexp.last_match(1).to_f
+    when /\AWARMED (\d+)/ then info["warmed"] = Regexp.last_match(1).to_i
     when /\ADONE (\S+)/ then done = Regexp.last_match(1)
     end
   end
@@ -172,10 +173,12 @@ def time_engine(argv, script, env, warm, procs, timeout)
   pooled = []
   per_proc = []
   procs.times do
-    times, err, = run_once(argv, script, env, timeout)
+    times, err, info = run_once(argv, script, env, timeout)
     return { status: err } if err
-    pooled.concat(times[warm..] || [])
-    per_proc << median(times[warm..] || times)
+    # The harness says where warmup ended when WARMUP_TIME stretched it.
+    w = info["warmed"] || warm
+    pooled.concat(times[w..] || [])
+    per_proc << median(times[w..] || times)
   end
   spread = per_proc.compact.empty? ? nil : per_proc.compact.max / per_proc.compact.min
   { median: median(pooled), min: pooled.min, n: pooled.size,
@@ -294,8 +297,10 @@ class RubyBenchSuite
     path = File.join(File.dirname(paths[bench]), "#{DRV_PREFIX}#{bench}_#{Process.pid}.rb")
     File.write(path, File.read(File.join(SHIM_DIR, "harness.rb")) + "\n" + src)
     env = base_env.merge("WARMUP_ITRS" => warm.to_s,
+                         # Same wall-clock warmup floor for every engine; a tracing JIT is not warm after 5 short iterations.
+                         "WARMUP_TIME" => probe ? "0" : "5",
                          "MIN_BENCH_ITRS" => meas.to_s,
-                         "MIN_BENCH_TIME" => "0",
+                         "MIN_BENCH_TIME" => probe ? "0" : "1",
                          "RUBYLIB" => uninstalled_rubylib).merge(bench_gems_env)
     # CRuby owns Bundler/RubyGems loading. RPyYARV can load a gem's own tree
     # (--gem-require turns that on), but not RubyGems' -- re-running the files
