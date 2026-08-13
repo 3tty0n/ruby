@@ -96,7 +96,7 @@ def invoke(frame, w_ci, w_block=None):
             raise UnsupportedOperation(
                 "call to '%s' passes a &block the stack does not hold"
                 % symbols.name_of(w_ci.mid))
-        w_block = _block_from_value(frame, frame.stack[top])
+        w_block = _block_from_value(frame.block, frame.stack[top])
         frame.pop()
     # A `send` rewrites these three; the callinfo keeps the rest of the site.
     mid = w_ci.mid
@@ -237,7 +237,11 @@ def invoke(frame, w_ci, w_block=None):
             return v
     if mid == NEW and helpers.ary_new_pristine(promote(recv)):
         if w_block is None:
-            v = _array_new(frame, recv_at, argc)
+            size = frame.stack[recv_at + 1] if argc >= 1 else value.Q_NIL
+            fill = frame.stack[recv_at + 2] if argc == 2 else value.Q_NIL
+            v = _array_new(size, fill, argc)
+            if v != value.Q_UNDEF:
+                _drop(frame, recv_at)
         else:
             v = _array_new_block(frame, recv_at, argc, w_block)
         if v != value.Q_UNDEF:
@@ -371,15 +375,13 @@ ARY_NEW_FILL_MAX = 128
 
 
 @dont_look_inside
-def _array_new(frame, recv_at, argc):
-    """rb_ary_s_new for a direct Array (array.c:1071); Qundef for every argument shape rb_ary_initialize treats specially."""
+def _array_new(size, fill, argc):
+    """rb_ary_s_new for a direct Array (array.c:1071); Qundef for every argument shape rb_ary_initialize treats specially. Takes the values, not the frame, so it never escapes the virtualizable."""
     # Left out of line on purpose: inlining these paths grew cd's and havlak's traces ~5%, and rb_ary_new is a call either way.
     if argc > 2:
         return value.Q_UNDEF
     if argc == 0:
-        _drop(frame, recv_at)
         return rubycall.ary_new_capa(0)
-    size = frame.stack[recv_at + 1]
     # FIXNUM_P, as rb_ary_s_new tests it: to_int, to_ary and a Bignum all take rb_ary_initialize's slow paths.
     if not value.is_fixnum(size):
         return value.Q_UNDEF
@@ -388,8 +390,6 @@ def _array_new(frame, recv_at, argc):
         return value.Q_UNDEF
     if argc == 2 and n > ARY_NEW_FILL_MAX:
         return value.Q_UNDEF
-    fill = value.Q_NIL if argc == 1 else frame.stack[recv_at + 2]
-    _drop(frame, recv_at)
     return rubycall.ary_new_filled(n, fill)
 
 
@@ -1823,13 +1823,13 @@ def _iseq_arity(w_iseq):
 
 
 @dont_look_inside
-def _block_from_value(frame, v):
-    """The block a `&arg` call site passes on, as vm_caller_setup_arg_block reads it (vm_args.c:1116)."""
+def _block_from_value(frame_block, v):
+    """The block a `&arg` call site passes on, as vm_caller_setup_arg_block reads it (vm_args.c:1116); takes the frame's block, not the frame, so it never escapes the virtualizable."""
     if v == value.Q_NIL:
         return None
     if v == proxy.value:
         # The frame's own block, without ever having built a Proc for it.
-        return frame.block
+        return frame_block
     if v in blocks.by_proc:
         return blocks.by_proc[v]
     if boot.is_symbol(v):
@@ -2488,9 +2488,9 @@ def _run_once(frame, iseq, idx):
 
 
 @dont_look_inside
-def _cvar_base(frame):
-    """vm_get_cvar_base: the innermost lexical scope that is a real class, so a `class << self` or an instance_eval scope steps aside."""
-    node = _cref_of(frame)
+def _cvar_base(cref):
+    """vm_get_cvar_base: the innermost lexical scope that is a real class, so a `class << self` or an instance_eval scope steps aside. Takes the cref, not the frame, so it never escapes the virtualizable."""
+    node = cref
     while node is not None:
         if node.klass != 0 and not node.by_eval \
                 and not boot.is_singleton_class(node.klass):
@@ -2502,13 +2502,13 @@ def _cvar_base(frame):
 
 
 @dont_look_inside
-def _cvar_get(frame, mid):
-    return boot.cvar_get(_cvar_base(frame), rubycall.rid(mid))
+def _cvar_get(cref, mid):
+    return boot.cvar_get(_cvar_base(cref), rubycall.rid(mid))
 
 
 @dont_look_inside
-def _cvar_set(frame, mid, v):
-    boot.cvar_set(_cvar_base(frame), rubycall.rid(mid), v)
+def _cvar_set(cref, mid, v):
+    boot.cvar_set(_cvar_base(cref), rubycall.rid(mid), v)
 
 
 def _const_base(frame):
@@ -2539,7 +2539,7 @@ def _defined(frame, kind, obj, recv):
     if kind == DEFINED_IVAR:
         return boot.ivar_defined(frame.self_val, rid)
     if kind == DEFINED_CVAR:
-        return boot.cvar_defined(_cvar_base(frame), rid)
+        return boot.cvar_defined(_cvar_base(_cref_of(frame)), rid)
     if kind == DEFINED_CONST:
         return _defined_const(_cref_of(frame), rid)
     if kind == DEFINED_CONST_FROM:
@@ -2634,8 +2634,9 @@ def get_printable_location(pc, iseq):
     return '%s@%d %s' % (iseq.name, pc, insns.NAMES[iseq.code[pc]])
 
 
+# is_recursive: execute recurses per Ruby call, so an inlining limit must retrace the callee as its own loop instead of leaving a portal call that escapes the virtualizable.
 jitdriver = JitDriver(greens=['pc', 'iseq'], reds=['frame'],
-                      virtualizables=['frame'],
+                      virtualizables=['frame'], is_recursive=True,
                       get_printable_location=get_printable_location)
 
 
@@ -2715,29 +2716,37 @@ def _execute_returnable(iseq, frame, pc):
 
 
 def _execute_guarded(iseq, frame, pc):
+    # No loop here: a loop would keep the tracer from inlining this, and then every call of a rescue/ensure-carrying ISeq escapes its fresh virtualizable and aborts the trace. The unwind loop only runs once something raised.
     gcroots.push_frame(frame)
     try:
-        while True:
-            try:
-                return _execute(iseq, frame, pc)
-            except RubyException, e:
-                pc = _unwind(iseq, frame,
-                             Throw(PENDING_RAISE, e.value, None, e.name),
-                             _epc(iseq, frame.pc))
-            except block_mod.BlockBreak, e:
-                pc = _unwind(iseq, frame,
-                             Throw(PENDING_BREAK, e.value, e.w_block),
-                             _epc(iseq, frame.pc))
-            except block_mod.BlockReturn, e:
-                pc = _unwind(iseq, frame,
-                             Throw(PENDING_RETURN, e.value, None, 'return',
-                                   e.frame),
-                             _epc(iseq, frame.pc))
-            except block_mod.BlockNext, e:
-                pc = _unwind(iseq, frame, Throw(PENDING_NEXT, e.value),
-                             _epc(iseq, frame.pc))
+        try:
+            return _execute(iseq, frame, pc)
+        except RubyException, e:
+            throw = Throw(PENDING_RAISE, e.value, None, e.name)
+        except block_mod.BlockBreak, e:
+            throw = Throw(PENDING_BREAK, e.value, e.w_block)
+        except block_mod.BlockReturn, e:
+            throw = Throw(PENDING_RETURN, e.value, None, 'return', e.frame)
+        except block_mod.BlockNext, e:
+            throw = Throw(PENDING_NEXT, e.value)
+        return _execute_unwinding(iseq, frame, throw)
     finally:
         gcroots.pop_frame(frame)
+
+
+def _execute_unwinding(iseq, frame, throw):
+    while True:
+        pc = _unwind(iseq, frame, throw, _epc(iseq, frame.pc))
+        try:
+            return _execute(iseq, frame, pc)
+        except RubyException, e:
+            throw = Throw(PENDING_RAISE, e.value, None, e.name)
+        except block_mod.BlockBreak, e:
+            throw = Throw(PENDING_BREAK, e.value, e.w_block)
+        except block_mod.BlockReturn, e:
+            throw = Throw(PENDING_RETURN, e.value, None, 'return', e.frame)
+        except block_mod.BlockNext, e:
+            throw = Throw(PENDING_NEXT, e.value)
 
 
 def _execute(iseq, frame, pc):
@@ -2952,11 +2961,11 @@ def _execute(iseq, frame, pc):
         elif opcode == insns.GETCLASSVARIABLE:
             mid = code[pc]
             pc += 1
-            frame.push(_cvar_get(frame, mid))
+            frame.push(_cvar_get(_cref_of(frame), mid))
         elif opcode == insns.SETCLASSVARIABLE:
             mid = code[pc]
             pc += 1
-            _cvar_set(frame, mid, frame.pop())
+            _cvar_set(_cref_of(frame), mid, frame.pop())
         elif opcode == insns.DEFINED:
             kind = code[pc]
             obj = iseq.consts[code[pc + 1]]
