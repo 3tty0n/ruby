@@ -739,6 +739,8 @@ struct super_call_args {
     ID    id;
     int   argc;
     const VALUE *argv;
+    /* RB_PASS_KEYWORDS when the last argument is the keyword Hash. */
+    int   kw_splat;
 };
 
 static VALUE
@@ -763,12 +765,14 @@ call_super_body(VALUE argp)
     /* UnboundMethod#bind_call, not rb_call_super: super needs a CRuby control frame, binding one method does not. */
     args[0] = p->recv;
     for (i = 0; i < p->argc; i++) args[i + 1] = p->argv[i];
-    return rb_funcallv(m, rb_intern("bind_call"), p->argc + 1, args);
+    return rb_funcallv_kw(m, rb_intern("bind_call"), p->argc + 1, args,
+                          p->kw_splat);
 }
 
 uintptr_t
 rpyyarv_call_super(uintptr_t klass, uintptr_t owner, uintptr_t recv,
-                   uintptr_t id, int argc, const uintptr_t *argv, int *state)
+                   uintptr_t id, int argc, const uintptr_t *argv, int kw,
+                   int *state)
 {
     struct super_call_args a;
     VALUE local[RPYYARV_MAX_ARGC];
@@ -785,6 +789,7 @@ rpyyarv_call_super(uintptr_t klass, uintptr_t owner, uintptr_t recv,
     a.id = (ID)id;
     a.argc = argc;
     a.argv = local;
+    a.kw_splat = kw ? RB_PASS_KEYWORDS : RB_NO_KEYWORDS;
     *state = 0;
     return (uintptr_t)rb_protect(call_super_body, (VALUE)&a, state);
 }

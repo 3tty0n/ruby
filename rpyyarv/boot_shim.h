@@ -144,7 +144,7 @@ uintptr_t rpyyarv_str_append(uintptr_t str, uintptr_t other);
 /* The method after owner's along klass's chain, called on recv: what `super` lands on when CRuby owns it. Qundef when there is none. */
 uintptr_t rpyyarv_call_super(uintptr_t klass, uintptr_t owner, uintptr_t recv,
                              uintptr_t id, int argc, const uintptr_t *argv,
-                             int *state);
+                             int kw, int *state);
 
 /* The heap Float the flonum encoding cannot represent, and the RFloat layout value.py reads by hand. */
 uintptr_t rpyyarv_float_new(double d);

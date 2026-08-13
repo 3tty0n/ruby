@@ -293,12 +293,13 @@ def lookup_core(klass, mid):
 
 @dont_look_inside
 def _reopened(cbase, rid):
-    """Reopening e.g. Integer via rb_define_class_id_under with Object as super would be a superclass mismatch."""
+    """Reopening e.g. Integer via rb_define_class_id_under with Object as super would be a superclass mismatch. cbase's own table only, as vm_const_get_under does: rb_const_get inherits, so `class Compiler; class Binding; end; end` would reopen ::Binding instead of making a nested class."""
     try:
-        v = boot.const_get(cbase, rid)
+        v = boot.const_at(cbase, rid)
     except RubyException:
         return 0
-    if value.is_immediate(v) or not boot.is_class(v):
+    if value.is_immediate(v) or v == value.Q_UNDEF \
+            or raw_word(v, value.FLAGS_WORD) & value.T_MASK != value.T_CLASS:
         return 0
     return v
 

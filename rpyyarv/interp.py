@@ -229,6 +229,12 @@ def invoke(frame, w_ci, w_block=None):
         # rb_f_block_given_p reads the *caller's* frame (vm.c:1862); through rb_funcallv it would find a CRuby one.
         _drop(frame, recv_at)
         return value.newbool(frame.block is not None)
+    if (mid == METHOD_UNDERSCORE or mid == CALLEE_UNDERSCORE) \
+            and fcall and argc == 0 and entry is None:
+        # rb_f_method_name reads the running CRuby frame, and RPyYARV pushes none; the frame's own entry is what it would have named.
+        _drop(frame, recv_at)
+        debug.count_native()
+        return _running_method(frame)
     if mid == BACKTRACE_PRIM and fcall and argc == 0:
         _drop(frame, recv_at)
         debug.count_native()
@@ -439,12 +445,27 @@ INITIALIZE = symbols.intern('initialize')
 BLOCK_GIVEN = symbols.intern('block_given?')
 DIR_UNDERSCORE = symbols.intern('__dir__')
 BACKTRACE_PRIM = symbols.intern('__rpyyarv_backtrace__')
+METHOD_UNDERSCORE = symbols.intern('__method__')
+CALLEE_UNDERSCORE = symbols.intern('__callee__')
 
 
 # A deeper chain than this is a runaway; caller only ever reads the top anyway.
 MAX_BACKTRACE = 4096
 # What RubyVM::InstructionSequence.compile names a source with no file, which is how prelude.rb is built; its frames are RPyYARV's own and no caller ever wrote them.
 COMPILED_PATH = '<compiled>'
+
+
+def _running_method(frame):
+    """__method__: the entry the innermost method frame runs under, walking out of the blocks written inside it; nil at the toplevel, as rb_f_method_name answers there."""
+    f = frame
+    n = 0
+    while f is not None and n < MAX_SCOPES:
+        entry = f.entry
+        if entry is not None:
+            return rubycall.sym_value(entry.mid)
+        f = f.defining_frame
+        n += 1
+    return value.Q_NIL
 
 
 @dont_look_inside
@@ -1343,12 +1364,9 @@ def _opt_send(frame, mid, argc):
     return rubycall.call(recv, mid, args)
 
 
-def _super_to_cruby(frame, klass, owner, mid, recv_at, argc, kw_splat):
-    """`super` landing on a method CRuby owns: the method after owner's along klass's chain, bound to the receiver."""
-    if kw_splat:
-        raise UnsupportedOperation(
-            "super from '%s' passes keywords to a method CRuby owns"
-            % symbols.name_of(mid))
+def _super_to_cruby(frame, klass, owner, mid, recv_at, argc, kw_splat,
+                    kw_names=NO_KEYWORDS):
+    """`super` landing on a method CRuby owns: the method after owner's along klass's chain, bound to the receiver. Literal keywords become the one trailing Hash bind_call passes on as keywords."""
     recv = frame.stack[recv_at]
     if mid == INITIALIZE and argc == 0 \
             and owner == value.core_class(value.C_BASIC_OBJECT) \
@@ -1360,8 +1378,11 @@ def _super_to_cruby(frame, klass, owner, mid, recv_at, argc, kw_splat):
     while i < argc:
         args.append(frame.stack[recv_at + 1 + i])
         i += 1
+    if len(kw_names) > 0:
+        args = _kw_to_positional(args, kw_names)
     _drop(frame, recv_at)
-    ret = rubycall.call_super(klass, owner, recv, mid, args)
+    ret = rubycall.call_super(klass, owner, recv, mid, args,
+                              kw_splat or len(kw_names) > 0)
     if ret == value.Q_UNDEF:
         raise UnsupportedOperation(
             "super from '%s' reaches a method its owner does not define"
@@ -1405,7 +1426,7 @@ def invoke_super(frame, w_ci):
                 % symbols.name_of(entry.mid))
         return _super_to_cruby(frame, promote(value.class_of(recv)),
                                entry.owner, entry.mid, recv_at, argc,
-                               w_ci.kw_splat)
+                               w_ci.kw_splat, w_ci.kw_names)
     if target.kind != dispatch.KIND_ISEQ:
         return _attr_send(frame, target, frame.stack[recv_at], recv_at, argc)
     return _enter(frame, target, frame.stack[recv_at], recv_at, argc,
@@ -1512,15 +1533,15 @@ def _core_method(frame, mid, recv, recv_at, argc):
     old = _sym_mid(frame.stack[recv_at + 3])
     entry = dispatch.own_lookup(cbase, old)
     dispatch.undefine(cbase, name)
-    if entry is not None:
-        # An RPyYARV method: the alias is a second name for the same body.
-        if entry.kind != dispatch.KIND_ISEQ:
-            dispatch.define_attr(cbase, name, entry.ivar, entry.kind)
-        else:
-            dispatch.define(cbase, name, entry.w_iseq, entry.private,
-                            entry.cref, entry.lexical)
+    if entry is not None and entry.kind == dispatch.KIND_ISEQ:
+        # An RPyYARV method: the alias is a second name for the same body, and define installs the trampoline CRuby resolves it through.
+        dispatch.define(cbase, name, entry.w_iseq, entry.private,
+                        entry.cref, entry.lexical)
         _drop(frame, recv_at)
         return value.Q_NIL
+    if entry is not None:
+        # An attr entry: register the fast path here, then let CRuby alias its own attr method too. define_attr installs no trampoline, so without this the new name would exist only in RPyYARV's registry -- invisible to respond_to?, instance_methods and a later alias of it.
+        dispatch.define_attr(cbase, name, entry.ivar, entry.kind)
     args = [cbase, frame.stack[recv_at + 2], frame.stack[recv_at + 3]]
     _drop(frame, recv_at)
     ret = rubycall.call(recv, mid, args)
