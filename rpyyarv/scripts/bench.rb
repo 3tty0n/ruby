@@ -122,7 +122,9 @@ def run_once(argv, script, env, timeout)
   err = err.scrub
   text = out + err
   info = coverage_of(text)
-  if text.include?("delegated to cruby:") || text.include?("running under CRuby instead")
+  # Per-file delegation is the hybrid working as designed and stays a number;
+  # only a main script CRuby ran wholesale would time the wrong engine.
+  if text.include?("running under CRuby instead")
     return [nil, "DELEGATED", info.merge("delegated" => first_delegation(text))]
   end
   unless status.success?
@@ -453,6 +455,9 @@ def report(suite_name, rows, engines, procs)
     note = []
     note << "BIMODAL?" if spread && spread > BIMODAL_RATIO
     note << "iseqs #{primary[:info]['iseqs']}" if primary && primary[:info] && primary[:info]["iseqs"]
+    if primary && primary[:info] && primary[:info]["files_delegated"].to_i > 0
+      note << "#{primary[:info]['files_delegated']} file(s) delegated"
+    end
     cells << note.join(" ")
     cells
   end
