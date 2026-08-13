@@ -123,7 +123,13 @@ B_STR_TO_S = 53
 B_KERNEL_EQQ = 54
 B_KERNEL_KIND_OF = 55
 B_KERNEL_IS_A = 56
-B_COUNT = 57
+B_HASH_ASET = 57
+B_HASH_KEY = 58
+B_HASH_HAS_KEY = 59
+B_SET_INCLUDE = 60
+B_STR_EQQ = 61
+B_STR_START_WITH = 62
+B_COUNT = 63
 
 _INT_MID = [PLUS, MINUS, MULT, DIV, MOD, EQ, LT, LE, GT, GE, AND, OR, XOR,
             RSHIFT]
@@ -375,13 +381,13 @@ def to_f(recv):
 
 
 def hash_aref(recv, key):
-    """Hash#[] straight to the lookup, skipping the send; a miss goes back to CRuby, which is what applies the default value or proc."""
+    """Hash#[] whole in one protected call, the default value or proc included, so a miss no longer pays a second full send."""
     if value.is_immediate(recv) \
             or raw_word(recv, value.KLASS_WORD) != value.core_class(value.C_HASH):
         return value.Q_UNDEF
     if not _core_op(value.C_HASH, B_HASH_AREF, AREF):
         return value.Q_UNDEF
-    return boot.hash_lookup(recv, key)
+    return boot.hash_aref_value(recv, key)
 
 
 def str_to_s(recv):
@@ -502,6 +508,140 @@ def responds_to(recv, sym):
     if klass == 0:
         return value.Q_UNDEF
     got = dispatch.responds(promote(klass), sym)
+    if got < 0:
+        return value.Q_UNDEF
+    return value.newbool(got == 1)
+
+
+INSTANCE_OF_P = symbols.intern('instance_of?')
+CLASS_MID = symbols.intern('class')
+FROZEN_P = symbols.intern('frozen?')
+KEY_P = symbols.intern('key?')
+HAS_KEY_P = symbols.intern('has_key?')
+INCLUDE_P = symbols.intern('include?')
+START_WITH_P = symbols.intern('start_with?')
+
+
+def _real_class_of(recv, mid):
+    """The class Kernel#class answers, when the receiver's class is no singleton and resolves mid to the pristine Kernel one; 0 otherwise."""
+    if modules.kernel == 0:
+        return 0
+    klass = value.class_of(recv)
+    if klass == 0:
+        return 0
+    klass = promote(klass)
+    flags = raw_word(klass, value.FLAGS_WORD)
+    if flags & value.T_MASK != value.T_CLASS \
+            or flags & value.FL_SINGLETON != 0:
+        return 0
+    if dispatch.lookup(klass, mid) is not None:
+        return 0
+    if dispatch.owner_of(klass, mid) != modules.kernel:
+        return 0
+    return klass
+
+
+def instance_of(recv, target):
+    """Kernel#instance_of? is one class comparison; a target that is no Class or Module must raise, so it goes back to CRuby."""
+    klass = _real_class_of(recv, INSTANCE_OF_P)
+    if klass == 0:
+        return value.Q_UNDEF
+    if klass == target:
+        return value.Q_TRUE
+    if value.is_immediate(target):
+        return value.Q_UNDEF
+    t = raw_word(target, value.FLAGS_WORD) & value.T_MASK
+    if t != value.T_CLASS and t != value.T_MODULE:
+        return value.Q_UNDEF
+    return value.Q_FALSE
+
+
+def obj_class(recv):
+    klass = _real_class_of(recv, CLASS_MID)
+    if klass == 0:
+        return value.Q_UNDEF
+    return klass
+
+
+def frozen_p(recv):
+    """Kernel#frozen? is the FL_FREEZE bit; immediates go back to CRuby, which answers true for them."""
+    if value.is_immediate(recv):
+        return value.Q_UNDEF
+    if _real_class_of(recv, FROZEN_P) == 0:
+        return value.Q_UNDEF
+    return value.newbool(
+        raw_word(recv, value.FLAGS_WORD) & value.FL_FREEZE != 0)
+
+
+def hash_key_p(recv, key, mid):
+    """Hash#key? through the same lookup as Hash#[]: absence is exactly the Qundef a miss answers, and an error raised instead."""
+    if value.is_immediate(recv) \
+            or raw_word(recv, value.KLASS_WORD) != value.core_class(value.C_HASH):
+        return value.Q_UNDEF
+    bit = B_HASH_KEY if mid == KEY_P else B_HASH_HAS_KEY
+    if not _core_op(value.C_HASH, bit, mid):
+        return value.Q_UNDEF
+    return value.newbool(boot.hash_lookup(recv, key) != value.Q_UNDEF)
+
+
+def hash_aset(recv, key, val):
+    """Hash#[]= in one protected call; the frozen check raises inside it."""
+    if value.is_immediate(recv) \
+            or raw_word(recv, value.KLASS_WORD) != value.core_class(value.C_HASH):
+        return value.Q_UNDEF
+    if not _core_op(value.C_HASH, B_HASH_ASET, ASET):
+        return value.Q_UNDEF
+    boot.hash_aset(recv, key, val)
+    return val
+
+
+def set_include(recv, elt):
+    """Set#include? of a direct core Set, which the shim checks; the guard here is only that nothing redefined it."""
+    if value.is_immediate(recv) or not _cruby_owns(B_SET_INCLUDE):
+        return value.Q_UNDEF
+    if dispatch.lookup(promote(value.class_of(recv)), INCLUDE_P) is not None:
+        return value.Q_UNDEF
+    return boot.set_include(recv, elt)
+
+
+def str_start_with(recv, prefix):
+    """String#start_with? with one String argument: a byte compare in the shim."""
+    if not value.is_plain_string(recv) \
+            or not _core_op(value.C_STRING, B_STR_START_WITH, START_WITH_P):
+        return value.Q_UNDEF
+    return boot.str_start_with(recv, prefix)
+
+
+def str_eqq(a, b):
+    """String#=== is rb_str_equal, the same function as ==."""
+    if not value.is_plain_string(a) \
+            or not _core_op(value.C_STRING, B_STR_EQQ, EQQ):
+        return value.Q_UNDEF
+    v = boot.str_eq(a, b)
+    if v != value.Q_UNDEF:
+        return v
+    if value.is_immediate(b) \
+            and dispatch.owner_of(promote(value.class_of(b)),
+                                  TO_STR) == value.Q_NIL:
+        return value.Q_FALSE
+    return value.Q_UNDEF
+
+
+def mod_eqq(a, b):
+    """Module#=== is kind_of? with the operands swapped, answered from the two classes alone."""
+    if value.is_immediate(a):
+        return value.Q_UNDEF
+    t = raw_word(a, value.FLAGS_WORD) & value.T_MASK
+    if t != value.T_CLASS and t != value.T_MODULE:
+        return value.Q_UNDEF
+    ka = promote(value.class_of(a))
+    if dispatch.owner_of(ka, EQQ) != value.core_class(value.C_MODULE) \
+            or dispatch.lookup(ka, EQQ) is not None:
+        return value.Q_UNDEF
+    kb = value.class_of(b)
+    if kb == 0:
+        return value.Q_UNDEF
+    got = dispatch.kind_of(promote(kb), a)
     if got < 0:
         return value.Q_UNDEF
     return value.newbool(got == 1)
@@ -680,7 +820,11 @@ def str_concat(a, b):
         return value.Q_UNDEF
     if not _core_op(value.C_STRING, B_STR_LTLT, LTLT):
         return value.Q_UNDEF
-    return boot.str_append(a, b)
+    v = boot.str_append(a, b)
+    if v != value.Q_UNDEF or not value.is_plain_string(b):
+        return v
+    # The raw arm refused (encoding negotiation or a frozen receiver): still one protected call instead of a full send.
+    return boot.str_push(a, b)
 
 
 def lshift(a, b):
@@ -732,6 +876,10 @@ def flt_uminus(recv):
 
 
 def zero_arg(recv, mid):
+    if mid == CLASS_MID:
+        return obj_class(recv)
+    if mid == FROZEN_P:
+        return frozen_p(recv)
     if mid == ABS:
         return int_abs(recv)
     if mid == TO_I:
@@ -812,6 +960,9 @@ def aset(recv, idx, val):
                     boot.obj_written(recv, val)
                 return val
         rubycall.ary_store(recv, value.fix2int(idx), val)
+        return val
+    v = hash_aset(recv, idx, val)
+    if v != value.Q_UNDEF:
         return val
     return value.Q_UNDEF
 

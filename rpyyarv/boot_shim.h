@@ -232,6 +232,11 @@ uintptr_t rpyyarv_proc_new(long handle, int *state);
 
 /* One handle whose GC owner died, or -1 when none are pending. */
 long rpyyarv_pop_dead_handle(void);
+
+uintptr_t rpyyarv_hash_aref_v(uintptr_t hash, uintptr_t key, int *state);
+uintptr_t rpyyarv_set_include(uintptr_t set, uintptr_t elt, int *state);
+uintptr_t rpyyarv_str_push(uintptr_t str, uintptr_t other, int *state);
+uintptr_t rpyyarv_str_start_with(uintptr_t str, uintptr_t prefix);
 int rpyyarv_is_proc(uintptr_t v);
 
 int rpyyarv_is_class(uintptr_t v);

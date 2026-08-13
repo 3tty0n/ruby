@@ -211,6 +211,13 @@ rb_hash_aset_ = _ext('rpyyarv_hash_aset', [VALUE, VALUE, VALUE, INTP],
 rb_hash_resurrect = _ext('rpyyarv_hash_resurrect', [VALUE, INTP], VALUE, reenters=True)
 rb_hash_size = _ext('rpyyarv_hash_size', [VALUE], rffi.LONG)
 rb_hash_lookup = _ext('rpyyarv_hash_lookup', [VALUE, VALUE, INTP], VALUE, reenters=True)
+rb_hash_aref_full = _ext('rpyyarv_hash_aref_v', [VALUE, VALUE, INTP], VALUE,
+                         reenters=True)
+rb_set_include = _ext('rpyyarv_set_include', [VALUE, VALUE, INTP], VALUE,
+                      reenters=True)
+rb_str_push = _ext('rpyyarv_str_push', [VALUE, VALUE, INTP], VALUE,
+                   reenters=True)
+rb_str_start_with = _ext('rpyyarv_str_start_with', [VALUE, VALUE], VALUE)
 rb_hash_delete = _ext('rpyyarv_hash_delete', [VALUE, VALUE, INTP],
                       lltype.Void, reenters=True)
 rb_hash_keys = _ext('rpyyarv_hash_keys', [VALUE, INTP], VALUE, reenters=True)
@@ -1218,6 +1225,43 @@ def hash_lookup(hash_v, key):
     if failed:
         _failed('Hash#[]')
     return ret
+
+
+def hash_aref_value(hash_v, key):
+    """Hash#[] whole, defaults included; the VALUE-keyed one, unlike hash_aref's C-string key."""
+    state = _enter_status()
+    v = rb_hash_aref_full(_v(hash_v), _v(key), state)
+    failed = _leave_status(state)
+    ret = rffi.cast(lltype.Signed, v)
+    if failed:
+        _failed('Hash#[]')
+    return ret
+
+
+def set_include(set_v, elt):
+    """Qundef for anything but a direct core Set."""
+    state = _enter_status()
+    v = rb_set_include(_v(set_v), _v(elt), state)
+    failed = _leave_status(state)
+    ret = rffi.cast(lltype.Signed, v)
+    if failed:
+        _failed('Set#include?')
+    return ret
+
+
+def str_push(string, other):
+    """Qundef unless both are Strings."""
+    state = _enter_status()
+    v = rb_str_push(_v(string), _v(other), state)
+    failed = _leave_status(state)
+    ret = rffi.cast(lltype.Signed, v)
+    if failed:
+        _failed('String#<<')
+    return ret
+
+
+def str_start_with(string, prefix):
+    return rffi.cast(lltype.Signed, rb_str_start_with(_v(string), _v(prefix)))
 
 
 def hash_delete(hash_v, key):

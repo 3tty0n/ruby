@@ -192,6 +192,13 @@ def invoke(frame, w_ci, w_block=None):
             _drop(frame, recv_at)
             debug.count_native()
             return v
+    if entry is None and argc == 2 and mid == helpers.ASET:
+        v = helpers.hash_aset(recv, frame.stack[recv_at + 1],
+                              frame.stack[recv_at + 2])
+        if v != value.Q_UNDEF:
+            _drop(frame, recv_at)
+            debug.count_native()
+            return v
     if entry is None and mid == EVAL and fcall \
             and (argc == 1 or (argc == 3 \
                               and frame.stack[recv_at + 2] == value.Q_NIL)):
@@ -537,9 +544,23 @@ def _native_binop(recv, arg, mid):
         v = helpers.int_eqq(recv, arg)
         if v != value.Q_UNDEF:
             return v
-        return helpers.sym_eqq(recv, arg)
+        v = helpers.sym_eqq(recv, arg)
+        if v != value.Q_UNDEF:
+            return v
+        v = helpers.str_eqq(recv, arg)
+        if v != value.Q_UNDEF:
+            return v
+        return helpers.mod_eqq(recv, arg)
     if mid == helpers.KIND_OF_P or mid == helpers.IS_A_P:
         return helpers.kind_of(recv, arg, mid)
+    if mid == helpers.INSTANCE_OF_P:
+        return helpers.instance_of(recv, arg)
+    if mid == helpers.KEY_P or mid == helpers.HAS_KEY_P:
+        return helpers.hash_key_p(recv, arg, mid)
+    if mid == helpers.INCLUDE_P:
+        return helpers.set_include(recv, arg)
+    if mid == helpers.START_WITH_P:
+        return helpers.str_start_with(recv, arg)
     if mid == helpers.XOR:
         return helpers.xor(recv, arg)
     if mid == helpers.RSHIFT:

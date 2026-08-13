@@ -1812,6 +1812,89 @@ rpyyarv_hash_delete(uintptr_t hash, uintptr_t key, int *state)
 }
 
 static VALUE
+hash_aref_body(VALUE argp)
+{
+    struct hash_args *p = (struct hash_args *)argp;
+    return rb_hash_aref(p->hash, p->key);
+}
+
+/* Hash#[] whole: hit, miss and the default value or proc, in one protected call; _v apart from the C-string-keyed rpyyarv_hash_aref above. */
+uintptr_t
+rpyyarv_hash_aref_v(uintptr_t hash, uintptr_t key, int *state)
+{
+    struct hash_args a;
+    a.hash = (VALUE)hash;
+    a.key = (VALUE)key;
+    *state = 0;
+    VALUE r = rb_protect(hash_aref_body, (VALUE)&a, state);
+    if (*state) return (uintptr_t)Qnil;
+    return (uintptr_t)r;
+}
+
+static VALUE
+set_include_body(VALUE argp)
+{
+    struct hash_args *p = (struct hash_args *)argp;
+    return rb_set_lookup(p->hash, p->key) ? Qtrue : Qfalse;
+}
+
+/* Set#include? of an exact core Set; the element's #hash can be Ruby code, so protected. */
+uintptr_t
+rpyyarv_set_include(uintptr_t set, uintptr_t elt, int *state)
+{
+    VALUE s = (VALUE)set;
+    struct hash_args a;
+    *state = 0;
+    if (SPECIAL_CONST_P(s) || rb_class_of(s) != rb_cSet)
+        return (uintptr_t)Qundef;
+    a.hash = s;
+    a.key = (VALUE)elt;
+    VALUE r = rb_protect(set_include_body, (VALUE)&a, state);
+    if (*state) return (uintptr_t)Qnil;
+    return (uintptr_t)r;
+}
+
+static VALUE
+str_push_body(VALUE argp)
+{
+    struct hash_args *p = (struct hash_args *)argp;
+    return rb_str_concat(p->hash, p->key);
+}
+
+/* String#<< of a String needing what the raw arm refuses: encoding negotiation or the frozen check, both of which can raise. */
+uintptr_t
+rpyyarv_str_push(uintptr_t str, uintptr_t other, int *state)
+{
+    struct hash_args a;
+    *state = 0;
+    if (!RB_TYPE_P((VALUE)str, T_STRING) || !RB_TYPE_P((VALUE)other, T_STRING))
+        return (uintptr_t)Qundef;
+    a.hash = (VALUE)str;
+    a.key = (VALUE)other;
+    VALUE r = rb_protect(str_push_body, (VALUE)&a, state);
+    if (*state) return (uintptr_t)Qnil;
+    return (uintptr_t)r;
+}
+
+/* String#start_with? for one String prefix of the same encoding: a byte compare, nothing to raise. */
+uintptr_t
+rpyyarv_str_start_with(uintptr_t str, uintptr_t prefix)
+{
+    VALUE s = (VALUE)str;
+    VALUE p = (VALUE)prefix;
+    long ls, lp;
+    if (!RB_TYPE_P(s, T_STRING) || !RB_TYPE_P(p, T_STRING))
+        return (uintptr_t)Qundef;
+    if (ENCODING_GET(s) != ENCODING_GET(p))
+        return (uintptr_t)Qundef;
+    ls = RSTRING_LEN(s);
+    lp = RSTRING_LEN(p);
+    if (lp > ls) return (uintptr_t)Qfalse;
+    return memcmp(RSTRING_PTR(s), RSTRING_PTR(p), lp) == 0
+        ? (uintptr_t)Qtrue : (uintptr_t)Qfalse;
+}
+
+static VALUE
 to_hash_type_body(VALUE argp)
 {
     struct hash_args *p = (struct hash_args *)argp;
@@ -2121,6 +2204,12 @@ rpyyarv_bop_mask(int *count)
     BOP(rb_mKernel, "===");
     BOP(rb_mKernel, "kind_of?");
     BOP(rb_mKernel, "is_a?");
+    BOP(rb_cHash, "[]=");
+    BOP(rb_cHash, "key?");
+    BOP(rb_cHash, "has_key?");
+    BOP(rb_cSet, "include?");
+    BOP(rb_cString, "===");
+    BOP(rb_cString, "start_with?");
 #undef BOP
 
     /* The count is an out-parameter, so every bit of the word stays available to the mask. */

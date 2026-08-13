@@ -118,7 +118,7 @@ gccheck:
 	          test/enumerators.rb test/loopiter.rb test/classvars.rb \
 	          test/scopedclass.rb test/trampolinekw.rb test/moduleattrs.rb \
 	          test/once.rb test/ranges.rb test/hasharef.rb test/kindof.rb \
-          test/lambdas.rb \
+          test/lambdas.rb test/objops.rb \
 	          test/defaultgems.rb \
 	          $(TOP)/benchmark/app_*.rb $(TOP)/benchmark/so_*.rb; do \
 	   n=`basename $$s`; \

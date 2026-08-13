@@ -39,6 +39,7 @@ T_MODULE = 0x03
 T_ARRAY = 0x07
 T_STRUCT = 0x09
 FL_FREEZE = 1 << 11             # RUBY_FL_FREEZE, the bit rb_check_frozen reads
+FL_SINGLETON = 1 << 13          # RUBY_FL_SINGLETON (== FL_USER1) on a T_CLASS
 T_DATA = 0x0c
 FL_TYPED_DATA = 1 << 6          # RUBY_TYPED_FL_IS_TYPED_DATA: RData keeps a function pointer where RTypedData keeps fields_obj
 FL_SHAREABLE = 1 << 8           # RUBY_FL_SHAREABLE, the bit ivar_ractor_check raises on
