@@ -1398,6 +1398,7 @@ def _opt_send(frame, mid, argc):
     return rubycall.call(recv, mid, args)
 
 
+@unroll_safe
 def _super_to_cruby(frame, klass, owner, mid, recv_at, argc, kw_splat,
                     kw_names=NO_KEYWORDS):
     args = []
@@ -1409,6 +1410,7 @@ def _super_to_cruby(frame, klass, owner, mid, recv_at, argc, kw_splat,
                                 kw_splat, kw_names)
 
 
+@unroll_safe
 def _super_to_cruby_args(frame, klass, owner, mid, recv_at, args, kw_splat,
                          kw_names=NO_KEYWORDS):
     """`super` landing on a method CRuby owns: the method after owner's along klass's chain, bound to the receiver. Literal keywords become the one trailing Hash bind_call passes on as keywords."""
