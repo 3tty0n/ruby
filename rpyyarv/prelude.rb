@@ -274,16 +274,15 @@ class Array
 end
 
 class Hash
-  # These walk a keys snapshot, so a value is re-read at yield time and
-  # mutation during iteration is not the error CRuby raises.
+  # These walk a flat [k0, v0, ...] snapshot, one C call for the whole hash,
+  # so mutation during iteration is not the error CRuby raises.
   def each
     return to_enum(:each) unless block_given?
-    ks = keys
+    ps = __rpyyarv_hash_pairs__(self)
     i = 0
-    while i < ks.length
-      k = ks[i]
-      yield [k, self[k]]
-      i = i + 1
+    while i < ps.length
+      yield [ps[i], ps[i + 1]]
+      i = i + 2
     end
     self
   end
@@ -303,13 +302,13 @@ class Hash
   def select
     return to_enum(:select) unless block_given?
     out = {}
-    ks = keys
+    ps = __rpyyarv_hash_pairs__(self)
     i = 0
-    while i < ks.length
-      k = ks[i]
-      v = self[k]
+    while i < ps.length
+      k = ps[i]
+      v = ps[i + 1]
       out[k] = v if yield k, v
-      i = i + 1
+      i = i + 2
     end
     out
   end
@@ -318,18 +317,17 @@ class Hash
   def merge!(*others)
     i = 0
     while i < others.length
-      other = others[i]
-      ks = other.keys
+      ps = __rpyyarv_hash_pairs__(others[i])
       j = 0
-      while j < ks.length
-        k = ks[j]
-        v = other[k]
+      while j < ps.length
+        k = ps[j]
+        v = ps[j + 1]
         if block_given? && key?(k)
           self[k] = yield(k, self[k], v)
         else
           self[k] = v
         end
-        j = j + 1
+        j = j + 2
       end
       i = i + 1
     end

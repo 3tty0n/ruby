@@ -235,6 +235,9 @@ long rpyyarv_pop_dead_handle(void);
 
 uintptr_t rpyyarv_hash_aref_v(uintptr_t hash, uintptr_t key, int *state);
 uintptr_t rpyyarv_set_include(uintptr_t set, uintptr_t elt, int *state);
+uintptr_t rpyyarv_hash_pairs(uintptr_t hash, int *state);
+uintptr_t rpyyarv_hash_lookup_fast(uintptr_t hash, uintptr_t key);
+uintptr_t rpyyarv_hash_aset_fast(uintptr_t hash, uintptr_t key, uintptr_t val);
 uintptr_t rpyyarv_str_push(uintptr_t str, uintptr_t other, int *state);
 uintptr_t rpyyarv_str_start_with(uintptr_t str, uintptr_t prefix);
 int rpyyarv_is_proc(uintptr_t v);

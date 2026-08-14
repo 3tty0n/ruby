@@ -248,6 +248,12 @@ def invoke(frame, w_ci, w_block=None):
         _drop(frame, recv_at)
         debug.count_native()
         return _backtrace()
+    if mid == HASH_PAIRS_PRIM and fcall and argc == 1 \
+            and boot.is_hash(frame.stack[recv_at + 1]):
+        v = boot.hash_pairs(frame.stack[recv_at + 1])
+        _drop(frame, recv_at)
+        debug.count_native()
+        return v
     if mid == DIR_UNDERSCORE and fcall and argc == 0:
         # Likewise f_dir: the running file is this frame's ISeq, not any CRuby frame's.
         v = _dir_of(frame)
@@ -459,6 +465,7 @@ INITIALIZE = symbols.intern('initialize')
 BLOCK_GIVEN = symbols.intern('block_given?')
 DIR_UNDERSCORE = symbols.intern('__dir__')
 BACKTRACE_PRIM = symbols.intern('__rpyyarv_backtrace__')
+HASH_PAIRS_PRIM = symbols.intern('__rpyyarv_hash_pairs__')
 METHOD_UNDERSCORE = symbols.intern('__method__')
 CALLEE_UNDERSCORE = symbols.intern('__callee__')
 

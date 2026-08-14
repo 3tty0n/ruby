@@ -215,6 +215,11 @@ rb_hash_aref_full = _ext('rpyyarv_hash_aref_v', [VALUE, VALUE, INTP], VALUE,
                          reenters=True)
 rb_set_include = _ext('rpyyarv_set_include', [VALUE, VALUE, INTP], VALUE,
                       reenters=True)
+rb_hash_pairs = _ext('rpyyarv_hash_pairs', [VALUE, INTP], VALUE,
+                     reenters=True)
+rb_hash_lookup_fast = _ext('rpyyarv_hash_lookup_fast', [VALUE, VALUE], VALUE)
+rb_hash_aset_fast = _ext('rpyyarv_hash_aset_fast', [VALUE, VALUE, VALUE],
+                         VALUE)
 rb_str_push = _ext('rpyyarv_str_push', [VALUE, VALUE, INTP], VALUE,
                    reenters=True)
 rb_str_start_with = _ext('rpyyarv_str_start_with', [VALUE, VALUE], VALUE)
@@ -1237,6 +1242,27 @@ def hash_aref_value(hash_v, key):
     ret = rffi.cast(lltype.Signed, v)
     if failed:
         _failed('Hash#[]')
+    return ret
+
+
+def hash_lookup_fast(hash_v, key):
+    """Unprotected Hash lookup for a key that cannot call Ruby; Q_UNDEF on miss."""
+    return rffi.cast(lltype.Signed, rb_hash_lookup_fast(_v(hash_v), _v(key)))
+
+
+def hash_aset_fast(hash_v, key, val):
+    """Unprotected Hash store; only for an unfrozen plain Hash and a key that cannot call Ruby."""
+    rb_hash_aset_fast(_v(hash_v), _v(key), _v(val))
+
+
+def hash_pairs(hash_v):
+    """[k0, v0, k1, v1, ...] of a Hash in entry order, one C call."""
+    state = _enter_status()
+    v = rb_hash_pairs(_v(hash_v), state)
+    failed = _leave_status(state)
+    ret = rffi.cast(lltype.Signed, v)
+    if failed:
+        _failed('Hash#each')
     return ret
 
 

@@ -1836,6 +1836,46 @@ rpyyarv_hash_aref_v(uintptr_t hash, uintptr_t key, int *state)
     return (uintptr_t)r;
 }
 
+/* An immediate or String key hashes and compares in C, so a plain lookup cannot reenter Ruby; Qundef on miss, defaults not consulted. */
+uintptr_t
+rpyyarv_hash_lookup_fast(uintptr_t hash, uintptr_t key)
+{
+    return (uintptr_t)rb_hash_lookup2((VALUE)hash, (VALUE)key, Qundef);
+}
+
+/* As above for store; the caller already checked the frozen bit. */
+uintptr_t
+rpyyarv_hash_aset_fast(uintptr_t hash, uintptr_t key, uintptr_t val)
+{
+    return (uintptr_t)rb_hash_aset((VALUE)hash, (VALUE)key, (VALUE)val);
+}
+
+static int
+hash_pairs_i(VALUE key, VALUE val, VALUE out)
+{
+    rb_ary_push(out, key);
+    rb_ary_push(out, val);
+    return ST_CONTINUE;
+}
+
+static VALUE
+hash_pairs_body(VALUE h)
+{
+    VALUE out = rb_ary_new_capa(2 * (long)rb_hash_size_num(h));
+    rb_hash_foreach(h, hash_pairs_i, out);
+    return out;
+}
+
+/* [k0, v0, k1, v1, ...] in entry order: one call and one Array where keys-then-aref cost a C call per key. */
+uintptr_t
+rpyyarv_hash_pairs(uintptr_t hash, int *state)
+{
+    *state = 0;
+    VALUE r = rb_protect(hash_pairs_body, (VALUE)hash, state);
+    if (*state) return (uintptr_t)Qnil;
+    return (uintptr_t)r;
+}
+
 static VALUE
 set_include_body(VALUE argp)
 {

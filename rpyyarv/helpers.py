@@ -380,6 +380,11 @@ def to_f(recv):
     return value.Q_UNDEF
 
 
+def _hash_key_cannot_reenter(key):
+    """Immediates and plain Strings hash and compare in C, so a lookup with one never runs Ruby and needs no rb_protect."""
+    return value.is_immediate(key) or value.is_plain_string(key)
+
+
 def hash_aref(recv, key):
     """Hash#[] whole in one protected call, the default value or proc included, so a miss no longer pays a second full send."""
     if value.is_immediate(recv) \
@@ -387,6 +392,11 @@ def hash_aref(recv, key):
         return value.Q_UNDEF
     if not _core_op(value.C_HASH, B_HASH_AREF, AREF):
         return value.Q_UNDEF
+    if _hash_key_cannot_reenter(key):
+        v = boot.hash_lookup_fast(recv, key)
+        if v != value.Q_UNDEF:
+            return v
+        # A miss still consults the default below, under rb_protect.
     return boot.hash_aref_value(recv, key)
 
 
@@ -591,6 +601,10 @@ def hash_aset(recv, key, val):
         return value.Q_UNDEF
     if not _core_op(value.C_HASH, B_HASH_ASET, ASET):
         return value.Q_UNDEF
+    if _hash_key_cannot_reenter(key) \
+            and raw_word(recv, value.FLAGS_WORD) & value.FL_FREEZE == 0:
+        boot.hash_aset_fast(recv, key, val)
+        return val
     boot.hash_aset(recv, key, val)
     return val
 
