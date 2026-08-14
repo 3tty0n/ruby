@@ -121,3 +121,45 @@ end
 q = Pair.new
 q.left = 8
 p q.first_of
+
+class Saver
+  def greet = "old"
+  alias_method :saved_greet, :greet
+  def greet = "new"
+end
+s = Saver.new
+p s.greet
+p s.saved_greet
+p Saver.instance_method(:saved_greet).bind(s).call
+
+class Opened; end
+Opened.class_eval do
+  DEPTH = 3
+  def visible = "seen #{DEPTH}"
+  def self.factory = "made"
+  private def hidden = "kept"
+end
+o = Opened.new
+p o.visible
+p Opened.factory
+p Opened.public_method_defined?(:visible)
+p Opened.private_method_defined?(:hidden)
+p Object.private_method_defined?(:visible)
+p(Opened.class_eval { |m| m == Opened })
+p Opened.class_eval { self }
+module Reopened; end
+Reopened.module_eval do
+  def helper = "mixed in"
+end
+class UsesHelper; include Reopened; end
+p UsesHelper.new.helper
+
+class Sized; end
+Sized.class_eval do
+  def self.new(n) = Array.new(n, 7)
+end
+p Sized.new(2)
+class OwnNew
+  def self.new(tag) = tag.to_s
+end
+p OwnNew.new(:t)

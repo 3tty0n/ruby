@@ -215,6 +215,15 @@ def invoke(frame, w_ci, w_block=None):
             _drop(frame, recv_at)
             debug.count_native()
             return v
+    if w_block is not None and entry is None and argc == 0 \
+            and not w_ci.blockarg \
+            and (mid == CLASS_EVAL or mid == MODULE_EVAL) \
+            and w_block.kind == block_mod.KIND_ISEQ \
+            and (dispatch.is_known_class(recv)
+                 or dispatch.is_known_module(recv)) \
+            and dispatch.owner_of(klass, mid) == \
+            value.core_class(value.C_MODULE):
+        return _module_eval_block(frame, recv, recv_at, w_block)
     if _is_attr_mid(mid) and argc > 0 and not value.is_immediate(recv) \
             and (dispatch.is_known_class(recv)
                  or dispatch.is_known_module(recv)):
@@ -1483,6 +1492,15 @@ def _instance_eval(frame, mid, recv, recv_at, argc, w_block):
     return call_block(w_block, args, NO_KEYWORDS, False, recv, cref)
 
 
+@unroll_safe
+def _module_eval_block(frame, recv, recv_at, w_block):
+    """class_eval/module_eval with a block, run here as _instance_eval is: through CRuby the block would keep its written cref and a def inside would land privately on Object."""
+    args = [recv]
+    cref = _push_cref(_cref_of(frame), recv, True)
+    _drop(frame, recv_at)
+    return call_block(w_block, args, NO_KEYWORDS, False, recv, cref)
+
+
 def _in_body_of(frame, recv):
     node = frame.cref
     return node is not None and node.klass == recv
@@ -1556,16 +1574,20 @@ def _core_method(frame, mid, recv, recv_at, argc):
 
 
 def _alias_method(frame, recv, recv_at):
-    """Module#alias_method: mirror the alias into the registry, then let CRuby make its own, so both dispatchers resolve the new name."""
-    name = _sym_mid(frame.stack[recv_at + 1])
-    old = _sym_mid(frame.stack[recv_at + 2])
-    entry = dispatch.lookup(recv, old)
-    dispatch.undefine(recv, name)
-    if entry is not None:
-        if entry.kind == dispatch.KIND_ISEQ:
-            dispatch.define(recv, name, entry.w_iseq, entry.private,
-                            entry.cref, entry.lexical)
-        else:
+    """Module#alias_method, as _core_method runs the alias keyword: an ISEQ alias never reaches CRuby, whose copy would be the old name's trampoline and so track a later redefinition of the old name (liquid-c saves ruby_parse this way before replacing parse)."""
+    new_v = frame.stack[recv_at + 1]
+    old_v = frame.stack[recv_at + 2]
+    if boot.is_symbol(new_v) and boot.is_symbol(old_v):
+        name = symbols.intern(boot.sym_of(new_v))
+        old = symbols.intern(boot.sym_of(old_v))
+        entry = dispatch.lookup(recv, old)
+        if entry is not None:
+            dispatch.undefine(recv, name)
+            if entry.kind == dispatch.KIND_ISEQ:
+                dispatch.define(recv, name, entry.w_iseq, entry.private,
+                                entry.cref, entry.lexical)
+                _drop(frame, recv_at)
+                return new_v
             dispatch.define_attr(recv, name, entry.ivar, entry.kind)
     args = [frame.stack[recv_at + 1], frame.stack[recv_at + 2]]
     _drop(frame, recv_at)
@@ -2666,6 +2688,10 @@ def _opt_new_alloc(klass):
         return 0
     if helpers.ary_new_pristine(klass):
         # The miss branch's `send new` is where _array_new runs; alloc plus a separate initialize would leave CRuby to fill it.
+        return 0
+    # A `def self.new` (liquid-c's ResourceLimits) must win over the alloc.
+    if dispatch.owner_of(promote(value.class_of(klass)), NEW) != \
+            value.core_class(value.C_CLASS):
         return 0
     return dispatch.alloc(klass)
 
