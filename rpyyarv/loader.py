@@ -257,6 +257,11 @@ class Loader(object):
 
         catches = self.catches(raw, labels, parents)
         returns = self.throws_return(opcodes, operands, raw, pool, catches)
+        shares = raw.shares_locals
+        for entry in catches:
+            # A rescue/ensure ISeq reads `$!` and the surrounding locals through defining_frame.
+            if entry.w_iseq is not None:
+                shares = True
         consts = [v for v in pool.consts]
         w_iseq = W_ISeq(raw.name, code, consts, [w for w in pool.iseqs],
                         [c for c in pool.callinfos], raw.nlocals,
@@ -269,7 +274,8 @@ class Loader(object):
                         kw_table, kw_defaults, raw.kw_required, kw_start,
                         raw.kw_bits, raw.kwrest, self.program.path,
                         [t for t in pool.case_tables],
-                        [p for p in line_pcs], [n for n in line_nums])
+                        [p for p in line_pcs], [n for n in line_nums],
+                        shares)
         gcroots.register_consts(consts)
         # The values `once` caches live here, and the mark hook walks the list itself.
         gcroots.register_consts(w_iseq.once_cache)
@@ -525,6 +531,10 @@ class Loader(object):
                 raise LoadError("%s in '%s' wants an ISeq, got %s"
                                 % (insns.NAMES[op], raw.name,
                                    operand.describe()))
+            if op == insns.SEND or op == insns.INVOKESUPER \
+                    or op == insns.ONCE:
+                # The nested ISeq runs against this frame's locals, which therefore move to the heap.
+                raw.shares_locals = True
             return pool.add_iseq(
                 self.load_iseq(operand.intval, [raw] + parents))
         if t == insns.T_CALL_DATA:

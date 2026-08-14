@@ -91,6 +91,8 @@ class RawISeq(object):
         self.kw_defaults = kw_defaults if kw_defaults is not None else []
         self.kw_bits = kw_bits
         self.kwrest = kwrest
+        # Set by the loader on the first block or once operand it wires.
+        self.shares_locals = False
         self.insns = []
         # Source line of each entry of insns; the bare Integers in iseq_data_to_ary's body set it.
         self.lines = []

@@ -1052,7 +1052,7 @@ def _enter_args(frame, entry, recv, recv_at, args, mid, w_block=None,
             _arity_error(argc, callee_iseq.nparams, callee_iseq.nparams)
         i = 0
         while i < argc:
-            callee.locals[i] = args[i]
+            callee.local_set(i, args[i])
             i += 1
     else:
         _refuse_iseq(callee_iseq, mid)
@@ -1081,7 +1081,7 @@ def _enter(frame, entry, recv, recv_at, argc, mid, w_block=None,
             _arity_error(argc, callee_iseq.nparams, callee_iseq.nparams)
         i = 0
         while i < argc:
-            callee.locals[i] = frame.stack[recv_at + 1 + i]
+            callee.local_set(i, frame.stack[recv_at + 1 + i])
             i += 1
     else:
         _refuse_iseq(callee_iseq, mid)
@@ -1100,7 +1100,7 @@ def _enter(frame, entry, recv, recv_at, argc, mid, w_block=None,
     args = []
     i = 0
     while i < argc:
-        args.append(callee.locals[i])
+        args.append(callee.local_get(i))
         i += 1
     debug.trace_enter(mid, args)
     ret = execute(callee_iseq, callee, pc)
@@ -1172,9 +1172,9 @@ def setup_params(w_iseq, callee, args, is_block, kw_names=NO_KEYWORDS,
     i = 0
     while i < lead:
         if i < n:
-            callee.locals[i] = args[i]
+            callee.local_set(i, args[i])
         else:
-            callee.locals[i] = value.Q_NIL
+            callee.local_set(i, value.Q_NIL)
         i += 1
 
     given = n - min_argc
@@ -1183,7 +1183,7 @@ def setup_params(w_iseq, callee, args, is_block, kw_names=NO_KEYWORDS,
     filled = given if given < opt_num else opt_num
     i = 0
     while i < filled:
-        callee.locals[lead + i] = args[lead + i]
+        callee.local_set(lead + i, args[lead + i])
         i += 1
 
     if rest >= 0:
@@ -1196,7 +1196,7 @@ def setup_params(w_iseq, callee, args, is_block, kw_names=NO_KEYWORDS,
         # The caller's frame still holds these while the shim copies them onto the machine stack.
         ary = rubycall.ary_new(values)
         assert rest >= 0
-        callee.locals[rest] = ary
+        callee.local_set(rest, ary)
 
     if post_num > 0:
         assert post_start >= 0
@@ -1204,9 +1204,9 @@ def setup_params(w_iseq, callee, args, is_block, kw_names=NO_KEYWORDS,
         while i < post_num:
             take = n - post_num + i
             if take >= 0 and take < n:
-                callee.locals[post_start + i] = args[take]
+                callee.local_set(post_start + i, args[take])
             else:
-                callee.locals[post_start + i] = value.Q_NIL
+                callee.local_set(post_start + i, value.Q_NIL)
             i += 1
 
     if kw_hash != 0:
@@ -1276,13 +1276,13 @@ def _setup_keywords(w_iseq, callee, args, base, kw_names, splat_hash=0):
         slot = start + i
         assert slot >= 0
         if given != value.Q_UNDEF:
-            callee.locals[slot] = given
+            callee.local_set(slot, given)
         elif i < required:
             missing.append(table[i])
         elif w_iseq.kw_defaults[i] != value.Q_UNDEF:
-            callee.locals[slot] = w_iseq.kw_defaults[i]
+            callee.local_set(slot, w_iseq.kw_defaults[i])
         else:
-            callee.locals[slot] = value.Q_NIL
+            callee.local_set(slot, value.Q_NIL)
             bits |= 1 << (i - required)
         i += 1
     if len(missing) > 0:
@@ -1305,7 +1305,7 @@ def _setup_keywords(w_iseq, callee, args, base, kw_names, splat_hash=0):
             j += 1
         slot = w_iseq.kwrest
         assert slot >= 0
-        callee.locals[slot] = rest
+        callee.local_set(slot, rest)
     else:
         unknown = []
         j = 0
@@ -1321,7 +1321,7 @@ def _setup_keywords(w_iseq, callee, args, base, kw_names, splat_hash=0):
     if w_iseq.kw_bits >= 0:
         slot = w_iseq.kw_bits
         assert slot >= 0
-        callee.locals[slot] = value.int2fix(bits)
+        callee.local_set(slot, value.int2fix(bits))
 
 
 @dont_look_inside
@@ -1825,7 +1825,7 @@ def _from_cruby(recv, mid, args, w_block, kw_splat=False):
             _arity_error(argc, callee_iseq.nparams, callee_iseq.nparams)
         i = 0
         while i < argc:
-            callee.locals[i] = args[i]
+            callee.local_set(i, args[i])
             i += 1
     else:
         _refuse_iseq(callee_iseq, mid)
@@ -2017,7 +2017,7 @@ def call_block(w_block, args, kw_names=NO_KEYWORDS, kw_splat=False,
             n = b_iseq.nparams
         i = 0
         while i < n:
-            callee.locals[i] = args[i]
+            callee.local_set(i, args[i])
             i += 1
     else:
         pc = setup_params(b_iseq, callee, args, True, kw_names, kw_splat)
@@ -2105,7 +2105,7 @@ def _autosplat(args):
 
 @unroll_safe
 def _outer_frame(frame, level):
-    """The frame `level` steps up the block chain; reading its locals from a trace forces that frame's virtualizable."""
+    """The frame `level` steps up the block chain; its locals live on the heap (shares_locals), so reading them never forces its virtualizable."""
     f = frame
     i = 0
     while i < level:
@@ -2244,16 +2244,16 @@ def _run_catch(frame, entry, throw):
     callee.defining_frame = frame
     callee.block = frame.block
     callee.own_block = frame.own_block
-    if len(callee.locals) > 0:
+    if w_iseq.nlocals > 0:
         # Local 0 is `$!`; for a break or a next nothing reads it.
-        callee.locals[0] = throw.value if throw.kind == PENDING_RAISE \
-            else value.Q_NIL
+        callee.local_set(0, throw.value if throw.kind == PENDING_RAISE
+                         else value.Q_NIL)
     callee.pending_kind = throw.kind
     callee.pending_value = throw.value
     callee.pending_block = throw.w_block
     callee.pending_frame = throw.target
-    return _run_with_errinfo(w_iseq, callee, callee.locals[0]
-                             if len(callee.locals) > 0 else value.Q_NIL)
+    return _run_with_errinfo(w_iseq, callee, callee.local_get(0)
+                             if w_iseq.nlocals > 0 else value.Q_NIL)
 
 
 def _run_with_errinfo(w_iseq, callee, errinfo):
@@ -2893,20 +2893,20 @@ def _execute(iseq, frame, pc):
             idx = packed & optable.LOCAL_SLOT_MASK
             assert idx >= 0
             if packed == idx:
-                frame.push(frame.locals[idx])
+                frame.push(frame.local_get(idx))
             else:
                 level = packed >> optable.LOCAL_LEVEL_SHIFT
-                frame.push(_outer_frame(frame, level).locals[idx])
+                frame.push(_outer_frame(frame, level).local_get(idx))
         elif opcode == insns.SETLOCAL:
             packed = code[pc]
             pc += 1
             idx = packed & optable.LOCAL_SLOT_MASK
             assert idx >= 0
             if packed == idx:
-                frame.locals[idx] = frame.pop()
+                frame.local_set(idx, frame.pop())
             else:
                 level = packed >> optable.LOCAL_LEVEL_SHIFT
-                _outer_frame(frame, level).locals[idx] = frame.pop()
+                _outer_frame(frame, level).local_set(idx, frame.pop())
         elif opcode == insns.GETBLOCKPARAMPROXY:
             packed = code[pc]
             pc += 1
@@ -2914,7 +2914,7 @@ def _execute(iseq, frame, pc):
             assert idx >= 0
             f = _local_frame(frame, packed)
             if f.block_param_set:
-                frame.push(f.locals[idx])
+                frame.push(f.local_get(idx))
             elif f.block is None:
                 frame.push(value.Q_NIL)
             else:
@@ -2926,16 +2926,16 @@ def _execute(iseq, frame, pc):
             assert idx >= 0
             f = _local_frame(frame, packed)
             if not f.block_param_set:
-                f.locals[idx] = _to_proc(f.block)
+                f.local_set(idx, _to_proc(f.block))
                 f.block_param_set = True
-            frame.push(f.locals[idx])
+            frame.push(f.local_get(idx))
         elif opcode == insns.SETBLOCKPARAM:
             packed = code[pc]
             pc += 1
             idx = packed & optable.LOCAL_SLOT_MASK
             assert idx >= 0
             f = _local_frame(frame, packed)
-            f.locals[idx] = frame.pop()
+            f.local_set(idx, frame.pop())
             f.block_param_set = True
         elif opcode == insns.DUP:
             v = frame.pop()
@@ -3237,7 +3237,7 @@ def _execute(iseq, frame, pc):
             assert idx >= 0
             # A set bit means the optional went unfilled, so vm_check_keyword answers false and the body computes its default.
             frame.push(value.newbool(
-                (value.fix2int(frame.locals[idx]) & (1 << bit)) == 0))
+                (value.fix2int(frame.local_get(idx)) & (1 << bit)) == 0))
         elif opcode == insns.THROW:
             throw_state = code[pc]
             pc += 1

@@ -77,6 +77,9 @@ def _mark_array(a):
 def _mark_frame(f):
     _mark_array(f.stack)
     _mark_array(f.locals)
+    s = f.shared
+    if s is not None:
+        _mark_array(s.values)
     if not value.is_immediate(f.self_val):
         boot.gc_mark_value(f.self_val)
     # f.cref needs no mark: every class a Cref names went through dispatch.root_base, which roots it for good.

@@ -36,7 +36,7 @@ class W_ISeq(object):
                           'has_return_throw', 'catches_return',
                           'kw_table[*]', 'kw_defaults[*]', 'kw_required',
                           'kw_start', 'kw_bits', 'kwrest', 'path',
-                          'line_pcs[*]', 'line_nums[*]']
+                          'line_pcs[*]', 'line_nums[*]', 'shares_locals']
     # once_cache is written once per body and is deliberately not immutable.
 
     def __init__(self, name, code, consts, iseqs, callinfos, nlocals,
@@ -46,7 +46,10 @@ class W_ISeq(object):
                  has_return_throw=False, catches_return=False,
                  path_sites=None, kw_table=None, kw_defaults=None,
                  kw_required=0, kw_start=-1, kw_bits=-1, kwrest=-1, path='',
-                 case_tables=None, line_pcs=None, line_nums=None):
+                 case_tables=None, line_pcs=None, line_nums=None,
+                 shares_locals=False):
+        # A nested ISeq (block, rescue, once) can reach these locals, so a frame keeps them on the heap instead of in the virtualizable.
+        self.shares_locals = shares_locals
         # Source lines, one pair per line change rather than per instruction; line_for walks them.
         self.line_pcs = line_pcs if line_pcs is not None else []
         self.line_nums = line_nums if line_nums is not None else []
