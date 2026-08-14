@@ -1876,6 +1876,32 @@ rpyyarv_hash_pairs(uintptr_t hash, int *state)
     return (uintptr_t)r;
 }
 
+struct alias_var_args {
+    VALUE sym1;
+    VALUE sym2;
+};
+
+static VALUE
+alias_variable_body(VALUE argp)
+{
+    struct alias_var_args *a = (struct alias_var_args *)argp;
+    rb_alias_variable(SYM2ID(a->sym1), SYM2ID(a->sym2));
+    return Qnil;
+}
+
+/* `alias $new $old` (vm.c m_core_set_variable_alias). */
+uintptr_t
+rpyyarv_alias_variable(uintptr_t sym1, uintptr_t sym2, int *state)
+{
+    struct alias_var_args a;
+    a.sym1 = (VALUE)sym1;
+    a.sym2 = (VALUE)sym2;
+    *state = 0;
+    VALUE r = rb_protect(alias_variable_body, (VALUE)&a, state);
+    if (*state) return (uintptr_t)Qnil;
+    return (uintptr_t)r;
+}
+
 static VALUE
 set_include_body(VALUE argp)
 {

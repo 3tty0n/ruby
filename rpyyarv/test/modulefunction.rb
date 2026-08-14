@@ -48,3 +48,23 @@ class C
   def call_named = named
 end
 p C.new.call_named
+
+# module_function(name) from inside a method body, as fileutils.rb's
+# private_module_function does.
+module P
+  def self.privatize(name)
+    module_function(name)
+    private_class_method(name)
+  end
+
+  def util(x)
+    x * 2
+  end
+  privatize :util
+end
+p P.send(:util, 21)
+begin
+  P.util(1)
+rescue NoMethodError
+  puts 'util is private on the singleton'
+end

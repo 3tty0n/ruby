@@ -72,7 +72,8 @@ BLOCK_HOOK = lltype.Ptr(lltype.FuncType([lltype.Signed, rffi.INT, VALUEP,
 TRAMP_HOOK = lltype.Ptr(lltype.FuncType(
     [VALUE, VALUE, rffi.INT, VALUEP, VALUE, rffi.INT, INTP, VALUEP], VALUE))
 
-MAX_ARGC = 32
+# Mirrors RPYYARV_MAX_ARGC; a splat can expand past the old 32 (fileutils passes 47).
+MAX_ARGC = 256
 
 
 def _ext(name, args, result, reenters=False):
@@ -217,6 +218,8 @@ rb_set_include = _ext('rpyyarv_set_include', [VALUE, VALUE, INTP], VALUE,
                       reenters=True)
 rb_hash_pairs = _ext('rpyyarv_hash_pairs', [VALUE, INTP], VALUE,
                      reenters=True)
+rb_alias_variable = _ext('rpyyarv_alias_variable', [VALUE, VALUE, INTP],
+                         VALUE, reenters=True)
 rb_hash_lookup_fast = _ext('rpyyarv_hash_lookup_fast', [VALUE, VALUE], VALUE)
 rb_hash_aset_fast = _ext('rpyyarv_hash_aset_fast', [VALUE, VALUE, VALUE],
                          VALUE)
@@ -1264,6 +1267,15 @@ def hash_pairs(hash_v):
     if failed:
         _failed('Hash#each')
     return ret
+
+
+def alias_variable(sym1, sym2):
+    """`alias $new $old`, as vm.c's core#set_variable_alias does it."""
+    state = _enter_status()
+    rb_alias_variable(_v(sym1), _v(sym2), state)
+    failed = _leave_status(state)
+    if failed:
+        _failed('alias')
 
 
 def set_include(set_v, elt):

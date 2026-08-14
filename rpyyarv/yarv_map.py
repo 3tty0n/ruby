@@ -51,7 +51,7 @@ EMIT = {
     'opt_hash_freeze': [0],
     'opt_case_dispatch': [0, 1],
     'opt_newarray_send': [0, 1],
-    'expandarray': [0],     # flag is checked, only plain masgn
+    'expandarray': [0, 1],  # count and the splat/post flag
     'opt_plus': [],         # CALL_DATA dropped
     'opt_minus': [],
     'opt_mult': [],

@@ -344,8 +344,15 @@ def invoke(frame, w_ci, w_block=None):
             return _to_proc(block_mod.W_Block(
                 w_block.w_iseq, w_block.frame, w_block.outer, is_lambda=True))
         return _to_proc(w_block)
-    if mid == MODULE_FUNCTION and fcall and _in_body_of(frame, recv):
+    if mid == MODULE_FUNCTION and fcall \
+            and (_in_body_of(frame, recv)
+                 or (argc > 0 and dispatch.is_known_module(recv))):
+        # With names it also works from a method body (fileutils.rb's private_module_function); the registry must mirror the singleton copies.
         return _module_function(frame, recv, recv_at, argc)
+    if mid == PRIVATE_CLASS_METHOD and argc > 0 \
+            and (dispatch.is_known_class(recv)
+                 or dispatch.is_known_module(recv)):
+        return _private_class_method(frame, recv, recv_at, argc)
     if mid == CORE_ALIAS or mid == CORE_UNDEF:
         return _core_method(frame, mid, recv, recv_at, argc)
     if mid == ALIAS_METHOD and argc == 2 and entry is None \
@@ -355,6 +362,12 @@ def invoke(frame, w_ci, w_block=None):
         return _alias_method(frame, recv, recv_at)
     if vm_core.value != 0 and recv == vm_core.value \
             and mid != HASH_MERGE_PTR and mid != HASH_MERGE_KWD:
+        if mid == CORE_GVAR_ALIAS and argc == 2:
+            boot.alias_variable(frame.stack[recv_at + 1],
+                                frame.stack[recv_at + 2])
+            _drop(frame, recv_at)
+            debug.count_native()
+            return value.Q_NIL
         if mid == CORE_LAMBDA and w_block is not None \
                 and w_block.kind == block_mod.KIND_ISEQ:
             # `->`: the same block re-tagged as a lambda, over a persistent handle the mark hook keeps deep-marked.
@@ -1387,18 +1400,24 @@ def _opt_send(frame, mid, argc):
 
 def _super_to_cruby(frame, klass, owner, mid, recv_at, argc, kw_splat,
                     kw_names=NO_KEYWORDS):
-    """`super` landing on a method CRuby owns: the method after owner's along klass's chain, bound to the receiver. Literal keywords become the one trailing Hash bind_call passes on as keywords."""
-    recv = frame.stack[recv_at]
-    if mid == INITIALIZE and argc == 0 \
-            and owner == value.core_class(value.C_BASIC_OBJECT) \
-            and helpers.basic_initialize_pristine():
-        _drop(frame, recv_at)
-        return value.Q_NIL
     args = []
     i = 0
     while i < argc:
         args.append(frame.stack[recv_at + 1 + i])
         i += 1
+    return _super_to_cruby_args(frame, klass, owner, mid, recv_at, args,
+                                kw_splat, kw_names)
+
+
+def _super_to_cruby_args(frame, klass, owner, mid, recv_at, args, kw_splat,
+                         kw_names=NO_KEYWORDS):
+    """`super` landing on a method CRuby owns: the method after owner's along klass's chain, bound to the receiver. Literal keywords become the one trailing Hash bind_call passes on as keywords."""
+    recv = frame.stack[recv_at]
+    if mid == INITIALIZE and len(args) == 0 \
+            and owner == value.core_class(value.C_BASIC_OBJECT) \
+            and helpers.basic_initialize_pristine():
+        _drop(frame, recv_at)
+        return value.Q_NIL
     if len(kw_names) > 0:
         args = _kw_to_positional(args, kw_names)
     _drop(frame, recv_at)
@@ -1424,7 +1443,8 @@ def invoke_super(frame, w_ci):
     if recv_at < 0:
         raise UnsupportedOperation(
             "super with %d argument(s) underflows the stack" % argc)
-    if not w_ci.simple and len(w_ci.kw_names) == 0 and not w_ci.kw_splat:
+    if not w_ci.simple and len(w_ci.kw_names) == 0 and not w_ci.kw_splat \
+            and not w_ci.splat:
         raise UnsupportedOperation(
             "super in '%s' passes arguments RPyYARV does not support"
             % symbols.name_of(entry.mid))
@@ -1433,36 +1453,48 @@ def invoke_super(frame, w_ci):
 
     rubycall.gc_stress_point()
     recv = frame.stack[recv_at]
+    klass = promote(value.class_of(recv))
     # CRuby is asked where super lands, since the chain above owner may hold iclasses registry.supers does not.
-    owner = dispatch.super_owner(promote(value.class_of(recv)), entry.owner,
-                                 entry.mid)
+    owner = dispatch.super_owner(klass, entry.owner, entry.mid)
     target = None
     if owner != value.Q_NIL:
         target = dispatch.lookup_owned(owner, entry.mid)
+    if target is None and owner == value.Q_NIL:
+        # No super method at all; rb_call_super's NoMethodError needs a CRuby frame, which RPyYARV never has.
+        raise UnsupportedOperation(
+            "super from '%s' has no superclass method"
+            % symbols.name_of(entry.mid))
+    if w_ci.splat:
+        trailing = 1 if w_ci.kw_splat else len(w_ci.kw_names)
+        args = _splat_args(frame, recv_at + 1, argc - trailing, trailing)
+        if target is None:
+            return _super_to_cruby_args(frame, klass, entry.owner, entry.mid,
+                                        recv_at, args, w_ci.kw_splat,
+                                        w_ci.kw_names)
+        if target.kind != dispatch.KIND_ISEQ:
+            return _attr_send_args(frame, target, recv, recv_at, args)
+        return _enter_args(frame, target, recv, recv_at, args, entry.mid,
+                           None, w_ci.kw_names, w_ci.kw_splat)
     if target is None:
-        if owner == value.Q_NIL:
-            # No super method at all; rb_call_super's NoMethodError needs a CRuby frame, which RPyYARV never has.
-            raise UnsupportedOperation(
-                "super from '%s' has no superclass method"
-                % symbols.name_of(entry.mid))
-        return _super_to_cruby(frame, promote(value.class_of(recv)),
-                               entry.owner, entry.mid, recv_at, argc,
-                               w_ci.kw_splat, w_ci.kw_names)
+        return _super_to_cruby(frame, klass, entry.owner, entry.mid, recv_at,
+                               argc, w_ci.kw_splat, w_ci.kw_names)
     if target.kind != dispatch.KIND_ISEQ:
-        return _attr_send(frame, target, frame.stack[recv_at], recv_at, argc)
-    return _enter(frame, target, frame.stack[recv_at], recv_at, argc,
+        return _attr_send(frame, target, recv, recv_at, argc)
+    return _enter(frame, target, recv, recv_at, argc,
                   entry.mid, None, w_ci.kw_names, w_ci.kw_splat)
 
 
 # `alias` and `undef` compile to a send of one of these (vm.c); unseen, the registry shadows what they change in CRuby.
 CORE_ALIAS = symbols.intern('core#set_method_alias')
 CORE_UNDEF = symbols.intern('core#undef_method')
+CORE_GVAR_ALIAS = symbols.intern('core#set_variable_alias')
 # Literal keywords beside a **, and a bare `super` forwarding keywords (vm.c:4261).
 HASH_MERGE_PTR = symbols.intern('core#hash_merge_ptr')
 HASH_MERGE_KWD = symbols.intern('core#hash_merge_kwd')
 
 
 MODULE_FUNCTION = symbols.intern('module_function')
+PRIVATE_CLASS_METHOD = symbols.intern('private_class_method')
 ALIAS_METHOD = symbols.intern('alias_method')
 INSTANCE_EVAL = symbols.intern('instance_eval')
 INSTANCE_EXEC = symbols.intern('instance_exec')
@@ -1530,6 +1562,34 @@ def _module_function(frame, recv, recv_at, argc):
     ret = rubycall.call(recv, MODULE_FUNCTION, args)
     _copy_to_singleton(recv, args)
     return ret
+
+
+@unroll_safe
+def _private_class_method(frame, recv, recv_at, argc):
+    args = []
+    i = 0
+    while i < argc:
+        args.append(frame.stack[recv_at + 1 + i])
+        i += 1
+    _drop(frame, recv_at)
+    # CRuby first, so a name it rejects raises before the registry is touched.
+    ret = rubycall.call(recv, PRIVATE_CLASS_METHOD, args)
+    _hide_on_singleton(recv, args)
+    return ret
+
+
+@dont_look_inside
+def _hide_on_singleton(recv, args):
+    klass = boot.singleton_class(recv)
+    if klass == 0 or value.is_immediate(klass):
+        return
+    for v in args:
+        mid = symbols.intern(_attr_name(v))
+        entry = dispatch.own_lookup(klass, mid)
+        if entry is None or entry.kind != dispatch.KIND_ISEQ:
+            continue
+        dispatch.define(klass, mid, entry.w_iseq, True, entry.cref,
+                        entry.lexical)
 
 
 @dont_look_inside
@@ -2504,11 +2564,31 @@ def _reverse(frame, n):
 
 
 @unroll_safe
-def _expand(frame, v, n):
+def _expand(frame, v, n, flag=0):
+    """vm_expandarray: flag 1 pushes the rest as an Array, flag 2 fills from the end."""
     if not value.is_array(v):
-        # vm_expandarray: a plain masgn takes whatever rb_ary_to_ary answers.
         v = boot.ary_to_ary(v)
     size = value.ary_len(v)
+    if flag & 2:
+        i = 0
+        while i < n - size:
+            frame.push(value.Q_NIL)
+            i += 1
+        j = 0
+        while i < n:
+            frame.push(value.ary_at(v, size - j - 1))
+            i += 1
+            j += 1
+        if flag & 1:
+            head = size - j
+            assert head >= 0
+            frame.push(boot.ary_subseq(v, 0, head))
+        return
+    if flag & 1:
+        if n > size:
+            frame.push(boot.ary_subseq(v, size, 0))
+        else:
+            frame.push(boot.ary_subseq(v, n, size - n))
     i = n - 1
     while i >= 0:
         if i < size:
@@ -2957,8 +3037,9 @@ def _execute(iseq, frame, pc):
             frame.push(b)
         elif opcode == insns.EXPANDARRAY:
             n = code[pc]
-            pc += 1
-            _expand(frame, frame.pop(), n)
+            flag = code[pc + 1]
+            pc += 2
+            _expand(frame, frame.pop(), n, flag)
         elif opcode == insns.OPT_PLUS:
             b = frame.pop()
             a = frame.pop()

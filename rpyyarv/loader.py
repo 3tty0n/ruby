@@ -306,6 +306,7 @@ class Loader(object):
                      insns.DUPHASH, insns.SWAP]
     # The merges build the one Hash a `**` or a bare `super` hands on; they are ordinary sends of a public method, so rb_funcallv runs them.
     VMCORE_SENDS = ['core#set_method_alias', 'core#undef_method',
+                    'core#set_variable_alias',
                     'core#hash_merge_ptr', 'core#hash_merge_kwd',
                     'lambda']
 
@@ -446,10 +447,10 @@ class Loader(object):
                        optable.MAX_LOCAL_LEVEL))
         elif op == insns.EXPANDARRAY:
             flag = self.int_of(ops[1], op, raw, 'flag')
-            if flag != 0:
+            if flag & ~3:
                 raise UnsupportedOperation(
-                    "expandarray with a splat or post arguments in '%s' is "
-                    "not supported" % raw.name)
+                    "expandarray flag %d in '%s' is not supported"
+                    % (flag, raw.name))
         elif op == insns.THROW:
             tag = self.int_of(ops[0], op, raw, 'throw state') & \
                 optable.TAG_MASK
@@ -668,8 +669,6 @@ class Loader(object):
                     "support" % (operand.strval, self.call_flag_name(operand)))
             for name in operand.kw_names:
                 kw_names.append(symbols.intern(name))
-        if splat and op == insns.INVOKESUPER:
-            raise UnsupportedOperation('super with a *splat is not supported')
         if blockarg and (flags & optable.CALL_FLAG_SUPER) != 0:
             raise UnsupportedOperation('super with a block is not supported')
         # iseq.c:3537 reports orig_argc without them; on the stack they are the topmost arguments. A **splat's one Hash is already counted.

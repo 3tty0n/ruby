@@ -32,7 +32,7 @@ uintptr_t rpyyarv_toregexp(int opt, int n, const uintptr_t *parts,
                            int *state);
 
 /* Largest argc rpyyarv_funcallv* copies onto the machine stack. */
-#define RPYYARV_MAX_ARGC 32
+#define RPYYARV_MAX_ARGC 256
 
 /* rb_funcallv under rb_protect; *state is non-zero on raise, -1 when argc exceeds RPYYARV_MAX_ARGC; argv may live in memory CRuby never scans, so it is copied to the machine stack first. */
 uintptr_t rpyyarv_funcallv_id(uintptr_t recv, uintptr_t mid, int argc,
@@ -236,6 +236,7 @@ long rpyyarv_pop_dead_handle(void);
 uintptr_t rpyyarv_hash_aref_v(uintptr_t hash, uintptr_t key, int *state);
 uintptr_t rpyyarv_set_include(uintptr_t set, uintptr_t elt, int *state);
 uintptr_t rpyyarv_hash_pairs(uintptr_t hash, int *state);
+uintptr_t rpyyarv_alias_variable(uintptr_t sym1, uintptr_t sym2, int *state);
 uintptr_t rpyyarv_hash_lookup_fast(uintptr_t hash, uintptr_t key);
 uintptr_t rpyyarv_hash_aset_fast(uintptr_t hash, uintptr_t key, uintptr_t val);
 uintptr_t rpyyarv_str_push(uintptr_t str, uintptr_t other, int *state);
