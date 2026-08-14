@@ -679,6 +679,10 @@ def eq(a, b):
         return value.newbool(a == b)
     if _flt2(a, b, B_FLT_EQ, True):
         return value.newbool(_dbl(a) == _dbl(b))
+    # `n == nil`: Integer#== hands a non-numeric to the argument's ==, which for an untouched NilClass is identity (numeric.c num_equal).
+    if b == value.Q_NIL and value.is_fixnum(a) and _int_op(B_INT_EQ) \
+            and identity_op(b, EQ):
+        return value.Q_FALSE
     v = _str_eq(a, b)
     if v != value.Q_UNDEF:
         return v
@@ -706,6 +710,10 @@ def neq(a, b):
         return value.newbool(a != b)
     if _flt2(a, b, B_FLT_EQ, True):
         return value.newbool(_dbl(a) != _dbl(b))
+    # As eq's nil arm: a Fixnum is never nil once both operators are untouched.
+    if b == value.Q_NIL and value.is_fixnum(a) and _int_op(B_INT_EQ) \
+            and identity_op(b, EQ):
+        return value.Q_TRUE
     if value.is_plain_string(a) \
             and dispatch.owns_identity(value.core_class(value.C_STRING), NEQ):
         v = _str_eq(a, b)
