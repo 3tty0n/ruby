@@ -1,6 +1,7 @@
 """Lookup is elidable in (klass, mid, version) and a send promotes class_of(recv), so dispatch folds to one guard_value."""
 
 from rpyyarv import boot
+from rpyyarv import debug
 from rpyyarv import gcroots
 from rpyyarv import rubycall
 from rpyyarv import symbols
@@ -490,6 +491,7 @@ class _Owners(object):
         self.stab = {}      # the same, for the module above that one
         self.rtab = {}      # (klass VALUE, Symbol VALUE) -> respond_to? for every instance
         self.ktab = {}      # (klass VALUE, module VALUE) -> kind_of? for every instance
+        self.invalidations = 0
 
 
 owners = _Owners()
@@ -502,6 +504,8 @@ def invalidate_owners():
     if len(owners.tab) == 0 and len(owners.stab) == 0 \
             and len(owners.rtab) == 0 and len(owners.ktab) == 0:
         return
+    owners.invalidations += 1
+    debug.note_invalidation(owners.invalidations)
     owners.tab = {}
     owners.stab = {}
     owners.rtab = {}

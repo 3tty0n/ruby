@@ -113,6 +113,8 @@ def report():
     if not coverage.enabled:
         return
     note('sends: rpyyarv %d, cruby %d' % (coverage.native, coverage.foreign))
+    from rpyyarv import dispatch
+    note('method-cache invalidations: %d' % dispatch.owners.invalidations)
     note('files: rpyyarv %d, delegated to cruby %d'
          % (coverage.files_native, coverage.files_cruby))
     percent = (100 * coverage.iseqs_native // coverage.iseqs_total
@@ -180,6 +182,12 @@ def write(s):
 def note(msg):
     """Unconditional one-liner, for a print dropped in while hunting a bug."""
     write('[rpyyarv] %s\n' % msg)
+
+
+def note_invalidation(n):
+    """One line per method-cache invalidation, only under coverage: their timing tells load-time noise from a steady-state trace killer."""
+    if coverage.enabled:
+        note('invalidation #%d' % n)
 
 
 def on(channel):
