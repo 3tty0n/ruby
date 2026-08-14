@@ -243,7 +243,11 @@ def _lookup(klass, mid, version):
     if owner == OWNER_UNKNOWN:
         return OWNER_PENDING
     if owner != entry.owner and owner != value.Q_NIL:
-        return None
+        # A module included behind supers' back shadows what the walk found; the owner's own table has the real entry, if it is ours.
+        table = registry.methods.get(owner, None)
+        if table is None:
+            return None
+        return table.get(mid, None)
     return entry
 
 
