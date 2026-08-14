@@ -2,7 +2,7 @@
 
 from rpyyarv import boot
 from rpyyarv import value
-from rpyyarv.rlib import dont_look_inside
+from rpyyarv.rlib import dont_look_inside, gc_mark_state
 
 
 class Registry(object):
@@ -109,6 +109,15 @@ def _mark_block_deep(w_block):
 
 @dont_look_inside
 def mark_roots():
+    # Reading a frame mid-trace is correct and not an escape; without this flag every GC during a residual call aborted the trace being recorded.
+    gc_mark_state.marking = True
+    try:
+        _mark_all()
+    finally:
+        gc_mark_state.marking = False
+
+
+def _mark_all():
     # Not _mark_array: this list is resized, the pools are not, and the annotator will not merge the two list kinds.
     pinned = state.pinned
     k = 0
@@ -149,7 +158,7 @@ def mark_roots():
             if not value.is_immediate(v):
                 boot.gc_mark_value(v)
             k += 1
-    # Reading a virtualizable's fields from here forces it, which jit-summary counts as "virtualizables forced".
+    # A frame in compiled code is still forced here (its VALUEs live in the jitframe); one mid-trace reads in place under the marking flag.
     f = state.top
     while f is not None:
         _mark_frame(f)

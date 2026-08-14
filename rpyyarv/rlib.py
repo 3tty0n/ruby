@@ -3,7 +3,7 @@ import os
 try:
     from rpython.rlib.jit import (
         JitDriver, elidable, promote, unroll_safe, dont_look_inside, hint,
-        set_user_param)
+        set_user_param, gc_mark_state)
     from rpython.rlib.objectmodel import always_inline
     from rpython.rlib.longlong2float import float2longlong, longlong2float
     from rpython.rlib.rarithmetic import LONG_BIT, intmask, ovfcheck, r_uint
@@ -130,6 +130,12 @@ except ImportError:
 
     def always_inline(func):
         return func
+
+    class _GCMarkState(object):
+        def __init__(self):
+            self.marking = False
+
+    gc_mark_state = _GCMarkState()
 
     def raw_word(addr, index):
         raise NotImplementedError('raw_word needs the RPython backend')
