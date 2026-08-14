@@ -139,6 +139,7 @@ rb_special_consts = _ext('rpyyarv_special_consts',
 rb_gc_set_mark_hook = _ext('rpyyarv_gc_set_mark_hook', [MARK_HOOK],
                            lltype.Void)
 rb_gc_mark_value = _ext('rpyyarv_gc_mark_value', [VALUE], lltype.Void)
+rb_gc_mark_maybe = _ext('rpyyarv_gc_mark_maybe', [VALUE], lltype.Void)
 rb_set_const_hook = _ext('rpyyarv_set_const_hook', [CONST_HOOK], lltype.Void)
 rb_set_method_hook = _ext('rpyyarv_set_method_hook', [CONST_HOOK], lltype.Void)
 rb_gc_start = _ext('rpyyarv_gc_start', [], lltype.Void, reenters=True)
@@ -1450,6 +1451,11 @@ def gc_register(v):
 
 def gc_mark_value(v):
     rb_gc_mark_value(rffi.cast(VALUE, v))
+
+
+def gc_mark_maybe(w):
+    """A machine word that may or may not be a VALUE; rb_gc_mark_maybe checks."""
+    rb_gc_mark_maybe(rffi.cast(VALUE, w))
 
 
 def gc_start():

@@ -586,6 +586,12 @@ rpyyarv_gc_mark_value(uintptr_t v)
     rb_gc_mark((VALUE)v);
 }
 
+void
+rpyyarv_gc_mark_maybe(uintptr_t v)
+{
+    rb_gc_mark_maybe((VALUE)v);
+}
+
 static void (*const_hook)(void);
 
 static void

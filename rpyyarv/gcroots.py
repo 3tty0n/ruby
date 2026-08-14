@@ -110,9 +110,19 @@ def _mark_block_deep(w_block):
         w_block = w_block.outer
 
 
+def _mark_word(w):
+    boot.gc_mark_maybe(w)
+
+
+# Installed at import time so force_now can walk a compiled frame's jitframe
+# words instead of deoptimizing it (metainterp/virtualizable.py, patch 0003).
+gc_mark_state.mark_word = _mark_word
+
+
 @dont_look_inside
 def mark_roots():
     # Reading a frame mid-trace is correct and not an escape; without this flag every GC during a residual call aborted the trace being recorded.
+    gc_mark_state.generation += 1
     gc_mark_state.marking = True
     try:
         _mark_all()
@@ -161,7 +171,7 @@ def _mark_all():
             if not value.is_immediate(v):
                 boot.gc_mark_value(v)
             k += 1
-    # A frame in compiled code is still forced here (its VALUEs live in the jitframe); one mid-trace reads in place under the marking flag.
+    # A frame in compiled code is not forced: its stale heap arrays are read (harmless extra marks) and its live jitframe words are walked once via mark_word.
     f = state.top
     while f is not None:
         _mark_frame(f)

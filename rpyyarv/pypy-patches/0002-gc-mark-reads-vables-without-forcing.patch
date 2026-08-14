@@ -1,0 +1,109 @@
+diff --git a/rpython/jit/metainterp/virtualizable.py b/rpython/jit/metainterp/virtualizable.py
+index 998f73b..5b6e3ba 100644
+--- a/rpython/jit/metainterp/virtualizable.py
++++ b/rpython/jit/metainterp/virtualizable.py
+@@ -2,6 +2,7 @@ from rpython.jit.codewriter.effectinfo import EffectInfo
+ from rpython.jit.metainterp import history
+ from rpython.jit.metainterp.warmstate import wrap, unwrap
+ from rpython.rlib.unroll import unrolling_iterable
++from rpython.rlib.jit import gc_mark_state
+ from rpython.rtyper import rvirtualizable
+ from rpython.rtyper.lltypesystem import lltype, llmemory
+ from rpython.rtyper.rclass import IR_IMMUTABLE_ARRAY, IR_IMMUTABLE
+@@ -219,7 +220,11 @@ class VirtualizableInfo(object):
+             virtualizable = cast_gcref_to_vtype(virtualizable)
+             if virtualizable.vable_token:
+                 force_now(virtualizable)
+-                assert not virtualizable.vable_token
++                # During a GC-mark read of a frame being traced the token
++                # deliberately survives: the values are correct and the read
++                # is not an escape.
++                assert (not virtualizable.vable_token or
++                        gc_mark_state.marking)
+         self.clear_vable_token = clear_vable_token
+ 
+         def tracing_before_residual_call(virtualizable):
+@@ -251,9 +256,16 @@ class VirtualizableInfo(object):
+                 # The values in the virtualizable are always correct during
+                 # tracing.  We only need to reset vable_token to TOKEN_NONE
+                 # as a marker for the tracing, to tell it that this
+-                # virtualizable escapes.
+-                virtualizable.vable_token = TOKEN_NONE
++                # virtualizable escapes.  A read made only to mark GC roots
++                # is not an escape, so it leaves the marker in place.
++                if not gc_mark_state.marking:
++                    virtualizable.vable_token = TOKEN_NONE
+             else:
++                if gc_mark_state.marking:
++                    # A conservative external GC only wants the frame's words;
++                    # walking the jitframe marks them without deoptimizing.
++                    _mark_jitframe_words(token)
++                    return
+                 from rpython.jit.metainterp.compile import ResumeGuardForcedDescr
+                 ResumeGuardForcedDescr.force_now(cpu, token)
+                 assert virtualizable.vable_token == TOKEN_NONE
+@@ -328,3 +340,37 @@ _dummy = lltype.malloc(_DUMMY)
+ 
+ TOKEN_NONE            = lltype.nullptr(llmemory.GCREF.TO)
+ TOKEN_TRACING_RESCALL = lltype.cast_opaque_ptr(llmemory.GCREF, _dummy)
++
++
++class _JitframeMarkCache(object):
++    """One (token, generation) pair: the mark hook reads a frame's fields
++    consecutively, so remembering the last walked jitframe keeps the walk
++    at one per frame per collection."""
++    def __init__(self):
++        self.token = TOKEN_NONE
++        self.generation = -1
++
++_jitframe_mark_cache = _JitframeMarkCache()
++
++
++def _mark_jitframe_words(token):
++    """Every word of a compiled frame through the embedder's conservative
++    mark callback: spilled values live in the jitframe, which an external
++    GC's stack scan cannot see, and walking it does not deoptimize."""
++    cache = _jitframe_mark_cache
++    if cache.token == token and \
++            cache.generation == gc_mark_state.generation:
++        return
++    cache.token = token
++    cache.generation = gc_mark_state.generation
++    cb = gc_mark_state.mark_word
++    if cb is None:
++        return
++    from rpython.jit.backend.llsupport import jitframe
++    frame = lltype.cast_opaque_ptr(lltype.Ptr(jitframe.JITFRAME), token)
++    i = 0
++    n = len(frame.jf_frame)
++    while i < n:
++        cb(frame.jf_frame[i])
++        i += 1
++_mark_jitframe_words._dont_inline_ = True
+diff --git a/rpython/rlib/jit.py b/rpython/rlib/jit.py
+index 9a93ace..8342c68 100644
+--- a/rpython/rlib/jit.py
++++ b/rpython/rlib/jit.py
+@@ -559,6 +559,22 @@ vref_None = non_virtual_ref(None)
+ class JitHintError(Exception):
+     """Inconsistency in the JIT hints."""
+ 
++class _GCMarkState(object):
++    """Set by an embedder's GC mark hook around reading virtualizable fields:
++    during tracing those fields are always correct, so a read that only marks
++    must not clear vable_token and read as an escape."""
++    def __init__(self):
++        self.marking = False
++        # Bumped by the embedder per collection, so the jitframe walk cache
++        # in metainterp/virtualizable.py never satisfies a stale hit.
++        self.generation = 0
++        # Embedder callback marking one machine word conservatively.
++        self.mark_word = None
++
++
++gc_mark_state = _GCMarkState()
++
++
+ ENABLE_ALL_OPTS = (
+     'intbounds:rewrite:virtualize:string:pure:earlyforce:heap:unroll')
+ 

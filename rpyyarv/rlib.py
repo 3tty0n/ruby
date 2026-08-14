@@ -134,6 +134,8 @@ except ImportError:
     class _GCMarkState(object):
         def __init__(self):
             self.marking = False
+            self.generation = 0
+            self.mark_word = None
 
     gc_mark_state = _GCMarkState()
 
