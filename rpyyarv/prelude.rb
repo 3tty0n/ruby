@@ -113,6 +113,244 @@ class Array
   end
 end
 
+class Integer
+  # `& 1` folds to one masked compare in a trace; the C even? was a full send.
+  def even? = self & 1 == 0
+  def odd? = self & 1 == 1
+end
+
+module Enumerable
+  # Covers every enumerable whose #each is native (Hash, and rubykon's Board);
+  # Array#inject also lands here, since CRuby defines inject on Enumerable only.
+  def inject(*args)
+    init_given = false
+    init = nil
+    sym = nil
+    if args.length == 1
+      if block_given?
+        init = args[0]
+        init_given = true
+      else
+        sym = args[0]
+      end
+    elsif args.length == 2
+      init = args[0]
+      init_given = true
+      sym = args[1]
+    end
+    acc = init
+    first = !init_given
+    each do |*e|
+      v = e.length == 1 ? e[0] : e
+      if first
+        acc = v
+        first = false
+      elsif sym
+        acc = acc.__send__(sym, v)
+      else
+        acc = yield(acc, v)
+      end
+    end
+    acc
+  end
+  alias_method :reduce, :inject
+
+  def map
+    return to_enum(:map) unless block_given?
+    out = []
+    each do |*e|
+      out << (e.length == 1 ? yield(e[0]) : yield(e))
+    end
+    out
+  end
+  alias_method :collect, :map
+
+  def find
+    return to_enum(:find) unless block_given?
+    each do |*e|
+      v = e.length == 1 ? e[0] : e
+      return v if yield(v)
+    end
+    nil
+  end
+  alias_method :detect, :find
+end
+
+class Array
+  def empty? = length == 0
+
+  def first(*args)
+    return self[0] if args.length == 0
+    self[0, args[0]]
+  end
+
+  def last(*args)
+    return self[length - 1] if args.length == 0
+    n = args[0]
+    n = length if n > length
+    self[length - n, n]
+  end
+
+  def include?(obj)
+    i = 0
+    while i < self.length
+      return true if self[i] == obj
+      i = i + 1
+    end
+    false
+  end
+
+  def count(*args)
+    if args.length == 0
+      return length unless block_given?
+      n = 0
+      i = 0
+      while i < self.length
+        n += 1 if yield self[i]
+        i = i + 1
+      end
+      n
+    else
+      obj = args[0]
+      n = 0
+      i = 0
+      while i < self.length
+        n += 1 if self[i] == obj
+        i = i + 1
+      end
+      n
+    end
+  end
+
+  def any?(*args)
+    if args.length == 1
+      pat = args[0]
+      i = 0
+      while i < self.length
+        return true if pat === self[i]
+        i = i + 1
+      end
+      return false
+    end
+    i = 0
+    if block_given?
+      while i < self.length
+        return true if yield self[i]
+        i = i + 1
+      end
+    else
+      while i < self.length
+        return true if self[i]
+        i = i + 1
+      end
+    end
+    false
+  end
+
+  def all?(*args)
+    if args.length == 1
+      pat = args[0]
+      i = 0
+      while i < self.length
+        return false unless pat === self[i]
+        i = i + 1
+      end
+      return true
+    end
+    i = 0
+    if block_given?
+      while i < self.length
+        return false unless yield self[i]
+        i = i + 1
+      end
+    else
+      while i < self.length
+        return false unless self[i]
+        i = i + 1
+      end
+    end
+    true
+  end
+end
+
+class Hash
+  # These walk a keys snapshot, so a value is re-read at yield time and
+  # mutation during iteration is not the error CRuby raises.
+  def each
+    return to_enum(:each) unless block_given?
+    ks = keys
+    i = 0
+    while i < ks.length
+      k = ks[i]
+      yield [k, self[k]]
+      i = i + 1
+    end
+    self
+  end
+  alias_method :each_pair, :each
+
+  def each_key
+    return to_enum(:each_key) unless block_given?
+    ks = keys
+    i = 0
+    while i < ks.length
+      yield ks[i]
+      i = i + 1
+    end
+    self
+  end
+
+  def select
+    return to_enum(:select) unless block_given?
+    out = {}
+    ks = keys
+    i = 0
+    while i < ks.length
+      k = ks[i]
+      v = self[k]
+      out[k] = v if yield k, v
+      i = i + 1
+    end
+    out
+  end
+  alias_method :filter, :select
+
+  def merge!(*others)
+    i = 0
+    while i < others.length
+      other = others[i]
+      ks = other.keys
+      j = 0
+      while j < ks.length
+        k = ks[j]
+        v = other[k]
+        if block_given? && key?(k)
+          self[k] = yield(k, self[k], v)
+        else
+          self[k] = v
+        end
+        j = j + 1
+      end
+      i = i + 1
+    end
+    self
+  end
+  alias_method :update, :merge!
+
+  # fetch never consults the default; key? then [] only touches stored pairs.
+  def fetch(*args)
+    n = args.length
+    if n == 0 || n > 2
+      raise ArgumentError, "wrong number of arguments (given #{n}, expected 1..2)"
+    end
+    k = args[0]
+    return self[k] if key?(k)
+    return yield(k) if block_given?
+    return args[1] if n == 2
+    raise KeyError.new("key not found: #{k.inspect}", receiver: self, key: k)
+  end
+end
+
 class Range
   def each
     return to_enum(:each) unless block_given?
@@ -145,6 +383,11 @@ class Range
 end
 
 module Kernel
+  def tap
+    yield self
+    self
+  end
+
   # splay!'s tree descent is a `loop do`, whose every iteration would otherwise
   # cross into rb_block_call and back through the ifunc bridge.
   def loop
