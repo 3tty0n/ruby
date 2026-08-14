@@ -333,6 +333,11 @@ def invoke(frame, w_ci, w_block=None):
         return _module_function(frame, recv, recv_at, argc)
     if mid == CORE_ALIAS or mid == CORE_UNDEF:
         return _core_method(frame, mid, recv, recv_at, argc)
+    if mid == ALIAS_METHOD and argc == 2 and entry is None \
+            and not value.is_immediate(recv) and boot.is_class(recv) \
+            and dispatch.owner_of(klass, mid) == \
+            value.core_class(value.C_MODULE):
+        return _alias_method(frame, recv, recv_at)
     if vm_core.value != 0 and recv == vm_core.value \
             and mid != HASH_MERGE_PTR and mid != HASH_MERGE_KWD:
         if mid == CORE_LAMBDA and w_block is not None \
@@ -1442,6 +1447,7 @@ HASH_MERGE_KWD = symbols.intern('core#hash_merge_kwd')
 
 
 MODULE_FUNCTION = symbols.intern('module_function')
+ALIAS_METHOD = symbols.intern('alias_method')
 INSTANCE_EVAL = symbols.intern('instance_eval')
 INSTANCE_EXEC = symbols.intern('instance_exec')
 CLASS_EVAL = symbols.intern('class_eval')
@@ -1545,6 +1551,25 @@ def _core_method(frame, mid, recv, recv_at, argc):
     args = [cbase, frame.stack[recv_at + 2], frame.stack[recv_at + 3]]
     _drop(frame, recv_at)
     ret = rubycall.call(recv, mid, args)
+    helpers.refresh()
+    return ret
+
+
+def _alias_method(frame, recv, recv_at):
+    """Module#alias_method: mirror the alias into the registry, then let CRuby make its own, so both dispatchers resolve the new name."""
+    name = _sym_mid(frame.stack[recv_at + 1])
+    old = _sym_mid(frame.stack[recv_at + 2])
+    entry = dispatch.lookup(recv, old)
+    dispatch.undefine(recv, name)
+    if entry is not None:
+        if entry.kind == dispatch.KIND_ISEQ:
+            dispatch.define(recv, name, entry.w_iseq, entry.private,
+                            entry.cref, entry.lexical)
+        else:
+            dispatch.define_attr(recv, name, entry.ivar, entry.kind)
+    args = [frame.stack[recv_at + 1], frame.stack[recv_at + 2]]
+    _drop(frame, recv_at)
+    ret = rubycall.call(recv, ALIAS_METHOD, args)
     helpers.refresh()
     return ret
 
