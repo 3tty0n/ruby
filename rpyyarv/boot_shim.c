@@ -1483,9 +1483,25 @@ handle_owner_dfree(void *p)
     dead_handles[n_dead++] = (long)(uintptr_t)p - 1;
 }
 
+static rpyyarv_handle_mark_fn handle_mark_callback;
+
+void
+rpyyarv_set_handle_mark_callback(rpyyarv_handle_mark_fn fn)
+{
+    handle_mark_callback = fn;
+}
+
+/* The owner traces its block's frames itself, so a Proc nobody holds dies together with everything only it kept alive. */
+static void
+handle_owner_dmark(void *p)
+{
+    if (handle_mark_callback)
+        handle_mark_callback((long)(uintptr_t)p - 1);
+}
+
 static const rb_data_type_t handle_owner_type = {
     "rpyyarv/block_handle",
-    { 0, handle_owner_dfree, 0 },
+    { handle_owner_dmark, handle_owner_dfree, 0 },
     0, 0, RUBY_TYPED_FREE_IMMEDIATELY
 };
 
@@ -1642,8 +1658,10 @@ rpyyarv_define_method(uintptr_t klass, uintptr_t mid, int is_private,
 static VALUE
 proc_new_body(VALUE handle)
 {
-    /* An ifunc Proc: calling it reaches block_yielder with the same LONG2FIX'd handle rb_block_call passes. */
-    return rb_proc_new(block_yielder, handle);
+    /* The ifunc marks its data (imemo.c), so the owner lives exactly as long as the Proc: its dmark walks the env, its dfree frees the handle. */
+    VALUE owner = TypedData_Wrap_Struct(0, &handle_owner_type,
+                                        (void *)(uintptr_t)(FIX2LONG(handle) + 1));
+    return rb_proc_new(block_yielder, owner);
 }
 
 uintptr_t

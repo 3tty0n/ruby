@@ -92,6 +92,10 @@ void rpyyarv_gc_mark_value(uintptr_t v);
 /* rb_gc_mark_maybe on a machine word that may not be a VALUE at all; jitframe words are scanned with this. */
 void rpyyarv_gc_mark_maybe(uintptr_t v);
 
+/* Called from a block-handle owner's dmark with its handle, so the block's frames live exactly as long as the owning Proc. */
+typedef void (*rpyyarv_handle_mark_fn)(long handle);
+void rpyyarv_set_handle_mark_callback(rpyyarv_handle_mark_fn fn);
+
 /* Called from rb_clear_constant_cache_for_id, beside the notifications YJIT and ZJIT take; the ID is dropped because RPyYARV's cache is invalidated whole. */
 void rpyyarv_set_const_hook(void (*fn)(void));
 

@@ -1,5 +1,6 @@
 """CRuby's conservative stack scan misses frame stacks/locals and const pools since they're RPython objects; this keeps them enumerable for the shim's mark hook."""
 
+from rpyyarv import block as block_mod
 from rpyyarv import boot
 from rpyyarv import value
 from rpyyarv.rlib import dont_look_inside, gc_mark_state
@@ -75,6 +76,13 @@ def _mark_array(a):
 
 
 def _mark_frame(f):
+    if f.marked_gen == gc_mark_state.generation:
+        return
+    f.marked_gen = gc_mark_state.generation
+    _mark_frame_now(f)
+
+
+def _mark_frame_now(f):
     _mark_array(f.stack)
     _mark_array(f.locals)
     s = f.shared
@@ -99,15 +107,36 @@ def _mark_block_procs(w_block):
 
 
 def _mark_block_deep(w_block):
-    """A block only the handle table holds: its defining frames may have returned, so their locals are reachable from nowhere else."""
+    """An escaped block's env, from its owner Proc's dmark: its defining frames may have returned, so nothing else roots their locals. Undeduplicated, since an incremental remark must see stores made since the first pass; the ISEQ block's own Proc is the caller being marked."""
     while w_block is not None:
-        if not value.is_immediate(w_block.proc_value):
+        if w_block.kind != block_mod.KIND_ISEQ \
+                and not value.is_immediate(w_block.proc_value):
             boot.gc_mark_value(w_block.proc_value)
         f = w_block.frame
         while f is not None:
-            _mark_frame(f)
+            _mark_frame_now(f)
             f = f.defining_frame
         w_block = w_block.outer
+
+
+@dont_look_inside
+def mark_handle(h):
+    """One handle's env, called from its owner Proc's dmark: alive exactly as long as the Proc, so a clique of Procs and Scopes nobody holds dies whole."""
+    b = state.blocks
+    if b is None or h < 0 or h >= len(b.table):
+        return
+    w_block = b.table[h]
+    if w_block is None:
+        return
+    gc_mark_state.generation += 1
+    gc_mark_state.marking = True
+    try:
+        v = b.selves[h]
+        if not value.is_immediate(v):
+            boot.gc_mark_value(v)
+        _mark_block_deep(w_block)
+    finally:
+        gc_mark_state.marking = False
 
 
 def _mark_word(w):
@@ -156,21 +185,7 @@ def _mark_all():
     while i < len(pools):
         _mark_array(pools[i])
         i += 1
-    b = state.blocks
-    if b is not None:
-        table = b.table
-        k = 0
-        while k < len(table):
-            _mark_block_deep(table[k])
-            k += 1
-        # The self each handed-over block was given, which nothing else roots.
-        selves = b.selves
-        k = 0
-        while k < len(selves):
-            v = selves[k]
-            if not value.is_immediate(v):
-                boot.gc_mark_value(v)
-            k += 1
+    # The handle table is not walked here: each handle's env is marked from its owner Proc's dmark (mark_handle), so unreferenced Procs can die.
     # A frame in compiled code is not forced: its stale heap arrays are read (harmless extra marks) and its live jitframe words are walked once via mark_word.
     f = state.top
     while f is not None:
@@ -181,3 +196,4 @@ def _mark_all():
 def install():
     # A plain function, not an llhelper pointer, so rffi wraps it in the enter-RPython-from-C prologue. See boot.install_block_callback.
     boot.set_mark_hook(mark_roots)
+    boot.set_handle_mark(mark_handle)

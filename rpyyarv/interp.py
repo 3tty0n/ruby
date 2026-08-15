@@ -1708,6 +1708,13 @@ def _alloc_handle(w_block):
 
 
 def _release_handle(h):
+    w_block = blocks.table[h]
+    if w_block is not None:
+        v = w_block.proc_value
+        # The Proc died; a later escape must build a fresh one.
+        w_block.proc_value = 0
+        if v in blocks.by_proc and blocks.by_proc[v] is w_block:
+            del blocks.by_proc[v]
     blocks.table[h] = None
     blocks.selves[h] = 0
     blocks.free.append(h)
@@ -1955,7 +1962,7 @@ def _check_block_error():
 
 @dont_look_inside
 def _to_proc(w_block):
-    """A real Proc for an escaping block, as rb_vm_bh_to_procval builds one (vm_insnhelper.c:543); memoised for one Proc identity, its handle never released."""
+    """A real Proc for an escaping block, as rb_vm_bh_to_procval builds one (vm_insnhelper.c:543); memoised for one Proc identity until the Proc's own death releases the handle."""
     if w_block is None:
         return value.Q_NIL
     if w_block.proc_value != 0:

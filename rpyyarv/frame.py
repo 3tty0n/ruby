@@ -30,6 +30,9 @@ class Frame(object):
     # Set on the way out of execute(); a `return` whose target frame is already gone is the orphaned Proc vm_throw_start answers with a LocalJumpError.
     dead = False
 
+    # The gc_mark_state.generation that last marked this frame; block chains revisit frames, and one mark per collection is enough.
+    marked_gen = 0
+
     def __init__(self, iseq, self_val, cref=None, entry=None):
         self = hint(self, access_directly=True, fresh_virtualizable=True)
         self.w_iseq = iseq

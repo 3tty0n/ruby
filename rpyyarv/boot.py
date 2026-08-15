@@ -141,6 +141,9 @@ rb_gc_set_mark_hook = _ext('rpyyarv_gc_set_mark_hook', [MARK_HOOK],
 rb_gc_mark_value = _ext('rpyyarv_gc_mark_value', [VALUE], lltype.Void)
 rb_gc_mark_maybe = _ext('rpyyarv_gc_mark_maybe', [VALUE], lltype.Void)
 rb_set_const_hook = _ext('rpyyarv_set_const_hook', [CONST_HOOK], lltype.Void)
+HANDLE_MARK_HOOK = lltype.Ptr(lltype.FuncType([lltype.Signed], lltype.Void))
+rb_set_handle_mark = _ext('rpyyarv_set_handle_mark_callback',
+                          [HANDLE_MARK_HOOK], lltype.Void)
 rb_set_method_hook = _ext('rpyyarv_set_method_hook', [CONST_HOOK], lltype.Void)
 rb_gc_start = _ext('rpyyarv_gc_start', [], lltype.Void, reenters=True)
 rb_core_classes = _ext('rpyyarv_core_classes', [VALUEP], lltype.Void)
@@ -1464,6 +1467,11 @@ def gc_start():
 
 def set_mark_hook(fn):
     rb_gc_set_mark_hook(fn)
+
+
+def set_handle_mark(fn):
+    """As install_block_callback: a plain function, so rffi builds the enter-RPython-from-C wrapper for it."""
+    rb_set_handle_mark(fn)
 
 
 def set_const_hook(fn):
