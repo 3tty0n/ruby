@@ -62,6 +62,12 @@ INDEX_MID = symbols.intern('index')
 MATCH_P = symbols.intern('match?')
 POP_MID = symbols.intern('pop')
 PUSH_MID = symbols.intern('push')
+POS_MID = symbols.intern('pos')
+POS_SET = symbols.intern('pos=')
+EOS_P_MID = symbols.intern('eos?')
+MATCHED_SIZE = symbols.intern('matched_size')
+SKIP_MID = symbols.intern('skip')
+BYTESLICE = symbols.intern('byteslice')
 SPACESHIP = symbols.intern('<=>')
 DIV_WORD = symbols.intern('div')
 DOWNCASE = symbols.intern('downcase')
@@ -716,6 +722,37 @@ def str_dup(recv):
     return boot.str_dup(recv)
 
 
+def ss_zero(recv, mid):
+    """StringScanner's struct reads; the shim's TypedData check is the guard."""
+    if value.is_immediate(recv):
+        return value.Q_UNDEF
+    if mid == POS_MID:
+        return boot.ss_pos(recv)
+    if mid == EOS_P_MID:
+        return boot.ss_eos_p(recv)
+    return boot.ss_matched_size(recv)
+
+
+def ss_set_pos(recv, arg):
+    if value.is_immediate(recv):
+        return value.Q_UNDEF
+    return boot.ss_set_pos(recv, arg)
+
+
+def ss_skip(recv, arg):
+    if value.is_immediate(recv) or value.is_immediate(arg):
+        return value.Q_UNDEF
+    return boot.ss_skip(recv, arg)
+
+
+def str_byteslice(recv, beg, length):
+    if value.is_immediate(recv) or not boot.is_string(recv):
+        return value.Q_UNDEF
+    if not _owned_by_core(recv, value.C_STRING, BYTESLICE):
+        return value.Q_UNDEF
+    return boot.str_byteslice2(recv, beg, length)
+
+
 def str_match_p(recv, arg):
     """String#match? of a Regexp: no backref, so nothing but the search itself leaves RPython."""
     if value.is_immediate(recv) or value.is_immediate(arg) \
@@ -1101,6 +1138,8 @@ def zero_arg(recv, mid):
         return ary_pop(recv)
     if mid == EMPTY_P:
         return empty_p(recv)
+    if mid == POS_MID or mid == EOS_P_MID or mid == MATCHED_SIZE:
+        return ss_zero(recv, mid)
     if mid == DOWNCASE or mid == DOWNCASE_BANG \
             or mid == UPCASE or mid == UPCASE_BANG:
         return str_case(recv, mid)

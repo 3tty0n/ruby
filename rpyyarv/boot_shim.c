@@ -2822,3 +2822,144 @@ rpyyarv_ary_push1(uintptr_t v, uintptr_t elt)
     if (!RB_TYPE_P(a, T_ARRAY) || OBJ_FROZEN(a)) return (uintptr_t)Qundef;
     return (uintptr_t)rb_ary_push(a, (VALUE)elt);
 }
+
+/* Mirror of ext/strscan/strscan.c's struct strscanner, version-locked to this checkout's bundled strscan; ss_of verifies the TypedData name before trusting it. */
+struct rpyyarv_ss {
+    unsigned long flags;      /* bit 0: matched */
+    VALUE str;
+    long prev;
+    long curr;
+    struct re_registers regs;
+    VALUE regex;
+    bool fixed_anchor_p;
+};
+
+static const rb_data_type_t *ss_type;
+
+static struct rpyyarv_ss *
+ss_of(VALUE v)
+{
+    struct rpyyarv_ss *p;
+    if (!RB_TYPE_P(v, T_DATA) || !RTYPEDDATA_P(v)) return NULL;
+    if (RTYPEDDATA_TYPE(v) != ss_type) {
+        if (strcmp(RTYPEDDATA_TYPE(v)->wrap_struct_name, "StringScanner"))
+            return NULL;
+        ss_type = RTYPEDDATA_TYPE(v);
+    }
+    p = RTYPEDDATA_DATA(v);
+    if (!p || !RB_TYPE_P(p->str, T_STRING)) return NULL;
+    return p;
+}
+
+uintptr_t
+rpyyarv_ss_pos(uintptr_t v)
+{
+    struct rpyyarv_ss *p = ss_of((VALUE)v);
+    if (!p) return (uintptr_t)Qundef;
+    return (uintptr_t)LONG2FIX(p->curr);
+}
+
+uintptr_t
+rpyyarv_ss_set_pos(uintptr_t v, uintptr_t posv)
+{
+    struct rpyyarv_ss *p = ss_of((VALUE)v);
+    long i;
+    if (!p || !FIXNUM_P((VALUE)posv)) return (uintptr_t)Qundef;
+    i = FIX2LONG((VALUE)posv);
+    if (i < 0) i += RSTRING_LEN(p->str);
+    /* Out of range raises upstream. */
+    if (i < 0 || i > RSTRING_LEN(p->str)) return (uintptr_t)Qundef;
+    p->curr = i;
+    return (uintptr_t)LONG2FIX(i);
+}
+
+uintptr_t
+rpyyarv_ss_eos_p(uintptr_t v)
+{
+    struct rpyyarv_ss *p = ss_of((VALUE)v);
+    if (!p) return (uintptr_t)Qundef;
+    return (uintptr_t)(p->curr >= RSTRING_LEN(p->str) ? Qtrue : Qfalse);
+}
+
+uintptr_t
+rpyyarv_ss_matched_size(uintptr_t v)
+{
+    struct rpyyarv_ss *p = ss_of((VALUE)v);
+    if (!p) return (uintptr_t)Qundef;
+    if (!(p->flags & 1UL)) return (uintptr_t)Qnil;
+    return (uintptr_t)LONG2FIX(p->regs.end[0] - p->regs.beg[0]);
+}
+
+static OnigPosition
+ss_match_head(regex_t *reg, VALUE str, struct re_registers *regs, void *args_v)
+{
+    struct rpyyarv_ss *p = args_v;
+    const char *pbeg = RSTRING_PTR(p->str);
+    long len = RSTRING_LEN(p->str);
+    const UChar *target =
+        (const UChar *)(p->fixed_anchor_p ? pbeg : pbeg + p->curr);
+    (void)str;
+    return onig_match(reg, target, (const UChar *)(pbeg + len),
+                      (const UChar *)(pbeg + p->curr), regs, ONIG_OPTION_NONE);
+}
+
+struct ss_skip_args {
+    struct rpyyarv_ss *p;
+    VALUE re;
+};
+
+static VALUE
+ss_skip_body(VALUE argp)
+{
+    struct ss_skip_args *a = (struct ss_skip_args *)argp;
+    struct rpyyarv_ss *p = a->p;
+    OnigPosition ret = rb_reg_onig_match(a->re, p->str, ss_match_head,
+                                         p, &p->regs);
+    if (ret == ONIG_MISMATCH) return Qnil;
+    p->flags |= 1UL;
+    p->prev = p->curr;
+    if (p->fixed_anchor_p) {
+        p->curr = p->regs.end[0];
+        return LONG2FIX(p->regs.end[0] - p->prev);
+    }
+    p->curr += p->regs.end[0];
+    return LONG2FIX(p->regs.end[0]);
+}
+
+/* StringScanner#skip with a Regexp: strscan_do_scan(headonly, succptr, no getstr). */
+uintptr_t
+rpyyarv_ss_skip(uintptr_t v, uintptr_t re, int *state)
+{
+    struct ss_skip_args a;
+    struct rpyyarv_ss *p;
+    VALUE r;
+    *state = 0;
+    p = ss_of((VALUE)v);
+    if (!p || !RB_TYPE_P((VALUE)re, T_REGEXP)) return (uintptr_t)Qundef;
+    p->flags &= ~1UL;
+    RB_OBJ_WRITE((VALUE)v, &p->regex, (VALUE)re);
+    a.p = p;
+    a.re = (VALUE)re;
+    r = rb_protect(ss_skip_body, (VALUE)&a, state);
+    if (*state) return (uintptr_t)Qnil;
+    return (uintptr_t)r;
+}
+
+/* String#byteslice with two Integers; rb_str_subseq indexes bytes and shares. */
+uintptr_t
+rpyyarv_str_byteslice2(uintptr_t str, uintptr_t begv, uintptr_t lenv)
+{
+    VALUE s = (VALUE)str;
+    long beg, len, n;
+    if (!RB_TYPE_P(s, T_STRING) || !FIXNUM_P((VALUE)begv)
+        || !FIXNUM_P((VALUE)lenv))
+        return (uintptr_t)Qundef;
+    beg = FIX2LONG((VALUE)begv);
+    len = FIX2LONG((VALUE)lenv);
+    n = RSTRING_LEN(s);
+    if (len < 0) return (uintptr_t)Qnil;
+    if (beg < 0) beg += n;
+    if (beg < 0 || beg > n) return (uintptr_t)Qnil;
+    if (len > n - beg) len = n - beg;
+    return (uintptr_t)rb_str_subseq(s, beg, len);
+}

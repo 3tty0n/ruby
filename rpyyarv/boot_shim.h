@@ -109,6 +109,12 @@ uintptr_t rpyyarv_hash_empty_p(uintptr_t v);
 uintptr_t rpyyarv_str_uminus(uintptr_t v);
 uintptr_t rpyyarv_ary_pop_fast(uintptr_t v);
 uintptr_t rpyyarv_ary_push1(uintptr_t v, uintptr_t elt);
+uintptr_t rpyyarv_ss_pos(uintptr_t v);
+uintptr_t rpyyarv_ss_set_pos(uintptr_t v, uintptr_t posv);
+uintptr_t rpyyarv_ss_eos_p(uintptr_t v);
+uintptr_t rpyyarv_ss_matched_size(uintptr_t v);
+uintptr_t rpyyarv_ss_skip(uintptr_t v, uintptr_t re, int *state);
+uintptr_t rpyyarv_str_byteslice2(uintptr_t str, uintptr_t begv, uintptr_t lenv);
 
 /* Called from a block-handle owner's dmark with its handle, so the block's frames live exactly as long as the owning Proc. */
 typedef void (*rpyyarv_handle_mark_fn)(long handle);

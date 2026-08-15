@@ -248,6 +248,14 @@ rb_hash_empty_p = _ext('rpyyarv_hash_empty_p', [VALUE], VALUE)
 rb_str_uminus = _ext('rpyyarv_str_uminus', [VALUE], VALUE)
 rb_ary_pop_fast = _ext('rpyyarv_ary_pop_fast', [VALUE], VALUE)
 rb_ary_push1 = _ext('rpyyarv_ary_push1', [VALUE, VALUE], VALUE)
+rb_ss_pos = _ext('rpyyarv_ss_pos', [VALUE], VALUE)
+rb_ss_set_pos = _ext('rpyyarv_ss_set_pos', [VALUE, VALUE], VALUE)
+rb_ss_eos_p = _ext('rpyyarv_ss_eos_p', [VALUE], VALUE)
+rb_ss_matched_size = _ext('rpyyarv_ss_matched_size', [VALUE], VALUE)
+rb_ss_skip = _ext('rpyyarv_ss_skip', [VALUE, VALUE, INTP], VALUE,
+                  reenters=True)
+rb_str_byteslice2 = _ext('rpyyarv_str_byteslice2', [VALUE, VALUE, VALUE],
+                         VALUE)
 rb_hash_delete = _ext('rpyyarv_hash_delete', [VALUE, VALUE, INTP],
                       lltype.Void, reenters=True)
 rb_hash_keys = _ext('rpyyarv_hash_keys', [VALUE, INTP], VALUE, reenters=True)
@@ -1399,6 +1407,38 @@ def ary_pop(v):
 
 def ary_push1(v, elt):
     return rffi.cast(lltype.Signed, rb_ary_push1(_v(v), _v(elt)))
+
+
+def ss_pos(v):
+    return rffi.cast(lltype.Signed, rb_ss_pos(_v(v)))
+
+
+def ss_set_pos(v, pos):
+    return rffi.cast(lltype.Signed, rb_ss_set_pos(_v(v), _v(pos)))
+
+
+def ss_eos_p(v):
+    return rffi.cast(lltype.Signed, rb_ss_eos_p(_v(v)))
+
+
+def ss_matched_size(v):
+    return rffi.cast(lltype.Signed, rb_ss_matched_size(_v(v)))
+
+
+def ss_skip(v, re):
+    """Qundef for the wrong types; a raise inside the match comes back out."""
+    state = _enter_status()
+    r = rb_ss_skip(_v(v), _v(re), state)
+    failed = _leave_status(state)
+    ret = rffi.cast(lltype.Signed, r)
+    if failed:
+        _failed('skip')
+    return ret
+
+
+def str_byteslice2(s, beg, length):
+    return rffi.cast(lltype.Signed,
+                     rb_str_byteslice2(_v(s), _v(beg), _v(length)))
 
 
 def hash_delete(hash_v, key):
