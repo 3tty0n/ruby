@@ -1971,6 +1971,94 @@ rpyyarv_str_push(uintptr_t str, uintptr_t other, int *state)
     return (uintptr_t)r;
 }
 
+/* String#casecmp of two 7-bit Strings: the ASCII fold CRuby's own uses there. */
+uintptr_t
+rpyyarv_str_casecmp(uintptr_t a, uintptr_t b)
+{
+    VALUE s1 = (VALUE)a, s2 = (VALUE)b;
+    const char *p1, *p2;
+    long l1, l2, i, n;
+    if (!RB_TYPE_P(s1, T_STRING) || !RB_TYPE_P(s2, T_STRING))
+        return (uintptr_t)Qundef;
+    if (rb_enc_str_coderange(s1) != ENC_CODERANGE_7BIT ||
+        rb_enc_str_coderange(s2) != ENC_CODERANGE_7BIT)
+        return (uintptr_t)Qundef;
+    p1 = RSTRING_PTR(s1); p2 = RSTRING_PTR(s2);
+    l1 = RSTRING_LEN(s1); l2 = RSTRING_LEN(s2);
+    n = l1 < l2 ? l1 : l2;
+    for (i = 0; i < n; i++) {
+        int c1 = p1[i], c2 = p2[i];
+        if (c1 >= 'A' && c1 <= 'Z') c1 += 32;
+        if (c2 >= 'A' && c2 <= 'Z') c2 += 32;
+        if (c1 != c2) return (uintptr_t)INT2FIX(c1 < c2 ? -1 : 1);
+    }
+    if (l1 != l2) return (uintptr_t)INT2FIX(l1 < l2 ? -1 : 1);
+    return (uintptr_t)INT2FIX(0);
+}
+
+/* String#<=> for two Strings. */
+uintptr_t
+rpyyarv_str_cmp(uintptr_t a, uintptr_t b)
+{
+    if (!RB_TYPE_P((VALUE)a, T_STRING) || !RB_TYPE_P((VALUE)b, T_STRING))
+        return (uintptr_t)Qundef;
+    return (uintptr_t)INT2FIX(rb_str_cmp((VALUE)a, (VALUE)b));
+}
+
+/* String#downcase/#upcase and bang forms for 7-bit strings: a byte map. */
+static uintptr_t
+str_change_case(uintptr_t str, int up, int bang)
+{
+    VALUE s = (VALUE)str;
+    long i, len;
+    char *p;
+    int changed = 0;
+    if (!RB_TYPE_P(s, T_STRING)) return (uintptr_t)Qundef;
+    if (rb_enc_str_coderange(s) != ENC_CODERANGE_7BIT)
+        return (uintptr_t)Qundef;
+    if (bang && OBJ_FROZEN(s)) return (uintptr_t)Qundef;
+    if (!bang) s = rb_str_dup(s);
+    rb_str_modify(s);
+    p = RSTRING_PTR(s);
+    len = RSTRING_LEN(s);
+    for (i = 0; i < len; i++) {
+        char c = p[i];
+        if (up ? (c >= 'a' && c <= 'z') : (c >= 'A' && c <= 'Z')) {
+            p[i] = up ? c - 32 : c + 32;
+            changed = 1;
+        }
+    }
+    if (bang && !changed) return (uintptr_t)Qnil;
+    return (uintptr_t)s;
+}
+
+uintptr_t
+rpyyarv_str_downcase(uintptr_t s) { return str_change_case(s, 0, 0); }
+uintptr_t
+rpyyarv_str_downcase_bang(uintptr_t s) { return str_change_case(s, 0, 1); }
+uintptr_t
+rpyyarv_str_upcase(uintptr_t s) { return str_change_case(s, 1, 0); }
+uintptr_t
+rpyyarv_str_upcase_bang(uintptr_t s) { return str_change_case(s, 1, 1); }
+
+/* Symbol#to_s: a fresh mutable copy of the fstring. */
+uintptr_t
+rpyyarv_sym_to_s(uintptr_t v)
+{
+    if (!SYMBOL_P((VALUE)v)) return (uintptr_t)Qundef;
+    return (uintptr_t)rb_str_dup(rb_sym2str((VALUE)v));
+}
+
+/* String#dup on the exact class, whose initialize_copy is C. */
+uintptr_t
+rpyyarv_str_dup(uintptr_t v)
+{
+    VALUE s = (VALUE)v;
+    if (!RB_TYPE_P(s, T_STRING) || rb_obj_class(s) != rb_cString)
+        return (uintptr_t)Qundef;
+    return (uintptr_t)rb_str_dup(s);
+}
+
 /* String#start_with? for one String prefix of the same encoding: a byte compare, nothing to raise. */
 uintptr_t
 rpyyarv_str_start_with(uintptr_t str, uintptr_t prefix)
@@ -2592,4 +2680,65 @@ rpyyarv_absolute_path(uintptr_t fname, uintptr_t base, int *state)
     VALUE r = rb_protect(absolute_path_body, (VALUE)&a, state);
     if (*state) return (uintptr_t)Qnil;
     return (uintptr_t)r;
+}
+
+/* String#length: rb_str_strlen counts characters without allocating. */
+uintptr_t
+rpyyarv_str_length(uintptr_t v)
+{
+    if (!RB_TYPE_P((VALUE)v, T_STRING)) return (uintptr_t)Qundef;
+    return (uintptr_t)LONG2FIX(rb_str_strlen((VALUE)v));
+}
+
+/* String#tr with two single-byte sets on a 7-bit string: mail's dasherize. */
+uintptr_t
+rpyyarv_str_tr1(uintptr_t str, uintptr_t from, uintptr_t to)
+{
+    VALUE s = (VALUE)str, f = (VALUE)from, t = (VALUE)to;
+    VALUE out;
+    char *p, cf, ct;
+    long i, len;
+    if (!RB_TYPE_P(s, T_STRING) || !RB_TYPE_P(f, T_STRING) ||
+        !RB_TYPE_P(t, T_STRING))
+        return (uintptr_t)Qundef;
+    if (RSTRING_LEN(f) != 1 || RSTRING_LEN(t) != 1)
+        return (uintptr_t)Qundef;
+    cf = RSTRING_PTR(f)[0];
+    ct = RSTRING_PTR(t)[0];
+    /* ^ or - or \ would make the one byte a pattern, not a byte. */
+    if (cf == '^' || cf == '-' || cf == '\\' ||
+        ct == '^' || ct == '-' || ct == '\\')
+        return (uintptr_t)Qundef;
+    if (rb_enc_str_coderange(s) != ENC_CODERANGE_7BIT ||
+        (unsigned char)cf > 127 || (unsigned char)ct > 127)
+        return (uintptr_t)Qundef;
+    out = rb_str_dup(s);
+    rb_str_modify(out);
+    p = RSTRING_PTR(out);
+    len = RSTRING_LEN(out);
+    for (i = 0; i < len; i++) {
+        if (p[i] == cf) p[i] = ct;
+    }
+    return (uintptr_t)out;
+}
+
+/* String#index of a String needle in a 7-bit haystack, no offset. */
+uintptr_t
+rpyyarv_str_index_of(uintptr_t str, uintptr_t needle)
+{
+    VALUE s = (VALUE)str, n = (VALUE)needle;
+    const char *ps, *pn, *found;
+    long ls, ln;
+    if (!RB_TYPE_P(s, T_STRING) || !RB_TYPE_P(n, T_STRING))
+        return (uintptr_t)Qundef;
+    if (rb_enc_str_coderange(s) != ENC_CODERANGE_7BIT ||
+        rb_enc_str_coderange(n) != ENC_CODERANGE_7BIT)
+        return (uintptr_t)Qundef;
+    ps = RSTRING_PTR(s); ls = RSTRING_LEN(s);
+    pn = RSTRING_PTR(n); ln = RSTRING_LEN(n);
+    if (ln == 0) return (uintptr_t)INT2FIX(0);
+    if (ln > ls) return (uintptr_t)Qnil;
+    found = memmem(ps, ls, pn, ln);
+    if (!found) return (uintptr_t)Qnil;
+    return (uintptr_t)LONG2FIX((long)(found - ps));
 }

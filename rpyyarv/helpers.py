@@ -56,6 +56,16 @@ TO_F = symbols.intern('to_f')
 TO_S = symbols.intern('to_s')
 NAME = symbols.intern('name')
 COS = symbols.intern('cos')
+CASECMP = symbols.intern('casecmp')
+TR = symbols.intern('tr')
+INDEX_MID = symbols.intern('index')
+SPACESHIP = symbols.intern('<=>')
+DIV_WORD = symbols.intern('div')
+DOWNCASE = symbols.intern('downcase')
+DOWNCASE_BANG = symbols.intern('downcase!')
+UPCASE = symbols.intern('upcase')
+UPCASE_BANG = symbols.intern('upcase!')
+DUP = symbols.intern('dup')
 KIND_OF_P = symbols.intern('kind_of?')
 IS_A_P = symbols.intern('is_a?')
 INSTANCE_EVAL = symbols.intern('instance_eval')
@@ -626,6 +636,130 @@ def str_start_with(recv, prefix):
     return boot.str_start_with(recv, prefix)
 
 
+def _owned_by_core(recv, klass_i, mid):
+    """CRuby's own core method still answers mid for recv; elidable on the method version like every owner_of."""
+    return dispatch.owner_of(promote(value.class_of(recv)),
+                             mid) == value.core_class(klass_i)
+
+
+def str_casecmp(recv, arg):
+    """String#casecmp for two Strings: C only, nothing to raise."""
+    if value.is_immediate(recv) or value.is_immediate(arg) \
+            or not boot.is_string(recv):
+        return value.Q_UNDEF
+    if not _owned_by_core(recv, value.C_STRING, CASECMP):
+        return value.Q_UNDEF
+    return boot.str_casecmp(recv, arg)
+
+
+def spaceship(recv, arg):
+    """Integer#<=> of two fixnums, or String#<=> of two Strings."""
+    if value.is_fixnum(recv) and value.is_fixnum(arg):
+        if not _owned_by_core(recv, value.C_INTEGER, SPACESHIP):
+            return value.Q_UNDEF
+        a = value.fix2int(recv)
+        b = value.fix2int(arg)
+        return value.int2fix(-1 if a < b else (1 if a > b else 0))
+    if not value.is_immediate(recv) and not value.is_immediate(arg) \
+            and boot.is_string(recv):
+        if not _owned_by_core(recv, value.C_STRING, SPACESHIP):
+            return value.Q_UNDEF
+        return boot.str_cmp(recv, arg)
+    return value.Q_UNDEF
+
+
+def int_div_word(recv, arg):
+    """Integer#div of two fixnums; RPython's // floors as Ruby's does."""
+    if not (value.is_fixnum(recv) and value.is_fixnum(arg)):
+        return value.Q_UNDEF
+    b = value.fix2int(arg)
+    # ZeroDivisionError, and FIXNUM_MIN // -1 overflows; both go back.
+    if b == 0 or b == -1:
+        return value.Q_UNDEF
+    if not _owned_by_core(recv, value.C_INTEGER, DIV_WORD):
+        return value.Q_UNDEF
+    return value.int2fix(value.fix2int(recv) // b)
+
+
+def str_case(recv, mid):
+    """String#downcase/#upcase and bang forms; the shim takes only 7-bit Strings. A subclass goes back: the plain forms answer a plain String there."""
+    if not value.is_plain_string(recv):
+        return value.Q_UNDEF
+    if not _owned_by_core(recv, value.C_STRING, mid):
+        return value.Q_UNDEF
+    if mid == DOWNCASE:
+        return boot.str_downcase(recv)
+    if mid == DOWNCASE_BANG:
+        return boot.str_downcase_bang(recv)
+    if mid == UPCASE:
+        return boot.str_upcase(recv)
+    return boot.str_upcase_bang(recv)
+
+
+def sym_to_s(recv):
+    if not boot.is_symbol(recv):
+        return value.Q_UNDEF
+    if not _owned_by_core(recv, value.C_SYMBOL, TO_S):
+        return value.Q_UNDEF
+    return boot.sym_to_s(recv)
+
+
+def str_dup(recv):
+    """String#dup on the exact class; string.c defines its own dup since 3.3."""
+    if not value.is_plain_string(recv):
+        return value.Q_UNDEF
+    if not _owned_by_core(recv, value.C_STRING, DUP):
+        return value.Q_UNDEF
+    return boot.str_dup(recv)
+
+
+def str_tr(recv, frm, to):
+    """String#tr of one plain byte for another; anything wider goes back."""
+    if not value.is_plain_string(recv):
+        return value.Q_UNDEF
+    if not _owned_by_core(recv, value.C_STRING, TR):
+        return value.Q_UNDEF
+    return boot.str_tr1(recv, frm, to)
+
+
+def str_index(recv, arg):
+    """String#index of a String needle, both 7-bit, no offset."""
+    if value.is_immediate(recv) or value.is_immediate(arg) \
+            or not boot.is_string(recv):
+        return value.Q_UNDEF
+    if not _owned_by_core(recv, value.C_STRING, INDEX_MID):
+        return value.Q_UNDEF
+    return boot.str_index_of(recv, arg)
+
+
+def str_length(recv, mid):
+    """String#length/#size: character count, byte count for a 7-bit string."""
+    if value.is_immediate(recv) or not boot.is_string(recv):
+        return value.Q_UNDEF
+    if not _owned_by_core(recv, value.C_STRING, mid):
+        return value.Q_UNDEF
+    return boot.str_length(recv)
+
+
+def ary_sub_aref(recv, idx):
+    """Array#[] with an Integer on a subclass that kept Array's; rb_ary_entry handles bounds and negatives."""
+    if value.is_immediate(recv) or not value.is_fixnum(idx) \
+            or not boot.is_array(recv):
+        return value.Q_UNDEF
+    if not _owned_by_core(recv, value.C_ARRAY, AREF):
+        return value.Q_UNDEF
+    return boot.ary_entry(recv, value.fix2int(idx))
+
+
+def ary_sub_length(recv, mid):
+    """Array#length/#size on a subclass that kept Array's."""
+    if value.is_immediate(recv) or not boot.is_array(recv):
+        return value.Q_UNDEF
+    if not _owned_by_core(recv, value.C_ARRAY, mid):
+        return value.Q_UNDEF
+    return value.int2fix(boot.ary_len(recv))
+
+
 def str_eqq(a, b):
     """String#=== is rb_str_equal, the same function as ==."""
     if not value.is_plain_string(a) \
@@ -911,12 +1045,25 @@ def zero_arg(recv, mid):
     if mid == NAME:
         return sym_name(recv)
     if mid == TO_S:
-        return str_to_s(recv)
+        v = str_to_s(recv)
+        if v != value.Q_UNDEF:
+            return v
+        return sym_to_s(recv)
     if mid == UMINUS:
         v = flt_uminus(recv)
         if v != value.Q_UNDEF:
             return v
         return int_uminus(recv)
+    if mid == DOWNCASE or mid == DOWNCASE_BANG \
+            or mid == UPCASE or mid == UPCASE_BANG:
+        return str_case(recv, mid)
+    if mid == DUP:
+        return str_dup(recv)
+    if mid == LENGTH or mid == SIZE:
+        v = ary_sub_length(recv, mid)
+        if v != value.Q_UNDEF:
+            return v
+        return str_length(recv, mid)
     return range_part(recv, mid)
 
 

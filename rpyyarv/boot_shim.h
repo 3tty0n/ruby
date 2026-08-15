@@ -92,6 +92,18 @@ void rpyyarv_gc_mark_value(uintptr_t v);
 /* rb_gc_mark_maybe on a machine word that may not be a VALUE at all; jitframe words are scanned with this. */
 void rpyyarv_gc_mark_maybe(uintptr_t v);
 
+uintptr_t rpyyarv_str_casecmp(uintptr_t a, uintptr_t b);
+uintptr_t rpyyarv_str_cmp(uintptr_t a, uintptr_t b);
+uintptr_t rpyyarv_str_downcase(uintptr_t s);
+uintptr_t rpyyarv_str_downcase_bang(uintptr_t s);
+uintptr_t rpyyarv_str_upcase(uintptr_t s);
+uintptr_t rpyyarv_str_upcase_bang(uintptr_t s);
+uintptr_t rpyyarv_sym_to_s(uintptr_t v);
+uintptr_t rpyyarv_str_dup(uintptr_t v);
+uintptr_t rpyyarv_str_length(uintptr_t v);
+uintptr_t rpyyarv_str_tr1(uintptr_t str, uintptr_t from, uintptr_t to);
+uintptr_t rpyyarv_str_index_of(uintptr_t str, uintptr_t needle);
+
 /* Called from a block-handle owner's dmark with its handle, so the block's frames live exactly as long as the owning Proc. */
 typedef void (*rpyyarv_handle_mark_fn)(long handle);
 void rpyyarv_set_handle_mark_callback(rpyyarv_handle_mark_fn fn);

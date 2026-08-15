@@ -230,6 +230,17 @@ rb_hash_aset_fast = _ext('rpyyarv_hash_aset_fast', [VALUE, VALUE, VALUE],
 rb_str_push = _ext('rpyyarv_str_push', [VALUE, VALUE, INTP], VALUE,
                    reenters=True)
 rb_str_start_with = _ext('rpyyarv_str_start_with', [VALUE, VALUE], VALUE)
+rb_str_casecmp_fast = _ext('rpyyarv_str_casecmp', [VALUE, VALUE], VALUE)
+rb_str_cmp_fast = _ext('rpyyarv_str_cmp', [VALUE, VALUE], VALUE)
+rb_str_downcase_fast = _ext('rpyyarv_str_downcase', [VALUE], VALUE)
+rb_str_downcase_bang = _ext('rpyyarv_str_downcase_bang', [VALUE], VALUE)
+rb_str_upcase_fast = _ext('rpyyarv_str_upcase', [VALUE], VALUE)
+rb_str_upcase_bang = _ext('rpyyarv_str_upcase_bang', [VALUE], VALUE)
+rb_sym_to_s_fast = _ext('rpyyarv_sym_to_s', [VALUE], VALUE)
+rb_str_dup_fast = _ext('rpyyarv_str_dup', [VALUE], VALUE)
+rb_str_length_fast = _ext('rpyyarv_str_length', [VALUE], VALUE)
+rb_str_tr1 = _ext('rpyyarv_str_tr1', [VALUE, VALUE, VALUE], VALUE)
+rb_str_index_of = _ext('rpyyarv_str_index_of', [VALUE, VALUE], VALUE)
 rb_hash_delete = _ext('rpyyarv_hash_delete', [VALUE, VALUE, INTP],
                       lltype.Void, reenters=True)
 rb_hash_keys = _ext('rpyyarv_hash_keys', [VALUE, INTP], VALUE, reenters=True)
@@ -1306,6 +1317,50 @@ def str_push(string, other):
 
 def str_start_with(string, prefix):
     return rffi.cast(lltype.Signed, rb_str_start_with(_v(string), _v(prefix)))
+
+
+def str_casecmp(a, b):
+    return rffi.cast(lltype.Signed, rb_str_casecmp_fast(_v(a), _v(b)))
+
+
+def str_cmp(a, b):
+    return rffi.cast(lltype.Signed, rb_str_cmp_fast(_v(a), _v(b)))
+
+
+def str_downcase(s):
+    return rffi.cast(lltype.Signed, rb_str_downcase_fast(_v(s)))
+
+
+def str_downcase_bang(s):
+    return rffi.cast(lltype.Signed, rb_str_downcase_bang(_v(s)))
+
+
+def str_upcase(s):
+    return rffi.cast(lltype.Signed, rb_str_upcase_fast(_v(s)))
+
+
+def str_upcase_bang(s):
+    return rffi.cast(lltype.Signed, rb_str_upcase_bang(_v(s)))
+
+
+def sym_to_s(v):
+    return rffi.cast(lltype.Signed, rb_sym_to_s_fast(_v(v)))
+
+
+def str_dup(v):
+    return rffi.cast(lltype.Signed, rb_str_dup_fast(_v(v)))
+
+
+def str_length(v):
+    return rffi.cast(lltype.Signed, rb_str_length_fast(_v(v)))
+
+
+def str_tr1(s, frm, to):
+    return rffi.cast(lltype.Signed, rb_str_tr1(_v(s), _v(frm), _v(to)))
+
+
+def str_index_of(s, needle):
+    return rffi.cast(lltype.Signed, rb_str_index_of(_v(s), _v(needle)))
 
 
 def hash_delete(hash_v, key):

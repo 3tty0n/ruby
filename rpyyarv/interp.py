@@ -15,7 +15,7 @@ from rpyyarv.error import RPyYarvError, RubyException, UnsupportedOperation
 from rpyyarv.frame import (Frame, PENDING_BREAK, PENDING_NEXT, PENDING_NONE,
                    PENDING_RAISE, PENDING_RETRY, PENDING_RETURN)
 from rpyyarv.iseq import (CATCH_ENSURE, CATCH_RESCUE, CATCH_RETRY,
-                          NO_BLOCK_ISEQ)
+                          NO_BLOCK_ISEQ, W_CallInfo)
 from rpyyarv.rlib import (JitDriver, StackOverflow, always_inline, check_stack_overflow,
                   dont_look_inside, on_foreign_stack, promote, raw_word, set_user_param,
                   unchecked_stack_start, unchecked_stack_stop, unroll_safe)
@@ -188,6 +188,24 @@ def invoke(frame, w_ci, w_block=None):
             v = _native_binop(recv, frame.stack[recv_at + 1], mid)
         else:
             v = helpers.zero_arg(recv, mid)
+        if v != value.Q_UNDEF:
+            _drop(frame, recv_at)
+            debug.count_native()
+            return v
+    if entry is None and argc == 1 \
+            and (mid == helpers.LT or mid == helpers.GT
+                 or mid == helpers.LE or mid == helpers.GE) \
+            and send_owners.comparable != 0 \
+            and dispatch.owner_of(klass, mid) == send_owners.comparable:
+        return _comparable_op(frame, mid, recv_at)
+    if entry is None and argc == 1 and mid == ENC_FIND \
+            and encodings.value != 0 and recv == encodings.value:
+        v = _encoding_find(frame, recv, recv_at)
+        if v != value.Q_UNDEF:
+            return v
+    if entry is None and argc == 2 and mid == helpers.TR:
+        v = helpers.str_tr(recv, frame.stack[recv_at + 1],
+                           frame.stack[recv_at + 2])
         if v != value.Q_UNDEF:
             _drop(frame, recv_at)
             debug.count_native()
@@ -573,7 +591,8 @@ MATCH = symbols.intern('=~')
 class _SendOwners(object):
     # Quasi-immutable: install() writes it once, before any Ruby code runs.
     _immutable_fields_ = ['kernel?', 'basic?', 'string_getbyte?',
-                          'string_setbyte?', 'array_each_slice?']
+                          'string_setbyte?', 'array_each_slice?',
+                          'comparable?']
 
     def __init__(self):
         self.kernel = 0
@@ -582,6 +601,7 @@ class _SendOwners(object):
         self.string_getbyte = 0
         self.string_setbyte = 0
         self.array_each_slice = 0
+        self.comparable = 0
 
 
 # Kernel#send and BasicObject#__send__, so a class that overrides either is seen.
@@ -661,11 +681,22 @@ def _native_binop(recv, arg, mid):
         return helpers.rshift(recv, arg)
     if mid == helpers.LTLT:
         return helpers.lshift(recv, arg)
+    if mid == helpers.CASECMP:
+        return helpers.str_casecmp(recv, arg)
+    if mid == helpers.INDEX_MID:
+        return helpers.str_index(recv, arg)
+    if mid == helpers.SPACESHIP:
+        return helpers.spaceship(recv, arg)
+    if mid == helpers.DIV_WORD:
+        return helpers.int_div_word(recv, arg)
     if mid == helpers.AREF:
         v = helpers.hash_aref(recv, arg)
         if v != value.Q_UNDEF:
             return v
-        return helpers.int_bitref(recv, arg)
+        v = helpers.int_bitref(recv, arg)
+        if v != value.Q_UNDEF:
+            return v
+        return helpers.ary_sub_aref(recv, arg)
     if mid == helpers.SQRT:
         return helpers.math_sqrt(recv, arg)
     if mid == helpers.COS:
@@ -1389,6 +1420,23 @@ def _opt_send(frame, mid, argc):
         if entry.kind != dispatch.KIND_ISEQ:
             return _attr_send(frame, entry, recv, recv_at, argc)
         return _enter(frame, entry, recv, recv_at, argc, mid, None)
+    if entry is None and argc <= 1:
+        # The same native answers invoke gives a named send; a subclass's inherited [] or length lands here via the opt_* fallback.
+        if argc == 1:
+            v = _native_binop(recv, frame.stack[recv_at + 1], mid)
+        else:
+            v = helpers.zero_arg(recv, mid)
+        if v != value.Q_UNDEF:
+            _drop(frame, recv_at)
+            debug.count_native()
+            return v
+    if entry is None and argc == 1 \
+            and (mid == helpers.LT or mid == helpers.GT
+                 or mid == helpers.LE or mid == helpers.GE) \
+            and send_owners.comparable != 0 \
+            and dispatch.owner_of(klass, mid) == send_owners.comparable:
+        # opt_lt and friends fall through here for a Comparable receiver.
+        return _comparable_op(frame, mid, recv_at)
     args = []
     i = 0
     while i < argc:
@@ -1740,6 +1788,62 @@ class _Fiber(object):
 
 
 fiber = _Fiber()
+
+
+class _Encodings(object):
+    _immutable_fields_ = ['value?']
+
+    def __init__(self):
+        self.value = 0
+
+
+encodings = _Encodings()
+
+ENC_FIND = symbols.intern('find')
+# Encoding.find is a pure lookup and Encodings are immortal, so one protected call per distinct name is enough.
+enc_cache = {}
+
+SPACESHIP_CI = W_CallInfo(helpers.SPACESHIP, 1)
+
+
+@unroll_safe
+def _comparable_op(frame, mid, recv_at):
+    """Comparable#< and friends: run <=> natively instead of bouncing out to compar.c and back in through the trampoline."""
+    recv = frame.stack[recv_at]
+    arg = frame.stack[recv_at + 1]
+    cmp = invoke(frame, SPACESHIP_CI)
+    if value.is_fixnum(cmp):
+        c = value.fix2int(cmp)
+        if mid == helpers.LT:
+            return value.newbool(c < 0)
+        if mid == helpers.LE:
+            return value.newbool(c <= 0)
+        if mid == helpers.GT:
+            return value.newbool(c > 0)
+        return value.newbool(c >= 0)
+    # nil or an exotic Integer: CRuby's own operator raises the ArgumentError.
+    gcroots.hold(recv)
+    gcroots.hold(arg)
+    try:
+        return rubycall.call(recv, mid, [arg])
+    finally:
+        gcroots.release(arg)
+        gcroots.release(recv)
+
+
+def _encoding_find(frame, recv, recv_at):
+    name_v = frame.stack[recv_at + 1]
+    if value.is_immediate(name_v) or not boot.is_string(name_v):
+        return value.Q_UNDEF
+    name = boot.str_of(name_v)
+    if name in enc_cache:
+        _drop(frame, recv_at)
+        debug.count_native()
+        return enc_cache[name]
+    _drop(frame, recv_at)
+    v = rubycall.call(recv, ENC_FIND, [name_v])
+    enc_cache[name] = v
+    return v
 
 PROXY_NAME = '__rpyyarv_block_param_proxy__'
 
@@ -2406,6 +2510,10 @@ def install():
         value.core_class(value.C_STRING), SETBYTE)
     send_owners.array_each_slice = dispatch.owner_of(
         value.core_class(value.C_ARRAY), EACH_SLICE)
+    send_owners.comparable = dispatch.const_get(
+        value.core_class(value.C_OBJECT), symbols.intern('Comparable'))
+    encodings.value = dispatch.const_get(
+        value.core_class(value.C_OBJECT), symbols.intern('Encoding'))
 
 
 @unroll_safe

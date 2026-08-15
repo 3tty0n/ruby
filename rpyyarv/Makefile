@@ -115,7 +115,8 @@ gccheck:
 	          test/regexpmatch.rb \
 	          test/sendblock.rb test/crefconsts.rb test/respondto.rb \
 	          test/fastsends.rb test/supercruby.rb test/supersplat.rb \
-	          test/gvaralias.rb test/expandsplat.rb test/instanceeval.rb \
+	          test/gvaralias.rb test/expandsplat.rb test/faststr.rb \
+	          test/instanceeval.rb \
 	          test/enumerators.rb test/loopiter.rb test/classvars.rb \
 	          test/scopedclass.rb test/trampolinekw.rb test/moduleattrs.rb \
 	          test/once.rb test/ranges.rb test/hasharef.rb test/kindof.rb \

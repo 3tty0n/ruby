@@ -89,6 +89,19 @@ class Array
     out
   end
 
+  def select
+    return to_enum(:select) unless block_given?
+    out = []
+    i = 0
+    while i < self.length
+      v = self[i]
+      out << v if yield v
+      i = i + 1
+    end
+    out
+  end
+  alias_method :filter, :select
+
   # The block arm only; liquid's scope walk calls it per variable lookup.
   def find_index(*args)
     if args.length == 0
