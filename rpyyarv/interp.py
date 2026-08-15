@@ -2486,7 +2486,10 @@ def configure_jitparams():
     # generic default (1619) left even repeatedly-called 30k-method workloads
     # interpreted; 100 captures them without the broad compile-time regressions
     # seen at 30. An explicit environment setting still replaces this default.
-    set_user_param(jitdriver, spec if spec else 'function_threshold=100')
+    # Eager bridges and roomier retraces: branchy code (rubykon's MCTS) needs its bridges anyway, and compiling them late is the slow mode.
+    set_user_param(jitdriver, spec if spec else
+                   'function_threshold=100,trace_eagerness=50,'
+                   'retrace_limit=25,max_retrace_guards=60')
 
 
 def install():
