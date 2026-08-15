@@ -241,6 +241,13 @@ rb_str_dup_fast = _ext('rpyyarv_str_dup', [VALUE], VALUE)
 rb_str_length_fast = _ext('rpyyarv_str_length', [VALUE], VALUE)
 rb_str_tr1 = _ext('rpyyarv_str_tr1', [VALUE, VALUE, VALUE], VALUE)
 rb_str_index_of = _ext('rpyyarv_str_index_of', [VALUE, VALUE], VALUE)
+rb_str_match_p = _ext('rpyyarv_str_match_p', [VALUE, VALUE, INTP], VALUE,
+                      reenters=True)
+rb_str_empty_p = _ext('rpyyarv_str_empty_p', [VALUE], VALUE)
+rb_hash_empty_p = _ext('rpyyarv_hash_empty_p', [VALUE], VALUE)
+rb_str_uminus = _ext('rpyyarv_str_uminus', [VALUE], VALUE)
+rb_ary_pop_fast = _ext('rpyyarv_ary_pop_fast', [VALUE], VALUE)
+rb_ary_push1 = _ext('rpyyarv_ary_push1', [VALUE, VALUE], VALUE)
 rb_hash_delete = _ext('rpyyarv_hash_delete', [VALUE, VALUE, INTP],
                       lltype.Void, reenters=True)
 rb_hash_keys = _ext('rpyyarv_hash_keys', [VALUE, INTP], VALUE, reenters=True)
@@ -1361,6 +1368,37 @@ def str_tr1(s, frm, to):
 
 def str_index_of(s, needle):
     return rffi.cast(lltype.Signed, rb_str_index_of(_v(s), _v(needle)))
+
+
+def str_match_p(s, re):
+    """Qundef for the wrong types; a raise inside the search comes back out."""
+    state = _enter_status()
+    v = rb_str_match_p(_v(s), _v(re), state)
+    failed = _leave_status(state)
+    ret = rffi.cast(lltype.Signed, v)
+    if failed:
+        _failed('match?')
+    return ret
+
+
+def str_empty_p(v):
+    return rffi.cast(lltype.Signed, rb_str_empty_p(_v(v)))
+
+
+def hash_empty_p(v):
+    return rffi.cast(lltype.Signed, rb_hash_empty_p(_v(v)))
+
+
+def str_uminus(v):
+    return rffi.cast(lltype.Signed, rb_str_uminus(_v(v)))
+
+
+def ary_pop(v):
+    return rffi.cast(lltype.Signed, rb_ary_pop_fast(_v(v)))
+
+
+def ary_push1(v, elt):
+    return rffi.cast(lltype.Signed, rb_ary_push1(_v(v), _v(elt)))
 
 
 def hash_delete(hash_v, key):

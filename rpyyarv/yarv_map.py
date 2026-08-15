@@ -47,6 +47,7 @@ EMIT = {
     'opt_nil_p': [],        # CALL_DATA dropped
     'opt_succ': [],         # CALL_DATA dropped
     'opt_str_freeze': [0],  # the literal, frozen once at load time
+    'opt_str_uminus': [0],  # the literal; interned at each execution
     'opt_ary_freeze': [0],
     'opt_hash_freeze': [0],
     'opt_case_dispatch': [0, 1],

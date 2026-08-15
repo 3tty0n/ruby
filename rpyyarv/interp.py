@@ -685,6 +685,10 @@ def _native_binop(recv, arg, mid):
         return helpers.str_casecmp(recv, arg)
     if mid == helpers.INDEX_MID:
         return helpers.str_index(recv, arg)
+    if mid == helpers.MATCH_P:
+        return helpers.str_match_p(recv, arg)
+    if mid == helpers.PUSH_MID:
+        return helpers.ary_push_one(recv, arg)
     if mid == helpers.SPACESHIP:
         return helpers.spaceship(recv, arg)
     if mid == helpers.DIV_WORD:
@@ -3589,6 +3593,15 @@ def _execute(iseq, frame, pc):
             else:
                 frame.push(_unop(frame, rubycall.call0(v_str, DUP),
                                  helpers.FREEZE))
+        elif opcode == insns.OPT_STR_UMINUS:
+            idx = code[pc]
+            pc += 1
+            v_str = iseq.consts[idx]
+            v = helpers.str_uminus(v_str)
+            if v != value.Q_UNDEF:
+                frame.push(v)
+            else:
+                frame.push(_unop(frame, v_str, helpers.UMINUS))
         elif opcode == insns.OPT_ARY_FREEZE or \
                 opcode == insns.OPT_HASH_FREEZE:
             idx = code[pc]

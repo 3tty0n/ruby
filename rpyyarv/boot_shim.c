@@ -2,6 +2,7 @@
 #include <stddef.h>
 #include <locale.h>
 #include <ruby.h>
+#include <ruby/re.h>
 
 /* In-tree, so the object-shape API libruby does not export is still reachable. */
 #include "shape.h"
@@ -2741,4 +2742,83 @@ rpyyarv_str_index_of(uintptr_t str, uintptr_t needle)
     found = memmem(ps, ls, pn, ln);
     if (!found) return (uintptr_t)Qnil;
     return (uintptr_t)LONG2FIX((long)(found - ps));
+}
+
+static OnigPosition
+matchp_search(regex_t *reg, VALUE str, struct re_registers *regs, void *args_v)
+{
+    const char *ptr;
+    long len;
+    (void)args_v;
+    RSTRING_GETMEM(str, ptr, len);
+    return onig_search(reg, (const UChar *)ptr, (const UChar *)(ptr + len),
+                       (const UChar *)ptr, (const UChar *)(ptr + len),
+                       regs, ONIG_OPTION_NONE);
+}
+
+struct matchp_args {
+    VALUE str;
+    VALUE re;
+};
+
+static VALUE
+str_match_p_body(VALUE argp)
+{
+    struct matchp_args *a = (struct matchp_args *)argp;
+    return rb_reg_onig_match(a->re, a->str, matchp_search, NULL, NULL)
+           == ONIG_MISMATCH ? Qfalse : Qtrue;
+}
+
+/* String#match? with a Regexp, no offset: writes no backref, so only the search itself runs under protect (encoding mismatch, Regexp.timeout). */
+uintptr_t
+rpyyarv_str_match_p(uintptr_t str, uintptr_t re, int *state)
+{
+    struct matchp_args a;
+    VALUE r;
+    *state = 0;
+    if (!RB_TYPE_P((VALUE)str, T_STRING) || !RB_TYPE_P((VALUE)re, T_REGEXP))
+        return (uintptr_t)Qundef;
+    a.str = (VALUE)str;
+    a.re = (VALUE)re;
+    r = rb_protect(str_match_p_body, (VALUE)&a, state);
+    if (*state) return (uintptr_t)Qnil;
+    return (uintptr_t)r;
+}
+
+uintptr_t
+rpyyarv_str_empty_p(uintptr_t v)
+{
+    if (!RB_TYPE_P((VALUE)v, T_STRING)) return (uintptr_t)Qundef;
+    return (uintptr_t)(RSTRING_LEN((VALUE)v) == 0 ? Qtrue : Qfalse);
+}
+
+uintptr_t
+rpyyarv_hash_empty_p(uintptr_t v)
+{
+    if (!RB_TYPE_P((VALUE)v, T_HASH)) return (uintptr_t)Qundef;
+    return (uintptr_t)(rb_hash_size_num((VALUE)v) == 0 ? Qtrue : Qfalse);
+}
+
+/* String#-@: the deduplicated frozen copy, or the receiver when already interned. */
+uintptr_t
+rpyyarv_str_uminus(uintptr_t v)
+{
+    if (!RB_TYPE_P((VALUE)v, T_STRING)) return (uintptr_t)Qundef;
+    return (uintptr_t)rb_str_to_interned_str((VALUE)v);
+}
+
+uintptr_t
+rpyyarv_ary_pop_fast(uintptr_t v)
+{
+    VALUE a = (VALUE)v;
+    if (!RB_TYPE_P(a, T_ARRAY) || OBJ_FROZEN(a)) return (uintptr_t)Qundef;
+    return (uintptr_t)rb_ary_pop(a);
+}
+
+uintptr_t
+rpyyarv_ary_push1(uintptr_t v, uintptr_t elt)
+{
+    VALUE a = (VALUE)v;
+    if (!RB_TYPE_P(a, T_ARRAY) || OBJ_FROZEN(a)) return (uintptr_t)Qundef;
+    return (uintptr_t)rb_ary_push(a, (VALUE)elt);
 }

@@ -81,3 +81,23 @@ p "hello".index("")
 p "hello".length
 p "hello".size
 p "こんにちは".length
+
+p "hello".match?(/l+/)
+p "hello".match?(/z/)
+p "".empty?
+p "x".empty?
+p({}.empty?)
+p({ a: 1 }.empty?)
+f = -"frozen me"
+p f.frozen?
+p((-"a").equal?(-"a"))
+arr = [1, 2, 3]
+p arr.pop
+p arr
+p arr.push(9)
+p [].pop
+begin
+  "x".match?(/x/.tap { Regexp })
+rescue StandardError
+  puts "err"
+end

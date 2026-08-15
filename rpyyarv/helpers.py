@@ -59,6 +59,9 @@ COS = symbols.intern('cos')
 CASECMP = symbols.intern('casecmp')
 TR = symbols.intern('tr')
 INDEX_MID = symbols.intern('index')
+MATCH_P = symbols.intern('match?')
+POP_MID = symbols.intern('pop')
+PUSH_MID = symbols.intern('push')
 SPACESHIP = symbols.intern('<=>')
 DIV_WORD = symbols.intern('div')
 DOWNCASE = symbols.intern('downcase')
@@ -713,6 +716,43 @@ def str_dup(recv):
     return boot.str_dup(recv)
 
 
+def str_match_p(recv, arg):
+    """String#match? of a Regexp: no backref, so nothing but the search itself leaves RPython."""
+    if value.is_immediate(recv) or value.is_immediate(arg) \
+            or not boot.is_string(recv):
+        return value.Q_UNDEF
+    if not _owned_by_core(recv, value.C_STRING, MATCH_P):
+        return value.Q_UNDEF
+    return boot.str_match_p(recv, arg)
+
+
+def str_uminus(recv):
+    """String#-@: the interned frozen copy."""
+    if not value.is_plain_string(recv):
+        return value.Q_UNDEF
+    if not _owned_by_core(recv, value.C_STRING, UMINUS):
+        return value.Q_UNDEF
+    return boot.str_uminus(recv)
+
+
+def ary_pop(recv):
+    if not value.is_plain_array(recv) \
+            or raw_word(recv, value.FLAGS_WORD) & value.FL_FREEZE != 0:
+        return value.Q_UNDEF
+    if not _owned_by_core(recv, value.C_ARRAY, POP_MID):
+        return value.Q_UNDEF
+    return boot.ary_pop(recv)
+
+
+def ary_push_one(recv, arg):
+    if not value.is_plain_array(recv) \
+            or raw_word(recv, value.FLAGS_WORD) & value.FL_FREEZE != 0:
+        return value.Q_UNDEF
+    if not _owned_by_core(recv, value.C_ARRAY, PUSH_MID):
+        return value.Q_UNDEF
+    return boot.ary_push1(recv, arg)
+
+
 def str_tr(recv, frm, to):
     """String#tr of one plain byte for another; anything wider goes back."""
     if not value.is_plain_string(recv):
@@ -1053,7 +1093,14 @@ def zero_arg(recv, mid):
         v = flt_uminus(recv)
         if v != value.Q_UNDEF:
             return v
-        return int_uminus(recv)
+        v = int_uminus(recv)
+        if v != value.Q_UNDEF:
+            return v
+        return str_uminus(recv)
+    if mid == POP_MID:
+        return ary_pop(recv)
+    if mid == EMPTY_P:
+        return empty_p(recv)
     if mid == DOWNCASE or mid == DOWNCASE_BANG \
             or mid == UPCASE or mid == UPCASE_BANG:
         return str_case(recv, mid)
@@ -1151,6 +1198,12 @@ def size(recv):
 def empty_p(recv):
     if value.is_plain_array(recv) and _ary_op(B_ARY_EMPTY_P):
         return value.newbool(value.ary_len(recv) == 0)
+    if value.is_immediate(recv):
+        return value.Q_UNDEF
+    if boot.is_hash(recv) and _owned_by_core(recv, value.C_HASH, EMPTY_P):
+        return boot.hash_empty_p(recv)
+    if boot.is_string(recv) and _owned_by_core(recv, value.C_STRING, EMPTY_P):
+        return boot.str_empty_p(recv)
     return value.Q_UNDEF
 
 
