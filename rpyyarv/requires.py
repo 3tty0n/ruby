@@ -8,6 +8,7 @@ from rpyyarv import debug
 from rpyyarv import gcroots
 from rpyyarv import interp
 from rpyyarv import loader
+from rpyyarv import prelude
 from rpyyarv import rubycall
 from rpyyarv import symbols
 from rpyyarv import value
@@ -17,6 +18,26 @@ from rpyyarv.frame import Frame
 COMPILE_FILE = 'compile_file'
 COMPILE_FILE_MID = symbols.intern(COMPILE_FILE)
 FOREIGN_REQUIRE_ENV = 'RPYYARV_FOREIGN_REQUIRE'
+CRUBY_REQUIRE = symbols.intern('__rpyyarv_cruby_require__')
+DELETE = symbols.intern('delete')
+LOADED_FEATURES = '$LOADED_FEATURES'
+
+# CRuby dispatches some requires itself -- autoload does (variable.c:3287) --
+# and the send hook below never sees those. This entry is RPyYARV's, so
+# CRuby's dispatch reaches it through the trampoline and lands in _Hook.
+OVERRIDE = """module Kernel
+  alias_method :__rpyyarv_cruby_require__, :require
+  def require(feature)
+    __rpyyarv_require__(feature)
+  end
+  private :require
+  # Kernel#require is a module_function, so the singleton copy needs the same
+  # body: bundled_gems.rb:60 sends every require through ::Kernel's.
+  def self.require(feature)
+    __rpyyarv_require__(feature)
+  end
+end
+"""
 
 
 class _Files(object):
@@ -43,6 +64,12 @@ class _Hook(rubycall.RequireHook):
             return rubycall.NOT_HANDLED
         return _require(mid, arg)
 
+    def from_cruby(self, arg):
+        v = self.handle(rubycall.REQUIRE, arg)
+        if v != rubycall.NOT_HANDLED:
+            return v
+        return _delegate(arg)
+
 
 def install(main_path):
     """RPYYARV_NO_REQUIRE=1 leaves every require to CRuby, as before."""
@@ -53,6 +80,7 @@ def install(main_path):
         files.delegated = spec.split(',')
     files.stack.append(main_path)
     rubycall.hooks.require = _Hook()
+    prelude.run(OVERRIDE)
 
 
 def _require(mid, arg):
@@ -113,16 +141,30 @@ def _load_rb(fname, path):
 
     files.loading[name] = True
     files.stack.append(name)
+    # Before the body, where load.c has its loading table (load.c:939) and this
+    # has none: while an autoloaded file runs, CRuby answers every constant
+    # lookup under the autoloaded name with NameError until the feature stops
+    # being one it still has to require (variable.c:3088).
+    boot.provide(path)
+    done = False
     try:
         interp.execute(result.w_iseq, Frame(result.w_iseq, boot.top_self()))
+        done = True
     finally:
         files.stack.pop()
         del files.loading[name]
+        # As load.c:1379: a file that raised is not a loaded feature.
+        if not done:
+            _unprovide(path)
     debug.count_native()
     debug.record_file(name, result.total, result.supported, '')
-    # After the body, as CRuby does (load.c:1379): a file that raised is not a loaded feature.
-    boot.provide(path)
     return value.Q_TRUE
+
+
+def _unprovide(path):
+    """Undo the boot.provide above; $LOADED_FEATURES is the array rb_provide_feature pushed onto."""
+    features = boot.gvar_get(LOADED_FEATURES)
+    boot.funcallv(features, rubycall.rid(DELETE), [path], DELETE)
 
 
 def _compile(path):
@@ -146,10 +188,10 @@ def _delegate_file(fname, name, total, supported, reason):
 
 
 def _delegate(fname):
-    """CRuby's own require, which keeps its own $LOADED_FEATURES bookkeeping."""
+    """CRuby's own require, which keeps its own $LOADED_FEATURES bookkeeping; the name OVERRIDE aliased it to, since `require` is now RPyYARV's."""
     debug.count_foreign(rubycall.REQUIRE)
-    return boot.funcallv(boot.top_self(), rubycall.rid(rubycall.REQUIRE),
-                         [fname], rubycall.REQUIRE)
+    return boot.funcallv(boot.top_self(), rubycall.rid(CRUBY_REQUIRE),
+                         [fname], CRUBY_REQUIRE)
 
 
 def _current_dir():

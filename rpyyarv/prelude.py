@@ -31,8 +31,13 @@ def _compile(source):
     return iseqw
 
 
+def run(source):
+    """Ruby source through the embedded CRuby's compiler, run by RPyYARV with self = main."""
+    w_iseq = loader.load_strict(bootiseq.load(_compile(source)))
+    interp.execute(w_iseq, Frame(w_iseq, boot.top_self()))
+
+
 def install():
     if os.environ.get('RPYYARV_NO_PRELUDE') == '1':
         return
-    w_iseq = loader.load_strict(bootiseq.load(_compile(SOURCE)))
-    interp.execute(w_iseq, Frame(w_iseq, boot.top_self()))
+    run(SOURCE)

@@ -273,6 +273,12 @@ def invoke(frame, w_ci, w_block=None):
         _drop(frame, recv_at)
         debug.count_native()
         return _backtrace()
+    if mid == REQUIRE_PRIM and fcall and argc == 1:
+        # The body of the Kernel#require requires.install() defines: a require
+        # CRuby itself dispatched (autoload does) reaches RPyYARV only here.
+        v = rubycall.hooks.require.from_cruby(frame.stack[recv_at + 1])
+        _drop(frame, recv_at)
+        return v
     if mid == HASH_PAIRS_PRIM and fcall and argc == 1 \
             and boot.is_hash(frame.stack[recv_at + 1]):
         v = boot.hash_pairs(frame.stack[recv_at + 1])
@@ -504,6 +510,7 @@ BLOCK_GIVEN = symbols.intern('block_given?')
 DIR_UNDERSCORE = symbols.intern('__dir__')
 BACKTRACE_PRIM = symbols.intern('__rpyyarv_backtrace__')
 HASH_PAIRS_PRIM = symbols.intern('__rpyyarv_hash_pairs__')
+REQUIRE_PRIM = symbols.intern('__rpyyarv_require__')
 METHOD_UNDERSCORE = symbols.intern('__method__')
 CALLEE_UNDERSCORE = symbols.intern('__callee__')
 

@@ -41,6 +41,10 @@ class RequireHook(object):
     def handle(self, mid, arg):
         return NOT_HANDLED
 
+    def from_cruby(self, arg):
+        """The Kernel#require override's body; nothing defines that method until requires.install() does."""
+        return value.Q_NIL
+
 
 class _Relative(object):
     """The file a require_relative resolves against, stamped by the send; load.c reads a CRuby frame for this and RPyYARV pushes none."""
