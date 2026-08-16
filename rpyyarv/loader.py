@@ -651,6 +651,12 @@ class Loader(object):
         if operand.kind != rawiseq.OP_CALL:
             raise LoadError("%s in '%s' wants call data, got %s"
                             % (insns.NAMES[op], raw.name, operand.describe()))
+        if operand.intval == 1 and (operand.strval == 'refine'
+                                    or operand.strval == 'using'):
+            # A whole file, since a refinement is lexically scoped and neither RPyYARV's dispatch nor a boundary rb_funcall consults CRuby's table; rb_mod_refine also refuses any block that is not CRuby's own. A method of either name that means something else costs coverage, not correctness.
+            raise UnsupportedOperation(
+                "the call to '%s' needs CRuby's lexical refinements"
+                % operand.strval)
         flags = operand.flag
         # Not ARGS_SIMPLE itself: CRuby clears it whenever a block ISeq is attached, and every other reason has its own bit outside this mask.
         simple = (not operand.has_kwarg
