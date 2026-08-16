@@ -148,6 +148,12 @@ def call_super(klass, owner, recv, mid, args, kw=False):
 
 
 @dont_look_inside
+def call_with_proc(recv, mid, args, proc, kw=False):
+    debug.count_foreign(mid)
+    return boot.call_with_proc(recv, rid(mid), args, proc, mid, kw)
+
+
+@dont_look_inside
 def call_with_block(recv, mid, args, handle, kw=False):
     debug.count_foreign(mid)
     return boot.call_with_block(recv, rid(mid), args, handle, mid, kw)

@@ -1560,6 +1560,53 @@ call_with_block_body(VALUE argp)
                             owner, a->kw_splat);
 }
 
+struct proccall_args {
+    VALUE recv;
+    ID    mid;
+    int   argc;
+    const VALUE *argv;
+    VALUE proc;
+    int   kw_splat;
+};
+
+static VALUE
+call_with_proc_body(VALUE argp)
+{
+    struct proccall_args *a = (struct proccall_args *)argp;
+    return rb_funcall_with_block_kw(a->recv, a->mid, a->argc, a->argv,
+                                    a->proc, a->kw_splat);
+}
+
+/* The Proc itself as the block, not an ifunc over it: module_eval yields with a cref only its own block sees, and a bounce back through RPyYARV would lose it. */
+uintptr_t
+rpyyarv_call_with_proc(uintptr_t recv, uintptr_t mid, int argc,
+                       const uintptr_t *argv, uintptr_t proc, int kw,
+                       int *state)
+{
+    VALUE buf[RPYYARV_MAX_ARGC];
+    struct proccall_args a;
+    int i;
+
+    if (argc < 0 || argc > RPYYARV_MAX_ARGC) {
+        *state = -1;
+        return (uintptr_t)Qnil;
+    }
+    for (i = 0; i < argc; i++) buf[i] = (VALUE)argv[i];
+
+    a.recv = (VALUE)recv;
+    a.mid = (ID)mid;
+    a.argc = argc;
+    a.argv = buf;
+    a.proc = (VALUE)proc;
+    a.kw_splat = kw ? RB_PASS_KEYWORDS : RB_NO_KEYWORDS;
+
+    *state = 0;
+    VALUE r = rb_protect(call_with_proc_body, (VALUE)&a, state);
+    absorb_unwind(state);
+    if (*state) return (uintptr_t)Qnil;
+    return (uintptr_t)r;
+}
+
 uintptr_t
 rpyyarv_call_with_block(uintptr_t recv, uintptr_t mid, int argc,
                         const uintptr_t *argv, long handle, int kw, int *state)

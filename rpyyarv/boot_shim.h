@@ -241,6 +241,10 @@ void rpyyarv_set_block_callback(rpyyarv_block_fn fn);
 uintptr_t rpyyarv_call_with_block(uintptr_t recv, uintptr_t mid, int argc,
                                   const uintptr_t *argv, long handle, int kw,
                                   int *state);
+/* Same, for a block that is already a CRuby Proc: it goes through as itself. */
+uintptr_t rpyyarv_call_with_proc(uintptr_t recv, uintptr_t mid, int argc,
+                                 const uintptr_t *argv, uintptr_t proc, int kw,
+                                 int *state);
 
 /* A block leaving a CRuby method early cannot unwind as an RPython exception through libruby's frames, so the yielder raises RPyYARV::Unwind (under Exception, not StandardError, so a bare `rescue` cannot eat it) standing in for CRuby's EC_JUMP_TAG (vm_insnhelper.c:1929); every rb_protect boundary below swallows it and leaves *state zero so the RPython side re-raises the parked unwind. */
 void rpyyarv_set_block_unwind(void);

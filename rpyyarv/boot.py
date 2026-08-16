@@ -173,6 +173,9 @@ rb_set_block_callback = _ext('rpyyarv_set_block_callback', [BLOCK_HOOK],
 rb_call_with_block = _ext('rpyyarv_call_with_block',
                           [VALUE, VALUE, rffi.INT, VALUEP, rffi.LONG,
                            rffi.INT, INTP], VALUE, reenters=True)
+rb_call_with_proc = _ext('rpyyarv_call_with_proc',
+                         [VALUE, VALUE, rffi.INT, VALUEP, VALUE,
+                          rffi.INT, INTP], VALUE, reenters=True)
 rb_set_trampoline_callback = _ext('rpyyarv_set_trampoline_callback',
                                   [TRAMP_HOOK], lltype.Void)
 rb_define_method_id = _ext('rpyyarv_define_method',
@@ -640,6 +643,28 @@ def _ary_new_chunked(values):
             _failed('Array#concat')
         at += count
     return ary
+
+
+def call_with_proc(recv, rid, args, proc, mid, kw=False):
+    """A foreign Proc as the block; CRuby runs it itself, so its cref and its own break/return stay CRuby's."""
+    argc = len(args)
+    if argc > MAX_ARGC:
+        raise RubyError(symbols.name_of(mid))
+    argv = _enter_argv(argc)
+    i = 0
+    while i < argc:
+        argv[i] = rffi.cast(VALUE, args[i])
+        i += 1
+    state = _enter_status()
+    v = rb_call_with_proc(_v(recv), _v(rid),
+                          rffi.cast(rffi.INT, argc), argv, _v(proc),
+                          rffi.cast(rffi.INT, 1 if kw else 0), state)
+    failed = _leave_status(state)
+    ret = rffi.cast(lltype.Signed, v)
+    _leave_argv(argv)
+    if failed:
+        _failed_mid(mid)
+    return ret
 
 
 def call_with_block(recv, rid, args, handle, mid, kw=False):

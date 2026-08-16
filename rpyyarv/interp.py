@@ -240,8 +240,8 @@ def invoke(frame, w_ci, w_block=None):
             _drop(frame, recv_at)
             debug.count_native()
             return v
+    # A `&proc` argument too, as instance_eval takes one: Forwardable builds its delegator that way, and out through CRuby the def would land on the proc's own cref.
     if w_block is not None and entry is None and argc == 0 \
-            and not w_ci.blockarg \
             and (mid == CLASS_EVAL or mid == MODULE_EVAL) \
             and w_block.kind == block_mod.KIND_ISEQ \
             and (dispatch.is_known_class(recv)
@@ -2054,6 +2054,9 @@ def _attr_from_cruby(entry, recv, args):
 
 @dont_look_inside
 def _call_with_block(recv, mid, args, w_block, kw=False):
+    if w_block.kind == block_mod.KIND_PROC:
+        # Already a CRuby Proc: handing it over as itself keeps the cref module_eval yields with, which an ifunc round trip through here would drop.
+        return rubycall.call_with_proc(recv, mid, args, w_block.proc_value, kw)
     if recv == fiber.value and mid == NEW and not kw:
         raise UnsupportedOperation(
             'Fiber.new with an RPyYARV block is not supported')
