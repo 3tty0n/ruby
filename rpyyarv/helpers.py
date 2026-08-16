@@ -79,6 +79,12 @@ KIND_OF_P = symbols.intern('kind_of?')
 IS_A_P = symbols.intern('is_a?')
 INSTANCE_EVAL = symbols.intern('instance_eval')
 INSTANCE_EXEC = symbols.intern('instance_exec')
+KEYS_MID = symbols.intern('keys')
+SHIFT_MID = symbols.intern('shift')
+UNSHIFT_MID = symbols.intern('unshift')
+FLATTEN_BANG_MID = symbols.intern('flatten!')
+GSUB = symbols.intern('gsub')
+GSUB_BANG = symbols.intern('gsub!')
 
 # RB_FIXABLE for a double (arithmetic/fixnum.h); both bounds are exact powers of two.
 FIXNUM_MAX_PLUS_1_DBL = float(value.FIXNUM_MAX + 1)
@@ -610,6 +616,8 @@ def hash_key_p(recv, key, mid):
     bit = B_HASH_KEY if mid == KEY_P else B_HASH_HAS_KEY
     if not _core_op(value.C_HASH, bit, mid):
         return value.Q_UNDEF
+    if _hash_key_cannot_reenter(key):
+        return value.newbool(boot.hash_lookup_fast(recv, key) != value.Q_UNDEF)
     return value.newbool(boot.hash_lookup(recv, key) != value.Q_UNDEF)
 
 
@@ -705,6 +713,15 @@ def str_case(recv, mid):
     return boot.str_upcase_bang(recv)
 
 
+def int_to_s(recv):
+    """Integer#to_s with no base argument, for a FIXNUM receiver."""
+    if not value.is_fixnum(recv):
+        return value.Q_UNDEF
+    if not _owned_by_core(recv, value.C_INTEGER, TO_S):
+        return value.Q_UNDEF
+    return boot.int_to_s(recv)
+
+
 def sym_to_s(recv):
     if not boot.is_symbol(recv):
         return value.Q_UNDEF
@@ -763,6 +780,15 @@ def str_match_p(recv, arg):
     return boot.str_match_p(recv, arg)
 
 
+def str_gsub2(recv, pat, rep, mid):
+    """String#gsub / #gsub! with a Regexp|String pattern and a String replacement: the shim rules out a backreference escape and encoding mismatch in C."""
+    if not value.is_plain_string(recv):
+        return value.Q_UNDEF
+    if not _owned_by_core(recv, value.C_STRING, mid):
+        return value.Q_UNDEF
+    return boot.str_gsub2(recv, pat, rep, rubycall.rid(mid), mid)
+
+
 def str_uminus(recv):
     """String#-@: the interned frozen copy."""
     if not value.is_plain_string(recv):
@@ -788,6 +814,58 @@ def ary_push_one(recv, arg):
     if not _owned_by_core(recv, value.C_ARRAY, PUSH_MID):
         return value.Q_UNDEF
     return boot.ary_push1(recv, arg)
+
+
+def ary_shift(recv):
+    if not value.is_plain_array(recv) \
+            or raw_word(recv, value.FLAGS_WORD) & value.FL_FREEZE != 0:
+        return value.Q_UNDEF
+    if not _owned_by_core(recv, value.C_ARRAY, SHIFT_MID):
+        return value.Q_UNDEF
+    return boot.ary_shift(recv)
+
+
+def ary_unshift1(recv, arg):
+    if not value.is_plain_array(recv) \
+            or raw_word(recv, value.FLAGS_WORD) & value.FL_FREEZE != 0:
+        return value.Q_UNDEF
+    if not _owned_by_core(recv, value.C_ARRAY, UNSHIFT_MID):
+        return value.Q_UNDEF
+    return boot.ary_unshift1(recv, arg)
+
+
+def ary_flatten_bang(recv):
+    """Array#flatten! for literal-Array elements only; a #to_ary-quacking non-Array element is a known corner, left untouched here."""
+    if not value.is_plain_array(recv) \
+            or raw_word(recv, value.FLAGS_WORD) & value.FL_FREEZE != 0:
+        return value.Q_UNDEF
+    if not _owned_by_core(recv, value.C_ARRAY, FLATTEN_BANG_MID):
+        return value.Q_UNDEF
+    return boot.ary_flatten_bang1(recv)
+
+
+def ary_hash_freeze(recv):
+    """Array#freeze / Hash#freeze: OBJ_FREEZE_RAW cannot re-enter Ruby for either type."""
+    if value.is_immediate(recv):
+        return value.Q_UNDEF
+    if value.is_plain_array(recv):
+        klass_i = value.C_ARRAY
+    elif raw_word(recv, value.KLASS_WORD) == value.core_class(value.C_HASH):
+        klass_i = value.C_HASH
+    else:
+        return value.Q_UNDEF
+    if not _owned_by_core(recv, klass_i, FREEZE):
+        return value.Q_UNDEF
+    return boot.ary_hash_freeze(recv)
+
+
+def hash_keys(recv):
+    if value.is_immediate(recv) \
+            or raw_word(recv, value.KLASS_WORD) != value.core_class(value.C_HASH):
+        return value.Q_UNDEF
+    if not _owned_by_core(recv, value.C_HASH, KEYS_MID):
+        return value.Q_UNDEF
+    return boot.hash_keys_fast(recv)
 
 
 def str_tr(recv, frm, to):
@@ -1125,7 +1203,10 @@ def zero_arg(recv, mid):
         v = str_to_s(recv)
         if v != value.Q_UNDEF:
             return v
-        return sym_to_s(recv)
+        v = sym_to_s(recv)
+        if v != value.Q_UNDEF:
+            return v
+        return int_to_s(recv)
     if mid == UMINUS:
         v = flt_uminus(recv)
         if v != value.Q_UNDEF:
@@ -1136,6 +1217,14 @@ def zero_arg(recv, mid):
         return str_uminus(recv)
     if mid == POP_MID:
         return ary_pop(recv)
+    if mid == SHIFT_MID:
+        return ary_shift(recv)
+    if mid == FLATTEN_BANG_MID:
+        return ary_flatten_bang(recv)
+    if mid == FREEZE:
+        return ary_hash_freeze(recv)
+    if mid == KEYS_MID:
+        return hash_keys(recv)
     if mid == EMPTY_P:
         return empty_p(recv)
     if mid == POS_MID or mid == EOS_P_MID or mid == MATCHED_SIZE:

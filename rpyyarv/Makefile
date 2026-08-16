@@ -116,6 +116,7 @@ gccheck:
 	          test/sendblock.rb test/crefconsts.rb test/respondto.rb \
 	          test/fastsends.rb test/supercruby.rb test/supersplat.rb \
 	          test/gvaralias.rb test/expandsplat.rb test/faststr.rb \
+	          test/fastctx.rb \
 	          test/scanner.rb test/instanceeval.rb \
 	          test/enumerators.rb test/loopiter.rb test/classvars.rb \
 	          test/scopedclass.rb test/trampolinekw.rb test/moduleattrs.rb \

@@ -233,6 +233,9 @@ rb_hash_aset_fast = _ext('rpyyarv_hash_aset_fast', [VALUE, VALUE, VALUE],
 rb_str_push = _ext('rpyyarv_str_push', [VALUE, VALUE, INTP], VALUE,
                    reenters=True)
 rb_str_start_with = _ext('rpyyarv_str_start_with', [VALUE, VALUE], VALUE)
+rb_int_to_s_fast = _ext('rpyyarv_int_to_s', [VALUE], VALUE)
+rb_str_gsub2 = _ext('rpyyarv_str_gsub2', [VALUE, VALUE, VALUE, VALUE, INTP],
+                    VALUE, reenters=True)
 rb_str_casecmp_fast = _ext('rpyyarv_str_casecmp', [VALUE, VALUE], VALUE)
 rb_str_cmp_fast = _ext('rpyyarv_str_cmp', [VALUE, VALUE], VALUE)
 rb_str_downcase_fast = _ext('rpyyarv_str_downcase', [VALUE], VALUE)
@@ -251,6 +254,12 @@ rb_hash_empty_p = _ext('rpyyarv_hash_empty_p', [VALUE], VALUE)
 rb_str_uminus = _ext('rpyyarv_str_uminus', [VALUE], VALUE)
 rb_ary_pop_fast = _ext('rpyyarv_ary_pop_fast', [VALUE], VALUE)
 rb_ary_push1 = _ext('rpyyarv_ary_push1', [VALUE, VALUE], VALUE)
+rb_ary_shift_fast = _ext('rpyyarv_ary_shift_fast', [VALUE], VALUE)
+rb_ary_unshift1 = _ext('rpyyarv_ary_unshift1', [VALUE, VALUE], VALUE)
+rb_ary_hash_freeze = _ext('rpyyarv_ary_hash_freeze', [VALUE], VALUE)
+rb_hash_keys_fast = _ext('rpyyarv_hash_keys_fast', [VALUE, INTP], VALUE,
+                         reenters=True)
+rb_ary_flatten_bang1 = _ext('rpyyarv_ary_flatten_bang1', [VALUE], VALUE)
 rb_ss_pos = _ext('rpyyarv_ss_pos', [VALUE], VALUE)
 rb_ss_set_pos = _ext('rpyyarv_ss_set_pos', [VALUE, VALUE], VALUE)
 rb_ss_eos_p = _ext('rpyyarv_ss_eos_p', [VALUE], VALUE)
@@ -501,9 +510,17 @@ def sym_of(v):
     return rffi.charp2str(p)
 
 
+_intern_memo = {}
+
+
 def intern(name):
+    """rb_intern is idempotent per name, so a call site that passes the same string every time (RubyVM, InstructionSequence, ...) pays the FFI crossing once."""
+    if name in _intern_memo:
+        return _intern_memo[name]
     with rffi.scoped_str2charp(name) as c_name:
-        return rffi.cast(lltype.Signed, rb_intern_(c_name))
+        r = rffi.cast(lltype.Signed, rb_intern_(c_name))
+    _intern_memo[name] = r
+    return r
 
 
 def sym_new(name):
@@ -1360,6 +1377,21 @@ def str_start_with(string, prefix):
     return rffi.cast(lltype.Signed, rb_str_start_with(_v(string), _v(prefix)))
 
 
+def int_to_s(v):
+    return rffi.cast(lltype.Signed, rb_int_to_s_fast(_v(v)))
+
+
+def str_gsub2(recv, pat, rep, rid, mid):
+    """String#gsub / #gsub! of a Regexp|String pattern and a backref-free String replacement."""
+    state = _enter_status()
+    v = rb_str_gsub2(_v(recv), _v(pat), _v(rep), rffi.cast(VALUE, rid), state)
+    failed = _leave_status(state)
+    ret = rffi.cast(lltype.Signed, v)
+    if failed:
+        _failed_mid(mid)
+    return ret
+
+
 def str_casecmp(a, b):
     return rffi.cast(lltype.Signed, rb_str_casecmp_fast(_v(a), _v(b)))
 
@@ -1433,6 +1465,33 @@ def ary_pop(v):
 
 def ary_push1(v, elt):
     return rffi.cast(lltype.Signed, rb_ary_push1(_v(v), _v(elt)))
+
+
+def ary_shift(v):
+    return rffi.cast(lltype.Signed, rb_ary_shift_fast(_v(v)))
+
+
+def ary_unshift1(v, elt):
+    return rffi.cast(lltype.Signed, rb_ary_unshift1(_v(v), _v(elt)))
+
+
+def ary_hash_freeze(v):
+    return rffi.cast(lltype.Signed, rb_ary_hash_freeze(_v(v)))
+
+
+def hash_keys_fast(hash_v):
+    """[k0, k1, ...] of a Hash in entry order, one C call; distinct from rubycall.hash_keys, which serves the keyword-splat error path."""
+    state = _enter_status()
+    v = rb_hash_keys_fast(_v(hash_v), state)
+    failed = _leave_status(state)
+    ret = rffi.cast(lltype.Signed, v)
+    if failed:
+        _failed('Hash#keys')
+    return ret
+
+
+def ary_flatten_bang1(v):
+    return rffi.cast(lltype.Signed, rb_ary_flatten_bang1(_v(v)))
 
 
 def ss_pos(v):

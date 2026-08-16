@@ -101,3 +101,29 @@ begin
 rescue StandardError
   puts "err"
 end
+
+p 0.to_s
+p 42.to_s
+p(-7.to_s)
+
+p "hello world".gsub(/o/, "0")
+p "hello world".gsub("o", "0")
+s3 = +"hello world"
+p s3.gsub!(/o/, "0")
+p s3
+p (+"no match").gsub!(/z/, "0")
+p "a.b.c".gsub(".", "-")
+p "keep \\0 literal".gsub("l", "\\0")
+p "abc".gsub(/b/) { "X" }
+
+class MyString < String
+end
+p MyString.new("hello").gsub(/l/, "L")
+
+class String
+  alias_method :orig_gsub, :gsub
+  def gsub(*args)
+    "patched:" + orig_gsub(*args)
+  end
+end
+p "hello".gsub("l", "L")

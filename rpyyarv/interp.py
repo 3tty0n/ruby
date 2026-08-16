@@ -217,6 +217,14 @@ def invoke(frame, w_ci, w_block=None):
             _drop(frame, recv_at)
             debug.count_native()
             return v
+    if entry is None and argc == 2 and w_block is None \
+            and (mid == helpers.GSUB or mid == helpers.GSUB_BANG):
+        v = helpers.str_gsub2(recv, frame.stack[recv_at + 1],
+                              frame.stack[recv_at + 2], mid)
+        if v != value.Q_UNDEF:
+            _drop(frame, recv_at)
+            debug.count_native()
+            return v
     if entry is None and argc == 2 and mid == helpers.ASET:
         v = helpers.hash_aset(recv, frame.stack[recv_at + 1],
                               frame.stack[recv_at + 2])
@@ -706,6 +714,8 @@ def _native_binop(recv, arg, mid):
         return helpers.str_match_p(recv, arg)
     if mid == helpers.PUSH_MID:
         return helpers.ary_push_one(recv, arg)
+    if mid == helpers.UNSHIFT_MID:
+        return helpers.ary_unshift1(recv, arg)
     if mid == helpers.SKIP_MID:
         return helpers.ss_skip(recv, arg)
     if mid == helpers.POS_SET:

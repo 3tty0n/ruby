@@ -92,6 +92,9 @@ void rpyyarv_gc_mark_value(uintptr_t v);
 /* rb_gc_mark_maybe on a machine word that may not be a VALUE at all; jitframe words are scanned with this. */
 void rpyyarv_gc_mark_maybe(uintptr_t v);
 
+uintptr_t rpyyarv_int_to_s(uintptr_t v);
+uintptr_t rpyyarv_str_gsub2(uintptr_t str, uintptr_t pat, uintptr_t rep,
+                            uintptr_t mid, int *state);
 uintptr_t rpyyarv_str_casecmp(uintptr_t a, uintptr_t b);
 uintptr_t rpyyarv_str_cmp(uintptr_t a, uintptr_t b);
 uintptr_t rpyyarv_str_downcase(uintptr_t s);
@@ -109,6 +112,11 @@ uintptr_t rpyyarv_hash_empty_p(uintptr_t v);
 uintptr_t rpyyarv_str_uminus(uintptr_t v);
 uintptr_t rpyyarv_ary_pop_fast(uintptr_t v);
 uintptr_t rpyyarv_ary_push1(uintptr_t v, uintptr_t elt);
+uintptr_t rpyyarv_ary_shift_fast(uintptr_t v);
+uintptr_t rpyyarv_ary_unshift1(uintptr_t v, uintptr_t elt);
+uintptr_t rpyyarv_ary_hash_freeze(uintptr_t v);
+uintptr_t rpyyarv_hash_keys_fast(uintptr_t hash, int *state);
+uintptr_t rpyyarv_ary_flatten_bang1(uintptr_t v);
 uintptr_t rpyyarv_ss_pos(uintptr_t v);
 uintptr_t rpyyarv_ss_set_pos(uintptr_t v, uintptr_t posv);
 uintptr_t rpyyarv_ss_eos_p(uintptr_t v);

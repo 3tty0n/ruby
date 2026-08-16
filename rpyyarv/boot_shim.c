@@ -2022,6 +2022,14 @@ rpyyarv_str_push(uintptr_t str, uintptr_t other, int *state)
     return (uintptr_t)r;
 }
 
+/* Integer#to_s with no base argument: rb_fix2str never re-enters Ruby for a FIXNUM. */
+uintptr_t
+rpyyarv_int_to_s(uintptr_t v)
+{
+    if (!FIXNUM_P((VALUE)v)) return (uintptr_t)Qundef;
+    return (uintptr_t)rb_fix2str((VALUE)v, 10);
+}
+
 /* String#casecmp of two 7-bit Strings: the ASCII fold CRuby's own uses there. */
 uintptr_t
 rpyyarv_str_casecmp(uintptr_t a, uintptr_t b)
@@ -2045,6 +2053,50 @@ rpyyarv_str_casecmp(uintptr_t a, uintptr_t b)
     }
     if (l1 != l2) return (uintptr_t)INT2FIX(l1 < l2 ? -1 : 1);
     return (uintptr_t)INT2FIX(0);
+}
+
+struct gsub2_args {
+    VALUE recv;
+    VALUE pat;
+    VALUE rep;
+    ID mid;
+};
+
+static VALUE
+str_gsub2_body(VALUE argp)
+{
+    struct gsub2_args *a = (struct gsub2_args *)argp;
+    VALUE argv[2];
+    argv[0] = a->pat;
+    argv[1] = a->rep;
+    return rb_funcallv(a->recv, a->mid, 2, argv);
+}
+
+/* String#gsub / #gsub! for a Regexp|String pattern and a String replacement with no backreference escape and no block: rb_funcallv still runs the real method (so a redefined pattern-to-source coercion is honoured), but skips RPyYARV's own dispatch bookkeeping; the replacement writes no backref and calls no Ruby method, so only encoding negotiation and Regexp.timeout can still raise, both under rb_protect. */
+uintptr_t
+rpyyarv_str_gsub2(uintptr_t str, uintptr_t pat, uintptr_t rep, uintptr_t mid,
+                  int *state)
+{
+    VALUE s = (VALUE)str, p = (VALUE)pat, r = (VALUE)rep;
+    struct gsub2_args a;
+    const char *rp;
+    long rl;
+    *state = 0;
+    if (!RB_TYPE_P(s, T_STRING) || !RB_TYPE_P(r, T_STRING))
+        return (uintptr_t)Qundef;
+    if (!RB_TYPE_P(p, T_REGEXP) && !RB_TYPE_P(p, T_STRING))
+        return (uintptr_t)Qundef;
+    RSTRING_GETMEM(r, rp, rl);
+    if (memchr(rp, '\\', rl))
+        return (uintptr_t)Qundef;
+    if (!rb_enc_compatible(s, p) || !rb_enc_compatible(s, r))
+        return (uintptr_t)Qundef;
+    a.recv = s; a.pat = p; a.rep = r; a.mid = (ID)mid;
+    {
+        VALUE ret = rb_protect(str_gsub2_body, (VALUE)&a, state);
+        if (*state) return (uintptr_t)Qnil;
+        return (uintptr_t)ret;
+    }
 }
 
 /* String#<=> for two Strings. */
@@ -2863,6 +2915,96 @@ rpyyarv_ary_pop_fast(uintptr_t v)
     VALUE a = (VALUE)v;
     if (!RB_TYPE_P(a, T_ARRAY) || OBJ_FROZEN(a)) return (uintptr_t)Qundef;
     return (uintptr_t)rb_ary_pop(a);
+}
+
+uintptr_t
+rpyyarv_ary_shift_fast(uintptr_t v)
+{
+    VALUE a = (VALUE)v;
+    if (!RB_TYPE_P(a, T_ARRAY) || OBJ_FROZEN(a)) return (uintptr_t)Qundef;
+    return (uintptr_t)rb_ary_shift(a);
+}
+
+uintptr_t
+rpyyarv_ary_unshift1(uintptr_t v, uintptr_t elt)
+{
+    VALUE a = (VALUE)v;
+    if (!RB_TYPE_P(a, T_ARRAY) || OBJ_FROZEN(a)) return (uintptr_t)Qundef;
+    return (uintptr_t)rb_ary_unshift(a, (VALUE)elt);
+}
+
+/* Array#freeze / Hash#freeze: OBJ_FREEZE_RAW cannot re-enter Ruby for either type. */
+uintptr_t
+rpyyarv_ary_hash_freeze(uintptr_t v)
+{
+    VALUE o = (VALUE)v;
+    if (!RB_TYPE_P(o, T_ARRAY) && !RB_TYPE_P(o, T_HASH)) return (uintptr_t)Qundef;
+    return (uintptr_t)rb_obj_freeze(o);
+}
+
+static int
+hash_keys_fast_i(VALUE key, VALUE val, VALUE out)
+{
+    (void)val;
+    rb_ary_push(out, key);
+    return ST_CONTINUE;
+}
+
+static VALUE
+hash_keys_fast_body(VALUE h)
+{
+    VALUE out = rb_ary_new_capa((long)rb_hash_size_num(h));
+    rb_hash_foreach(h, hash_keys_fast_i, out);
+    return out;
+}
+
+/* Hash#keys in entry order, an rb_hash_foreach loop in place of rpyyarv_hash_keys's rb_funcall (that one stays, for the keyword-splat error path, which does not need the extra speed). */
+uintptr_t
+rpyyarv_hash_keys_fast(uintptr_t hash, int *state)
+{
+    *state = 0;
+    VALUE r = rb_protect(hash_keys_fast_body, (VALUE)hash, state);
+    if (*state) return (uintptr_t)Qnil;
+    return (uintptr_t)r;
+}
+
+/* Array#flatten! for literal-Array elements only (no #to_ary duck-typing, a known corner); nil if nothing to flatten, self otherwise; Q_UNDEF past one level of nesting or a frozen receiver. */
+uintptr_t
+rpyyarv_ary_flatten_bang1(uintptr_t v)
+{
+    VALUE a = (VALUE)v;
+    VALUE out;
+    long i, n, j, m;
+    int any_array = 0, any_nested = 0;
+    if (!RB_TYPE_P(a, T_ARRAY) || OBJ_FROZEN(a)) return (uintptr_t)Qundef;
+    n = RARRAY_LEN(a);
+    for (i = 0; i < n && !any_nested; i++) {
+        VALUE e = RARRAY_AREF(a, i);
+        if (RB_TYPE_P(e, T_ARRAY)) {
+            any_array = 1;
+            m = RARRAY_LEN(e);
+            for (j = 0; j < m; j++) {
+                if (RB_TYPE_P(RARRAY_AREF(e, j), T_ARRAY)) {
+                    any_nested = 1;
+                    break;
+                }
+            }
+        }
+    }
+    if (any_nested) return (uintptr_t)Qundef;
+    if (!any_array) return (uintptr_t)Qnil;
+    out = rb_ary_new_capa(n);
+    for (i = 0; i < n; i++) {
+        VALUE e = RARRAY_AREF(a, i);
+        if (RB_TYPE_P(e, T_ARRAY)) {
+            m = RARRAY_LEN(e);
+            for (j = 0; j < m; j++) rb_ary_push(out, RARRAY_AREF(e, j));
+        } else {
+            rb_ary_push(out, e);
+        }
+    }
+    rb_ary_replace(a, out);
+    return (uintptr_t)a;
 }
 
 uintptr_t
