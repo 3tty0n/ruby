@@ -1922,6 +1922,8 @@ class _Fiber(object):
 
     def __init__(self):
         self.value = 0
+        # class VALUE -> 1 when it is Fiber or descends from it. Never invalidated: a class lives as long as this VM, and only re-parenting Fiber itself could stale an entry.
+        self.kinds = {}
 
 
 fiber = _Fiber()
@@ -2167,13 +2169,36 @@ def _attr_from_cruby(entry, recv, args):
 
 
 @dont_look_inside
+def _is_fiber_class(klass):
+    """Fiber or a subclass of it; hexapdf's FiberWithLength is one, and identity alone let a subclass through to the ifunc path silently."""
+    if fiber.value == 0 or value.is_immediate(klass):
+        return False
+    known = fiber.kinds.get(klass, -1)
+    if known >= 0:
+        return known == 1
+    k = klass
+    n = 0
+    found = False
+    while k != 0 and not value.is_immediate(k) and n < dispatch.MAX_ANCESTORS:
+        if k == fiber.value:
+            found = True
+            break
+        k = boot.class_superclass(k)
+        n += 1
+    fiber.kinds[klass] = 1 if found else 0
+    return found
+
+
+@dont_look_inside
 def _call_with_block(recv, mid, args, w_block, kw=False):
     if w_block.kind == block_mod.KIND_PROC:
         # Already a CRuby Proc: handing it over as itself keeps the cref module_eval yields with, which an ifunc round trip through here would drop.
         return rubycall.call_with_proc(recv, mid, args, w_block.proc_value, kw)
-    if recv == fiber.value and mid == NEW and not kw:
+    if mid == NEW and not kw and _is_fiber_class(recv):
+        # A fiber suspends without unwinding, and both root chains here are strictly LIFO: the shadowstack's decr_stack and gcroots' frame list. RPYYARV_DELEGATE_FILES leaves the file to CRuby.
         raise UnsupportedOperation(
-            'Fiber.new with an RPyYARV block is not supported')
+            '%s.new with an RPyYARV block is not supported; name the file in '
+            'RPYYARV_DELEGATE_FILES to leave it to CRuby' % boot.inspect(recv))
     handle = _alloc_handle(w_block)
     # No release here: the handle's owner object dies with the ifunc, and _alloc_handle reclaims the slot then.
     try:
