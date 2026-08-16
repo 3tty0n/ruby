@@ -275,7 +275,7 @@ class Loader(object):
                         raw.kw_bits, raw.kwrest, self.program.path,
                         [t for t in pool.case_tables],
                         [p for p in line_pcs], [n for n in line_nums],
-                        shares)
+                        shares, [n for n in raw.local_names])
         gcroots.register_consts(consts)
         # The values `once` caches live here, and the mark hook walks the list itself.
         gcroots.register_consts(w_iseq.once_cache)

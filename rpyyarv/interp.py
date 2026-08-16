@@ -235,7 +235,10 @@ def invoke(frame, w_ci, w_block=None):
     if entry is None and (mid == CLASS_EVAL or mid == MODULE_EVAL) and \
             w_block is None and argc >= 1 and argc <= 3 and \
             (dispatch.is_known_class(recv) or dispatch.is_known_module(recv)):
-        v = _module_eval_rpy(frame, recv, frame.stack[recv_at + 1])
+        v = _module_eval_rpy(frame, recv, frame.stack[recv_at + 1],
+                             frame.stack[recv_at + 2] if argc >= 2
+                             else value.Q_NIL,
+                             frame.stack[recv_at + 3] if argc >= 3 else 0)
         if v != value.Q_UNDEF:
             _drop(frame, recv_at)
             debug.count_native()
@@ -819,16 +822,26 @@ def _eval_rpy(frame, klass, recv, source):
 
 
 @dont_look_inside
-def _module_eval_rpy(frame, recv, source):
+def _module_eval_rpy(frame, recv, source, file_v, line_v):
     """String class_eval/module_eval with the caller's lexical CREF preserved; a string RPyYARV cannot compile or load goes back to CRuby's module_eval."""
     if value.is_immediate(source) or not boot.is_string(source):
         return value.Q_UNDEF
     from rpyyarv import bootiseq
     from rpyyarv import loader
-    from rpyyarv import prelude
     text = boot.str_of(source)
+    line = value.fix2int(line_v) if value.is_fixnum(line_v) else 1
+    names = _eval_local_names(frame, text)
+    if len(names) > 0:
+        # eval_string_with_cref runs the string in the caller's scope; declaring the names here is how the compiler gives it one slot per caller local.
+        text = _declare_locals(names) + text
+        line -= 1
     try:
-        result = loader.load(bootiseq.load(prelude._compile(text)))
+        iseqw = _compile_eval(text, file_v, line)
+        gcroots.hold(iseqw)
+        try:
+            result = loader.load(bootiseq.load(iseqw))
+        finally:
+            gcroots.release(iseqw)
     except RubyException:
         return value.Q_UNDEF
     except RPyYarvError:
@@ -837,8 +850,107 @@ def _module_eval_rpy(frame, recv, source):
         return value.Q_UNDEF
     # Not by_eval, as the block form is: eval_under pushes the receiver's cref plainly (vm_eval.c:2269), so an alias or a @@cvar inside the string means the receiver's.
     cref = _push_cref(_cref_of(frame), recv)
-    return execute(result.w_iseq, Frame(result.w_iseq, recv, cref,
-                                        frame.entry))
+    callee = Frame(result.w_iseq, recv, cref, frame.entry)
+    _copy_eval_locals(frame, callee, result.w_iseq, False)
+    try:
+        return execute(result.w_iseq, callee)
+    finally:
+        # ponytail: copied in and out, where CRuby shares the environment itself; a Proc the string leaves behind writes only the eval's own slots.
+        _copy_eval_locals(frame, callee, result.w_iseq, True)
+
+
+COMPILE = symbols.intern('compile')
+
+
+@dont_look_inside
+def _compile_eval(text, file_v, line):
+    """The eval source through the embedded CRuby's compiler, under the file and line the caller named, so __FILE__ and __LINE__ inside the string match CRuby's."""
+    rubyvm = boot.const_get(value.core_class(value.C_OBJECT),
+                            boot.intern('RubyVM'))
+    iseq_class = boot.const_get(rubyvm, boot.intern('InstructionSequence'))
+    src = boot.str_new(text)
+    gcroots.hold(src)
+    try:
+        return boot.funcallv(iseq_class, boot.intern('compile'),
+                             [src, file_v, file_v, value.int2fix(line)],
+                             COMPILE)
+    finally:
+        gcroots.release(src)
+
+
+def _is_local_name(name):
+    """A name the eval source may declare: `_1` and `it` are the parser's own, and a slot with no name is not one."""
+    if len(name) == 0 or name == 'it':
+        return False
+    c = name[0]
+    if not ((c >= 'a' and c <= 'z') or c == '_'):
+        return False
+    i = 1
+    while i < len(name):
+        c = name[i]
+        if not ((c >= 'a' and c <= 'z') or (c >= 'A' and c <= 'Z')
+                or (c >= '0' and c <= '9') or c == '_'):
+            return False
+        i += 1
+    return not (len(name) == 2 and name[0] == '_'
+                and name[1] >= '0' and name[1] <= '9')
+
+
+def _eval_local_names(frame, text):
+    """Every local the string names, innermost first; CRuby's eval sees the whole scope, so a block's frame chains out to its method's. A name the text never mentions is left out, so a source that reads none is compiled as written -- a leading magic comment included."""
+    names = []
+    seen = {}
+    f = frame
+    n = 0
+    while f is not None and n < MAX_SCOPES:
+        for name in f.w_iseq.local_names:
+            if _is_local_name(name) and name not in seen \
+                    and text.find(name) >= 0:
+                seen[name] = True
+                names.append(name)
+        f = f.defining_frame
+        n += 1
+    return names
+
+
+def _declare_locals(names):
+    parts = []
+    for name in names:
+        parts.append('%s = %s' % (name, name))
+    return '; '.join(parts) + '\n'
+
+
+def _copy_eval_locals(frame, callee, w_iseq, back):
+    """The caller's locals into the eval's matching slots, or back out after it ran: an assignment in the string reaches the caller, as CRuby's shared scope does."""
+    f = frame
+    n = 0
+    seen = {}
+    while f is not None and n < MAX_SCOPES:
+        names = f.w_iseq.local_names
+        i = 0
+        while i < len(names):
+            name = names[i]
+            if _is_local_name(name) and name not in seen:
+                seen[name] = True
+                at = _slot_named(w_iseq, name)
+                if at >= 0:
+                    if back:
+                        f.local_set(i, callee.local_get(at))
+                    else:
+                        callee.local_set(at, f.local_get(i))
+            i += 1
+        f = f.defining_frame
+        n += 1
+
+
+def _slot_named(w_iseq, name):
+    names = w_iseq.local_names
+    i = 0
+    while i < len(names):
+        if names[i] == name:
+            return i
+        i += 1
+    return -1
 
 
 def _new_with_block(frame, entry, klass, recv_at, argc, w_block):

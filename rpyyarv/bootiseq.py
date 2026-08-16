@@ -107,6 +107,7 @@ def _read_iseq(program, pending, owners, ary, parent):
     raw.kw_defaults = defaults
     raw.kw_bits = _int_or(boot.hash_aref(params, 'kwbits'), -1)
     raw.kwrest = _int_or(boot.hash_aref(params, 'kwrest'), -1)
+    raw.local_names = _local_names(boot.ary_entry(ary, I_LOCALS))
     if len(names) > 0 and raw.kw_bits < 0:
         raise LoadError("'%s' has keyword parameters but no kwbits slot: %s"
                         % (raw.name, _MOVED))
@@ -302,6 +303,18 @@ def _kw_arg_names(v):
         names.append(boot.sym_of(e))
         i += 1
     return names
+
+
+def _local_names(ary):
+    """One name per slot in local_slot's order; a hidden slot holds no Symbol and stays ''."""
+    out = []
+    n = boot.ary_len(ary)
+    i = 0
+    while i < n:
+        v = boot.ary_entry(ary, i)
+        out.append(boot.sym_of(v) if boot.is_symbol(v) else '')
+        i += 1
+    return out
 
 
 def _int_or(v, default):
