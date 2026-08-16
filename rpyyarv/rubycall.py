@@ -142,9 +142,9 @@ def call2(recv, mid, a, b):
 
 
 @dont_look_inside
-def call_super(klass, owner, recv, mid, args, kw=False):
+def call_super(klass, owner, recv, mid, args, kw=False, proc=0):
     debug.count_foreign(mid)
-    return boot.call_super(klass, owner, recv, rid(mid), args, mid, kw)
+    return boot.call_super(klass, owner, recv, rid(mid), args, mid, kw, proc)
 
 
 @dont_look_inside

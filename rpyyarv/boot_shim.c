@@ -748,6 +748,7 @@ struct super_call_args {
     const VALUE *argv;
     /* RB_PASS_KEYWORDS when the last argument is the keyword Hash. */
     int   kw_splat;
+    VALUE proc;
 };
 
 static VALUE
@@ -772,14 +773,15 @@ call_super_body(VALUE argp)
     /* UnboundMethod#bind_call, not rb_call_super: super needs a CRuby control frame, binding one method does not. */
     args[0] = p->recv;
     for (i = 0; i < p->argc; i++) args[i + 1] = p->argv[i];
-    return rb_funcallv_kw(m, rb_intern("bind_call"), p->argc + 1, args,
-                          p->kw_splat);
+    /* With the block, since a bare `super` forwards the one its method was given (vm_insnhelper.c:5033); Qnil means none. */
+    return rb_funcall_with_block_kw(m, rb_intern("bind_call"), p->argc + 1,
+                                    args, p->proc, p->kw_splat);
 }
 
 uintptr_t
 rpyyarv_call_super(uintptr_t klass, uintptr_t owner, uintptr_t recv,
                    uintptr_t id, int argc, const uintptr_t *argv, int kw,
-                   int *state)
+                   uintptr_t proc, int *state)
 {
     struct super_call_args a;
     VALUE local[RPYYARV_MAX_ARGC];
@@ -797,6 +799,7 @@ rpyyarv_call_super(uintptr_t klass, uintptr_t owner, uintptr_t recv,
     a.argc = argc;
     a.argv = local;
     a.kw_splat = kw ? RB_PASS_KEYWORDS : RB_NO_KEYWORDS;
+    a.proc = proc ? (VALUE)proc : Qnil;
     *state = 0;
     return (uintptr_t)rb_protect(call_super_body, (VALUE)&a, state);
 }
@@ -1597,7 +1600,7 @@ rpyyarv_call_with_proc(uintptr_t recv, uintptr_t mid, int argc,
     a.mid = (ID)mid;
     a.argc = argc;
     a.argv = buf;
-    a.proc = (VALUE)proc;
+    a.proc = proc ? (VALUE)proc : Qnil;
     a.kw_splat = kw ? RB_PASS_KEYWORDS : RB_NO_KEYWORDS;
 
     *state = 0;

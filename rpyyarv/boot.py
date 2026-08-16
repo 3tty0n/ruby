@@ -324,7 +324,7 @@ rb_str_append = _ext('rpyyarv_str_append', [VALUE, VALUE], VALUE,
                      reenters=True)
 rb_call_super = _ext('rpyyarv_call_super',
                      [VALUE, VALUE, VALUE, VALUE, rffi.INT, VALUEP,
-                      rffi.INT, INTP],
+                      rffi.INT, VALUE, INTP],
                      VALUE, reenters=True)
 # No reenters: the barrier sets bits in preallocated page bitmaps and reaches no mark callback; see the comment on rpyyarv_obj_written.
 rb_obj_written = _ext('rpyyarv_obj_written', [VALUE, VALUE], lltype.Void)
@@ -932,7 +932,7 @@ def str_getbyte(string, index):
     return rffi.cast(lltype.Signed, rb_str_getbyte(_v(string), _v(index)))
 
 
-def call_super(klass, owner, recv, rid, args, mid, kw=False):
+def call_super(klass, owner, recv, rid, args, mid, kw=False, proc=0):
     """The method after owner's along klass's chain, called on recv; where `super` lands when CRuby owns it."""
     argc = len(args)
     if argc > MAX_ARGC:
@@ -946,7 +946,8 @@ def call_super(klass, owner, recv, rid, args, mid, kw=False):
     v = rb_call_super(rffi.cast(VALUE, klass), rffi.cast(VALUE, owner),
                       rffi.cast(VALUE, recv), rffi.cast(VALUE, rid),
                       rffi.cast(rffi.INT, argc), argv,
-                      rffi.cast(rffi.INT, 1 if kw else 0), state)
+                      rffi.cast(rffi.INT, 1 if kw else 0),
+                      rffi.cast(VALUE, proc), state)
     failed = _leave_status(state)
     ret = rffi.cast(lltype.Signed, v)
     _leave_argv(argv)

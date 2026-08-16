@@ -122,7 +122,7 @@ gccheck:
 	          test/once.rb test/ranges.rb test/hasharef.rb test/kindof.rb \
           test/lambdas.rb test/objops.rb test/aliasnest.rb test/enumops.rb \
 	          test/defaultgems.rb test/modevalproc.rb \
-	          test/strevallocals.rb \
+	          test/strevallocals.rb test/refinements.rb test/superblock.rb \
 	          $(TOP)/benchmark/app_*.rb $(TOP)/benchmark/so_*.rb; do \
 	   n=`basename $$s`; \
 	   case $$s in test/*) \

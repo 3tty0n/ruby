@@ -1606,8 +1606,10 @@ def _super_to_cruby_args(frame, klass, owner, mid, recv_at, args, kw_splat,
     if len(kw_names) > 0:
         args = _kw_to_positional(args, kw_names)
     _drop(frame, recv_at)
+    # The frame's own block: a bare `super` forwards the one its method was given.
     ret = rubycall.call_super(klass, owner, recv, mid, args,
-                              kw_splat or len(kw_names) > 0)
+                              kw_splat or len(kw_names) > 0,
+                              _to_proc(frame.block))
     if ret == value.Q_UNDEF:
         raise UnsupportedOperation(
             "super from '%s' reaches a method its owner does not define"
@@ -1659,14 +1661,14 @@ def invoke_super(frame, w_ci):
         if target.kind != dispatch.KIND_ISEQ:
             return _attr_send_args(frame, target, recv, recv_at, args)
         return _enter_args(frame, target, recv, recv_at, args, entry.mid,
-                           None, w_ci.kw_names, w_ci.kw_splat)
+                           frame.block, w_ci.kw_names, w_ci.kw_splat)
     if target is None:
         return _super_to_cruby(frame, klass, entry.owner, entry.mid, recv_at,
                                argc, w_ci.kw_splat, w_ci.kw_names)
     if target.kind != dispatch.KIND_ISEQ:
         return _attr_send(frame, target, recv, recv_at, argc)
     return _enter(frame, target, recv, recv_at, argc,
-                  entry.mid, None, w_ci.kw_names, w_ci.kw_splat)
+                  entry.mid, frame.block, w_ci.kw_names, w_ci.kw_splat)
 
 
 # `alias` and `undef` compile to a send of one of these (vm.c); unseen, the registry shadows what they change in CRuby.
