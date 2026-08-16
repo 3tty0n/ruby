@@ -2505,10 +2505,10 @@ def configure_jitparams():
     # generic default (1619) left even repeatedly-called 30k-method workloads
     # interpreted; 100 captures them without the broad compile-time regressions
     # seen at 30. An explicit environment setting still replaces this default.
-    # Eager bridges and roomier retraces: branchy code (rubykon's MCTS) needs its bridges anyway, and compiling them late is the slow mode.
+    # Eager bridges: branchy code (rubykon's MCTS) needs its bridges anyway, and compiling them late is the slow mode.
+    # No retrace_limit=25,max_retrace_guards=60: they buy nothing measurable and segfault pypy's force_op_from_preamble on protoboeuf.
     set_user_param(jitdriver, spec if spec else
-                   'function_threshold=100,trace_eagerness=50,'
-                   'retrace_limit=25,max_retrace_guards=60')
+                   'function_threshold=100,trace_eagerness=50')
 
 
 def install():
