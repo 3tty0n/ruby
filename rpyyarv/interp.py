@@ -835,7 +835,8 @@ def _module_eval_rpy(frame, recv, source):
         return value.Q_UNDEF
     if len(result.reasons) > 0:
         return value.Q_UNDEF
-    cref = _push_cref(_cref_of(frame), recv, True)
+    # Not by_eval, as the block form is: eval_under pushes the receiver's cref plainly (vm_eval.c:2269), so an alias or a @@cvar inside the string means the receiver's.
+    cref = _push_cref(_cref_of(frame), recv)
     return execute(result.w_iseq, Frame(result.w_iseq, recv, cref,
                                         frame.entry))
 
