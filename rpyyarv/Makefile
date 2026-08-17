@@ -112,7 +112,7 @@ gccheck:
 	          test/nulstr.rb test/opcodes4.rb test/moduledefs.rb \
 	          test/kwargs.rb test/strops.rb \
 	          test/splatargs.rb test/pushtoarray.rb test/modulefunction.rb \
-	          test/regexpmatch.rb \
+	          test/regexpmatch.rb test/regexbackref.rb \
 	          test/sendblock.rb test/crefconsts.rb test/respondto.rb \
 	          test/fastsends.rb test/supercruby.rb test/supersplat.rb \
 	          test/gvaralias.rb test/expandsplat.rb test/faststr.rb \
@@ -121,6 +121,7 @@ gccheck:
 	          test/enumerators.rb test/loopiter.rb test/classvars.rb \
 	          test/scopedclass.rb test/trampolinekw.rb test/moduleattrs.rb \
 	          test/once.rb test/ranges.rb test/hasharef.rb test/kindof.rb \
+	          test/redefcache.rb \
           test/lambdas.rb test/objops.rb test/aliasnest.rb test/enumops.rb \
 	          test/defaultgems.rb test/modevalproc.rb \
 	          test/strevallocals.rb test/refinements.rb test/superblock.rb \

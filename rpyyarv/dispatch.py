@@ -98,6 +98,7 @@ def define(klass, mid, w_iseq, private, cref=0, lexical=None):
     _table_for(klass)[mid] = MethodEntry(w_iseq, private, klass, mid, cref,
                                          KIND_ISEQ, 0, lexical)
     registry.version = Version()
+    flush_trampoline_cache()
     invalidate_owners()
     _install_trampoline(klass, mid, private)
 
@@ -107,6 +108,7 @@ def define_attr(klass, mid, ivar, kind):
     _table_for(klass)[mid] = MethodEntry(None, False, klass, mid, 0, kind,
                                          ivar)
     registry.version = Version()
+    flush_trampoline_cache()
     invalidate_owners()
 
 
@@ -155,6 +157,38 @@ def lookup_from_cruby(klass, mid):
     return None
 
 
+# Direct-mapped cache of the trampoline's (rid, receiver class) -> (mid, entry); that pair is monomorphic in practice, so a hit skips rubycall.mid_of_rid, owner_of and own_lookup entirely.
+_TC_SIZE = 512
+_TC_MASK = _TC_SIZE - 1
+_tc_rids = [0] * _TC_SIZE
+_tc_klasses = [0] * _TC_SIZE     # 0 marks a slot empty: VALUE 0 is never a class
+_tc_mids = [0] * _TC_SIZE
+_tc_entries = [None] * _TC_SIZE
+
+
+def flush_trampoline_cache():
+    """Called wherever a lookup this cache could have memoised might change."""
+    i = 0
+    while i < _TC_SIZE:
+        _tc_klasses[i] = 0
+        i += 1
+
+
+@dont_look_inside
+def lookup_from_trampoline(rid, klass):
+    """trampoline_callback's entry point: mid and its MethodEntry for a CRuby-resolved (rid, klass), cached by rid xor klass."""
+    idx = intmask(rid * 1000003 ^ klass) & _TC_MASK
+    if _tc_klasses[idx] == klass and _tc_rids[idx] == rid:
+        return _tc_mids[idx], _tc_entries[idx]
+    mid = rubycall.mid_of_rid(rid)
+    entry = lookup_from_cruby(klass, mid) if mid != rubycall.NO_MID else None
+    _tc_rids[idx] = rid
+    _tc_klasses[idx] = klass
+    _tc_mids[idx] = mid
+    _tc_entries[idx] = entry
+    return mid, entry
+
+
 def undefine(klass, mid):
     """Drops the registry entry, so a later lookup falls through to CRuby's."""
     table = registry.methods.get(klass, None)
@@ -162,6 +196,7 @@ def undefine(klass, mid):
         return False
     del table[mid]
     registry.version = Version()
+    flush_trampoline_cache()
     invalidate_owners()
     return True
 
@@ -176,6 +211,7 @@ def own_lookup(klass, mid):
 def record_class(klass, superklass):
     registry.supers[klass] = superklass
     registry.version = Version()
+    flush_trampoline_cache()
     gcroots.register_class(klass)
 
 
@@ -336,6 +372,7 @@ def define_module(cbase, mid):
     registry.module_owned = True
     registry.modules[mod] = True
     registry.version = Version()
+    flush_trampoline_cache()
     boot.gc_register(mod)
     gcroots.register_class(mod)
     # `def self.x` and module_function land on the singleton class.
@@ -511,6 +548,7 @@ def invalidate_owners():
     owners.rtab = {}
     owners.ktab = {}
     registry.version = Version()
+    flush_trampoline_cache()
 
 
 @elidable
@@ -525,6 +563,7 @@ def _fill_owner(klass, mid):
     gcroots.register_class(klass)
     owners.tab[(klass, mid)] = owner
     registry.version = Version()
+    flush_trampoline_cache()
 
 
 def owner_of(klass, mid):
@@ -551,6 +590,7 @@ def _fill_responds(klass, sym):
     gcroots.register_class(klass)
     owners.rtab[(klass, sym)] = got
     registry.version = Version()
+    flush_trampoline_cache()
 
 
 def responds(klass, sym):
@@ -582,6 +622,7 @@ def _fill_sym_name(sym):
     gcroots.hold(v)
     sym_names.tab[sym] = v
     registry.version = Version()
+    flush_trampoline_cache()
 
 
 def sym_name(sym):
@@ -605,6 +646,7 @@ def _fill_kind_of(klass, target):
     gcroots.register_class(target)
     owners.ktab[(klass, target)] = got
     registry.version = Version()
+    flush_trampoline_cache()
 
 
 def kind_of(klass, target):
@@ -658,6 +700,7 @@ def _fill_super_owner(klass, owner, mid):
     gcroots.register_class(klass)
     owners.stab[(klass, owner, mid)] = found
     registry.version = Version()
+    flush_trampoline_cache()
 
 
 def super_owner(klass, owner, mid):

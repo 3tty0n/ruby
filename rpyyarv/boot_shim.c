@@ -2072,7 +2072,7 @@ str_gsub2_body(VALUE argp)
     return rb_funcallv(a->recv, a->mid, 2, argv);
 }
 
-/* String#gsub / #gsub! for a Regexp|String pattern and a String replacement with no backreference escape and no block: rb_funcallv still runs the real method (so a redefined pattern-to-source coercion is honoured), but skips RPyYARV's own dispatch bookkeeping; the replacement writes no backref and calls no Ruby method, so only encoding negotiation and Regexp.timeout can still raise, both under rb_protect. */
+/* String#gsub/gsub!/sub/sub! for a Regexp|String pattern and a String replacement with no backreference escape and no block: rb_funcallv still runs the real method (so a redefined pattern-to-source coercion is honoured, and gsub/sub set $~ exactly as they always did), but skips RPyYARV's own dispatch bookkeeping; the replacement writes no backref itself and calls no Ruby method, so only encoding negotiation and Regexp.timeout can still raise, both under rb_protect. */
 uintptr_t
 rpyyarv_str_gsub2(uintptr_t str, uintptr_t pat, uintptr_t rep, uintptr_t mid,
                   int *state)
@@ -2883,6 +2883,101 @@ rpyyarv_str_match_p(uintptr_t str, uintptr_t re, int *state)
     a.str = (VALUE)str;
     a.re = (VALUE)re;
     r = rb_protect(str_match_p_body, (VALUE)&a, state);
+    if (*state) return (uintptr_t)Qnil;
+    return (uintptr_t)r;
+}
+
+struct eq_tilde_args {
+    VALUE str;
+    VALUE re;
+};
+
+static VALUE
+eq_tilde_body(VALUE argp)
+{
+    struct eq_tilde_args *a = (struct eq_tilde_args *)argp;
+    return rb_reg_match(a->re, a->str);
+}
+
+/* String#=~ Regexp and Regexp#=~ String: rb_reg_match is the whole method (it sets $~ itself), tried in whichever operand order has a String and a Regexp. */
+uintptr_t
+rpyyarv_str_eq_tilde(uintptr_t a, uintptr_t b, int *state)
+{
+    struct eq_tilde_args args;
+    VALUE va = (VALUE)a, vb = (VALUE)b;
+    *state = 0;
+    if (RB_TYPE_P(va, T_STRING) && CLASS_OF(vb) == rb_cRegexp) {
+        args.str = va; args.re = vb;
+    } else if (RB_TYPE_P(vb, T_STRING) && CLASS_OF(va) == rb_cRegexp) {
+        args.str = vb; args.re = va;
+    } else {
+        return (uintptr_t)Qundef;
+    }
+    {
+        VALUE ret = rb_protect(eq_tilde_body, (VALUE)&args, state);
+        if (*state) return (uintptr_t)Qnil;
+        return (uintptr_t)ret;
+    }
+}
+
+/* Regexp#=== String: the same rb_reg_match core as =~, answered as true/false instead of a position. */
+uintptr_t
+rpyyarv_reg_eqq(uintptr_t re, uintptr_t str, int *state)
+{
+    struct eq_tilde_args args;
+    VALUE r;
+    *state = 0;
+    if (CLASS_OF((VALUE)re) != rb_cRegexp || !RB_TYPE_P((VALUE)str, T_STRING))
+        return (uintptr_t)Qundef;
+    args.str = (VALUE)str; args.re = (VALUE)re;
+    r = rb_protect(eq_tilde_body, (VALUE)&args, state);
+    if (*state) return (uintptr_t)Qnil;
+    return (uintptr_t)(NIL_P(r) ? Qfalse : Qtrue);
+}
+
+/* Regexp.last_match with no argument: rb_backref_get plus the rb_match_busy mark match_getter (re.c) also sets, so a later match cannot mutate this MatchData out from under it. */
+uintptr_t
+rpyyarv_last_match0(void)
+{
+    VALUE md = rb_backref_get();
+    if (NIL_P(md)) return (uintptr_t)Qnil;
+    rb_match_busy(md);
+    return (uintptr_t)md;
+}
+
+/* Regexp.last_match(n) for a Fixnum n: rb_reg_nth_match answers nil for any out-of-range n, so nothing here can raise. */
+uintptr_t
+rpyyarv_last_match1(uintptr_t n)
+{
+    VALUE md;
+    if (!FIXNUM_P((VALUE)n)) return (uintptr_t)Qundef;
+    md = rb_backref_get();
+    if (NIL_P(md)) return (uintptr_t)Qnil;
+    return (uintptr_t)rb_reg_nth_match(FIX2INT((VALUE)n), md);
+}
+
+static VALUE
+str_match_body(VALUE argp)
+{
+    struct eq_tilde_args *a = (struct eq_tilde_args *)argp;
+    VALUE md;
+    rb_reg_match(a->re, a->str);
+    md = rb_backref_get();
+    if (!NIL_P(md)) rb_match_busy(md);
+    return md;
+}
+
+/* String#match with a Regexp pattern, no offset, no block: rb_reg_match sets $~, which is exactly what Regexp#match itself returns (rb_match_busy and all). */
+uintptr_t
+rpyyarv_str_match(uintptr_t str, uintptr_t re, int *state)
+{
+    struct eq_tilde_args args;
+    VALUE r;
+    *state = 0;
+    if (!RB_TYPE_P((VALUE)str, T_STRING) || CLASS_OF((VALUE)re) != rb_cRegexp)
+        return (uintptr_t)Qundef;
+    args.str = (VALUE)str; args.re = (VALUE)re;
+    r = rb_protect(str_match_body, (VALUE)&args, state);
     if (*state) return (uintptr_t)Qnil;
     return (uintptr_t)r;
 }

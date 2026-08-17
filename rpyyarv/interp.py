@@ -203,6 +203,19 @@ def invoke(frame, w_ci, w_block=None):
         v = _encoding_find(frame, recv, recv_at)
         if v != value.Q_UNDEF:
             return v
+    if entry is None and argc == 0 and mid == helpers.LAST_MATCH \
+            and regexp_class.value != 0 and recv == regexp_class.value:
+        v = helpers.last_match0()
+        _drop(frame, recv_at)
+        debug.count_native()
+        return v
+    if entry is None and argc == 1 and mid == helpers.LAST_MATCH \
+            and regexp_class.value != 0 and recv == regexp_class.value:
+        v = helpers.last_match1(frame.stack[recv_at + 1])
+        if v != value.Q_UNDEF:
+            _drop(frame, recv_at)
+            debug.count_native()
+            return v
     if entry is None and argc == 2 and mid == helpers.BYTESLICE:
         v = helpers.str_byteslice(recv, frame.stack[recv_at + 1],
                                   frame.stack[recv_at + 2])
@@ -218,9 +231,17 @@ def invoke(frame, w_ci, w_block=None):
             debug.count_native()
             return v
     if entry is None and argc == 2 and w_block is None \
-            and (mid == helpers.GSUB or mid == helpers.GSUB_BANG):
+            and (mid == helpers.GSUB or mid == helpers.GSUB_BANG
+                 or mid == helpers.SUB or mid == helpers.SUB_BANG):
         v = helpers.str_gsub2(recv, frame.stack[recv_at + 1],
                               frame.stack[recv_at + 2], mid)
+        if v != value.Q_UNDEF:
+            _drop(frame, recv_at)
+            debug.count_native()
+            return v
+    if entry is None and argc == 1 and w_block is None \
+            and mid == helpers.MATCH_MID:
+        v = helpers.str_match(recv, frame.stack[recv_at + 1])
         if v != value.Q_UNDEF:
             _drop(frame, recv_at)
             debug.count_native()
@@ -689,7 +710,12 @@ def _native_binop(recv, arg, mid):
         v = helpers.str_eqq(recv, arg)
         if v != value.Q_UNDEF:
             return v
+        v = helpers.reg_eqq(recv, arg)
+        if v != value.Q_UNDEF:
+            return v
         return helpers.mod_eqq(recv, arg)
+    if mid == MATCH:
+        return helpers.str_eq_tilde(recv, arg)
     if mid == helpers.KIND_OF_P or mid == helpers.IS_A_P:
         return helpers.kind_of(recv, arg, mid)
     if mid == helpers.INSTANCE_OF_P:
@@ -1948,6 +1974,17 @@ class _Encodings(object):
 
 encodings = _Encodings()
 
+
+class _RegexpClass(object):
+    """Regexp itself, cached so Regexp.last_match can be told apart from an instance method call at nearly no cost."""
+    _immutable_fields_ = ['value?']
+
+    def __init__(self):
+        self.value = 0
+
+
+regexp_class = _RegexpClass()
+
 ENC_FIND = symbols.intern('find')
 # Encoding.find is a pure lookup and Encodings are immortal, so one protected call per distinct name is enough.
 enc_cache = {}
@@ -2064,16 +2101,17 @@ def trampoline_callback(self_v, rid, argc, argv, blockv, kw, statusp, errp):
     boot.store_int(statusp, TRAMP_OK)
     boot.store_value(errp, value.Q_NIL)
     recv = boot.as_signed(self_v)
-    mid = rubycall.mid_of_rid(boot.as_signed(rid))
-    # argv lives on CRuby's VM stack for the whole call, so the copy needs no root until it lands in the callee's frame.
-    args = boot.read_values(argv, argc)
+    mid, entry = dispatch.lookup_from_trampoline(boot.as_signed(rid),
+                                                  value.class_of(recv))
+    # argv lives on CRuby's VM stack for the whole call, so it needs no root until _from_cruby copies what it reads into the callee's frame.
     w_block = None
     proc_v = boot.as_signed(blockv)
     if proc_v != value.Q_NIL:
         w_block = block_mod.from_proc(proc_v)
     foreign = _enter_foreign_stack()
     try:
-        return boot.as_value(_from_cruby(recv, mid, args, w_block,
+        return boot.as_value(_from_cruby(recv, mid, entry, argv,
+                                         boot.as_int(argc), w_block,
                                          boot.as_int(kw) != 0))
     except RubyException, e:
         boot.store_int(statusp, TRAMP_RAISE)
@@ -2132,34 +2170,33 @@ def _tramp_failed(statusp, errp, msg):
     boot.store_value(errp, boot.str_new('[rpyyarv] %s' % msg))
 
 
-def _from_cruby(recv, mid, args, w_block, kw_splat=False):
-    """The send half of the trampoline: the registry's own lookup, with the arguments CRuby already parsed; kw_splat says its last one is a keyword Hash."""
+def _from_cruby(recv, mid, entry, argv, argc, w_block, kw_splat=False):
+    """The send half of the trampoline: entry is trampoline_callback's cached lookup; argv/argc are still CRuby's raw buffer, unread. kw_splat says its last value is a keyword Hash."""
     if mid == rubycall.NO_MID:
         raise UnsupportedOperation(
             'CRuby dispatched a method name RPyYARV never interned')
-    entry = dispatch.lookup_from_cruby(value.class_of(recv), mid)
     if entry is None:
         raise UnsupportedOperation(
             "CRuby dispatched '%s' to RPyYARV, which no longer defines it"
             % symbols.name_of(mid))
     if entry.kind != dispatch.KIND_ISEQ:
-        return _attr_from_cruby(entry, recv, args)
+        return _attr_from_cruby(entry, recv, boot.read_values(argv, argc))
     callee_iseq = entry.w_iseq
     callee = Frame(callee_iseq, recv, None, entry)
     callee.block = w_block
     pc = 0
-    argc = len(args)
     if callee_iseq.simple_params and not kw_splat:
         if argc != callee_iseq.nparams:
             _arity_error(argc, callee_iseq.nparams, callee_iseq.nparams)
+        # Simple params: no intermediate list, argv's slots land straight in the callee's locals.
         i = 0
         while i < argc:
-            callee.local_set(i, args[i])
+            callee.local_set(i, boot.read_value_at(argv, i))
             i += 1
     else:
         _refuse_iseq(callee_iseq, mid)
-        pc = setup_params(callee_iseq, callee, args, False, NO_KEYWORDS,
-                          kw_splat)
+        pc = setup_params(callee_iseq, callee, boot.read_values(argv, argc),
+                          False, NO_KEYWORDS, kw_splat)
     debug.count_native()
     return execute(callee_iseq, callee, pc)
 
@@ -2692,6 +2729,8 @@ def install():
         value.core_class(value.C_OBJECT), symbols.intern('Comparable'))
     encodings.value = dispatch.const_get(
         value.core_class(value.C_OBJECT), symbols.intern('Encoding'))
+    regexp_class.value = dispatch.const_get(
+        value.core_class(value.C_OBJECT), symbols.intern('Regexp'))
 
 
 @unroll_safe

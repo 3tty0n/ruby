@@ -85,6 +85,11 @@ UNSHIFT_MID = symbols.intern('unshift')
 FLATTEN_BANG_MID = symbols.intern('flatten!')
 GSUB = symbols.intern('gsub')
 GSUB_BANG = symbols.intern('gsub!')
+SUB = symbols.intern('sub')
+SUB_BANG = symbols.intern('sub!')
+MATCH_TILDE = symbols.intern('=~')
+MATCH_MID = symbols.intern('match')
+LAST_MATCH = symbols.intern('last_match')
 
 # RB_FIXABLE for a double (arithmetic/fixnum.h); both bounds are exact powers of two.
 FIXNUM_MAX_PLUS_1_DBL = float(value.FIXNUM_MAX + 1)
@@ -781,12 +786,51 @@ def str_match_p(recv, arg):
 
 
 def str_gsub2(recv, pat, rep, mid):
-    """String#gsub / #gsub! with a Regexp|String pattern and a String replacement: the shim rules out a backreference escape and encoding mismatch in C."""
+    """String#gsub/gsub!/sub/sub! with a Regexp|String pattern and a String replacement: the shim rules out a backreference escape and encoding mismatch in C."""
     if not value.is_plain_string(recv):
         return value.Q_UNDEF
     if not _owned_by_core(recv, value.C_STRING, mid):
         return value.Q_UNDEF
     return boot.str_gsub2(recv, pat, rep, rubycall.rid(mid), mid)
+
+
+def str_eq_tilde(a, b):
+    """String#=~ Regexp and Regexp#=~ String: rb_reg_match is the whole method and sets the backref itself; the shim decides which operand is the String and which is the Regexp."""
+    if value.is_plain_string(a):
+        if not _owned_by_core(a, value.C_STRING, MATCH_TILDE):
+            return value.Q_UNDEF
+        return boot.str_eq_tilde(a, b)
+    if value.is_plain_string(b):
+        return boot.str_eq_tilde(a, b)
+    return value.Q_UNDEF
+
+
+def reg_eqq(re, s):
+    """Regexp#=== String: same rb_reg_match core as =~, answered as true/false; a Regexp subclass or non-String argument falls back."""
+    if value.is_immediate(re) or not value.is_plain_string(s):
+        return value.Q_UNDEF
+    return boot.reg_eqq(re, s)
+
+
+def last_match0():
+    """Regexp.last_match with no argument."""
+    return boot.last_match0()
+
+
+def last_match1(n):
+    """Regexp.last_match(n); anything but a Fixnum n falls back to the name/symbol-aware generic path."""
+    if not value.is_fixnum(n):
+        return value.Q_UNDEF
+    return boot.last_match1(n)
+
+
+def str_match(recv, arg):
+    """String#match with a Regexp pattern, no offset, no block: rb_reg_match plus the backref it sets, skipping the generic Regexp#match funcall."""
+    if not value.is_plain_string(recv):
+        return value.Q_UNDEF
+    if not _owned_by_core(recv, value.C_STRING, MATCH_MID):
+        return value.Q_UNDEF
+    return boot.str_match(recv, arg)
 
 
 def str_uminus(recv):

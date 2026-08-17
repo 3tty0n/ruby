@@ -33,6 +33,16 @@ class Frame(object):
     # The gc_mark_state.generation that last marked this frame; block chains revisit frames, and one mark per collection is enough.
     marked_gen = 0
 
+    # Almost every frame is a plain method call: no block, no unwind pending, not itself a block's frame. Zero-init covers all of that.
+    block = None
+    own_block = None
+    defining_frame = None
+    prev_frame = None
+    pending_kind = PENDING_NONE
+    pending_value = 0
+    pending_block = None
+    pending_frame = None
+
     def __init__(self, iseq, self_val, cref=None, entry=None):
         self = hint(self, access_directly=True, fresh_virtualizable=True)
         self.w_iseq = iseq
@@ -51,18 +61,6 @@ class Frame(object):
         self.cref = cref
         # The running MethodEntry, which invokesuper resumes above.
         self.entry = entry
-        self.block = None
-        # For a block's frame, the block itself: a break's unwind tag.
-        self.own_block = None
-        # For a block's frame, the frame it was written in; getlocal at a non-zero level walks this chain, as CRuby walks the EP chain.
-        self.defining_frame = None
-        # gcroots links live frames through this; not virtualizable.
-        self.prev_frame = None
-        self.pending_kind = PENDING_NONE
-        self.pending_value = 0
-        self.pending_block = None
-        # For a pending non-local return, the frame it is aimed at.
-        self.pending_frame = None
 
     def local_get(self, idx):
         s = self.shared

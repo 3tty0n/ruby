@@ -249,6 +249,14 @@ rb_str_tr1 = _ext('rpyyarv_str_tr1', [VALUE, VALUE, VALUE], VALUE)
 rb_str_index_of = _ext('rpyyarv_str_index_of', [VALUE, VALUE], VALUE)
 rb_str_match_p = _ext('rpyyarv_str_match_p', [VALUE, VALUE, INTP], VALUE,
                       reenters=True)
+rb_str_eq_tilde = _ext('rpyyarv_str_eq_tilde', [VALUE, VALUE, INTP], VALUE,
+                       reenters=True)
+rb_reg_eqq_fast = _ext('rpyyarv_reg_eqq', [VALUE, VALUE, INTP], VALUE,
+                       reenters=True)
+rb_last_match0 = _ext('rpyyarv_last_match0', [], VALUE)
+rb_last_match1 = _ext('rpyyarv_last_match1', [VALUE], VALUE)
+rb_str_match_fast = _ext('rpyyarv_str_match', [VALUE, VALUE, INTP], VALUE,
+                         reenters=True)
 rb_str_empty_p = _ext('rpyyarv_str_empty_p', [VALUE], VALUE)
 rb_hash_empty_p = _ext('rpyyarv_hash_empty_p', [VALUE], VALUE)
 rb_str_uminus = _ext('rpyyarv_str_uminus', [VALUE], VALUE)
@@ -753,6 +761,11 @@ def read_values(argv, argc):
         out[i] = rffi.cast(lltype.Signed, argv[i])
         i += 1
     return out
+
+
+def read_value_at(argv, i):
+    """One argv slot, for a caller that writes each straight into a Frame's locals instead of collecting a list first."""
+    return rffi.cast(lltype.Signed, argv[i])
 
 
 def as_value(n):
@@ -1389,6 +1402,45 @@ def str_gsub2(recv, pat, rep, rid, mid):
     ret = rffi.cast(lltype.Signed, v)
     if failed:
         _failed_mid(mid)
+    return ret
+
+
+def str_eq_tilde(a, b):
+    """=~ between a String and a Regexp in either order: Qundef for the wrong types, a raise inside the match comes back out."""
+    state = _enter_status()
+    v = rb_str_eq_tilde(_v(a), _v(b), state)
+    failed = _leave_status(state)
+    ret = rffi.cast(lltype.Signed, v)
+    if failed:
+        _failed('=~')
+    return ret
+
+
+def reg_eqq(re, s):
+    state = _enter_status()
+    v = rb_reg_eqq_fast(_v(re), _v(s), state)
+    failed = _leave_status(state)
+    ret = rffi.cast(lltype.Signed, v)
+    if failed:
+        _failed('===')
+    return ret
+
+
+def last_match0():
+    return rffi.cast(lltype.Signed, rb_last_match0())
+
+
+def last_match1(n):
+    return rffi.cast(lltype.Signed, rb_last_match1(_v(n)))
+
+
+def str_match(s, re):
+    state = _enter_status()
+    v = rb_str_match_fast(_v(s), _v(re), state)
+    failed = _leave_status(state)
+    ret = rffi.cast(lltype.Signed, v)
+    if failed:
+        _failed('match')
     return ret
 
 
