@@ -7,7 +7,8 @@
 WARMUP_ITRS = Integer(ENV.fetch('WARMUP_ITRS', '15'))
 # Seconds of warmup a tracing JIT needs regardless of the iteration count; both floors apply, and warmup keeps extending while iterations still get faster, up to WARMUP_MAX.
 WARMUP_TIME = Float(ENV.fetch('WARMUP_TIME', '0'))
-WARMUP_MAX = Float(ENV.fetch('WARMUP_MAX', '30'))
+# 60: rubyboy's deterministic re-trace burst ends near iteration 17 (~40 s in); 30 capped warmup mid-burst and left stalled iterations in the window.
+WARMUP_MAX = Float(ENV.fetch('WARMUP_MAX', '60'))
 MIN_BENCH_ITRS = Integer(ENV.fetch('MIN_BENCH_ITRS', '10'))
 MIN_BENCH_TIME = Integer(ENV.fetch('MIN_BENCH_TIME', '10'))
 
@@ -55,10 +56,11 @@ def run_benchmark(_num_itrs_hint, *_rest)
     recent.shift if recent.length > 10
     n += 1
     if warmed.nil? && n >= WARMUP_ITRS && total >= WARMUP_TIME * 1000
-      # Warm once the last five iterations stopped improving on the five before, or the cap ran out; the driver drops everything before this point. WARMUP_TIME 0 keeps the plain iteration-count behavior.
+      # Warm once the last five iterations stopped improving AND contain no spike; a min-only test read rubyboy's 2.4x re-trace burst as settled and put 2-3 stalled iterations in every measured window. WARMUP_TIME 0 keeps the plain iteration-count behavior.
       settled = WARMUP_TIME == 0 ||
                 (recent.length >= 10 &&
-                 recent[5, 5].min >= recent[0, 5].min * 0.97)
+                 recent[5, 5].min >= recent[0, 5].min * 0.97 &&
+                 recent[5, 5].max <= recent[5, 5].min * 1.2)
       if settled || total >= WARMUP_MAX * 1000
         warmed = n
         puts "WARMED " + n.to_s
