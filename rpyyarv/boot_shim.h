@@ -129,6 +129,14 @@ uintptr_t rpyyarv_ss_matched_size(uintptr_t v);
 uintptr_t rpyyarv_ss_skip(uintptr_t v, uintptr_t re, int *state);
 uintptr_t rpyyarv_str_byteslice2(uintptr_t str, uintptr_t begv, uintptr_t lenv);
 
+/* Kernel#format / Kernel#sprintf: rb_str_format(argc, argv, fmt) under rb_protect. */
+uintptr_t rpyyarv_sprintf(int argc, const uintptr_t *argv, uintptr_t fmt,
+                          int *state);
+/* CGI.escapeHTML for a String; Qundef for anything else, including a non-ascii-compatible encoding. */
+uintptr_t rpyyarv_cgi_escape_html(uintptr_t str);
+/* String#match? without rb_protect, taken only when the search cannot raise; see boot_shim.c for the exact eligibility rule. */
+uintptr_t rpyyarv_str_match_p_fast(uintptr_t str, uintptr_t re);
+
 /* Called from a block-handle owner's dmark with its handle, so the block's frames live exactly as long as the owning Proc. */
 typedef void (*rpyyarv_handle_mark_fn)(long handle);
 void rpyyarv_set_handle_mark_callback(rpyyarv_handle_mark_fn fn);

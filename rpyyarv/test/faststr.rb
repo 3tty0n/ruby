@@ -84,6 +84,28 @@ p "こんにちは".length
 
 p "hello".match?(/l+/)
 p "hello".match?(/z/)
+p "hello".match?(/l/, 3)
+
+# A fixed-encoding Regexp against a mismatched String encoding still raises,
+# byte-identical to the fallback path build/ruby takes.
+fixed_re = Regexp.new("\xa4\xa2".dup.force_encoding("EUC-JP"), Regexp::FIXEDENCODING)
+begin
+  fixed_re.match?("こんにちは")
+rescue Encoding::CompatibilityError => e
+  puts e.message
+end
+broken = "\xff".dup.force_encoding("UTF-8")
+begin
+  broken.match?(/x/)
+rescue ArgumentError => e
+  puts e.message
+end
+
+# A global Regexp.timeout still falls back to the protected search.
+Regexp.timeout = 0.05
+p "hello".match?(/l+/)
+Regexp.timeout = nil
+
 p "".empty?
 p "x".empty?
 p({}.empty?)

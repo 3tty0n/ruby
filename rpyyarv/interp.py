@@ -133,7 +133,7 @@ def invoke(frame, w_ci, w_block=None):
     callee_iseq = None
     if entry is not None and (fcall or not entry.private):
         if entry.kind != dispatch.KIND_ISEQ:
-            return _attr_send(frame, entry, recv, recv_at, argc)
+            return _attr_send(frame, entry, recv, recv_at, argc, w_block)
         callee_iseq = entry.w_iseq
 
     if callee_iseq is not None:
@@ -216,6 +216,15 @@ def invoke(frame, w_ci, w_block=None):
             _drop(frame, recv_at)
             debug.count_native()
             return v
+    if entry is None and argc == 1 and mid == helpers.ESCAPE_HTML_MID \
+            and recv == dispatch.const_at(value.core_class(value.C_OBJECT),
+                                          CGI_CONST):
+        # dispatch.const_at answers Qundef, not recv, until `require 'cgi/escape'` defines CGI -- never a match, so this stays a plain (elidable) miss until then.
+        v = helpers.cgi_escape_html(frame.stack[recv_at + 1])
+        if v != value.Q_UNDEF:
+            _drop(frame, recv_at)
+            debug.count_native()
+            return v
     if entry is None and argc == 2 and mid == helpers.BYTESLICE:
         v = helpers.str_byteslice(recv, frame.stack[recv_at + 1],
                                   frame.stack[recv_at + 2])
@@ -235,6 +244,20 @@ def invoke(frame, w_ci, w_block=None):
                  or mid == helpers.SUB or mid == helpers.SUB_BANG):
         v = helpers.str_gsub2(recv, frame.stack[recv_at + 1],
                               frame.stack[recv_at + 2], mid)
+        if v != value.Q_UNDEF:
+            _drop(frame, recv_at)
+            debug.count_native()
+            return v
+    if entry is None and fcall and w_block is None and argc >= 2 \
+            and argc - 1 <= boot.MAX_ARGC \
+            and (mid == helpers.FORMAT_MID or mid == helpers.SPRINTF_MID):
+        fmt = frame.stack[recv_at + 1]
+        args = []
+        i = 0
+        while i < argc - 1:
+            args.append(frame.stack[recv_at + 2 + i])
+            i += 1
+        v = helpers.kernel_format(recv, fmt, args, mid)
         if v != value.Q_UNDEF:
             _drop(frame, recv_at)
             debug.count_native()
@@ -285,6 +308,12 @@ def invoke(frame, w_ci, w_block=None):
             and (dispatch.is_known_class(recv)
                  or dispatch.is_known_module(recv)):
         return _define_attrs(frame, mid, recv, recv_at, argc)
+    if mid == DEFINE_METHOD and argc == 1 and not w_ci.blockarg \
+            and w_block is not None and w_block.kind == block_mod.KIND_ISEQ \
+            and w_block.w_iseq.simple_params and not frame.module_func \
+            and _attr_name(frame.stack[recv_at + 1]) != '':
+        # module_func: CRuby's own send never learns of RPyYARV's own module_function pragma, so the singleton copy it gives `def` here would be wrong; left to the existing (already CRuby-only) fallback.
+        return _define_bmethod(frame, mid, recv, recv_at, w_block)
     if mid == INITIALIZE and argc == 0 and entry is None and w_block is None \
             and helpers.basic_initialize(klass):
         # rb_obj_dummy_initialize: no argument, no effect, nil (object.c:118).
@@ -621,6 +650,7 @@ DEFINED_CONST_FROM = 17
 ATTR_READER = symbols.intern('attr_reader')
 ATTR_WRITER = symbols.intern('attr_writer')
 ATTR_ACCESSOR = symbols.intern('attr_accessor')
+DEFINE_METHOD = symbols.intern('define_method')
 
 
 def _is_attr_mid(mid):
@@ -775,8 +805,21 @@ def _native_binop(recv, arg, mid):
     return value.Q_UNDEF
 
 
-def _attr_send(frame, entry, recv, recv_at, argc):
-    """An attr_* entry: the shape-guarded ivar access getinstancevariable compiles to, without a frame."""
+@unroll_safe
+def _attr_send(frame, entry, recv, recv_at, argc, w_block=None):
+    """An attr_* entry: the shape-guarded ivar access getinstancevariable compiles to, without a frame; a KIND_BMETHOD entry runs its define_method body the same way."""
+    if entry.kind == dispatch.KIND_BMETHOD:
+        args = [0] * argc
+        i = 0
+        while i < argc:
+            args[i] = frame.stack[recv_at + 1 + i]
+            i += 1
+        _drop(frame, recv_at)
+        # A block on this call must reach a `yield` in the body; first cut leaves that to CRuby's own bmethod instead of wiring callee.block.
+        if w_block is not None:
+            return _call_with_block(recv, entry.mid, args, w_block)
+        debug.count_native()
+        return _run_bmethod(entry.w_block, recv, args)
     if entry.kind == dispatch.KIND_ATTR_READER:
         if argc != 0:
             _arity_error(argc, 0, 0)
@@ -829,6 +872,39 @@ def _attr_name(v):
     if not value.is_immediate(v) and boot.is_string(v):
         return boot.str_of(v)
     return ''
+
+
+def _is_class_or_module(v):
+    if value.is_immediate(v):
+        return False
+    kind = raw_word(v, value.FLAGS_WORD) & value.T_MASK
+    return kind == value.T_CLASS or kind == value.T_MODULE
+
+
+@unroll_safe
+def _define_bmethod(frame, mid, recv, recv_at, w_block):
+    """`define_method name do ... end` with a plain-required-params block: CRuby's send installs the real bmethod first (unchanged for reflection, super, respond_to? and any C caller), then a fast entry runs the block directly on a later call, skipping the round trip through rb_funcallv and the ifunc Proc."""
+    name_v = frame.stack[recv_at + 1]
+    _drop(frame, recv_at)
+    # First, so a name or block CRuby rejects raises before anything is registered.
+    ret = _call_with_block(recv, mid, [name_v], w_block)
+    # A Symbol is itself a CRuby immediate, like a Fixnum: no is_immediate guard needed (_attr_name reads one the same way).
+    if not boot.is_symbol(ret):
+        return ret
+    returned_mid = symbols.intern(boot.sym_of(ret))
+    # recv is the class/module itself for `class C; define_method`, but its own class (Object, usually) for the toplevel `main` form.
+    search = recv if _is_class_or_module(recv) else value.class_of(recv)
+    if value.is_immediate(search):
+        return ret
+    owner = dispatch.owner_of(search, returned_mid)
+    if value.is_immediate(owner) or owner == value.Q_NIL:
+        return ret
+    # Lambda-flagged once here, not mutated later: is_lambda is quasi-immutable, and _run_bmethod's `return`/`break` need it to target this frame as _run_lambda's own do.
+    lambda_block = block_mod.W_Block(w_block.w_iseq, w_block.frame,
+                                     w_block.outer, is_lambda=True)
+    dispatch.define_bmethod(owner, returned_mid, lambda_block,
+                            frame.cref is None)
+    return ret
 
 
 @dont_look_inside
@@ -1037,8 +1113,8 @@ def _kw_invoke(frame, w_ci, recv_at, argc, w_block, mid, fcall):
     entry = dispatch.lookup(klass, mid)
     if entry is not None and (fcall or not entry.private):
         if entry.kind != dispatch.KIND_ISEQ:
-            # An attr_* entry takes no keywords, so this only ever raises the arity error CRuby would.
-            return _attr_send(frame, entry, recv, recv_at, argc)
+            # An attr_* entry takes no keywords, so this only ever raises the arity error CRuby would; a KIND_BMETHOD entry sees them the same way.
+            return _attr_send(frame, entry, recv, recv_at, argc, w_block)
         if w_block is None or w_ci.blockarg:
             return _enter(frame, entry, recv, recv_at, argc, mid,
                           w_block, w_ci.kw_names, w_ci.kw_splat)
@@ -1193,7 +1269,7 @@ def _splat_invoke(frame, w_ci, recv_at, argc, w_block, mid, fcall):
     entry = dispatch.lookup(klass, mid)
     if entry is not None and (fcall or not entry.private):
         if entry.kind != dispatch.KIND_ISEQ:
-            return _attr_send_args(frame, entry, recv, recv_at, args)
+            return _attr_send_args(frame, entry, recv, recv_at, args, w_block)
         if w_block is None or w_ci.blockarg:
             return _enter_args(frame, entry, recv, recv_at, args, mid,
                                w_block, kw_names, w_ci.kw_splat)
@@ -1242,9 +1318,15 @@ def _splat_invoke(frame, w_ci, recv_at, argc, w_block, mid, fcall):
     return ret
 
 
-def _attr_send_args(frame, entry, recv, recv_at, args):
+def _attr_send_args(frame, entry, recv, recv_at, args, w_block=None):
     """_attr_send for a *splat call, whose arguments are already a list."""
     argc = len(args)
+    if entry.kind == dispatch.KIND_BMETHOD:
+        _drop(frame, recv_at)
+        if w_block is not None:
+            return _call_with_block(recv, entry.mid, args, w_block)
+        debug.count_native()
+        return _run_bmethod(entry.w_block, recv, args)
     if entry.kind == dispatch.KIND_ATTR_READER:
         if argc != 0:
             _arity_error(argc, 0, 0)
@@ -1695,14 +1777,15 @@ def invoke_super(frame, w_ci):
                                         recv_at, args, w_ci.kw_splat,
                                         w_ci.kw_names)
         if target.kind != dispatch.KIND_ISEQ:
-            return _attr_send_args(frame, target, recv, recv_at, args)
+            return _attr_send_args(frame, target, recv, recv_at, args,
+                                   frame.block)
         return _enter_args(frame, target, recv, recv_at, args, entry.mid,
                            frame.block, w_ci.kw_names, w_ci.kw_splat)
     if target is None:
         return _super_to_cruby(frame, klass, entry.owner, entry.mid, recv_at,
                                argc, w_ci.kw_splat, w_ci.kw_names)
     if target.kind != dispatch.KIND_ISEQ:
-        return _attr_send(frame, target, recv, recv_at, argc)
+        return _attr_send(frame, target, recv, recv_at, argc, frame.block)
     return _enter(frame, target, recv, recv_at, argc,
                   entry.mid, frame.block, w_ci.kw_names, w_ci.kw_splat)
 
@@ -1989,6 +2072,9 @@ ENC_FIND = symbols.intern('find')
 # Encoding.find is a pure lookup and Encodings are immortal, so one protected call per distinct name is enough.
 enc_cache = {}
 
+# CGI is loaded only by `require 'cgi/escape'` (or 'cgi'), never present at install(); dispatch.const_at's own version-keyed cache is memo enough, so there is no separate _CGIModule like _RegexpClass.
+CGI_CONST = symbols.intern('CGI')
+
 SPACESHIP_CI = W_CallInfo(helpers.SPACESHIP, 1)
 
 
@@ -2180,7 +2266,8 @@ def _from_cruby(recv, mid, entry, argv, argc, w_block, kw_splat=False):
             "CRuby dispatched '%s' to RPyYARV, which no longer defines it"
             % symbols.name_of(mid))
     if entry.kind != dispatch.KIND_ISEQ:
-        return _attr_from_cruby(entry, recv, boot.read_values(argv, argc))
+        return _attr_from_cruby(entry, recv, boot.read_values(argv, argc),
+                                w_block)
     callee_iseq = entry.w_iseq
     callee = Frame(callee_iseq, recv, None, entry)
     callee.block = w_block
@@ -2201,8 +2288,13 @@ def _from_cruby(recv, mid, entry, argv, argc, w_block, kw_splat=False):
     return execute(callee_iseq, callee, pc)
 
 
-def _attr_from_cruby(entry, recv, args):
-    """_from_cruby's accessor case; CRuby's argv is already a marked buffer."""
+def _attr_from_cruby(entry, recv, args, w_block=None):
+    """_from_cruby's accessor case; CRuby's argv is already a marked buffer. entry.kind == KIND_BMETHOD should never reach here in practice: define_bmethod installs no trampoline, so CRuby's own dispatch always finds the real bmethod, not this one; kept for the trampoline resolution cache's sake."""
+    if entry.kind == dispatch.KIND_BMETHOD:
+        if w_block is not None:
+            return _call_with_block(recv, entry.mid, args, w_block)
+        debug.count_native()
+        return _run_bmethod(entry.w_block, recv, args)
     if entry.kind == dispatch.KIND_ATTR_READER:
         if len(args) != 0:
             _arity_error(len(args), 0, 0)
@@ -2438,6 +2530,17 @@ def _run_lambda(w_block, b_iseq, callee, args, kw_names, kw_splat):
     finally:
         # A later return aimed here from an escaped inner proc is the orphaned LocalJumpError.
         callee.dead = True
+
+
+@unroll_safe
+def _run_bmethod(w_block, recv, args, kw_names=NO_KEYWORDS, kw_splat=False):
+    """entry.w_block: method-style arity, no autosplat, and `return`/`break` both leave the method itself, exactly as CRuby's own bmethod runs its ifunc Proc (verified: break IS swallowed like a lambda's, not a LocalJumpError)."""
+    b_iseq = promote(w_block.w_iseq)
+    outer = w_block.frame
+    callee = Frame(b_iseq, recv, outer.cref, outer.entry)
+    callee.defining_frame = outer
+    callee.own_block = w_block
+    return _run_lambda(w_block, b_iseq, callee, args, kw_names, kw_splat)
 
 
 @dont_look_inside

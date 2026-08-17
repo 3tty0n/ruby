@@ -90,6 +90,9 @@ SUB_BANG = symbols.intern('sub!')
 MATCH_TILDE = symbols.intern('=~')
 MATCH_MID = symbols.intern('match')
 LAST_MATCH = symbols.intern('last_match')
+FORMAT_MID = symbols.intern('format')
+SPRINTF_MID = symbols.intern('sprintf')
+ESCAPE_HTML_MID = symbols.intern('escapeHTML')
 
 # RB_FIXABLE for a double (arithmetic/fixnum.h); both bounds are exact powers of two.
 FIXNUM_MAX_PLUS_1_DBL = float(value.FIXNUM_MAX + 1)
@@ -776,12 +779,15 @@ def str_byteslice(recv, beg, length):
 
 
 def str_match_p(recv, arg):
-    """String#match? of a Regexp: no backref, so nothing but the search itself leaves RPython."""
+    """String#match? of a Regexp: no backref, so nothing but the search itself leaves RPython. The unprotected shim is tried first; it answers Qundef itself whenever it cannot rule out a raise, and the rb_protect'd search runs then."""
     if value.is_immediate(recv) or value.is_immediate(arg) \
             or not boot.is_string(recv):
         return value.Q_UNDEF
     if not _owned_by_core(recv, value.C_STRING, MATCH_P):
         return value.Q_UNDEF
+    v = boot.str_match_p_fast(recv, arg)
+    if v != value.Q_UNDEF:
+        return v
     return boot.str_match_p(recv, arg)
 
 
@@ -831,6 +837,25 @@ def str_match(recv, arg):
     if not _owned_by_core(recv, value.C_STRING, MATCH_MID):
         return value.Q_UNDEF
     return boot.str_match(recv, arg)
+
+
+def kernel_format(recv, fmt, args, mid):
+    """Kernel#format / Kernel#sprintf: rb_str_format directly, skipping the varargs Kernel dispatch; coercion and a bad format spec both run under rb_protect in the shim."""
+    if modules.kernel == 0 or not value.is_plain_string(fmt):
+        return value.Q_UNDEF
+    klass = promote(value.class_of(recv))
+    if dispatch.lookup(klass, mid) is not None:
+        return value.Q_UNDEF
+    if dispatch.owner_of(klass, mid) != modules.kernel:
+        return value.Q_UNDEF
+    return boot.str_format(fmt, args)
+
+
+def cgi_escape_html(str_arg):
+    """CGI.escapeHTML for an ascii-compatible String; the shim itself falls back (Qundef) for anything else, a non-String included."""
+    if value.is_immediate(str_arg):
+        return value.Q_UNDEF
+    return boot.cgi_escape_html(str_arg)
 
 
 def str_uminus(recv):

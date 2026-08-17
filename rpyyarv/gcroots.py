@@ -14,6 +14,8 @@ class Registry(object):
         self.classes = []       # classes RPyYARV defined, keys of the registry
         self.held = []          # exception VALUEs parked outside any frame
         self.blocks = None      # interp's handle table, once it exists
+        # ponytail: grows monotonically, a redefined name leaks its old block until process end -- bounded by define_method call count.
+        self.bmethods = []
 
 
 state = Registry()
@@ -22,6 +24,11 @@ state = Registry()
 def register_blocks(blocks):
     """The blocks CRuby can reach through a handle; their defining frames may already have returned, so nothing else keeps their locals marked."""
     state.blocks = blocks
+
+
+def register_bmethod(w_block):
+    """A define_method body dispatch.define_bmethod now runs directly, kept alive for the life of the process."""
+    state.bmethods.append(w_block)
 
 
 def register_class(v):
@@ -184,6 +191,11 @@ def _mark_all():
     i = 0
     while i < len(pools):
         _mark_array(pools[i])
+        i += 1
+    bmethods = state.bmethods
+    i = 0
+    while i < len(bmethods):
+        _mark_block_deep(bmethods[i])
         i += 1
     # The handle table is not walked here: each handle's env is marked from its owner Proc's dmark (mark_handle), so unreferenced Procs can die.
     # A frame in compiled code is not forced: its stale heap arrays are read (harmless extra marks) and its live jitframe words are walked once via mark_word.

@@ -21,14 +21,15 @@ class Version(object):
 KIND_ISEQ = 0
 KIND_ATTR_READER = 1
 KIND_ATTR_WRITER = 2
+KIND_BMETHOD = 3
 
 
 class MethodEntry(object):
     _immutable_fields_ = ['w_iseq', 'private', 'owner', 'mid', 'cref',
-                          'kind', 'ivar', 'lexical']
+                          'kind', 'ivar', 'lexical', 'w_block']
 
     def __init__(self, w_iseq, private, owner=0, mid=0, cref=0,
-                 kind=KIND_ISEQ, ivar=0, lexical=None):
+                 kind=KIND_ISEQ, ivar=0, lexical=None, w_block=None):
         self.w_iseq = w_iseq
         self.kind = kind
         # For an accessor kind, the rpyyarv symbol id of the `@name` it reads.
@@ -42,6 +43,8 @@ class MethodEntry(object):
         # invokesuper resumes the lookup above (owner, mid).
         self.owner = owner
         self.mid = mid
+        # KIND_BMETHOD only: the define_method block run as the method body.
+        self.w_block = w_block
 
 
 # Never reaches a caller of lookup: it only says the owner table has no answer yet.
@@ -110,6 +113,16 @@ def define_attr(klass, mid, ivar, kind):
     registry.version = Version()
     flush_trampoline_cache()
     invalidate_owners()
+
+
+def define_bmethod(klass, mid, w_block, private):
+    """No trampoline either: CRuby's own send already installed a real bmethod for mid, which reflection/super/respond_to? and any C caller still reach directly."""
+    _table_for(klass)[mid] = MethodEntry(None, private, klass, mid, 0,
+                                         KIND_BMETHOD, 0, None, w_block)
+    registry.version = Version()
+    flush_trampoline_cache()
+    invalidate_owners()
+    gcroots.register_bmethod(w_block)
 
 
 @dont_look_inside

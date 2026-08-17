@@ -116,6 +116,7 @@ gccheck:
 	          test/sendblock.rb test/crefconsts.rb test/respondto.rb \
 	          test/fastsends.rb test/supercruby.rb test/supersplat.rb \
 	          test/gvaralias.rb test/expandsplat.rb test/faststr.rb \
+	          test/fastfmt.rb \
 	          test/fastctx.rb \
 	          test/scanner.rb test/instanceeval.rb \
 	          test/enumerators.rb test/loopiter.rb test/classvars.rb \
@@ -125,6 +126,7 @@ gccheck:
           test/lambdas.rb test/objops.rb test/aliasnest.rb test/enumops.rb \
 	          test/defaultgems.rb test/modevalproc.rb \
 	          test/strevallocals.rb test/refinements.rb test/superblock.rb \
+	          test/bmethod.rb \
 	          $(TOP)/benchmark/app_*.rb $(TOP)/benchmark/so_*.rb; do \
 	   n=`basename $$s`; \
 	   case $$s in test/*) \

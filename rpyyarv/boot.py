@@ -276,6 +276,10 @@ rb_ss_skip = _ext('rpyyarv_ss_skip', [VALUE, VALUE, INTP], VALUE,
                   reenters=True)
 rb_str_byteslice2 = _ext('rpyyarv_str_byteslice2', [VALUE, VALUE, VALUE],
                          VALUE)
+rb_sprintf_ = _ext('rpyyarv_sprintf', [rffi.INT, VALUEP, VALUE, INTP], VALUE,
+                   reenters=True)
+rb_cgi_escape_html = _ext('rpyyarv_cgi_escape_html', [VALUE], VALUE)
+rb_str_match_p_fast = _ext('rpyyarv_str_match_p_fast', [VALUE, VALUE], VALUE)
 rb_hash_delete = _ext('rpyyarv_hash_delete', [VALUE, VALUE, INTP],
                       lltype.Void, reenters=True)
 rb_hash_keys = _ext('rpyyarv_hash_keys', [VALUE, INTP], VALUE, reenters=True)
@@ -1497,6 +1501,33 @@ def str_match_p(s, re):
     if failed:
         _failed('match?')
     return ret
+
+
+def str_match_p_fast(s, re):
+    """The unprotected match?: Qundef whenever the shim is not sure the search cannot raise, same as a type mismatch."""
+    return rffi.cast(lltype.Signed, rb_str_match_p_fast(_v(s), _v(re)))
+
+
+def str_format(fmt, args):
+    """Kernel#format / Kernel#sprintf; the caller keeps len(args) within MAX_ARGC, as every other variable-argc boot call here does."""
+    argc = len(args)
+    argv = _enter_argv(argc)
+    i = 0
+    while i < argc:
+        argv[i] = rffi.cast(VALUE, args[i])
+        i += 1
+    state = _enter_status()
+    v = rb_sprintf_(rffi.cast(rffi.INT, argc), argv, _v(fmt), state)
+    failed = _leave_status(state)
+    ret = rffi.cast(lltype.Signed, v)
+    _leave_argv(argv)
+    if failed:
+        _failed('format')
+    return ret
+
+
+def cgi_escape_html(s):
+    return rffi.cast(lltype.Signed, rb_cgi_escape_html(_v(s)))
 
 
 def str_empty_p(v):

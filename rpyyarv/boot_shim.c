@@ -13,6 +13,8 @@
 #include "internal/range.h"
 /* rb_str_eql_internal, which YJIT relies on to neither allocate nor raise. */
 #include "internal/string.h"
+/* rb_hrtime_t, for reading a Regexp's own onigmo timelimit alongside the process-global one. */
+#include "hrtime.h"
 #include "rpyyarv.h"
 
 #include "boot_shim.h"
@@ -3249,4 +3251,112 @@ rpyyarv_str_byteslice2(uintptr_t str, uintptr_t begv, uintptr_t lenv)
     if (beg < 0 || beg > n) return (uintptr_t)Qnil;
     if (len > n - beg) len = n - beg;
     return (uintptr_t)rb_str_subseq(s, beg, len);
+}
+
+struct sprintf_args {
+    int argc;
+    VALUE *argv;
+    VALUE fmt;
+};
+
+static VALUE
+sprintf_body(VALUE argp)
+{
+    struct sprintf_args *a = (struct sprintf_args *)argp;
+    return rb_str_format(a->argc, a->argv, a->fmt);
+}
+
+/* Kernel#format / Kernel#sprintf: rb_str_format itself, the worker rb_f_sprintf calls, skipping only the varargs Kernel dispatch around it -- argument to_s/to_str coercion can re-enter Ruby and a bad format spec raises ArgumentError, so the call runs under rb_protect. */
+uintptr_t
+rpyyarv_sprintf(int argc, const uintptr_t *argv, uintptr_t fmt, int *state)
+{
+    VALUE buf[RPYYARV_MAX_ARGC];
+    struct sprintf_args a;
+    int i;
+    *state = 0;
+    if (!RB_TYPE_P((VALUE)fmt, T_STRING) || argc < 0 || argc > RPYYARV_MAX_ARGC)
+        return (uintptr_t)Qundef;
+    for (i = 0; i < argc; i++) buf[i] = (VALUE)argv[i];
+    a.argc = argc; a.argv = buf; a.fmt = (VALUE)fmt;
+    {
+        VALUE ret = rb_protect(sprintf_body, (VALUE)&a, state);
+        if (*state) return (uintptr_t)Qnil;
+        return (uintptr_t)ret;
+    }
+}
+
+struct cgi_esc { unsigned char len; char str[6]; };
+
+/* Mirrors ext/cgi/escape/escape.c's html_escape_table exactly: the five characters CGI.escapeHTML replaces. */
+static const struct cgi_esc cgi_html_escape_table[UCHAR_MAX + 1] = {
+    ['\''] = {5, "&#39;"},
+    ['&']  = {5, "&amp;"},
+    ['"']  = {6, "&quot;"},
+    ['<']  = {4, "&lt;"},
+    ['>']  = {4, "&gt;"},
+};
+
+/* CGI.escapeHTML for an ascii-compatible-encoded String: ext/cgi/escape/escape.c's optimized_escape_html byte loop, taken only when that C extension itself would take it (rb_enc_str_asciicompat_p); a dummy/non-ascii-compatible encoding falls back to the pure-Ruby CGI::Escape#escapeHTML, which handles it via re-encoding. Neither branch can re-enter Ruby or raise for a String receiver, so no rb_protect. */
+uintptr_t
+rpyyarv_cgi_escape_html(uintptr_t str)
+{
+    VALUE s = (VALUE)str, escaped;
+    rb_encoding *enc;
+    const char *cstr, *end;
+    char *buf, *dest;
+    long len;
+    if (!RB_TYPE_P(s, T_STRING)) return (uintptr_t)Qundef;
+    enc = rb_enc_get(s);
+    if (!rb_enc_asciicompat(enc)) return (uintptr_t)Qundef;
+    len = RSTRING_LEN(s);
+    if (len >= LONG_MAX / 6) return (uintptr_t)Qundef;
+    buf = ALLOC_N(char, len * 6);
+    cstr = RSTRING_PTR(s);
+    end = cstr + len;
+    dest = buf;
+    while (cstr < end) {
+        unsigned char c = (unsigned char)*cstr++;
+        unsigned char l = cgi_html_escape_table[c].len;
+        if (l) {
+            memcpy(dest, cgi_html_escape_table[c].str, l);
+            dest += l;
+        }
+        else {
+            *dest++ = (char)c;
+        }
+    }
+    if (len < dest - buf) {
+        escaped = rb_str_new(buf, dest - buf);
+        rb_enc_associate(escaped, enc);
+    }
+    else {
+        escaped = rb_str_dup(s);
+    }
+    xfree(buf);
+    return (uintptr_t)escaped;
+}
+
+/* String#match? without rb_protect: taken only when onig_search cannot raise. re.c's rb_reg_prepare_re returns its regexp unchanged, with no recompile or ArgumentError, whenever the string's encoding already equals the compiled pattern's -- the exact-match branch of rb_reg_prepare_enc -- and a broken string is ruled out separately, since that raises before the encoding check runs.
+ *
+ * The timeout question: re.c keeps a per-Regexp deadline (onigmo.h's regex_t::timelimit, a public struct field) and a process-global fallback (re.c's rb_reg_match_time_limit, which -- unlike the timelimit field -- turned out not to be exported for linking, confirmed by ld at this shim's build time). re.c's own rb_reg_timeout_p *is* exported (regint.h declares it; declared again here rather than pulling in that whole internal onigmo header) and folds both into one end-time on its first call (the *end_time == 0 arm), touching no state and calling no clock when neither is armed; asking it that once, the same way onig_search's periodic callback would, is how this shim learns "no timeout is armed" without the hidden symbol. */
+extern bool rb_reg_timeout_p(regex_t *reg, void *end_time);
+
+uintptr_t
+rpyyarv_str_match_p_fast(uintptr_t str, uintptr_t re)
+{
+    VALUE s = (VALUE)str, r = (VALUE)re;
+    regex_t *reg;
+    rb_hrtime_t end_time = 0;
+    if (!RB_TYPE_P(s, T_STRING) || !RB_TYPE_P(r, T_REGEXP))
+        return (uintptr_t)Qundef;
+    if (rb_enc_str_coderange(s) == ENC_CODERANGE_BROKEN)
+        return (uintptr_t)Qundef;
+    reg = RREGEXP_PTR(r);
+    if (reg->enc != rb_enc_get(s))
+        return (uintptr_t)Qundef;
+    rb_reg_timeout_p(reg, &end_time);
+    if (end_time != RB_HRTIME_MAX)
+        return (uintptr_t)Qundef;
+    return matchp_search(reg, s, NULL, NULL) == ONIG_MISMATCH
+           ? (uintptr_t)Qfalse : (uintptr_t)Qtrue;
 }
