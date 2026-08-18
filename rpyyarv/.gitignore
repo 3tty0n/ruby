@@ -8,6 +8,8 @@ rpyyarv
 rpyyarv-jit
 rpyyarv-dump
 rpyyarv-dump-jit
+!scripts/rpyyarv
+!scripts/rpyyarv-jit
 !Makefile
 
 pypy/

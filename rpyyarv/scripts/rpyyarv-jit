@@ -1,0 +1,10 @@
+#!/bin/sh
+# Run the sibling binary like an installed ruby. The embedded CRuby is the
+# uninstalled build tree, so it needs RPYYARV_BUILD to derive its stdlib -I
+# set, and RubyGems on for scripts written for a stock ruby. Dispatches on
+# its own basename, so a symlink named rpyyarv runs the interpreter binary.
+root=$(cd "$(dirname "$0")/.." && pwd)
+: "${RPYYARV_BUILD:=$(dirname "$root")/build}"
+: "${RPYYARV_GEMS:=1}"
+export RPYYARV_BUILD RPYYARV_GEMS
+exec "$root/$(basename "$0")" "$@"
