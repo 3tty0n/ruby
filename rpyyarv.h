@@ -12,10 +12,11 @@ void rb_rpyyarv_constant_state_changed(ID id);
 void rb_rpyyarv_method_state_changed(void);
 
 // Every fiber switch brackets coroutine_transfer with park/unpark, keyed by the rb_fiber_t address; born fires on a new fiber's first instruction and died from fiber_free.
+// unpark/born also carry the arriving fiber's machine stack (base 0 for the root fiber), so the JIT's stack-depth window can follow the stack actually running.
 typedef struct rb_rpyyarv_fiber_hooks {
     void (*park)(long key);
-    void (*unpark)(long key);
-    void (*born)(long key);
+    void (*unpark)(long key, long stack_base, long stack_size);
+    void (*born)(long key, long stack_base, long stack_size);
     void (*died)(long key);
 } rb_rpyyarv_fiber_hooks_t;
 

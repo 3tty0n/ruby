@@ -952,7 +952,7 @@ fiber_entry(struct coroutine_context * from, struct coroutine_context * to)
     fiber_restore_thread(thread, fiber);
 
     /* a new fiber arrives here instead of returning from coroutine_transfer */
-    if (rpyyarv_fiber_hooks) rpyyarv_fiber_hooks->born((long)fiber);
+    if (rpyyarv_fiber_hooks) rpyyarv_fiber_hooks->born((long)fiber, (long)fiber->stack.base, (long)fiber->stack.size);
 
     rb_fiber_start(fiber);
 
@@ -1731,7 +1731,7 @@ fiber_setcontext(rb_fiber_t *new_fiber, rb_fiber_t *old_fiber)
     struct coroutine_context * from = coroutine_transfer(&old_fiber->context, &new_fiber->context);
 
     /* back here means old_fiber is running again */
-    if (rpyyarv_fiber_hooks) rpyyarv_fiber_hooks->unpark((long)old_fiber);
+    if (rpyyarv_fiber_hooks) rpyyarv_fiber_hooks->unpark((long)old_fiber, (long)old_fiber->stack.base, (long)old_fiber->stack.size);
 
 #if defined(COROUTINE_SANITIZE_ADDRESS)
     __sanitizer_finish_switch_fiber(old_fiber->context.fake_stack, NULL, NULL);
