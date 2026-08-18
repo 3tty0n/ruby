@@ -313,10 +313,6 @@ class RubyBenchSuite
     # benchmark, and its ensure would delete the file out from under this call.
     no_require = gems?(bench) && !force_native && !native_requires?(bench)
     src = File.read(paths[bench]).gsub(/^\s*require_relative\s+['"][.\/]*harness\/loader['"].*$/, "")
-    # Fiber.new crosses into CRuby with an RPyYARV block. optcarrot's --opt
-    # replaces that loop with generated methods, which are the configuration
-    # this project benchmarks and can execute natively.
-    src = src.sub('["--headless", rom_path]', '["--headless", "--opt", rom_path]') if bench == "optcarrot"
     path = File.join(File.dirname(paths[bench]), "#{DRV_PREFIX}#{bench}_#{Process.pid}.rb")
     File.write(path, File.read(File.join(SHIM_DIR, "harness.rb")) + "\n" + src)
     env = base_env.merge("WARMUP_ITRS" => warm.to_s,
