@@ -41,8 +41,27 @@ extern int madvise(caddr_t, size_t, int);
 #include "vm_sync.h"
 #include "id_table.h"
 #include "ractor_core.h"
+#include "rpyyarv.h"
 
 static const int DEBUG = 0;
+
+// NULL until rpyyarv registers; a plain ruby then pays one predicted branch per fiber switch.
+static const rb_rpyyarv_fiber_hooks_t *rpyyarv_fiber_hooks;
+
+void
+rb_rpyyarv_set_fiber_hooks(const rb_rpyyarv_fiber_hooks_t *hooks)
+{
+    rpyyarv_fiber_hooks = hooks;
+}
+
+// rpyyarv carries a fiber kill through its own frames as a raise, so their ensures run; here it becomes the fatal unwind again.
+void
+rb_rpyyarv_fiber_kill_rethrow(void)
+{
+    rb_execution_context_t *ec = GET_EC();
+    ec->errinfo = RUBY_FATAL_FIBER_KILLED;
+    EC_JUMP_TAG(ec, TAG_FATAL);
+}
 
 #define RB_PAGE_SIZE (pagesize)
 #define RB_PAGE_MASK (~(RB_PAGE_SIZE - 1))
@@ -932,6 +951,9 @@ fiber_entry(struct coroutine_context * from, struct coroutine_context * to)
 
     fiber_restore_thread(thread, fiber);
 
+    /* a new fiber arrives here instead of returning from coroutine_transfer */
+    if (rpyyarv_fiber_hooks) rpyyarv_fiber_hooks->born((long)fiber);
+
     rb_fiber_start(fiber);
 
 #ifndef COROUTINE_PTHREAD_CONTEXT
@@ -1240,6 +1262,9 @@ fiber_free(void *ptr)
 {
     rb_fiber_t *fiber = ptr;
     RUBY_FREE_ENTER("fiber");
+
+    /* a fiber the GC reaped mid-flight passes here too, so this is the one death notice */
+    if (rpyyarv_fiber_hooks) rpyyarv_fiber_hooks->died((long)fiber);
 
     if (DEBUG) fprintf(stderr, "fiber_free: %p[%p]\n", (void *)fiber, fiber->stack.base);
 
@@ -1701,7 +1726,12 @@ fiber_setcontext(rb_fiber_t *new_fiber, rb_fiber_t *old_fiber)
 #endif
 
     /* swap machine context */
+    if (rpyyarv_fiber_hooks) rpyyarv_fiber_hooks->park((long)old_fiber);
+
     struct coroutine_context * from = coroutine_transfer(&old_fiber->context, &new_fiber->context);
+
+    /* back here means old_fiber is running again */
+    if (rpyyarv_fiber_hooks) rpyyarv_fiber_hooks->unpark((long)old_fiber);
 
 #if defined(COROUTINE_SANITIZE_ADDRESS)
     __sanitizer_finish_switch_fiber(old_fiber->context.fake_stack, NULL, NULL);
