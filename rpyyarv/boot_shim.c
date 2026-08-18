@@ -1,5 +1,6 @@
 #include <stdlib.h>
 #include <stddef.h>
+#include <string.h>
 #include <locale.h>
 #include <ruby.h>
 #include <ruby/re.h>
@@ -44,6 +45,9 @@ rpyyarv_set_block_unwind(void)
     block_unwind = 1;
 }
 
+/* internal/thread.h's RUBY_FATAL_FIBER_KILLED, spelled out rather than pulling that header in here. */
+#define RPYYARV_FIBER_KILLED RB_INT2FIX(2)
+
 /* A failed rb_protect whose exception is the carrier: the RPython side holds the real unwind, so report success. */
 static void
 absorb_unwind(int *state)
@@ -55,6 +59,21 @@ absorb_unwind(int *state)
         rb_set_errinfo(Qnil);
         *state = 0;
     }
+}
+
+/* Fiber#kill arrives as a TAG_FATAL rb_protect failure, which RPyYARV carries as an ordinary raise so its ensures run; at the last of its frames it goes back to being fatal, since no rescue may see it and the fiber has to die. */
+uintptr_t
+rpyyarv_fiber_killed_value(void)
+{
+    return (uintptr_t)RPYYARV_FIBER_KILLED;
+}
+
+int
+rpyyarv_rethrow_if_fiber_kill(uintptr_t v)
+{
+    if ((VALUE)v != RPYYARV_FIBER_KILLED) return 0;
+    rb_rpyyarv_fiber_kill_rethrow();
+    return 1;                     /* not reached */
 }
 
 void *
@@ -1487,6 +1506,54 @@ handle_owner_dfree(void *p)
         cap_dead = cap;
     }
     dead_handles[n_dead++] = (long)(uintptr_t)p - 1;
+}
+
+/* The shadowstack swap runs here rather than in RPython: entering RPython pushes a frame of its own, and the copy has to happen with none of ours on the stack. */
+static rpyyarv_fiber_save_fn fiber_park_callback;
+static rpyyarv_fiber_save_fn fiber_unpark_callback;
+static void **fiber_ss_base;
+static void **fiber_ss_top;
+
+static void
+fiber_park(long key)
+{
+    char *buf = fiber_park_callback(key);
+    char *base = (char *)*fiber_ss_base;
+    long len = (char *)*fiber_ss_top - base;
+    if (!buf) rb_fatal("rpyyarv: out of memory saving a fiber's shadowstack");
+    *(long *)buf = len;
+    memcpy(buf + sizeof(long), base, (size_t)len);
+    *fiber_ss_top = base;
+}
+
+static void
+fiber_unpark(long key)
+{
+    char *buf = fiber_unpark_callback(key);
+    char *base = (char *)*fiber_ss_base;
+    long len;
+    if (!buf) return;             /* a fiber that never parked: nothing saved */
+    len = *(long *)buf;
+    memcpy(base, buf + sizeof(long), (size_t)len);
+    *fiber_ss_top = base + len;
+    *(long *)buf = 0;             /* the copy is live again; trace nothing */
+}
+
+void
+rpyyarv_set_fiber_hooks(rpyyarv_fiber_save_fn park, rpyyarv_fiber_save_fn unpark,
+                        rpyyarv_fiber_key_fn born, rpyyarv_fiber_key_fn died,
+                        void **base_slot, void **top_slot)
+{
+    static rb_rpyyarv_fiber_hooks_t hooks;
+    fiber_park_callback = park;
+    fiber_unpark_callback = unpark;
+    fiber_ss_base = base_slot;
+    fiber_ss_top = top_slot;
+    hooks.park = fiber_park;
+    hooks.unpark = fiber_unpark;
+    hooks.born = born;
+    hooks.died = died;
+    rb_rpyyarv_set_fiber_hooks(&hooks);
 }
 
 static rpyyarv_handle_mark_fn handle_mark_callback;

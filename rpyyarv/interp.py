@@ -2162,20 +2162,19 @@ class _Proxy(object):
         self.value = 0
 
 
-# rb_block_param_proxy's stand-in, pushed instead of a Proc (insns.def:144): a Symbol, so unmarked, and it never leaves those sites.
-proxy = _Proxy()
-
-
-class _Fiber(object):
+class _FiberKill(object):
+    """RUBY_FATAL_FIBER_KILLED (internal/thread.h), asked of the shim once."""
     _immutable_fields_ = ['value?']
 
     def __init__(self):
         self.value = 0
-        # class VALUE -> 1 when it is Fiber or descends from it. Never invalidated: a class lives as long as this VM, and only re-parenting Fiber itself could stale an entry.
-        self.kinds = {}
 
 
-fiber = _Fiber()
+fiber_kill = _FiberKill()
+
+
+# rb_block_param_proxy's stand-in, pushed instead of a Proc (insns.def:144): a Symbol, so unmarked, and it never leaves those sites.
+proxy = _Proxy()
 
 
 class _Encodings(object):
@@ -2275,6 +2274,8 @@ def block_callback(handle, argc, argv, cruby_self):
         return boot.as_value(call_block(w_block, args, NO_KEYWORDS, False,
                                         _sub_self(handle, cruby_self)))
     except RubyException, e:
+        # A kill goes back to CRuby as the fatal it was; RPyYARV's frames have run their ensures by now.
+        boot.rethrow_if_fiber_kill(e.value)
         # Held: the RPython field it waits in is not something CRuby scans.
         gcroots.hold(e.value)
         blocks.exc = e
@@ -2330,6 +2331,7 @@ def trampoline_callback(self_v, rid, argc, argv, blockv, kw, statusp, errp):
                                          boot.as_int(argc), w_block,
                                          boot.as_int(kw) != 0))
     except RubyException, e:
+        boot.rethrow_if_fiber_kill(e.value)
         boot.store_int(statusp, TRAMP_RAISE)
         boot.store_value(errp, e.value)
     except block_mod.BlockJump, e:
@@ -2438,36 +2440,10 @@ def _attr_from_cruby(entry, recv, args, w_block=None):
 
 
 @dont_look_inside
-def _is_fiber_class(klass):
-    """Fiber or a subclass of it; hexapdf's FiberWithLength is one, and identity alone let a subclass through to the ifunc path silently."""
-    if fiber.value == 0 or value.is_immediate(klass):
-        return False
-    known = fiber.kinds.get(klass, -1)
-    if known >= 0:
-        return known == 1
-    k = klass
-    n = 0
-    found = False
-    while k != 0 and not value.is_immediate(k) and n < dispatch.MAX_ANCESTORS:
-        if k == fiber.value:
-            found = True
-            break
-        k = boot.class_superclass(k)
-        n += 1
-    fiber.kinds[klass] = 1 if found else 0
-    return found
-
-
-@dont_look_inside
 def _call_with_block(recv, mid, args, w_block, kw=False):
     if w_block.kind == block_mod.KIND_PROC:
         # Already a CRuby Proc: handing it over as itself keeps the cref module_eval yields with, which an ifunc round trip through here would drop.
         return rubycall.call_with_proc(recv, mid, args, w_block.proc_value, kw)
-    if mid == NEW and not kw and _is_fiber_class(recv):
-        # A fiber suspends without unwinding, and both root chains here are strictly LIFO: the shadowstack's decr_stack and gcroots' frame list. RPYYARV_DELEGATE_FILES leaves the file to CRuby.
-        raise UnsupportedOperation(
-            '%s.new with an RPyYARV block is not supported; name the file in '
-            'RPYYARV_DELEGATE_FILES to leave it to CRuby' % boot.inspect(recv))
     handle = _alloc_handle(w_block)
     # No release here: the handle's owner object dies with the ifunc, and _alloc_handle reclaims the slot then.
     try:
@@ -2847,7 +2823,13 @@ def _throw(frame, throw_state, v):
         'throw with tag %d (redo) is not supported' % tag)
 
 
-def _catch_for(iseq, epc, kind):
+def _is_fiber_kill(throw):
+    """Fiber#kill travels as a raise so the ensures on its way out still run, but it is fatal: no rescue may take it, and it is not an exception object $! could name."""
+    return throw.kind == PENDING_RAISE and throw.value == fiber_kill.value \
+        and fiber_kill.value != 0
+
+
+def _catch_for(iseq, epc, kind, fatal=False):
     """The first catch-table entry covering epc, in CRuby's search order (vm.c:2911); a break or a next takes only an ensure."""
     catches = iseq.catches
     i = 0
@@ -2855,7 +2837,8 @@ def _catch_for(iseq, epc, kind):
         entry = catches[i]
         if entry.start < epc and epc <= entry.end:
             if entry.kind == CATCH_ENSURE or \
-                    (entry.kind == CATCH_RESCUE and kind == PENDING_RAISE) or \
+                    (entry.kind == CATCH_RESCUE and kind == PENDING_RAISE
+                     and not fatal) or \
                     (entry.kind == CATCH_RETRY and kind == PENDING_RETRY):
                 return entry
         i += 1
@@ -2872,7 +2855,7 @@ def _run_catch(frame, entry, throw):
     if w_iseq.nlocals > 0:
         # Local 0 is `$!`; for a break or a next nothing reads it.
         callee.local_set(0, throw.value if throw.kind == PENDING_RAISE
-                         else value.Q_NIL)
+                         and not _is_fiber_kill(throw) else value.Q_NIL)
     callee.pending_kind = throw.kind
     callee.pending_value = throw.value
     callee.pending_block = throw.w_block
@@ -2893,7 +2876,8 @@ def _run_with_errinfo(w_iseq, callee, errinfo):
 def _unwind(iseq, frame, throw, epc):
     """Run the entries covering epc until one completes and answer the resume pc; re-raises when the frame handles nothing."""
     while True:
-        entry = _catch_for(iseq, epc, throw.kind)
+        entry = _catch_for(iseq, epc, throw.kind,
+                           _is_fiber_kill(throw))
         if entry is None:
             _rethrow(throw)
         frame.reset_sp(entry.sp)
@@ -2942,8 +2926,7 @@ def install():
     gcroots.register_blocks(blocks)
     # A Symbol, so it is an immediate no mark hook has to reach.
     proxy.value = boot.sym_new(PROXY_NAME)
-    fiber.value = dispatch.const_get(value.core_class(value.C_OBJECT),
-                                     symbols.intern('Fiber'))
+    fiber_kill.value = boot.fiber_killed_value()
     # Asked before any Ruby code runs, so these are the pristine owners.
     send_owners.kernel = dispatch.owner_of(
         value.core_class(value.C_OBJECT), SEND)

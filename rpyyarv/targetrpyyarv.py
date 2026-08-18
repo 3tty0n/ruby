@@ -6,6 +6,7 @@ from rpyyarv import boot
 from rpyyarv import bootiseq
 from rpyyarv import debug
 from rpyyarv import dispatch
+from rpyyarv import fibers
 from rpyyarv import gcroots
 from rpyyarv import helpers
 from rpyyarv import interp
@@ -97,6 +98,7 @@ def entry_point(argv):
     # RPYYARV_GC_NO_HOOK leaves the escaped VALUEs unreachable on purpose.
     if os.environ.get('RPYYARV_GC_NO_HOOK') != '1':
         gcroots.install()
+        fibers.install()
     if os.environ.get('RPYYARV_GC_STRESS') == '1':
         rubycall.stress.flag = True
 
@@ -136,6 +138,8 @@ def entry_point(argv):
 
 def target(driver, args):
     driver.exe_name = 'rpyyarv'
+    # The shadowstack copy a fiber switch saves is generated only under this.
+    driver.config.translation.continuation = True
     return entry_point, None
 
 

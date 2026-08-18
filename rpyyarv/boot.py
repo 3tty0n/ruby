@@ -144,6 +144,14 @@ rb_set_const_hook = _ext('rpyyarv_set_const_hook', [CONST_HOOK], lltype.Void)
 HANDLE_MARK_HOOK = lltype.Ptr(lltype.FuncType([lltype.Signed], lltype.Void))
 rb_set_handle_mark = _ext('rpyyarv_set_handle_mark_callback',
                           [HANDLE_MARK_HOOK], lltype.Void)
+FIBER_SAVE_HOOK = lltype.Ptr(lltype.FuncType([lltype.Signed], VOIDP))
+FIBER_KEY_HOOK = lltype.Ptr(lltype.FuncType([lltype.Signed], lltype.Void))
+rb_fiber_killed_value = _ext('rpyyarv_fiber_killed_value', [], VALUE)
+rb_rethrow_if_fiber_kill = _ext('rpyyarv_rethrow_if_fiber_kill', [VALUE],
+                                rffi.INT)
+rb_set_fiber_hooks = _ext('rpyyarv_set_fiber_hooks',
+                          [FIBER_SAVE_HOOK, FIBER_SAVE_HOOK, FIBER_KEY_HOOK,
+                           FIBER_KEY_HOOK, VOIDP, VOIDP], lltype.Void)
 rb_set_method_hook = _ext('rpyyarv_set_method_hook', [CONST_HOOK], lltype.Void)
 rb_gc_start = _ext('rpyyarv_gc_start', [], lltype.Void, reenters=True)
 rb_core_classes = _ext('rpyyarv_core_classes', [VALUEP], lltype.Void)
@@ -1773,6 +1781,20 @@ def set_mark_hook(fn):
 def set_handle_mark(fn):
     """As install_block_callback: a plain function, so rffi builds the enter-RPython-from-C wrapper for it."""
     rb_set_handle_mark(fn)
+
+
+def fiber_killed_value():
+    return rffi.cast(lltype.Signed, rb_fiber_killed_value())
+
+
+def rethrow_if_fiber_kill(v):
+    """Returns for anything but Fiber#kill, which resumes its fatal unwind here rather than crossing back into CRuby as a raise."""
+    rb_rethrow_if_fiber_kill(_v(v))
+
+
+def set_fiber_hooks(park, unpark, born, died, base_slot, top_slot):
+    """As install_block_callback: plain functions, so rffi builds the enter-RPython-from-C wrappers."""
+    rb_set_fiber_hooks(park, unpark, born, died, base_slot, top_slot)
 
 
 def set_const_hook(fn):

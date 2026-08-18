@@ -137,6 +137,22 @@ uintptr_t rpyyarv_cgi_escape_html(uintptr_t str);
 /* String#match? without rb_protect, taken only when the search cannot raise; see boot_shim.c for the exact eligibility rule. */
 uintptr_t rpyyarv_str_match_p_fast(uintptr_t str, uintptr_t re);
 
+/* RUBY_FATAL_FIBER_KILLED, the errinfo a killed fiber unwinds with. */
+uintptr_t rpyyarv_fiber_killed_value(void);
+
+/* 0 unless v is the fiber kill, which never returns: it goes back to being a fatal unwind. */
+int rpyyarv_rethrow_if_fiber_kill(uintptr_t v);
+
+/* One fiber switch: park hands back the buffer the shadowstack is copied into, unpark hands back the one it is copied from. */
+typedef void *(*rpyyarv_fiber_save_fn)(long key);
+typedef void (*rpyyarv_fiber_key_fn)(long key);
+/* base_slot/top_slot are the addresses of RPython's shadowstack base and top pointers, which the copy needs and RPython alone can name. */
+void rpyyarv_set_fiber_hooks(rpyyarv_fiber_save_fn park,
+                             rpyyarv_fiber_save_fn unpark,
+                             rpyyarv_fiber_key_fn born,
+                             rpyyarv_fiber_key_fn died,
+                             void **base_slot, void **top_slot);
+
 /* Called from a block-handle owner's dmark with its handle, so the block's frames live exactly as long as the owning Proc. */
 typedef void (*rpyyarv_handle_mark_fn)(long handle);
 void rpyyarv_set_handle_mark_callback(rpyyarv_handle_mark_fn fn);

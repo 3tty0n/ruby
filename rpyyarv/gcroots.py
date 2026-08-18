@@ -14,6 +14,7 @@ class Registry(object):
         self.classes = []       # classes RPyYARV defined, keys of the registry
         self.held = []          # exception VALUEs parked outside any frame
         self.blocks = None      # interp's handle table, once it exists
+        self.fibers = None      # fibers.mark_suspended, once fibers are installed
         # ponytail: grows monotonically, a redefined name leaks its old block until process end -- bounded by define_method call count.
         self.bmethods = []
 
@@ -24,6 +25,11 @@ state = Registry()
 def register_blocks(blocks):
     """The blocks CRuby can reach through a handle; their defining frames may already have returned, so nothing else keeps their locals marked."""
     state.blocks = blocks
+
+
+def register_fibers(fn):
+    """fibers.mark_suspended, passed as a function so this module keeps its place below fibers.py."""
+    state.fibers = fn
 
 
 def register_bmethod(w_block):
@@ -203,6 +209,9 @@ def _mark_all():
     while f is not None:
         _mark_frame(f)
         f = f.prev_frame
+    # A suspended fiber's frames are on no chain of ours; its own saved one still holds them.
+    if state.fibers is not None:
+        state.fibers()
 
 
 def install():
