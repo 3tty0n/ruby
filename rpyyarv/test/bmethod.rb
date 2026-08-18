@@ -89,3 +89,18 @@ class ProcArg
   define_method(:add_one, &add_one)
 end
 puts ProcArg.new.add_one(9)
+
+# module_function applies to a later define_method too (verified against
+# build/ruby), not just plain def: private on the module itself, callable
+# on the module as a singleton method.
+module ModFuncBm
+  module_function
+
+  define_method(:mf) { 1 }
+end
+puts ModFuncBm.mf
+begin
+  Object.new.extend(ModFuncBm).mf
+rescue NoMethodError => e
+  puts "modfunc_bm_private: #{e.class}"
+end

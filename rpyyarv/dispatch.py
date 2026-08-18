@@ -22,6 +22,8 @@ KIND_ISEQ = 0
 KIND_ATTR_READER = 1
 KIND_ATTR_WRITER = 2
 KIND_BMETHOD = 3
+# undef_method's poison: present but never returned by _walk, so it blocks the ancestor lookup remove_method's plain delete lets through.
+KIND_UNDEF = 4
 
 
 class MethodEntry(object):
@@ -106,9 +108,9 @@ def define(klass, mid, w_iseq, private, cref=0, lexical=None):
     _install_trampoline(klass, mid, private)
 
 
-def define_attr(klass, mid, ivar, kind):
+def define_attr(klass, mid, ivar, kind, private=False):
     """No trampoline: CRuby's own attr entry is still there, so a call from C reaches it directly."""
-    _table_for(klass)[mid] = MethodEntry(None, False, klass, mid, 0, kind,
+    _table_for(klass)[mid] = MethodEntry(None, private, klass, mid, 0, kind,
                                          ivar)
     registry.version = Version()
     flush_trampoline_cache()
@@ -135,6 +137,18 @@ def define_singleton(obj, mid, w_iseq, cref=0, lexical=None):
     if klass not in registry.supers:
         _record_ancestry(klass)
     define(klass, mid, w_iseq, False, cref, lexical)
+
+
+@dont_look_inside
+def define_singleton_bmethod(obj, mid, w_block):
+    """As define_singleton, for a KIND_BMETHOD entry: module_function's define_method form needs both the private instance copy define_bmethod gives it and this public singleton one."""
+    klass = boot.singleton_class(obj)
+    if klass == 0 or value.is_immediate(klass):
+        raise UnsupportedOperation(
+            "'%s' cannot be given a singleton method" % value.repr_of(obj))
+    if klass not in registry.supers:
+        _record_ancestry(klass)
+    define_bmethod(klass, mid, w_block, False)
 
 
 @dont_look_inside
@@ -214,6 +228,14 @@ def undefine(klass, mid):
     return True
 
 
+def undef_method(klass, mid):
+    """Module#undef_method: unlike remove_method, a later lookup must not see the ancestor's method either, so this leaves a poison entry rather than deleting."""
+    _table_for(klass)[mid] = MethodEntry(None, False, klass, mid, 0, KIND_UNDEF)
+    registry.version = Version()
+    flush_trampoline_cache()
+    invalidate_owners()
+
+
 def own_lookup(klass, mid):
     table = registry.methods.get(klass, None)
     if table is None:
@@ -258,13 +280,15 @@ def _walk(klass, mid):
         if table is not None:
             entry = table.get(mid, None)
             if entry is not None:
-                return entry
+                # A poison entry blocks the ancestors too, as CRuby's own undef does.
+                return None if entry.kind == KIND_UNDEF else entry
         k = supers.get(k, 0)
         n += 1
     # Toplevel defs live on Object; reachable from any receiver, as in Ruby.
     table = methods.get(value.core_class(value.C_OBJECT), None)
     if table is not None:
-        return table.get(mid, None)
+        entry = table.get(mid, None)
+        return None if entry is not None and entry.kind == KIND_UNDEF else entry
     return None
 
 
@@ -335,7 +359,7 @@ def _lookup_core(klass, mid, version):
         if table is not None:
             entry = table.get(mid, None)
             if entry is not None:
-                return entry
+                return None if entry.kind == KIND_UNDEF else entry
         k = supers.get(k, 0)
         n += 1
     return None

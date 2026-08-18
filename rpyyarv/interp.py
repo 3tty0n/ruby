@@ -84,7 +84,8 @@ def define_method(frame, mid, w_iseq):
         dispatch.define(node.klass, mid, w_iseq, True, node.klass, node)
         dispatch.define_singleton(node.klass, mid, w_iseq, node.klass, node)
     else:
-        dispatch.define(node.klass, mid, w_iseq, False, node.klass, node)
+        dispatch.define(node.klass, mid, w_iseq, frame.private_pragma,
+                        node.klass, node)
 
 
 @unroll_safe
@@ -312,8 +313,12 @@ def invoke(frame, w_ci, w_block=None):
             and w_block is not None and w_block.kind == block_mod.KIND_ISEQ \
             and w_block.w_iseq.simple_params and not frame.module_func \
             and _attr_name(frame.stack[recv_at + 1]) != '':
-        # module_func: CRuby's own send never learns of RPyYARV's own module_function pragma, so the singleton copy it gives `def` here would be wrong; left to the existing (already CRuby-only) fallback.
-        return _define_bmethod(frame, mid, recv, recv_at, w_block)
+        return _define_bmethod(frame, mid, recv, recv_at, w_block,
+                               frame.private_pragma)
+    if mid == DEFINE_METHOD and argc == 1 and frame.module_func \
+            and _attr_name(frame.stack[recv_at + 1]) != '':
+        # CRuby's own send never learns of RPyYARV's own module_function pragma; module_function's own name form (below) makes the real definition private and copies it to the singleton after the fact.
+        return _define_bmethod_modfunc(frame, mid, recv, recv_at, w_block)
     if mid == INITIALIZE and argc == 0 and entry is None and w_block is None \
             and helpers.basic_initialize(klass):
         # rb_obj_dummy_initialize: no argument, no effect, nil (object.c:118).
@@ -445,6 +450,17 @@ def invoke(frame, w_ci, w_block=None):
             and (dispatch.is_known_class(recv)
                  or dispatch.is_known_module(recv)):
         return _private_class_method(frame, recv, recv_at, argc)
+    if (mid == PRIVATE or mid == PUBLIC) and fcall and argc == 0 \
+            and _in_body_of(frame, recv):
+        return _visibility_pragma(frame, mid, recv, recv_at)
+    if (mid == PRIVATE or mid == PUBLIC) and fcall and argc > 0 \
+            and (dispatch.is_known_class(recv)
+                 or dispatch.is_known_module(recv)):
+        return _visibility_names(frame, mid, recv, recv_at, argc)
+    if (mid == REMOVE_METHOD or mid == UNDEF_METHOD) and argc > 0 \
+            and (dispatch.is_known_class(recv)
+                 or dispatch.is_known_module(recv)):
+        return _remove_or_undef(frame, mid, recv, recv_at, argc)
     if mid == CORE_ALIAS or mid == CORE_UNDEF:
         return _core_method(frame, mid, recv, recv_at, argc)
     if mid == ALIAS_METHOD and argc == 2 and entry is None \
@@ -846,12 +862,31 @@ def _define_attrs(frame, mid, klass, recv_at, argc):
     _drop(frame, recv_at)
     # First, so a name CRuby rejects raises before anything is registered.
     ret = rubycall.call(klass, mid, args)
-    _install_attrs(klass, mid, args)
+    private = frame.private_pragma
+    if private:
+        # CRuby's own send never learns of RPyYARV's own private pragma, so the accessors it just installed are still public; make them private too, as plain def under the same pragma already is.
+        names = _attr_method_names(mid, args)
+        if len(names) > 0:
+            rubycall.call(klass, PRIVATE, names)
+    _install_attrs(klass, mid, args, private)
     return ret
 
 
+def _attr_method_names(mid, args):
+    names = []
+    for i in range(len(args)):
+        name = _attr_name(args[i])
+        if name == '':
+            continue
+        if mid != ATTR_WRITER:
+            names.append(rubycall.sym_value(symbols.intern(name)))
+        if mid != ATTR_READER:
+            names.append(rubycall.sym_value(symbols.intern(name + '=')))
+    return names
+
+
 @dont_look_inside
-def _install_attrs(klass, mid, args):
+def _install_attrs(klass, mid, args, private=False):
     """attr_* still runs in CRuby, so its entries stay there for reflection and CRuby's callers; the registry gains native ones too."""
     for i in range(len(args)):
         name = _attr_name(args[i])
@@ -860,10 +895,10 @@ def _install_attrs(klass, mid, args):
         ivar = symbols.intern('@' + name)
         if mid != ATTR_WRITER:
             dispatch.define_attr(klass, symbols.intern(name), ivar,
-                                 dispatch.KIND_ATTR_READER)
+                                 dispatch.KIND_ATTR_READER, private)
         if mid != ATTR_READER:
             dispatch.define_attr(klass, symbols.intern(name + '='), ivar,
-                                 dispatch.KIND_ATTR_WRITER)
+                                 dispatch.KIND_ATTR_WRITER, private)
 
 
 def _attr_name(v):
@@ -882,7 +917,7 @@ def _is_class_or_module(v):
 
 
 @unroll_safe
-def _define_bmethod(frame, mid, recv, recv_at, w_block):
+def _define_bmethod(frame, mid, recv, recv_at, w_block, private_pragma=False):
     """`define_method name do ... end` with a plain-required-params block: CRuby's send installs the real bmethod first (unchanged for reflection, super, respond_to? and any C caller), then a fast entry runs the block directly on a later call, skipping the round trip through rb_funcallv and the ifunc Proc."""
     name_v = frame.stack[recv_at + 1]
     _drop(frame, recv_at)
@@ -899,11 +934,31 @@ def _define_bmethod(frame, mid, recv, recv_at, w_block):
     owner = dispatch.owner_of(search, returned_mid)
     if value.is_immediate(owner) or owner == value.Q_NIL:
         return ret
+    if private_pragma:
+        # CRuby's own send never learns of RPyYARV's own private pragma, so the real definition it just installed is still public; make it private too, as plain def under the same pragma already is.
+        rubycall.call(owner, PRIVATE, [ret])
     # Lambda-flagged once here, not mutated later: is_lambda is quasi-immutable, and _run_bmethod's `return`/`break` need it to target this frame as _run_lambda's own do.
     lambda_block = block_mod.W_Block(w_block.w_iseq, w_block.frame,
                                      w_block.outer, is_lambda=True)
     dispatch.define_bmethod(owner, returned_mid, lambda_block,
-                            frame.cref is None)
+                            frame.cref is None or private_pragma)
+    return ret
+
+
+@unroll_safe
+def _define_bmethod_modfunc(frame, mid, recv, recv_at, w_block):
+    """define_method under a module_function pragma: CRuby's send installs it as a normal public instance method, so module_function's own named-argument form is reused to make it private and copy it to the singleton, exactly as `def` under the pragma already does; the registry mirrors both copies so a call to either is enforced without a CRuby round trip (a call unknown to the registry answers true from CRuby's own funcallv, which is send's own force-call API and so never checks visibility)."""
+    name_v = frame.stack[recv_at + 1]
+    _drop(frame, recv_at)
+    ret = _call_with_block(recv, mid, [name_v], w_block)
+    if not boot.is_symbol(ret):
+        return ret
+    rubycall.call(recv, MODULE_FUNCTION, [ret])
+    returned_mid = symbols.intern(boot.sym_of(ret))
+    lambda_block = block_mod.W_Block(w_block.w_iseq, w_block.frame,
+                                     w_block.outer, is_lambda=True)
+    dispatch.define_bmethod(recv, returned_mid, lambda_block, True)
+    dispatch.define_singleton_bmethod(recv, returned_mid, lambda_block)
     return ret
 
 
@@ -1801,6 +1856,10 @@ HASH_MERGE_KWD = symbols.intern('core#hash_merge_kwd')
 
 MODULE_FUNCTION = symbols.intern('module_function')
 PRIVATE_CLASS_METHOD = symbols.intern('private_class_method')
+PRIVATE = symbols.intern('private')
+PUBLIC = symbols.intern('public')
+REMOVE_METHOD = symbols.intern('remove_method')
+UNDEF_METHOD = symbols.intern('undef_method')
 ALIAS_METHOD = symbols.intern('alias_method')
 INSTANCE_EVAL = symbols.intern('instance_eval')
 INSTANCE_EXEC = symbols.intern('instance_exec')
@@ -1881,6 +1940,77 @@ def _private_class_method(frame, recv, recv_at, argc):
     # CRuby first, so a name it rejects raises before the registry is touched.
     ret = rubycall.call(recv, PRIVATE_CLASS_METHOD, args)
     _hide_on_singleton(recv, args)
+    return ret
+
+
+@unroll_safe
+def _visibility_pragma(frame, mid, recv, recv_at):
+    """Bare `private`/`public`: flips the body's default for every def (and define_method, attr_*) that follows, as frame.module_func already does for module_function."""
+    frame.private_pragma = (mid == PRIVATE)
+    _drop(frame, recv_at)
+    return recv
+
+
+@unroll_safe
+def _visibility_names(frame, mid, recv, recv_at, argc):
+    """`private :name, ...` / `public :name, ...` (also covers `private def x; end`, since def returns the new mid as a Symbol). Looked up before CRuby's own call: for a name only an ancestor owns, that call gives recv a fresh private override of its own (matching CRuby's real rb_mod_private), which would make a lookup afterwards see recv as a stranger to the entry the walk below has to copy."""
+    args = []
+    i = 0
+    while i < argc:
+        args.append(frame.stack[recv_at + 1 + i])
+        i += 1
+    _drop(frame, recv_at)
+    entries = _lookup_all(recv, args)
+    # CRuby first, so a name it rejects raises before the registry is touched.
+    ret = rubycall.call(recv, mid, args)
+    _mark_visibility(recv, args, entries, mid == PRIVATE)
+    return ret
+
+
+def _lookup_all(klass, args):
+    entries = []
+    i = 0
+    while i < len(args):
+        entries.append(dispatch.lookup(klass, symbols.intern(_attr_name(args[i]))))
+        i += 1
+    return entries
+
+
+@dont_look_inside
+def _mark_visibility(klass, args, entries, private):
+    i = 0
+    while i < len(args):
+        entry = entries[i]
+        if entry is not None and entry.kind != dispatch.KIND_UNDEF:
+            name_mid = symbols.intern(_attr_name(args[i]))
+            if entry.kind == dispatch.KIND_ISEQ:
+                dispatch.define(klass, name_mid, entry.w_iseq, private,
+                                entry.cref, entry.lexical)
+            elif entry.kind == dispatch.KIND_BMETHOD:
+                dispatch.define_bmethod(klass, name_mid, entry.w_block,
+                                        private)
+            else:
+                dispatch.define_attr(klass, name_mid, entry.ivar,
+                                     entry.kind, private)
+        i += 1
+
+
+@unroll_safe
+def _remove_or_undef(frame, mid, recv, recv_at, argc):
+    """Module#remove_method / #undef_method: CRuby first, so a name it rejects raises before the registry is touched; remove exposes an ancestor's method on a later lookup, undef must not."""
+    args = []
+    i = 0
+    while i < argc:
+        args.append(frame.stack[recv_at + 1 + i])
+        i += 1
+    _drop(frame, recv_at)
+    ret = rubycall.call(recv, mid, args)
+    for v in args:
+        name_mid = symbols.intern(_attr_name(v))
+        if mid == UNDEF_METHOD:
+            dispatch.undef_method(recv, name_mid)
+        else:
+            dispatch.undefine(recv, name_mid)
     return ret
 
 

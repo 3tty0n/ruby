@@ -27,6 +27,9 @@ class Frame(object):
     # A module body that ran `module_function` with no arguments; every def after it becomes private plus a singleton method (vm_method.c rb_mod_modfunc).
     module_func = False
 
+    # A class/module body that ran `private` with no arguments; every def after it lands private, until `public` flips it back.
+    private_pragma = False
+
     # Set on the way out of execute(); a `return` whose target frame is already gone is the orphaned Proc vm_throw_start answers with a LocalJumpError.
     dead = False
 
