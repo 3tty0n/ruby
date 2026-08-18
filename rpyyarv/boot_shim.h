@@ -145,11 +145,14 @@ int rpyyarv_rethrow_if_fiber_kill(uintptr_t v);
 
 /* One fiber switch: park hands back the buffer the shadowstack is copied into, unpark hands back the one it is copied from. */
 typedef void *(*rpyyarv_fiber_save_fn)(long key);
+/* unpark/born also receive the arriving stack's bounds so RPython can re-anchor its stack-depth window. */
+typedef void *(*rpyyarv_fiber_arrive_fn)(long key, long stack_base, long stack_size);
+typedef void (*rpyyarv_fiber_born_fn)(long key, long stack_base, long stack_size);
 typedef void (*rpyyarv_fiber_key_fn)(long key);
 /* base_slot/top_slot are the addresses of RPython's shadowstack base and top pointers, which the copy needs and RPython alone can name. */
 void rpyyarv_set_fiber_hooks(rpyyarv_fiber_save_fn park,
-                             rpyyarv_fiber_save_fn unpark,
-                             rpyyarv_fiber_key_fn born,
+                             rpyyarv_fiber_arrive_fn unpark,
+                             rpyyarv_fiber_born_fn born,
                              rpyyarv_fiber_key_fn died,
                              void **base_slot, void **top_slot);
 

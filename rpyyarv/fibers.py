@@ -1,6 +1,7 @@
 """A fiber suspends without unwinding, so every process-global stack RPyYARV keeps outside the machine stack is saved and restored around each switch, keyed by rb_fiber_t*."""
 
 from rpython.rlib import rgc
+from rpython.rlib import rstack
 from rpython.rlib._stacklet_shadowstack import (STACKLET, alloc_stacklet,
                                                 lambda_customtrace)
 from rpython.rtyper.lltypesystem import llmemory, lltype, rffi
@@ -11,9 +12,35 @@ from rpyyarv import gcroots
 from rpyyarv import interp
 from rpyyarv import requires
 from rpyyarv import rubycall
-from rpyyarv.rlib import unchecked_stack_start, unchecked_stack_stop
+from rpyyarv.rlib import (raw_word, set_raw_word, unchecked_stack_start,
+                          unchecked_stack_stop)
 
 SIZEADDR = llmemory.sizeof(llmemory.Address)
+
+
+class _Anchors(object):
+    """RPython's stack-depth window (rpy_stacktoobig end/length). Left on the main stack, a coroutine stack reads as permanently full: tracing, bridges and even entry into compiled loops are then silently refused, so the JIT dies inside every fiber."""
+
+    def __init__(self):
+        self.end_adr = 0
+        self.length_adr = 0
+        self.main_end = 0
+        self.main_length = 0
+
+
+anchors = _Anchors()
+
+
+def _anchor_stack(base, size):
+    """Point the depth window at the stack now running; base 0 is the root fiber, whose window was captured at install."""
+    if anchors.end_adr == 0:
+        return
+    if base == 0:
+        set_raw_word(anchors.end_adr, 0, anchors.main_end)
+        set_raw_word(anchors.length_adr, 0, anchors.main_length)
+    else:
+        set_raw_word(anchors.end_adr, 0, base + size)
+        set_raw_word(anchors.length_adr, 0, size - (size >> 2))
 
 
 class FiberState(object):
@@ -122,8 +149,9 @@ def park(key):
     return rffi.cast(rffi.VOIDP, buf)
 
 
-def unpark(key):
+def unpark(key, stack_base, stack_size):
     """The buffer the shim copies back; it stays attached, with its length zeroed, so the next park can reuse it."""
+    _anchor_stack(stack_base, stack_size)
     if key not in registry.states:
         return lltype.nullptr(rffi.VOIDP.TO)
     st = registry.states[key]
@@ -132,8 +160,9 @@ def unpark(key):
     return rffi.cast(rffi.VOIDP, st.ss.s_sscopy)
 
 
-def born(key):
+def born(key, stack_base, stack_size):
     """A fiber running its first instruction: the resuming fiber left the shadowstack empty, and none of the globals belong to this one."""
+    _anchor_stack(stack_base, stack_size)
     _reap()
     st = _state_for(key)
     st.top = None
@@ -174,6 +203,13 @@ def mark_suspended():
 def install():
     rgc.register_custom_trace_hook(STACKLET, lambda_customtrace)
     gcroots.register_fibers(mark_suspended)
+    # Capture the main stack's depth window as _raise_stack_limit left it (touching the length here would undo the 4MB deep-recursion limit); the slowpath only anchors the lazy end without changing it.
+    anchors.end_adr = rstack._stack_get_end_adr()
+    anchors.length_adr = rstack._stack_get_length_adr()
+    if raw_word(anchors.end_adr, 0) == 0:
+        rstack._stack_too_big_slowpath(llop.stack_current(lltype.Signed))
+    anchors.main_end = raw_word(anchors.end_adr, 0)
+    anchors.main_length = raw_word(anchors.length_adr, 0)
     base_slot = rffi.cast(rffi.VOIDP,
                           llop.gc_adr_of_root_stack_base(llmemory.Address))
     top_slot = rffi.cast(rffi.VOIDP,

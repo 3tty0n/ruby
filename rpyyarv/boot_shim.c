@@ -1510,7 +1510,7 @@ handle_owner_dfree(void *p)
 
 /* The shadowstack swap runs here rather than in RPython: entering RPython pushes a frame of its own, and the copy has to happen with none of ours on the stack. */
 static rpyyarv_fiber_save_fn fiber_park_callback;
-static rpyyarv_fiber_save_fn fiber_unpark_callback;
+static rpyyarv_fiber_arrive_fn fiber_unpark_callback;
 static void **fiber_ss_base;
 static void **fiber_ss_top;
 
@@ -1527,9 +1527,9 @@ fiber_park(long key)
 }
 
 static void
-fiber_unpark(long key)
+fiber_unpark(long key, long stack_base, long stack_size)
 {
-    char *buf = fiber_unpark_callback(key);
+    char *buf = fiber_unpark_callback(key, stack_base, stack_size);
     char *base = (char *)*fiber_ss_base;
     long len;
     if (!buf) return;             /* a fiber that never parked: nothing saved */
@@ -1540,8 +1540,8 @@ fiber_unpark(long key)
 }
 
 void
-rpyyarv_set_fiber_hooks(rpyyarv_fiber_save_fn park, rpyyarv_fiber_save_fn unpark,
-                        rpyyarv_fiber_key_fn born, rpyyarv_fiber_key_fn died,
+rpyyarv_set_fiber_hooks(rpyyarv_fiber_save_fn park, rpyyarv_fiber_arrive_fn unpark,
+                        rpyyarv_fiber_born_fn born, rpyyarv_fiber_key_fn died,
                         void **base_slot, void **top_slot)
 {
     static rb_rpyyarv_fiber_hooks_t hooks;

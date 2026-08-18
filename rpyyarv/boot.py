@@ -145,12 +145,16 @@ HANDLE_MARK_HOOK = lltype.Ptr(lltype.FuncType([lltype.Signed], lltype.Void))
 rb_set_handle_mark = _ext('rpyyarv_set_handle_mark_callback',
                           [HANDLE_MARK_HOOK], lltype.Void)
 FIBER_SAVE_HOOK = lltype.Ptr(lltype.FuncType([lltype.Signed], VOIDP))
+FIBER_ARRIVE_HOOK = lltype.Ptr(lltype.FuncType(
+    [lltype.Signed, lltype.Signed, lltype.Signed], VOIDP))
+FIBER_BORN_HOOK = lltype.Ptr(lltype.FuncType(
+    [lltype.Signed, lltype.Signed, lltype.Signed], lltype.Void))
 FIBER_KEY_HOOK = lltype.Ptr(lltype.FuncType([lltype.Signed], lltype.Void))
 rb_fiber_killed_value = _ext('rpyyarv_fiber_killed_value', [], VALUE)
 rb_rethrow_if_fiber_kill = _ext('rpyyarv_rethrow_if_fiber_kill', [VALUE],
                                 rffi.INT)
 rb_set_fiber_hooks = _ext('rpyyarv_set_fiber_hooks',
-                          [FIBER_SAVE_HOOK, FIBER_SAVE_HOOK, FIBER_KEY_HOOK,
+                          [FIBER_SAVE_HOOK, FIBER_ARRIVE_HOOK, FIBER_BORN_HOOK,
                            FIBER_KEY_HOOK, VOIDP, VOIDP], lltype.Void)
 rb_set_method_hook = _ext('rpyyarv_set_method_hook', [CONST_HOOK], lltype.Void)
 rb_gc_start = _ext('rpyyarv_gc_start', [], lltype.Void, reenters=True)
