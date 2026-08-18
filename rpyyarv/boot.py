@@ -1200,7 +1200,7 @@ def ivar_set(obj, rid, val):
         _failed('instance_variable_set')
 
 
-LAYOUT_N = 12
+LAYOUT_N = 14
 
 
 def object_layout():

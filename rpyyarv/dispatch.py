@@ -784,20 +784,28 @@ def _data_fields(obj, flags):
     return 0
 
 
+def _class_fields(obj, hdr):
+    """The imemo/fields a class or module keeps its ivars in; 0 for a boxable one, whose prime classext is not the only one it may have (internal/class.h:314)."""
+    if hdr & value.RCLASS_BOXABLE:
+        return 0
+    return raw_word(obj, value.CLASS_FIELDS_WORD)
+
+
 def ivar_get(obj, mid):
-    """T_OBJECT reads compile to a shape guard plus a raw field load, and a typed T_DATA to the same over its fields object."""
+    """T_OBJECT reads compile to a shape guard plus a raw field load, and a typed T_DATA or a class to the same over its fields object."""
     if obj != 0 and (obj & value.IMMEDIATE_MASK) == 0:
         flags = raw_word(obj, value.FLAGS_WORD)
-        kind = flags & value.T_MASK
-        if kind == value.T_CLASS or kind == value.T_MODULE:
-            got = boot.class_ivar_get(obj, rubycall.const_rid(mid))
-            if got != value.Q_UNDEF:
-                return got
         fields = obj
-        # One promoted word, so the three tests below fold into its one guard.
+        # One promoted word, so the four tests below fold into its one guard.
         hdr = promote(flags & value.IV_HEADER_MASK)
-        if (hdr & value.T_MASK) != value.T_OBJECT:
-            fields = _data_fields(obj, flags)
+        kind = hdr & value.T_MASK
+        klass = kind == value.T_CLASS or kind == value.T_MODULE
+        if kind != value.T_OBJECT:
+            if klass:
+                # Re-read every time: growing a class's ivars replaces its fields object.
+                fields = _class_fields(obj, hdr)
+            else:
+                fields = _data_fields(obj, flags)
             if fields != 0:
                 hdr = promote(raw_word(fields, value.FLAGS_WORD)
                               & value.IV_HEADER_MASK)
@@ -806,8 +814,14 @@ def ivar_get(obj, mid):
             slot = iv_slot(shape_id, rubycall.const_rid(mid))
             if slot >= 0:
                 if hdr & value.ROBJECT_HEAP:
-                    return raw_word(raw_word(fields, value.FIELDS_WORD), slot)
-                return raw_word(fields, value.FIELDS_WORD + slot)
+                    got = raw_word(raw_word(fields, value.FIELDS_WORD), slot)
+                else:
+                    got = raw_word(fields, value.FIELDS_WORD + slot)
+                # An unshareable class ivar read from a non-main ractor raises (variable.c:1457), which only CRuby can tell.
+                if not klass or value.is_immediate(got) \
+                        or (raw_word(got, value.FLAGS_WORD)
+                            & value.FL_SHAREABLE):
+                    return got
             if slot == -1:
                 return value.Q_NIL
     return _ivar_get_slow(obj, mid)
@@ -929,7 +943,8 @@ def check_object_layout():
     want = [value.SHAPE_SHIFT, value.SHAPE_ID_BITS, value.ROBJECT_HEAP,
             value.FIELDS_WORD, value.T_MASK, value.T_OBJECT,
             value.FL_FREEZE, value.SHAPE_ID_IN_FLAGS, value.T_DATA,
-            value.FL_TYPED_DATA, value.FIELDS_WORD, value.FL_SHAREABLE]
+            value.FL_TYPED_DATA, value.FIELDS_WORD, value.FL_SHAREABLE,
+            value.CLASS_FIELDS_WORD, value.RCLASS_BOXABLE]
     return got == want
 
 

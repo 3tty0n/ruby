@@ -1237,6 +1237,10 @@ rpyyarv_object_layout(int *out)
     out[10] = (int)(offsetof(struct RTypedData, fields_obj) / SIZEOF_VALUE);
     /* Set on the objects ivar_ractor_check (variable.c:1220) may raise for. */
     out[11] = (int)RUBY_FL_SHAREABLE;
+    /* Where a class or module keeps its ivars: the prime classext's fields_obj. */
+    out[12] = (int)(offsetof(struct RClass_and_rb_classext_t, classext.fields_obj) / SIZEOF_VALUE);
+    /* Only a boxable class can hold another classext, so the prime one is the sole one without it (internal/class.h:314). */
+    out[13] = (int)RCLASS_BOXABLE;
 }
 
 /* Neither allocates nor raises, so boot.py may declare it without reenters. */

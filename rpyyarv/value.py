@@ -43,6 +43,9 @@ FL_SINGLETON = 1 << 13          # RUBY_FL_SINGLETON (== FL_USER1) on a T_CLASS
 T_DATA = 0x0c
 FL_TYPED_DATA = 1 << 6          # RUBY_TYPED_FL_IS_TYPED_DATA: RData keeps a function pointer where RTypedData keeps fields_obj
 FL_SHAREABLE = 1 << 8           # RUBY_FL_SHAREABLE, the bit ivar_ractor_check raises on
+# struct RClass_and_rb_classext_t: a class or module keeps its ivars in the prime classext's fields_obj.
+CLASS_FIELDS_WORD = 5
+RCLASS_BOXABLE = 1 << 16        # internal/class.h: FL_USER4, ROBJECT_HEAP's bit, so IV_HEADER_MASK already covers it
 
 # Every header bit an ivar access decides on, in one word: promoting it collapses the type, shape and spill tests into a single guard. -(1 << SHAPE_SHIFT) is the shape id's bits as a signed word.
 IV_HEADER_MASK = -(1 << SHAPE_SHIFT) | ROBJECT_HEAP | T_MASK
