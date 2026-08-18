@@ -289,6 +289,10 @@ rb_ss_skip = _ext('rpyyarv_ss_skip', [VALUE, VALUE, INTP], VALUE,
                   reenters=True)
 rb_str_byteslice2 = _ext('rpyyarv_str_byteslice2', [VALUE, VALUE, VALUE],
                          VALUE)
+rb_str_force_encoding_fast = _ext('rpyyarv_str_force_encoding_fast',
+                                  [VALUE, VALUE], VALUE, reenters=True)
+rb_unpack1_double = _ext('rpyyarv_unpack1_double', [VALUE, VALUE, VALUE],
+                         VALUE, reenters=True)
 rb_sprintf_ = _ext('rpyyarv_sprintf', [rffi.INT, VALUEP, VALUE, INTP], VALUE,
                    reenters=True)
 rb_cgi_escape_html = _ext('rpyyarv_cgi_escape_html', [VALUE], VALUE)
@@ -1625,6 +1629,17 @@ def ss_skip(v, re):
 def str_byteslice2(s, beg, length):
     return rffi.cast(lltype.Signed,
                      rb_str_byteslice2(_v(s), _v(beg), _v(length)))
+
+
+def str_force_encoding_fast(s, enc):
+    """The unprotected String#force_encoding: Qundef whenever the shim is not sure the association cannot raise."""
+    return rffi.cast(lltype.Signed, rb_str_force_encoding_fast(_v(s), _v(enc)))
+
+
+def unpack1_double(s, fmt, offset):
+    """The unprotected String#unpack1: Qundef unless the format is "E" and the eight bytes are in range."""
+    return rffi.cast(lltype.Signed,
+                     rb_unpack1_double(_v(s), _v(fmt), _v(offset)))
 
 
 def hash_delete(hash_v, key):

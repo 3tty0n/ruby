@@ -3335,6 +3335,53 @@ rpyyarv_str_byteslice2(uintptr_t str, uintptr_t begv, uintptr_t lenv)
     return (uintptr_t)rb_str_subseq(s, beg, len);
 }
 
+/* String#force_encoding without rb_protect: Qundef unless every raise its body reaches is ruled out first -- str_modifiable's whole STR_UNMODIFIABLE_MASK (FL_FREEZE, string.c's STR_TMPLOCK == FL_USER7, and STR_CHILLED, whose deprecation warning can itself raise), rb_to_encoding's TypeError (an Encoding instance takes enc_check_encoding's own arm, so rb_to_encoding_index never reaches to_str), and rb_enc_associate_index's SPECIAL_CONST ArgumentError and rb_str_change_terminator_length regrow, which an encoding of the same mbminlen never reaches. */
+uintptr_t
+rpyyarv_str_force_encoding_fast(uintptr_t str, uintptr_t enc)
+{
+    VALUE s = (VALUE)str, e = (VALUE)enc;
+    rb_encoding *encoding;
+    int idx, oldidx;
+    if (!RB_TYPE_P(s, T_STRING)
+        || FL_ANY_RAW(s, FL_FREEZE | FL_USER7 | STR_CHILLED)
+        || !rb_obj_is_kind_of(e, rb_cEncoding))
+        return (uintptr_t)Qundef;
+    idx = rb_to_encoding_index(e);
+    if (idx < 0) return (uintptr_t)Qundef;
+    oldidx = ENCODING_GET(s);
+    if (oldidx == idx) return (uintptr_t)s;
+    encoding = rb_enc_from_index(idx);
+    if (!encoding
+        || rb_enc_mbminlen(encoding) != rb_enc_mbminlen(rb_enc_from_index(oldidx)))
+        return (uintptr_t)Qundef;
+    rb_enc_associate_index(s, idx);
+    if (ENC_CODERANGE(s) == ENC_CODERANGE_7BIT && rb_enc_asciicompat(encoding))
+        return (uintptr_t)s;
+    ENC_CODERANGE_CLEAR(s);
+    return (uintptr_t)s;
+}
+
+/* String#unpack1("E") only: Qundef unless the eight little-endian bytes lie wholly inside str, which is every check pack.c's 'E' arm makes before its own memcpy. The host is assumed little-endian; a big-endian one falls back. */
+uintptr_t
+rpyyarv_unpack1_double(uintptr_t str, uintptr_t fmt, uintptr_t offv)
+{
+    VALUE s = (VALUE)str, f = (VALUE)fmt;
+    double v;
+    long off;
+#ifdef WORDS_BIGENDIAN
+    return (uintptr_t)Qundef;
+#endif
+    if (!RB_TYPE_P(s, T_STRING) || !RB_TYPE_P(f, T_STRING)
+        || !FIXNUM_P((VALUE)offv)
+        || RSTRING_LEN(f) != 1 || RSTRING_PTR(f)[0] != 'E')
+        return (uintptr_t)Qundef;
+    off = FIX2LONG((VALUE)offv);
+    if (off < 0 || off > RSTRING_LEN(s) - 8)
+        return (uintptr_t)Qundef;
+    memcpy(&v, RSTRING_PTR(s) + off, 8);
+    return (uintptr_t)rb_float_new(v);
+}
+
 struct sprintf_args {
     int argc;
     VALUE *argv;

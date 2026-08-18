@@ -128,6 +128,8 @@ uintptr_t rpyyarv_ss_eos_p(uintptr_t v);
 uintptr_t rpyyarv_ss_matched_size(uintptr_t v);
 uintptr_t rpyyarv_ss_skip(uintptr_t v, uintptr_t re, int *state);
 uintptr_t rpyyarv_str_byteslice2(uintptr_t str, uintptr_t begv, uintptr_t lenv);
+uintptr_t rpyyarv_str_force_encoding_fast(uintptr_t str, uintptr_t enc);
+uintptr_t rpyyarv_unpack1_double(uintptr_t str, uintptr_t fmt, uintptr_t offv);
 
 /* Kernel#format / Kernel#sprintf: rb_str_format(argc, argv, fmt) under rb_protect. */
 uintptr_t rpyyarv_sprintf(int argc, const uintptr_t *argv, uintptr_t fmt,

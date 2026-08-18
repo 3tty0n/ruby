@@ -193,6 +193,26 @@ def invoke(frame, w_ci, w_block=None):
             _drop(frame, recv_at)
             debug.count_native()
             return v
+    if entry is None and argc == 1 and w_block is None \
+            and mid == FORCE_ENCODING \
+            and send_owners.string_force_encoding != 0 \
+            and dispatch.owner_of(klass, FORCE_ENCODING) == \
+            send_owners.string_force_encoding:
+        v = boot.str_force_encoding_fast(recv, frame.stack[recv_at + 1])
+        if v != value.Q_UNDEF:
+            _drop(frame, recv_at)
+            debug.count_native()
+            return v
+    if entry is None and argc == 1 and w_block is None and mid == UNPACK1 \
+            and send_owners.string_unpack1 != 0 \
+            and dispatch.owner_of(klass, UNPACK1) == \
+            send_owners.string_unpack1:
+        v = boot.unpack1_double(recv, frame.stack[recv_at + 1],
+                                value.int2fix(0))
+        if v != value.Q_UNDEF:
+            _drop(frame, recv_at)
+            debug.count_native()
+            return v
     if entry is None and argc <= 1:
         # A send an opt_* instruction would have caught if YARV had one for it.
         if argc == 1:
@@ -665,6 +685,9 @@ BUFFER = symbols.intern('buffer')
 GETBYTE = symbols.intern('getbyte')
 SETBYTE = symbols.intern('setbyte')
 ALLOCATE = symbols.intern('allocate')
+FORCE_ENCODING = symbols.intern('force_encoding')
+UNPACK1 = symbols.intern('unpack1')
+OFFSET = symbols.intern('offset')
 
 DEFINED_IVAR = 2
 DEFINED_GVAR = 4
@@ -695,7 +718,8 @@ class _SendOwners(object):
     # Quasi-immutable: install() writes it once, before any Ruby code runs.
     _immutable_fields_ = ['kernel?', 'basic?', 'string_getbyte?',
                           'string_setbyte?', 'array_each_slice?',
-                          'comparable?', 'class_allocate?']
+                          'comparable?', 'class_allocate?',
+                          'string_force_encoding?', 'string_unpack1?']
 
     def __init__(self):
         self.kernel = 0
@@ -706,6 +730,8 @@ class _SendOwners(object):
         self.array_each_slice = 0
         self.comparable = 0
         self.class_allocate = 0
+        self.string_force_encoding = 0
+        self.string_unpack1 = 0
 
 
 # Kernel#send and BasicObject#__send__, so a class that overrides either is seen.
@@ -1192,6 +1218,18 @@ def _kw_invoke(frame, w_ci, recv_at, argc, w_block, mid, fcall):
             if e.w_block is not w_block:
                 raise
             return e.value
+    # The one keyword shape String#unpack1 has, answered without building the Hash the boundary call would need.
+    if entry is None and w_block is None and argc == 2 and mid == UNPACK1 \
+            and len(w_ci.kw_names) == 1 and w_ci.kw_names[0] == OFFSET \
+            and send_owners.string_unpack1 != 0 \
+            and dispatch.owner_of(klass, UNPACK1) == \
+            send_owners.string_unpack1:
+        v = boot.unpack1_double(recv, frame.stack[recv_at + 1],
+                                frame.stack[recv_at + 2])
+        if v != value.Q_UNDEF:
+            _drop(frame, recv_at)
+            debug.count_native()
+            return v
     # As in invoke(): a block RPyYARV holds runs here, so its keyword parameters do not have to survive a round trip through libruby.
     if proxy.value != 0 and recv == proxy.value:
         return _block_send(frame, mid, recv_at, argc, frame.block,
@@ -2955,6 +2993,10 @@ def install():
         value.core_class(value.C_ARRAY), EACH_SLICE)
     send_owners.class_allocate = dispatch.owner_of(
         value.core_class(value.C_CLASS), ALLOCATE)
+    send_owners.string_force_encoding = dispatch.owner_of(
+        value.core_class(value.C_STRING), FORCE_ENCODING)
+    send_owners.string_unpack1 = dispatch.owner_of(
+        value.core_class(value.C_STRING), UNPACK1)
     send_owners.comparable = dispatch.const_get(
         value.core_class(value.C_OBJECT), symbols.intern('Comparable'))
     encodings.value = dispatch.const_get(

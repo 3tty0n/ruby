@@ -127,7 +127,7 @@ gccheck:
 	          test/defaultgems.rb test/modevalproc.rb \
 	          test/strevallocals.rb test/refinements.rb test/superblock.rb \
 	          test/bmethod.rb test/visibility.rb test/fiberblock.rb \
-	          test/allocfast.rb \
+	          test/allocfast.rb test/strwire.rb \
 	          $(TOP)/benchmark/app_*.rb $(TOP)/benchmark/so_*.rb; do \
 	   n=`basename $$s`; \
 	   case $$s in test/*) \
