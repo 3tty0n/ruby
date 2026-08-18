@@ -183,6 +183,16 @@ def invoke(frame, w_ci, w_block=None):
             _drop(frame, recv_at)
             debug.count_native()
             return v
+    if entry is None and argc == 0 and w_block is None and mid == ALLOCATE \
+            and not value.is_immediate(recv) \
+            and send_owners.class_allocate != 0 \
+            and dispatch.owner_of(klass, ALLOCATE) == \
+            send_owners.class_allocate:
+        v = boot.alloc_default(recv)
+        if v != value.Q_UNDEF:
+            _drop(frame, recv_at)
+            debug.count_native()
+            return v
     if entry is None and argc <= 1:
         # A send an opt_* instruction would have caught if YARV had one for it.
         if argc == 1:
@@ -654,6 +664,7 @@ SUCC = symbols.intern('succ')
 BUFFER = symbols.intern('buffer')
 GETBYTE = symbols.intern('getbyte')
 SETBYTE = symbols.intern('setbyte')
+ALLOCATE = symbols.intern('allocate')
 
 DEFINED_IVAR = 2
 DEFINED_GVAR = 4
@@ -684,7 +695,7 @@ class _SendOwners(object):
     # Quasi-immutable: install() writes it once, before any Ruby code runs.
     _immutable_fields_ = ['kernel?', 'basic?', 'string_getbyte?',
                           'string_setbyte?', 'array_each_slice?',
-                          'comparable?']
+                          'comparable?', 'class_allocate?']
 
     def __init__(self):
         self.kernel = 0
@@ -694,6 +705,7 @@ class _SendOwners(object):
         self.string_setbyte = 0
         self.array_each_slice = 0
         self.comparable = 0
+        self.class_allocate = 0
 
 
 # Kernel#send and BasicObject#__send__, so a class that overrides either is seen.
@@ -2941,6 +2953,8 @@ def install():
         value.core_class(value.C_STRING), SETBYTE)
     send_owners.array_each_slice = dispatch.owner_of(
         value.core_class(value.C_ARRAY), EACH_SLICE)
+    send_owners.class_allocate = dispatch.owner_of(
+        value.core_class(value.C_CLASS), ALLOCATE)
     send_owners.comparable = dispatch.const_get(
         value.core_class(value.C_OBJECT), symbols.intern('Comparable'))
     encodings.value = dispatch.const_get(

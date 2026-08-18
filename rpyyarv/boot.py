@@ -167,6 +167,7 @@ rb_class_superclass = _ext('rpyyarv_class_superclass', [VALUE, INTP], VALUE, ree
 rb_singleton_class = _ext('rpyyarv_singleton_class', [VALUE, INTP], VALUE, reenters=True)
 rb_obj_alloc = _ext('rpyyarv_obj_alloc', [VALUE, INTP], VALUE, reenters=True)
 rb_obj_alloc_fast = _ext('rpyyarv_obj_alloc_fast', [VALUE], VALUE, reenters=True)
+rb_alloc_default = _ext('rpyyarv_alloc_default', [VALUE], VALUE, reenters=True)
 rb_const_get_ = _ext('rpyyarv_const_get', [VALUE, VALUE, INTP], VALUE, reenters=True)
 rb_const_at_ = _ext('rpyyarv_const_at', [VALUE, VALUE, INTP], VALUE,
                     reenters=True)
@@ -1128,6 +1129,11 @@ def singleton_class(obj):
 
 def obj_alloc_fast(klass):
     return rffi.cast(lltype.Signed, rb_obj_alloc_fast(_v(klass)))
+
+
+def alloc_default(klass):
+    """The unprotected Class#allocate: Qundef whenever the shim is not sure the allocation cannot raise."""
+    return rffi.cast(lltype.Signed, rb_alloc_default(_v(klass)))
 
 
 def obj_alloc(klass):

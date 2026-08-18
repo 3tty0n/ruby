@@ -8,6 +8,8 @@
 /* In-tree, so the object-shape API libruby does not export is still reachable. */
 #include "shape.h"
 #include "internal/array.h"
+/* RCLASS_SINGLETON_P/RCLASS_INITIALIZED_P, the raises Class#allocate's fast path has to rule out. */
+#include "internal/class.h"
 /* Its STATIC_ASSERTs are what let the RPython ivar fast path read an imemo/fields with the RObject layout. */
 #include "internal/imemo.h"
 #include "internal/numeric.h"
@@ -1062,6 +1064,19 @@ uintptr_t
 rpyyarv_obj_alloc_fast(uintptr_t klass)
 {
     return (uintptr_t)rb_obj_alloc((VALUE)klass);
+}
+
+/* Class#allocate without rb_protect: Qundef unless every raise rb_obj_alloc reaches is ruled out first -- its Check_Type, class_get_alloc_func's uninitialized/singleton/undefined-allocator trio, and, since only Object's own allocator gets through, class_call_alloc_func's wrong-instance-allocation check, which that allocator cannot trip. */
+uintptr_t
+rpyyarv_alloc_default(uintptr_t klass)
+{
+    static rb_alloc_func_t object_alloc;
+    VALUE k = (VALUE)klass;
+    if (!object_alloc) object_alloc = rb_get_alloc_func(rb_cObject);
+    if (!RB_TYPE_P(k, T_CLASS) || RCLASS_SINGLETON_P(k)
+        || !RCLASS_INITIALIZED_P(k) || rb_get_alloc_func(k) != object_alloc)
+        return (uintptr_t)Qundef;
+    return (uintptr_t)rb_obj_alloc(k);
 }
 
 static VALUE
