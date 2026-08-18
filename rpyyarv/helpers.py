@@ -28,6 +28,8 @@ ASET = symbols.intern('[]=')
 LENGTH = symbols.intern('length')
 SIZE = symbols.intern('size')
 EMPTY_P = symbols.intern('empty?')
+BYTESIZE = symbols.intern('bytesize')
+ASCII_ONLY_P = symbols.intern('ascii_only?')
 LTLT = symbols.intern('<<')
 AND = symbols.intern('&')
 OR = symbols.intern('|')
@@ -965,6 +967,24 @@ def str_length(recv, mid):
     return boot.str_length(recv)
 
 
+def str_bytesize(recv):
+    """String#bytesize: RSTRING_LEN, which allocates nothing and cannot raise."""
+    if value.is_immediate(recv) or not boot.is_string(recv):
+        return value.Q_UNDEF
+    if not _owned_by_core(recv, value.C_STRING, BYTESIZE):
+        return value.Q_UNDEF
+    return value.int2fix(boot.str_bytesize(recv))
+
+
+def str_ascii_only_p(recv):
+    """String#ascii_only?: the coderange scan behind it neither allocates nor raises."""
+    if value.is_immediate(recv) or not boot.is_string(recv):
+        return value.Q_UNDEF
+    if not _owned_by_core(recv, value.C_STRING, ASCII_ONLY_P):
+        return value.Q_UNDEF
+    return boot.str_ascii_only_p(recv)
+
+
 def ary_sub_aref(recv, idx):
     """Array#[] with an Integer on a subclass that kept Array's; rb_ary_entry handles bounds and negatives."""
     if value.is_immediate(recv) or not value.is_fixnum(idx) \
@@ -1308,6 +1328,10 @@ def zero_arg(recv, mid):
         if v != value.Q_UNDEF:
             return v
         return str_length(recv, mid)
+    if mid == BYTESIZE:
+        return str_bytesize(recv)
+    if mid == ASCII_ONLY_P:
+        return str_ascii_only_p(recv)
     return range_part(recv, mid)
 
 

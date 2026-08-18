@@ -719,7 +719,8 @@ class _SendOwners(object):
     _immutable_fields_ = ['kernel?', 'basic?', 'string_getbyte?',
                           'string_setbyte?', 'array_each_slice?',
                           'comparable?', 'class_allocate?',
-                          'string_force_encoding?', 'string_unpack1?']
+                          'string_force_encoding?', 'string_unpack1?',
+                          'array_pack?']
 
     def __init__(self):
         self.kernel = 0
@@ -732,6 +733,7 @@ class _SendOwners(object):
         self.class_allocate = 0
         self.string_force_encoding = 0
         self.string_unpack1 = 0
+        self.array_pack = 0
 
 
 # Kernel#send and BasicObject#__send__, so a class that overrides either is seen.
@@ -1226,6 +1228,19 @@ def _kw_invoke(frame, w_ci, recv_at, argc, w_block, mid, fcall):
             send_owners.string_unpack1:
         v = boot.unpack1_double(recv, frame.stack[recv_at + 1],
                                 frame.stack[recv_at + 2])
+        if v != value.Q_UNDEF:
+            _drop(frame, recv_at)
+            debug.count_native()
+            return v
+    # The one keyword shape protoboeuf's generated encoder packs with, answered without building the Hash the boundary call would need.
+    if entry is None and w_block is None and argc == 2 \
+            and mid == helpers.PACK \
+            and len(w_ci.kw_names) == 1 and w_ci.kw_names[0] == BUFFER \
+            and send_owners.array_pack != 0 \
+            and dispatch.owner_of(klass, helpers.PACK) == \
+            send_owners.array_pack:
+        v = boot.pack_double_into(recv, frame.stack[recv_at + 1],
+                                  frame.stack[recv_at + 2])
         if v != value.Q_UNDEF:
             _drop(frame, recv_at)
             debug.count_native()
@@ -2997,6 +3012,8 @@ def install():
         value.core_class(value.C_STRING), FORCE_ENCODING)
     send_owners.string_unpack1 = dispatch.owner_of(
         value.core_class(value.C_STRING), UNPACK1)
+    send_owners.array_pack = dispatch.owner_of(
+        value.core_class(value.C_ARRAY), helpers.PACK)
     send_owners.comparable = dispatch.const_get(
         value.core_class(value.C_OBJECT), symbols.intern('Comparable'))
     encodings.value = dispatch.const_get(
@@ -3090,6 +3107,14 @@ def _newarray_send(frame, n, meth):
             i += 1
         v_ary = rubycall.ary_new(values)
         _drop(frame, at)
+        # Before the keyword Hash exists: the shim answers "E" outright, so the fused instruction allocates nothing but the eight bytes it appends.
+        if send_owners.array_pack != 0 \
+                and dispatch.owner_of(value.class_of(v_ary), helpers.PACK) \
+                == send_owners.array_pack:
+            v = boot.pack_double_into(v_ary, arg, buffer)
+            if v != value.Q_UNDEF:
+                debug.count_native()
+                return v
         kwargs = boot.hash_new(1)
         boot.hash_aset(kwargs, rubycall.sym_value(BUFFER), buffer)
         return rubycall.call_kw(v_ary, helpers.PACK, [arg, kwargs])

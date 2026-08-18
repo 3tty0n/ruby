@@ -3382,6 +3382,38 @@ rpyyarv_unpack1_double(uintptr_t str, uintptr_t fmt, uintptr_t offv)
     return (uintptr_t)rb_float_new(v);
 }
 
+/* String#ascii_only?: rb_enc_str_coderange only scans and caches the range in the flags, so it neither allocates nor raises. */
+uintptr_t
+rpyyarv_str_ascii_only_p(uintptr_t str)
+{
+    VALUE s = (VALUE)str;
+    if (!RB_TYPE_P(s, T_STRING)) return (uintptr_t)Qundef;
+    return (uintptr_t)RBOOL(rb_enc_str_coderange(s) == ENC_CODERANGE_7BIT);
+}
+
+/* [Float].pack("E", buffer: buf) without rb_protect: Qundef unless every raise pack_pack reaches is ruled out -- its buffer TypeError, rb_str_modify's whole STR_UNMODIFIABLE_MASK, the TOO_FEW on an empty Array, and rb_to_float's TypeError, which a Float element cannot trip. 'E' takes pack.c's default enc_info arm, so the buffer keeps whatever encoding and coderange rb_str_buf_cat leaves it. The host is assumed little-endian, as HTOVD is a no-op there; a big-endian one falls back. */
+uintptr_t
+rpyyarv_pack_double_into(uintptr_t ary, uintptr_t fmt, uintptr_t buf)
+{
+    VALUE a = (VALUE)ary, f = (VALUE)fmt, b = (VALUE)buf, from;
+    double d;
+#ifdef WORDS_BIGENDIAN
+    return (uintptr_t)Qundef;
+#endif
+    if (!RB_TYPE_P(a, T_ARRAY) || RARRAY_LEN(a) < 1
+        || !RB_TYPE_P(f, T_STRING) || RSTRING_LEN(f) != 1
+        || RSTRING_PTR(f)[0] != 'E'
+        || !RB_TYPE_P(b, T_STRING)
+        || FL_ANY_RAW(b, FL_FREEZE | FL_USER7 | STR_CHILLED))
+        return (uintptr_t)Qundef;
+    from = RARRAY_AREF(a, 0);
+    if (!RB_FLOAT_TYPE_P(from)) return (uintptr_t)Qundef;
+    d = RFLOAT_VALUE(from);
+    rb_str_modify(b);
+    rb_str_buf_cat(b, (char *)&d, sizeof(double));
+    return (uintptr_t)b;
+}
+
 struct sprintf_args {
     int argc;
     VALUE *argv;

@@ -293,6 +293,10 @@ rb_str_force_encoding_fast = _ext('rpyyarv_str_force_encoding_fast',
                                   [VALUE, VALUE], VALUE, reenters=True)
 rb_unpack1_double = _ext('rpyyarv_unpack1_double', [VALUE, VALUE, VALUE],
                          VALUE, reenters=True)
+# No reenters: scans and caches a coderange in the flags, allocating nothing.
+rb_str_ascii_only_p = _ext('rpyyarv_str_ascii_only_p', [VALUE], VALUE)
+rb_pack_double_into = _ext('rpyyarv_pack_double_into', [VALUE, VALUE, VALUE],
+                           VALUE, reenters=True)
 rb_sprintf_ = _ext('rpyyarv_sprintf', [rffi.INT, VALUEP, VALUE, INTP], VALUE,
                    reenters=True)
 rb_cgi_escape_html = _ext('rpyyarv_cgi_escape_html', [VALUE], VALUE)
@@ -1640,6 +1644,20 @@ def unpack1_double(s, fmt, offset):
     """The unprotected String#unpack1: Qundef unless the format is "E" and the eight bytes are in range."""
     return rffi.cast(lltype.Signed,
                      rb_unpack1_double(_v(s), _v(fmt), _v(offset)))
+
+
+def str_bytesize(v):
+    return rffi.cast(lltype.Signed, rb_str_len(_v(v)))
+
+
+def str_ascii_only_p(v):
+    return rffi.cast(lltype.Signed, rb_str_ascii_only_p(_v(v)))
+
+
+def pack_double_into(ary, fmt, buf):
+    """The unprotected Array#pack: Qundef unless the format is "E" and the one Float goes into a writable buffer."""
+    return rffi.cast(lltype.Signed,
+                     rb_pack_double_into(_v(ary), _v(fmt), _v(buf)))
 
 
 def hash_delete(hash_v, key):
