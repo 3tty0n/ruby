@@ -112,7 +112,9 @@ def run_once(argv, script, env, timeout)
     return [nil, "DELEGATED", info.merge("delegated" => first_delegation(text))]
   end
   unless status.success?
-    return [nil, status.exitstatus == 142 ? "TIMEOUT" : "FAIL", info.merge("why" => why(err, status))]
+    return [nil, status.exitstatus == 142 ? "TIMEOUT" : "FAIL",
+            info.merge("why" => why(err, status),
+                       "err_tail" => err[-400..-1] || err)]
   end
   times = []
   done = nil
@@ -125,7 +127,10 @@ def run_once(argv, script, env, timeout)
     when /\ADONE (\S+)/ then done = Regexp.last_match(1)
     end
   end
-  return [nil, "FAIL", info.merge("why" => "no DONE line")] if done != "true"
+  if done != "true"
+    return [nil, "FAIL", info.merge("why" => "no DONE line",
+                                    "err_tail" => err[-400..-1] || err)]
+  end
   [times, nil, info]
 end
 
@@ -144,8 +149,12 @@ def first_delegation(text)
   "delegated"
 end
 
+# Benign noise a run prints anyway: the reaper-thread refusal, debug counts.
+WHY_NOISE = /another thread is not supported|terminated with exception|invalidation #/
+
 def why(err, status)
-  msg = err.lines.map(&:chomp).reject { |l| l.include?("not loaded") }
+  msg = err.lines.map(&:chomp)
+           .reject { |l| l.include?("not loaded") || l =~ WHY_NOISE }
            .grep(/rror|xception|undefined|rpyyarv|undler|ould not find/).first
   return "exit #{status.exitstatus}" unless msg
   msg.gsub(%r{\S*/bench_tmp_drv_\S+\.rb:?}, "").strip[0, 100]
@@ -157,7 +166,9 @@ def time_engine(argv, script, env, warm, procs, timeout)
   per_proc = []
   procs.times do
     times, err, info = run_once(argv, script, env, timeout)
-    return { status: err } if err
+    if err
+      return { status: err, why: info["why"], err_tail: info["err_tail"] }
+    end
     # The harness says where warmup ended when WARMUP_TIME stretched it.
     w = info["warmed"] || warm
     pooled.concat(times[w..] || [])
