@@ -321,6 +321,14 @@ def foreign_report(suite, names, top)
       text.scan(/^\[rpyyarv\]   cruby (?:send|site): (.*)$/).flatten.first(top).each do |l|
         puts format("  %-22s %s", "", l)
       end
+      # Why files delegate, folded to the root cause so gems aggregate.
+      reasons = Hash.new(0)
+      text.scan(/^\[rpyyarv\]   delegated to cruby: (.*)$/).flatten.each do |l|
+        reasons[l[/'\w+' is not implemented/] || l.sub(/\A\S+ /, "")] += 1
+      end
+      reasons.sort_by { |_, n| -n }.first(top).each do |r, n|
+        puts format("  %-22s %4d file(s): %s", "", n, r)
+      end
     end
   end
 end
