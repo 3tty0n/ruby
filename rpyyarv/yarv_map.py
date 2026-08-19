@@ -91,7 +91,9 @@ EMIT = {
     'definesmethod': [0, 1],
     'opt_send_without_block': [0],
     'send': [0, 1],         # blockiseq is iseq.NO_BLOCK_ISEQ when absent
+    'sendforward': [0, 1],
     'invokesuper': [0, 1],
+    'invokesuperforward': [0, 1],
     'invokeblock': [0],
     'throw': [0],
     'checkmatch': [0],      # a rescue clause's class test, and case/when

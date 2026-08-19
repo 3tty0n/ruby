@@ -108,6 +108,14 @@ def _read_iseq(program, pending, owners, ary, parent):
     raw.kw_bits = _int_or(boot.hash_aref(params, 'kwbits'), -1)
     raw.kwrest = _int_or(boot.hash_aref(params, 'kwrest'), -1)
     raw.local_names = _local_names(boot.ary_entry(ary, I_LOCALS))
+    if raw.rest_start < 0:
+        for _i in range(len(raw.local_names)):
+            if raw.local_names[_i] == '...':
+                raw.rest_start = _i
+                # arg_size counted the `...`; it is the rest, not a lead.
+                raw.lead_num = 0
+                raw.forwardable = True
+                break
     if len(names) > 0 and raw.kw_bits < 0:
         raise LoadError("'%s' has keyword parameters but no kwbits slot: %s"
                         % (raw.name, _MOVED))

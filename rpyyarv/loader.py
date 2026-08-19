@@ -276,6 +276,9 @@ class Loader(object):
                         [t for t in pool.case_tables],
                         [p for p in line_pcs], [n for n in line_nums],
                         shares, [n for n in raw.local_names])
+        if raw.forwardable:
+            # The `...` rest carries keywords the ruby2_keywords way.
+            w_iseq.r2k = True
         gcroots.register_consts(consts)
         # The `once` cache lives here; the mark hook walks the list.
         gcroots.register_consts(w_iseq.once_cache)
@@ -300,10 +303,6 @@ class Loader(object):
                 return True
         return False
 
-    # What the compiler may push between the FrozenCore receiver and its send.
-    VMCORE_PUSHES = [insns.PUTSPECIALOBJECT, insns.PUTOBJECT, insns.PUTNIL,
-                     insns.PUTSELF, insns.GETLOCAL, insns.NEWHASH,
-                     insns.DUPHASH, insns.SWAP]
     # Ordinary public sends, so rb_funcallv runs them.
     VMCORE_SENDS = ['core#set_method_alias', 'core#undef_method',
                     'core#set_variable_alias',
@@ -311,24 +310,45 @@ class Loader(object):
                     'lambda']
 
     def check_vmcore(self, opcodes, operands, raw):
-        """FrozenCore's send (vm.c:4274) must be one of the implemented ones."""
+        """FrozenCore's consumer send (vm.c:4274) must be an implemented one."""
         for i in range(len(opcodes)):
             if opcodes[i] != insns.PUTSPECIALOBJECT:
                 continue
             if self.int_of(operands[i][0], opcodes[i], raw, 'object type') != \
                     optable.SPECIAL_OBJECT_VMCORE:
                 continue
+            # Walk the stack depth to the send whose receiver this push is;
+            # anything inconclusive defers to the runtime's receiver guard.
+            depth = 1
             j = i + 1
-            while j < len(opcodes) and opcodes[j] in self.VMCORE_PUSHES:
+            while j < len(opcodes):
+                op = opcodes[j]
+                if op == insns.SEND or op == insns.OPT_SEND_WITHOUT_BLOCK:
+                    ci = operands[j][0]
+                    pops = ci.intval + len(ci.kw_names) + 1
+                    if ci.flag & optable.CALL_FLAG_ARGS_BLOCKARG:
+                        pops += 1
+                    if depth == pops:
+                        if ci.strval not in self.VMCORE_SENDS:
+                            raise UnsupportedOperation(
+                                "RubyVM::FrozenCore#%s is not supported"
+                                % ci.strval)
+                        break
+                    if depth < pops:
+                        break
+                    depth += 1 - pops
+                elif insns.IS_BRANCH[op] or op == insns.JUMP \
+                        or op == insns.LEAVE or op == insns.THROW:
+                    break
+                else:
+                    pop = insns.STACK_POP[op]
+                    push = insns.STACK_PUSH[op]
+                    if pop < 0 or push < 0:
+                        break
+                    depth += push - pop
+                    if depth <= 0:
+                        break
                 j += 1
-            mid = ''
-            if j < len(opcodes) and (opcodes[j] == insns.SEND or
-                                     opcodes[j] == insns.OPT_SEND_WITHOUT_BLOCK):
-                mid = operands[j][0].strval
-            # The runtime guards the real receiver; defer an inconclusive scan.
-            if mid != '' and mid not in self.VMCORE_SENDS:
-                raise UnsupportedOperation(
-                    "RubyVM::FrozenCore#%s is not supported" % mid)
 
     def opt_table(self, raw, labels):
         """iseq.c:3425 writes opt_num+1 labels; vm_args.c:906 indexes them."""
@@ -454,6 +474,10 @@ class Loader(object):
                 optable.TAG_MASK
             if tag == optable.TAG_REDO:
                 raise UnsupportedOperation('redo is not supported')
+        elif op == insns.SENDFORWARD or op == insns.INVOKESUPERFORWARD:
+            if ops[1].kind != rawiseq.OP_NIL:
+                raise UnsupportedOperation(
+                    'a written block on a forwarding call is not supported')
         elif op == insns.PUTSPECIALOBJECT:
             kind = self.int_of(ops[0], op, raw, 'object type')
             if kind < optable.SPECIAL_OBJECT_VMCORE or \
@@ -652,6 +676,15 @@ class Loader(object):
                 "the call to '%s' needs CRuby's lexical refinements"
                 % operand.strval)
         flags = operand.flag
+        argc_extra = 0
+        if flags & optable.CALL_FLAG_FORWARDING:
+            # f(...): the `...` rest local is on the stack; run as f(*rest).
+            flags = (flags & ~optable.CALL_FLAG_FORWARDING) | \
+                optable.CALL_FLAG_ARGS_SPLAT
+            if op == insns.SENDFORWARD:
+                # Blockarg-shaped: a forwarded break unwinds past this frame.
+                flags |= optable.CALL_FLAG_ARGS_BLOCKARG
+            argc_extra = 1
         # Not ARGS_SIMPLE: CRuby clears it whenever a block ISeq is attached.
         simple = (not operand.has_kwarg
                   and (flags & ~optable.SIMPLE_CALL_FLAGS) == 0)
@@ -671,7 +704,7 @@ class Loader(object):
                 kw_names.append(symbols.intern(name))
         # iseq.c:3537 reports orig_argc without them; a **splat Hash counts.
         return W_CallInfo(symbols.intern(operand.strval),
-                          operand.intval + len(kw_names),
+                          operand.intval + len(kw_names) + argc_extra,
                           simple, (flags & optable.CALL_FLAG_FCALL) != 0,
                           (flags & optable.CALL_FLAG_SUPER) != 0, blockarg,
                           [m for m in kw_names], kw_splat, splat)

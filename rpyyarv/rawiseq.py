@@ -79,6 +79,8 @@ class RawISeq(object):
         self.opt_labels = opt_labels if opt_labels is not None else []
         # Local slots, as iseq.c:3438 spells them; -1 when the kind is absent.
         self.rest_start = rest_start
+        # def m(...): bound as ruby2_keywords def m(*rest, &blk) would be.
+        self.forwardable = False
         self.post_start = post_start
         self.post_num = post_num
         # `{|a| }`, whose single parameter takes a yielded Array whole.

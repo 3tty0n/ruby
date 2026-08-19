@@ -1418,6 +1418,7 @@ def _splat_kw(args, kw_splat, trailing):
 @unroll_safe
 def _splat_invoke(frame, w_ci, recv_at, argc, w_block, mid, fcall):
     """A *splat call; the expansion may outrun the frame's sized stack."""
+    assert recv_at >= 0
     kw_names = w_ci.kw_names
     nkw = len(kw_names)
     trailing = 1 if w_ci.kw_splat else nkw
@@ -4057,6 +4058,19 @@ def _execute(iseq, frame, pc):
             idx = code[pc]
             pc += 1
             frame.push(invoke_block(frame, iseq.callinfos[idx]))
+        elif opcode == insns.SENDFORWARD:
+            idx = code[pc]
+            pc += 2
+            w_ci = iseq.callinfos[idx]
+            at = frame.sp - 1 - w_ci.argc
+            assert at >= 0
+            # The frame's own block rides along, as a bare super forwards it.
+            frame.push(_splat_invoke(frame, w_ci, at, w_ci.argc, frame.block,
+                                     w_ci.mid, w_ci.fcall))
+        elif opcode == insns.INVOKESUPERFORWARD:
+            idx = code[pc]
+            pc += 2
+            frame.push(invoke_super(frame, iseq.callinfos[idx]))
         elif opcode == insns.INVOKESUPER:
             idx = code[pc]
             block = code[pc + 1]
