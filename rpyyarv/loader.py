@@ -454,10 +454,6 @@ class Loader(object):
                 optable.TAG_MASK
             if tag == optable.TAG_REDO:
                 raise UnsupportedOperation('redo is not supported')
-        elif op == insns.INVOKESUPER:
-            if ops[1].kind != rawiseq.OP_NIL:
-                raise UnsupportedOperation(
-                    'super with a block is not supported')
         elif op == insns.PUTSPECIALOBJECT:
             kind = self.int_of(ops[0], op, raw, 'object type')
             if kind < optable.SPECIAL_OBJECT_VMCORE or \
@@ -673,8 +669,6 @@ class Loader(object):
                     "support" % (operand.strval, self.call_flag_name(operand)))
             for name in operand.kw_names:
                 kw_names.append(symbols.intern(name))
-        if blockarg and (flags & optable.CALL_FLAG_SUPER) != 0:
-            raise UnsupportedOperation('super with a block is not supported')
         # iseq.c:3537 reports orig_argc without them; a **splat Hash counts.
         return W_CallInfo(symbols.intern(operand.strval),
                           operand.intval + len(kw_names),

@@ -26,6 +26,7 @@ EMIT = {
     'newhash': [0],
     'duphash': [0],
     'splatarray': [0],      # the flag is a Qtrue/Qfalse VALUE operand
+    'splatkw': [],
     'pushtoarray': [0],
     'concatarray': [],
     'concattoarray': [],

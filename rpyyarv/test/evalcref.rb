@@ -25,3 +25,25 @@ p $seen_self == EvalDst
 o = Object.new
 o.instance_eval(&BlockHome::STORE)
 p $seen_self.equal?(o)
+
+# alias inside a block-form class_eval: CBASE is the receiver, not the
+# enclosing body (vm_get_cbase keeps eval-pushed crefs, CONST_BASE skips).
+module Kernelish
+  def greet
+    :hi
+  end
+end
+dup2 = Kernelish.dup
+class AliasHost
+  DUP2 = 1
+  def self.wire(m)
+    m.class_eval do
+      alias hello greet
+    end
+  end
+end
+AliasHost.wire(dup2)
+class UsesDup; include Module.new; end
+UsesDup.include dup2
+p UsesDup.new.hello
+p UsesDup.new.greet

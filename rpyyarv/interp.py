@@ -330,10 +330,9 @@ def invoke(frame, w_ci, w_block=None):
     if w_block is not None and entry is None and argc == 0 \
             and (mid == CLASS_EVAL or mid == MODULE_EVAL) \
             and w_block.kind == block_mod.KIND_ISEQ \
-            and (dispatch.is_known_class(recv)
-                 or dispatch.is_known_module(recv)) \
             and dispatch.owner_of(klass, mid) == \
-            value.core_class(value.C_MODULE):
+            value.core_class(value.C_MODULE) \
+            and _eval_receiver(recv):
         return _module_eval_block(frame, recv, recv_at, w_block)
     if _is_attr_mid(mid) and argc > 0 and not value.is_immediate(recv) \
             and (dispatch.is_known_class(recv)
@@ -1857,19 +1856,19 @@ def _opt_send(frame, mid, argc):
 
 @unroll_safe
 def _super_to_cruby(frame, klass, owner, mid, recv_at, argc, kw_splat,
-                    kw_names=NO_KEYWORDS):
+                    kw_names=NO_KEYWORDS, w_block=None):
     args = []
     i = 0
     while i < argc:
         args.append(frame.stack[recv_at + 1 + i])
         i += 1
     return _super_to_cruby_args(frame, klass, owner, mid, recv_at, args,
-                                kw_splat, kw_names)
+                                kw_splat, kw_names, w_block)
 
 
 @unroll_safe
 def _super_to_cruby_args(frame, klass, owner, mid, recv_at, args, kw_splat,
-                         kw_names=NO_KEYWORDS):
+                         kw_names=NO_KEYWORDS, w_block=None):
     """super onto a CRuby-owned method: the one after owner on klass's chain."""
     recv = frame.stack[recv_at]
     if mid == INITIALIZE and len(args) == 0 \
@@ -1880,10 +1879,10 @@ def _super_to_cruby_args(frame, klass, owner, mid, recv_at, args, kw_splat,
     if len(kw_names) > 0:
         args = _kw_to_positional(args, kw_names)
     _drop(frame, recv_at)
-    # The frame's own block: a bare super forwards the one it was given.
+    # blk: the frame's own for a bare super, the written one otherwise.
     ret = rubycall.call_super(klass, owner, recv, mid, args,
                               kw_splat or len(kw_names) > 0,
-                              _to_proc(frame.block))
+                              _to_proc(w_block))
     if ret == value.Q_UNDEF:
         raise UnsupportedOperation(
             "super from '%s' reaches a method its owner does not define"
@@ -1892,13 +1891,49 @@ def _super_to_cruby_args(frame, klass, owner, mid, recv_at, args, kw_splat,
     return ret
 
 
+METHOD_MISSING = symbols.intern('method_missing')
+
+
 @unroll_safe
-def invoke_super(frame, w_ci):
+def _super_missing_args(frame, mid, recv_at, args, kw_splat, kw_names,
+                        w_block):
+    """A super with no superclass method reaches method_missing (vm_eval.c)."""
+    recv = frame.stack[recv_at]
+    if len(kw_names) > 0:
+        args = _kw_to_positional(args, kw_names)
+    full = [rubycall.sym_value(mid)]
+    i = 0
+    while i < len(args):
+        full.append(args[i])
+        i += 1
+    _drop(frame, recv_at)
+    kw = kw_splat or len(kw_names) > 0
+    proc_v = _to_proc(w_block)
+    if proc_v != value.Q_NIL:
+        return rubycall.call_with_proc(recv, METHOD_MISSING, full, proc_v, kw)
+    if kw:
+        return rubycall.call_kw(recv, METHOD_MISSING, full)
+    return rubycall.call(recv, METHOD_MISSING, full)
+
+
+@unroll_safe
+def invoke_super(frame, w_ci, w_block=None, has_block=False):
     """A send's lookup, resumed above the running method's owner."""
     entry = frame.entry
     if entry is None:
         raise UnsupportedOperation(
             'super outside a method body is not supported')
+    if w_ci.blockarg:
+        # Read before pop, so frame marks it across the alloc (vm_args.c:1119).
+        top = frame.sp - 1
+        if top < 0:
+            raise UnsupportedOperation(
+                "super passes a &block the stack does not hold")
+        w_block = _block_from_value(frame.block, frame.stack[top])
+        frame.pop()
+        # super(&nil) suppresses forwarding; only a bare super inherits.
+        has_block = True
+    blk = w_block if has_block else frame.block
     argc = w_ci.argc
     recv_at = frame.sp - argc - 1
     if recv_at < 0:
@@ -1921,29 +1956,36 @@ def invoke_super(frame, w_ci):
     if owner != value.Q_NIL:
         target = dispatch.lookup_owned(owner, entry.mid)
     if target is None and owner == value.Q_NIL:
-        # rb_call_super's NoMethodError needs a CRuby frame RPyYARV lacks.
-        raise UnsupportedOperation(
-            "super from '%s' has no superclass method"
-            % symbols.name_of(entry.mid))
+        # vm_call_method_missing: a missing super falls back to it.
+        if w_ci.splat:
+            trailing = 1 if w_ci.kw_splat else len(w_ci.kw_names)
+            args = _splat_args(frame, recv_at + 1, argc - trailing, trailing)
+        else:
+            args = []
+            i = 0
+            while i < argc:
+                args.append(frame.stack[recv_at + 1 + i])
+                i += 1
+        return _super_missing_args(frame, entry.mid, recv_at, args,
+                                   w_ci.kw_splat, w_ci.kw_names, blk)
     if w_ci.splat:
         trailing = 1 if w_ci.kw_splat else len(w_ci.kw_names)
         args = _splat_args(frame, recv_at + 1, argc - trailing, trailing)
         if target is None:
             return _super_to_cruby_args(frame, klass, entry.owner, entry.mid,
                                         recv_at, args, w_ci.kw_splat,
-                                        w_ci.kw_names)
+                                        w_ci.kw_names, blk)
         if target.kind != dispatch.KIND_ISEQ:
-            return _attr_send_args(frame, target, recv, recv_at, args,
-                                   frame.block)
+            return _attr_send_args(frame, target, recv, recv_at, args, blk)
         return _enter_args(frame, target, recv, recv_at, args, entry.mid,
-                           frame.block, w_ci.kw_names, w_ci.kw_splat)
+                           blk, w_ci.kw_names, w_ci.kw_splat)
     if target is None:
         return _super_to_cruby(frame, klass, entry.owner, entry.mid, recv_at,
-                               argc, w_ci.kw_splat, w_ci.kw_names)
+                               argc, w_ci.kw_splat, w_ci.kw_names, blk)
     if target.kind != dispatch.KIND_ISEQ:
-        return _attr_send(frame, target, recv, recv_at, argc, frame.block)
+        return _attr_send(frame, target, recv, recv_at, argc, blk)
     return _enter(frame, target, recv, recv_at, argc,
-                  entry.mid, frame.block, w_ci.kw_names, w_ci.kw_splat)
+                  entry.mid, blk, w_ci.kw_names, w_ci.kw_splat)
 
 
 # alias/undef compile to a send of one of these (vm.c); registry must see.
@@ -3392,6 +3434,14 @@ def _cvar_set(cref, mid, v):
     boot.cvar_set(_cvar_base(cref), rubycall.rid(mid), v)
 
 
+def _cbase(frame):
+    """vm_get_cbase: innermost cref klass, an eval-pushed one included."""
+    node = frame.cref
+    if node is not None and node.klass != 0:
+        return node.klass
+    return _const_base(frame)
+
+
 def _const_base(frame):
     """The cbase a `class Foo::Bar` or a setconstant resolves against."""
     node = frame.cref
@@ -3880,8 +3930,10 @@ def _execute(iseq, frame, pc):
             pc += 1
             if kind == optable.SPECIAL_OBJECT_VMCORE:
                 frame.push(_vm_core())
+            elif kind == optable.SPECIAL_OBJECT_CBASE:
+                # vm_get_cbase: an eval-pushed cref counts, unlike CONST_BASE.
+                frame.push(_cbase(frame))
             else:
-                # CBASE and CONST_BASE differ only for a singleton class body.
                 frame.push(_const_base(frame))
         elif opcode == insns.OPT_GETCONSTANT_PATH:
             idx = code[pc]
@@ -3961,9 +4013,12 @@ def _execute(iseq, frame, pc):
             block = code[pc + 1]
             pc += 2
             if block != NO_BLOCK_ISEQ:
-                raise UnsupportedOperation(
-                    'super with a block is not supported')
-            frame.push(invoke_super(frame, iseq.callinfos[idx]))
+                w_blk = block_mod.W_Block(iseq.iseqs[block], frame,
+                                          frame.block)
+                frame.push(invoke_super(frame, iseq.callinfos[idx], w_blk,
+                                        True))
+            else:
+                frame.push(invoke_super(frame, iseq.callinfos[idx]))
         elif opcode == insns.JUMP:
             target = code[pc]
             pc += 1
@@ -4200,6 +4255,12 @@ def _execute(iseq, frame, pc):
             b = frame.pop()
             a = frame.pop()
             frame.push(_binop(frame, a, b, MATCH))
+        elif opcode == insns.SPLATKW:
+            block_v = frame.pop()
+            hash_v = frame.pop()
+            frame.push(value.Q_NIL if hash_v == value.Q_NIL
+                       else rubycall.to_hash_type(hash_v))
+            frame.push(block_v)
         elif opcode == insns.OPT_DUPARRAY_SEND:
             idx = code[pc]
             mid = code[pc + 1]

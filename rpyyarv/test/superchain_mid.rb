@@ -6,3 +6,11 @@ class Mid < Top
     @mid = :mid
   end
 end
+class YieldBase
+  def with_block(x)
+    yield(x) + 1
+  end
+  def fwd(x)
+    block_given? ? yield(x) * 10 : -1
+  end
+end

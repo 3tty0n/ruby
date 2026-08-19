@@ -32,3 +32,48 @@ class Aliased
   alias_method :other, :orig
 end
 p Aliased.new.other
+
+# super carrying a block: written, forwarded via &, and suppressed by &nil.
+class YieldDeriv < YieldBase
+  def with_block(x)
+    super(x) { |v| v * 2 } + 100
+  end
+  def fwd(x, &b)
+    super(x, &b)
+  end
+  def quiet(x)
+    fwd(x, &nil)
+  end
+end
+d = YieldDeriv.new
+p d.with_block(3)
+p(d.fwd(4) { |v| v + 5 })
+p d.quiet(9)
+class NativeYieldBase
+  def twice(x)
+    yield(x) * 2
+  end
+end
+class NativeYieldDeriv < NativeYieldBase
+  def twice(x)
+    super(x) { |v| v + 7 } - 1
+  end
+end
+p NativeYieldDeriv.new.twice(10)
+
+# A super with no superclass method falls back to method_missing.
+class GhostBase
+  def method_missing(name, *args, &blk)
+    return "mm-#{name}-#{args.inspect}-#{blk ? blk.call : :noblk}" if name == :ghost
+    super
+  end
+  def respond_to_missing?(n, priv = false)
+    n == :ghost || super
+  end
+end
+class GhostDeriv < GhostBase
+  def ghost(a, **o)
+    super { :fromblk }
+  end
+end
+p GhostDeriv.new.ghost(1, x: 2)
