@@ -33,7 +33,8 @@ def use_gemfile(*_rest)
   end
 end
 
-def run_benchmark(_num_itrs_hint, *_rest)
+# ractor_args mirrors upstream's non-ractor mode: yield(0, *args), whole list.
+def run_benchmark(_num_itrs_hint, *_rest, ractor_args: [])
   total = 0
   measured = 0
   n = 0
@@ -41,7 +42,7 @@ def run_benchmark(_num_itrs_hint, *_rest)
   recent = []
   loop do
     t0 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-    yield
+    yield(0, *ractor_args)
     t1 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
     ms = (t1 - t0) * 1000.0
     total += ms
