@@ -425,6 +425,17 @@ def invoke(frame, w_ci, w_block=None):
                 if e.w_block is not w_block:
                     raise
                 return e.value
+    if w_block is not None and mid == EACH_WITH_INDEX and argc == 0 and \
+            entry is None and value.is_plain_array(recv) and \
+            dispatch.owner_of(klass, EACH_WITH_INDEX) == \
+            send_owners.array_each_with_index:
+        _drop(frame, recv_at)
+        try:
+            return _array_each_with_index(recv, w_block)
+        except block_mod.BlockBreak, e:
+            if e.w_block is not w_block:
+                raise
+            return e.value
     if entry is None and w_block is None and not value.is_immediate(recv) \
             and (raw_word(recv, value.FLAGS_WORD) & value.T_MASK) == \
             value.T_STRUCT:
@@ -610,6 +621,16 @@ def _array_each_slice(ary, size, w_block):
     return ary
 
 
+def _array_each_with_index(ary, w_block):
+    """Enumerable#each_with_index for a plain Array, no CRuby per element."""
+    i = 0
+    # Length re-read each pass: mutation mid-iteration behaves like CRuby.
+    while i < value.ary_len(ary):
+        call_block(w_block, [value.ary_at(ary, i), value.int2fix(i)])
+        i += 1
+    return ary
+
+
 NEW = symbols.intern('new')
 INITIALIZE = symbols.intern('initialize')
 BLOCK_GIVEN = symbols.intern('block_given?')
@@ -678,6 +699,7 @@ def _dir_of(frame):
 ITSELF = symbols.intern('itself')
 REVERSE_EACH = symbols.intern('reverse_each')
 EACH_SLICE = symbols.intern('each_slice')
+EACH_WITH_INDEX = symbols.intern('each_with_index')
 INDEX = symbols.intern('index')
 SUCC = symbols.intern('succ')
 BUFFER = symbols.intern('buffer')
@@ -717,6 +739,7 @@ class _SendOwners(object):
     # Quasi-immutable: install() writes it once, before any Ruby code runs.
     _immutable_fields_ = ['kernel?', 'basic?', 'string_getbyte?',
                           'string_setbyte?', 'array_each_slice?',
+                          'array_each_with_index?',
                           'comparable?', 'class_allocate?',
                           'string_force_encoding?', 'string_unpack1?',
                           'array_pack?']
@@ -728,6 +751,7 @@ class _SendOwners(object):
         self.string_getbyte = 0
         self.string_setbyte = 0
         self.array_each_slice = 0
+        self.array_each_with_index = 0
         self.comparable = 0
         self.class_allocate = 0
         self.string_force_encoding = 0
@@ -3002,6 +3026,8 @@ def install():
         value.core_class(value.C_STRING), SETBYTE)
     send_owners.array_each_slice = dispatch.owner_of(
         value.core_class(value.C_ARRAY), EACH_SLICE)
+    send_owners.array_each_with_index = dispatch.owner_of(
+        value.core_class(value.C_ARRAY), EACH_WITH_INDEX)
     send_owners.class_allocate = dispatch.owner_of(
         value.core_class(value.C_CLASS), ALLOCATE)
     send_owners.string_force_encoding = dispatch.owner_of(
