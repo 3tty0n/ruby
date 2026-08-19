@@ -24,6 +24,7 @@
 #include "vm_core.h"
 #include "ractor_core.h"
 #include "yjit.h"
+#include "rpyyarv.h"
 
 const rb_cref_t *rb_vm_cref_in_context(VALUE self, VALUE cbase);
 
@@ -3108,7 +3109,22 @@ VALUE
 rb_callable_receiver(VALUE callable)
 {
     if (rb_obj_is_proc(callable)) {
-        VALUE binding = proc_binding(callable);
+        VALUE binding;
+        rb_proc_t *proc;
+        const struct rb_block *block;
+        GetProcPtr(callable, proc);
+        block = &proc->block;
+        while (vm_block_type(block) == block_type_proc) {
+            GetProcPtr(block->as.proc, proc);
+            block = &proc->block;
+        }
+        /* No binding to ask: a C-level proc names no receiver to warn on. */
+        if (vm_block_type(block) == block_type_symbol ||
+            (vm_block_type(block) == block_type_ifunc &&
+             !IS_METHOD_PROC_IFUNC(block->as.captured.code.ifunc))) {
+            return Qundef;
+        }
+        binding = proc_binding(callable);
         return rb_funcall(binding, rb_intern("receiver"), 0);
     }
     else if (rb_obj_is_method(callable)) {
@@ -3547,6 +3563,17 @@ rb_proc_new(
     VALUE val)
 {
     VALUE procval = rb_block_call(rb_mRubyVMFrozenCore, idProc, 0, 0, func, val);
+    return procval;
+}
+
+// rb_proc_new with a chosen captured self, so a caller can plant a sentinel.
+VALUE
+rb_rpyyarv_proc_new(rb_block_call_func_t func, VALUE data, VALUE self_v)
+{
+    VALUE procval = rb_proc_new(func, data);
+    rb_proc_t *proc;
+    GetProcPtr(procval, proc);
+    RB_OBJ_WRITE(procval, &proc->block.as.captured.self, self_v);
     return procval;
 }
 

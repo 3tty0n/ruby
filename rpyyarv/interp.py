@@ -317,7 +317,7 @@ def invoke(frame, w_ci, w_block=None):
             return v
     if entry is None and (mid == CLASS_EVAL or mid == MODULE_EVAL) and \
             w_block is None and argc >= 1 and argc <= 3 and \
-            (dispatch.is_known_class(recv) or dispatch.is_known_module(recv)):
+            _eval_receiver(recv):
         v = _module_eval_rpy(frame, recv, frame.stack[recv_at + 1],
                              frame.stack[recv_at + 2] if argc >= 2
                              else value.Q_NIL,
@@ -1052,6 +1052,19 @@ def _eval_rpy(frame, klass, recv, source):
 
 
 @dont_look_inside
+def _eval_receiver(recv):
+    """Out through CRuby a string eval's defs would lose their cref home."""
+    if dispatch.is_known_class(recv) or dispatch.is_known_module(recv):
+        return True
+    if value.is_immediate(recv):
+        return False
+    kind = raw_word(recv, value.FLAGS_WORD) & value.T_MASK
+    if kind != value.T_CLASS and kind != value.T_MODULE:
+        return False
+    dispatch.adopt(recv)
+    return True
+
+
 def _module_eval_rpy(frame, recv, source, file_v, line_v):
     """String class_eval/module_eval keeping the caller's lexical CREF."""
     if value.is_immediate(source) or not boot.is_string(source):
@@ -1979,7 +1992,8 @@ def _instance_eval(frame, mid, recv, recv_at, argc, w_block):
     sing = _singleton_of(recv)
     cref = None
     if sing != 0:
-        cref = _push_cref(_cref_of(frame), sing, True)
+        # Over the block's own chain (yield_under), never the caller's.
+        cref = _push_cref(_cref_of(w_block.frame), sing, True)
     _drop(frame, recv_at)
     return call_block(w_block, args, NO_KEYWORDS, False, recv, cref)
 
@@ -1988,7 +2002,8 @@ def _instance_eval(frame, mid, recv, recv_at, argc, w_block):
 def _module_eval_block(frame, recv, recv_at, w_block):
     """class_eval/module_eval block: CRuby would keep the written cref."""
     args = [recv]
-    cref = _push_cref(_cref_of(frame), recv, True)
+    # Over the block's own chain (yield_under), never the caller's.
+    cref = _push_cref(_cref_of(w_block.frame), recv, True)
     _drop(frame, recv_at)
     return call_block(w_block, args, NO_KEYWORDS, False, recv, cref)
 
@@ -2218,7 +2233,8 @@ def _alloc_handle(w_block):
         if h < 0:
             break
         _release_handle(h)
-    here = boot.current_receiver()
+    # The sentinel, not the live receiver: a real rebind must never collide.
+    here = boot.block_sentinel()
     if len(blocks.free) > 0:
         h = blocks.free.pop()
         blocks.table[h] = w_block
@@ -2401,13 +2417,30 @@ TRAMP_UNSUPPORTED = 2
 TRAMP_UNWIND = 3
 
 
-def trampoline_callback(self_v, rid, argc, argv, blockv, kw, statusp, errp):
+def trampoline_callback(self_v, rid, owner_v, def_v, argc, argv, blockv, kw,
+                        statusp, errp):
     """Called from C; failures leave via statusp/errp, never into libruby."""
     boot.store_int(statusp, TRAMP_OK)
     boot.store_value(errp, value.Q_NIL)
     recv = boot.as_signed(self_v)
-    mid, entry = dispatch.lookup_from_trampoline(boot.as_signed(rid),
-                                                  value.class_of(recv))
+    # The def CRuby dispatched: exact across alias/define_method copies.
+    entry = dispatch.lookup_from_def(boot.as_signed(def_v))
+    if entry is not None:
+        mid = rubycall.mid_of_rid(boot.as_signed(rid))
+        if mid == rubycall.NO_MID:
+            mid = entry.mid
+    else:
+        # From the owner CRuby chose: super/bind_call name an ancestor, and
+        # re-deriving from self's class would loop back to the most derived.
+        owner = boot.as_signed(owner_v)
+        if owner == value.Q_NIL or owner == 0:
+            owner = value.class_of(recv)
+        mid, entry = dispatch.lookup_from_trampoline(boot.as_signed(rid),
+                                                     owner)
+        if entry is None and owner != value.class_of(recv):
+            # Aliases and the like keep the old dynamic resolution as a net.
+            mid, entry = dispatch.lookup_from_trampoline(boot.as_signed(rid),
+                                                         value.class_of(recv))
     # argv lives on CRuby's VM stack for the call, so it needs no root.
     w_block = None
     proc_v = boot.as_signed(blockv)
@@ -2801,7 +2834,8 @@ def _outer_frame(frame, level):
         f = f.defining_frame
         if f is None:
             raise UnsupportedOperation(
-                'a local at level %d has no enclosing scope' % level)
+                'a local at level %d has no enclosing scope in %s (%s)'
+                % (level, frame.w_iseq.name, frame.w_iseq.path))
         i += 1
     return f
 
@@ -4174,7 +4208,9 @@ def _execute(iseq, frame, pc):
             frame.push(rubycall.call1(
                 rubycall.ary_resurrect(iseq.consts[idx]), mid, arg))
         else:
-            raise UnsupportedOperation('unknown opcode %d' % opcode)
+            raise UnsupportedOperation(
+                'unknown opcode %d in %s (%s) at pc %d'
+                % (opcode, iseq.name, iseq.path, pc))
 
 
 def run(iseq):

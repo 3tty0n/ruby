@@ -59,6 +59,7 @@ class Registry(object):
 
     def __init__(self):
         self.methods = {}       # klass VALUE -> {mid: MethodEntry}
+        self.defs = {}          # CRuby method-def address -> MethodEntry
         self.supers = {}        # klass VALUE -> superclass VALUE
         # Modules RPyYARV defined; never in supers, which holds only classes.
         self.modules = {}
@@ -84,11 +85,14 @@ def enable_trampolines():
 
 
 @dont_look_inside
-def _install_trampoline(klass, mid, private):
+def _install_trampoline(klass, mid, private, entry):
     """A CRuby entry beside the registry one; it resolves through lookup."""
     if not trampoline.enabled:
         return
-    boot.define_method_entry(klass, rubycall.rid(mid), private)
+    key = boot.define_method_entry(klass, rubycall.rid(mid), private)
+    # Copies of the entry (alias, define_method(Method)) share this def.
+    if key != 0:
+        registry.defs[key] = entry
 
 
 def _table_for(klass):
@@ -100,12 +104,13 @@ def _table_for(klass):
 
 
 def define(klass, mid, w_iseq, private, cref=0, lexical=None):
-    _table_for(klass)[mid] = MethodEntry(w_iseq, private, klass, mid, cref,
-                                         KIND_ISEQ, 0, lexical)
+    entry = MethodEntry(w_iseq, private, klass, mid, cref, KIND_ISEQ, 0,
+                        lexical)
+    _table_for(klass)[mid] = entry
     registry.version = Version()
     flush_trampoline_cache()
     invalidate_owners()
-    _install_trampoline(klass, mid, private)
+    _install_trampoline(klass, mid, private, entry)
 
 
 def define_attr(klass, mid, ivar, kind, private=False):
@@ -199,6 +204,12 @@ def flush_trampoline_cache():
     while i < _TC_SIZE:
         _tc_klasses[i] = 0
         i += 1
+
+
+@dont_look_inside
+def lookup_from_def(key):
+    """The entry a CRuby method-def address stands for; exact identity."""
+    return registry.defs.get(key, None)
 
 
 @dont_look_inside
@@ -415,6 +426,27 @@ def define_module(cbase, mid):
     # `def self.x` and module_function land on the singleton class.
     _record_ancestry(boot.singleton_class(mod))
     return mod
+
+
+@dont_look_inside
+def adopt(mod):
+    """Adopt a CRuby-made class/module, exactly as reopening it would."""
+    kind = raw_word(mod, value.FLAGS_WORD) & value.T_MASK
+    if kind == value.T_CLASS:
+        boot.gc_register(mod)
+        parent = boot.class_superclass(mod)
+        if parent == 0 or value.is_immediate(parent):
+            parent = value.core_class(value.C_OBJECT)
+        record_class(mod, parent)
+        _record_ancestry(boot.singleton_class(mod))
+    elif kind == value.T_MODULE:
+        registry.module_owned = True
+        registry.modules[mod] = True
+        registry.version = Version()
+        flush_trampoline_cache()
+        boot.gc_register(mod)
+        gcroots.register_class(mod)
+        _record_ancestry(boot.singleton_class(mod))
 
 
 @dont_look_inside

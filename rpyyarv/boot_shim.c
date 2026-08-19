@@ -2,6 +2,7 @@
 #include <stddef.h>
 #include <string.h>
 #include <locale.h>
+#include <pthread.h>
 #include <ruby.h>
 #include <ruby/re.h>
 
@@ -1601,6 +1602,28 @@ rpyyarv_pop_dead_handle(void)
     return n_dead ? dead_handles[--n_dead] : -1;
 }
 
+/* Defined by the trampoline block below; blocks need it earlier. */
+static void reject_foreign_thread(void);
+
+/* Handle procs capture this self: a rebind test that no receiver collides. */
+static VALUE block_self_sentinel = Qnil;
+
+static VALUE
+sentinel_self(void)
+{
+    if (NIL_P(block_self_sentinel)) {
+        block_self_sentinel = rb_obj_alloc(rb_cBasicObject);
+        rb_gc_register_mark_object(block_self_sentinel);
+    }
+    return block_self_sentinel;
+}
+
+uintptr_t
+rpyyarv_block_sentinel(void)
+{
+    return (uintptr_t)sentinel_self();
+}
+
 static VALUE
 block_yielder(RB_BLOCK_CALL_FUNC_ARGLIST(yielded, callback_arg))
 {
@@ -1612,6 +1635,7 @@ block_yielder(RB_BLOCK_CALL_FUNC_ARGLIST(yielded, callback_arg))
     (void)yielded;
     (void)blockarg;
     if (!block_callback) return Qnil;
+    reject_foreign_thread();
     if (n < 0) n = 0;
     if (n > RPYYARV_MAX_ARGC) n = RPYYARV_MAX_ARGC;
     for (i = 0; i < n; i++) buf[i] = argv[i];
@@ -1645,8 +1669,10 @@ call_with_block_body(VALUE argp)
     struct blockcall_args *a = (struct blockcall_args *)argp;
     VALUE owner = TypedData_Wrap_Struct(0, &handle_owner_type,
                                         (void *)(uintptr_t)(a->handle + 1));
-    return rb_block_call_kw(a->recv, a->mid, a->argc, a->argv, block_yielder,
-                            owner, a->kw_splat);
+    /* FCALL like rb_block_call, but the block self is the rebind sentinel. */
+    return rb_rpyyarv_block_call_kw(a->recv, a->mid, a->argc, a->argv,
+                                    block_yielder, owner, a->kw_splat,
+                                    sentinel_self());
 }
 
 struct proccall_args {
@@ -1662,8 +1688,9 @@ static VALUE
 call_with_proc_body(VALUE argp)
 {
     struct proccall_args *a = (struct proccall_args *)argp;
-    return rb_funcall_with_block_kw(a->recv, a->mid, a->argc, a->argv,
-                                    a->proc, a->kw_splat);
+    /* Private-allowed like rb_funcallv; funcall_with_block is public-only. */
+    return rb_rpyyarv_call_with_proc_kw(a->recv, a->mid, a->argc, a->argv,
+                                        a->proc, a->kw_splat);
 }
 
 /* The Proc itself, not an ifunc: a bounce through RPyYARV loses its cref. */
@@ -1726,10 +1753,24 @@ rpyyarv_call_with_block(uintptr_t recv, uintptr_t mid, int argc,
 
 static rpyyarv_tramp_fn tramp_callback;
 
+/* RPython state is single-threaded; a foreign thread must never enter it. */
+static pthread_t rpyyarv_thread;
+
+static void
+reject_foreign_thread(void)
+{
+    if (!pthread_equal(pthread_self(), rpyyarv_thread)) {
+        rb_raise(rb_eNotImpError,
+                 "rpyyarv: a call into RPyYARV from another thread is not "
+                 "supported");
+    }
+}
+
 void
 rpyyarv_set_trampoline_callback(rpyyarv_tramp_fn fn)
 {
     tramp_callback = fn;
+    rpyyarv_thread = pthread_self();
 }
 
 static VALUE
@@ -1737,6 +1778,10 @@ rpyyarv_trampoline(int argc, VALUE *argv, VALUE self)
 {
     /* argv is on the VM stack, already covered by rb_execution_context_mark. */
     ID mid = rb_frame_this_func();
+    /* super/bind_call name an owner; resolving from self would re-derive. */
+    VALUE owner = rb_rpyyarv_frame_owner();
+    /* The def survives alias/define_method copies where (owner, mid) lies. */
+    uintptr_t defkey = (uintptr_t)rb_rpyyarv_frame_method_def();
     VALUE blockproc = rb_block_given_p() ? rb_block_proc() : Qnil;
     /* A -1 cfunc gets the keyword Hash as a positional; only this flags it. */
     int kw = rb_keyword_given_p() ? 1 : 0;
@@ -1747,7 +1792,9 @@ rpyyarv_trampoline(int argc, VALUE *argv, VALUE self)
     if (!tramp_callback) {
         rb_raise(rb_eRuntimeError, "rpyyarv: no trampoline callback");
     }
-    r = (VALUE)tramp_callback((uintptr_t)self, (uintptr_t)mid, argc,
+    reject_foreign_thread();
+    r = (VALUE)tramp_callback((uintptr_t)self, (uintptr_t)mid,
+                              (uintptr_t)owner, defkey, argc,
                               (uintptr_t *)argv, (uintptr_t)blockproc, kw,
                               &status, (uintptr_t *)&err);
     /* Raised here: an RPython exception must not unwind through this frame. */
@@ -1780,7 +1827,7 @@ define_method_body(VALUE argp)
     return Qnil;
 }
 
-void
+uintptr_t
 rpyyarv_define_method(uintptr_t klass, uintptr_t mid, int is_private,
                       int *state)
 {
@@ -1790,6 +1837,9 @@ rpyyarv_define_method(uintptr_t klass, uintptr_t mid, int is_private,
     a.is_private = is_private;
     *state = 0;
     rb_protect(define_method_body, (VALUE)&a, state);
+    if (*state) return 0;
+    /* The def identity aliases and define_method(Method) copies share. */
+    return (uintptr_t)rb_rpyyarv_method_def(a.klass, a.mid);
 }
 
 static VALUE
@@ -1798,7 +1848,7 @@ proc_new_body(VALUE handle)
     /* The ifunc marks its data (imemo.c), so the owner lives with the Proc. */
     VALUE owner = TypedData_Wrap_Struct(0, &handle_owner_type,
                                         (void *)(uintptr_t)(FIX2LONG(handle) + 1));
-    return rb_proc_new(block_yielder, owner);
+    return rb_rpyyarv_proc_new(block_yielder, owner, sentinel_self());
 }
 
 uintptr_t

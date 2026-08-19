@@ -1566,6 +1566,29 @@ rb_block_call(VALUE obj, ID mid, int argc, const VALUE * argv,
     return rb_block_call_kw(obj, mid, argc, argv, bl_proc, data2, RB_NO_KEYWORDS);
 }
 
+// rb_block_call_kw passing a proc handler whose captured self is chosen, so
+// a reified block keeps a self a caller can use as a rebind sentinel.
+VALUE
+rb_rpyyarv_block_call_kw(VALUE obj, ID mid, int argc, const VALUE *argv,
+                         rb_block_call_func_t bl_proc, VALUE data2,
+                         int kw_splat, VALUE block_self)
+{
+    VALUE proc = rb_rpyyarv_proc_new(bl_proc, data2, block_self);
+    vm_passed_block_handler_set(GET_EC(), proc);
+    return rb_call(obj, mid, argc, argv, kw_splat ? CALL_FCALL_KW : CALL_FCALL);
+}
+
+// Like the above with an existing proc: private-allowed, as rb_funcallv is.
+VALUE
+rb_rpyyarv_call_with_proc_kw(VALUE obj, ID mid, int argc, const VALUE *argv,
+                             VALUE proc, int kw_splat)
+{
+    if (!NIL_P(proc)) {
+        vm_passed_block_handler_set(GET_EC(), proc);
+    }
+    return rb_call(obj, mid, argc, argv, kw_splat ? CALL_FCALL_KW : CALL_FCALL);
+}
+
 VALUE
 rb_block_call_kw(VALUE obj, ID mid, int argc, const VALUE * argv,
               rb_block_call_func_t bl_proc, VALUE data2, int kw_splat)

@@ -300,18 +300,21 @@ void rpyyarv_set_block_unwind(void);
 #define RPYYARV_TRAMP_UNSUPPORTED 2   /* *errval is the message String */
 #define RPYYARV_TRAMP_UNWIND      3   /* an unwind parked on the RPython side */
 
-typedef uintptr_t (*rpyyarv_tramp_fn)(uintptr_t self, uintptr_t mid, int argc,
+typedef uintptr_t (*rpyyarv_tramp_fn)(uintptr_t self, uintptr_t mid,
+                                      uintptr_t owner, uintptr_t defkey,
+                                      int argc,
                                       uintptr_t *argv, uintptr_t blockproc,
                                       int kw, int *status, uintptr_t *errval);
 void rpyyarv_set_trampoline_callback(rpyyarv_tramp_fn fn);
-void rpyyarv_define_method(uintptr_t klass, uintptr_t mid, int is_private,
-                           int *state);
+uintptr_t rpyyarv_define_method(uintptr_t klass, uintptr_t mid, int is_private,
+                                int *state);
 
 /* The handle must outlive the Proc, so the handle table never releases it. */
 uintptr_t rpyyarv_proc_new(long handle, int *state);
 
 /* One handle whose GC owner died, or -1 when none are pending. */
 long rpyyarv_pop_dead_handle(void);
+uintptr_t rpyyarv_block_sentinel(void);
 
 uintptr_t rpyyarv_hash_aref_v(uintptr_t hash, uintptr_t key, int *state);
 uintptr_t rpyyarv_set_include(uintptr_t set, uintptr_t elt, int *state);

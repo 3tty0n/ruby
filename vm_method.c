@@ -357,6 +357,33 @@ rb_rpyyarv_method_state_changed(void)
     if (rpyyarv_method_hook) rpyyarv_method_hook();
 }
 
+// The owner CRuby's dispatch chose, so a trampoline can honor super/bind_call.
+VALUE
+rb_rpyyarv_frame_owner(void)
+{
+    const rb_callable_method_entry_t *me =
+        rb_vm_frame_method_entry(GET_EC()->cfp);
+    return me ? me->owner : Qnil;
+}
+
+// The def identity; shared by aliases, define_method(Method) and bind_call.
+const void *
+rb_rpyyarv_frame_method_def(void)
+{
+    const rb_callable_method_entry_t *me =
+        rb_vm_frame_method_entry(GET_EC()->cfp);
+    return me ? (const void *)me->def : NULL;
+}
+
+const void *
+rb_rpyyarv_method_def(VALUE klass, ID mid)
+{
+    const rb_method_entry_t *me = rb_method_entry(klass, mid);
+    // A prepend can shadow the fresh entry; a wrong def would poison the map.
+    if (!me || me->owner != klass) return NULL;
+    return (const void *)me->def;
+}
+
 void
 rb_clear_constant_cache_for_id(ID id)
 {

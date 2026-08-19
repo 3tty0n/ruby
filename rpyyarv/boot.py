@@ -70,7 +70,8 @@ BLOCK_HOOK = lltype.Ptr(lltype.FuncType([lltype.Signed, rffi.INT, VALUEP,
                                          VALUE], VALUE))
 # (self, mid, argc, argv, blockproc, kw, status, errval) -> result
 TRAMP_HOOK = lltype.Ptr(lltype.FuncType(
-    [VALUE, VALUE, rffi.INT, VALUEP, VALUE, rffi.INT, INTP, VALUEP], VALUE))
+    [VALUE, VALUE, VALUE, VALUE, rffi.INT, VALUEP, VALUE, rffi.INT, INTP,
+     VALUEP], VALUE))
 
 # Mirrors RPYYARV_MAX_ARGC; a splat can expand past 32 (fileutils passes 47).
 MAX_ARGC = 256
@@ -192,7 +193,7 @@ rb_call_with_proc = _ext('rpyyarv_call_with_proc',
 rb_set_trampoline_callback = _ext('rpyyarv_set_trampoline_callback',
                                   [TRAMP_HOOK], lltype.Void)
 rb_define_method_id = _ext('rpyyarv_define_method',
-                           [VALUE, VALUE, rffi.INT, INTP], lltype.Void,
+                           [VALUE, VALUE, rffi.INT, INTP], VALUE,
                            reenters=True)
 rb_array_layout = _ext('rpyyarv_array_layout', [INTP], lltype.Void)
 # No reenters: rb_str_eql_internal neither allocates nor raises.
@@ -337,6 +338,7 @@ rb_ary_to_ary = _ext('rpyyarv_ary_to_ary', [VALUE, INTP], VALUE,
 rb_sym_name = _ext('rpyyarv_sym_name', [VALUE], VALUE, reenters=True)
 rb_current_receiver = _ext('rpyyarv_current_receiver', [], VALUE,
                            reenters=True)
+rb_block_sentinel = _ext('rpyyarv_block_sentinel', [], VALUE, reenters=True)
 rb_dir_of = _ext('rpyyarv_dir_of', [VALUE], VALUE, reenters=True)
 rb_cvar_get = _ext('rpyyarv_cvar_get', [VALUE, VALUE, INTP], VALUE,
                    reenters=True)
@@ -750,13 +752,14 @@ def install_trampoline_callback(fn):
 
 
 def define_method_entry(klass, rid, private):
-    """A CRuby method entry over the generic trampoline."""
+    """A CRuby method entry over the generic trampoline; returns its def key."""
     state = _enter_status()
-    rb_define_method_id(_v(klass), _v(rid),
-                        rffi.cast(rffi.INT, 1 if private else 0), state)
+    key = rb_define_method_id(_v(klass), _v(rid),
+                              rffi.cast(rffi.INT, 1 if private else 0), state)
     failed = _leave_status(state)
     if failed:
         _failed('define_method')
+    return rffi.cast(lltype.Signed, key)
 
 
 def as_signed(v):
@@ -1058,6 +1061,11 @@ def dir_of(path):
 
 def current_receiver():
     return rffi.cast(lltype.Signed, rb_current_receiver())
+
+
+def block_sentinel():
+    """The self handle procs capture; equality means CRuby did not rebind."""
+    return rffi.cast(lltype.Signed, rb_block_sentinel())
 
 
 def sym_name(sym):
