@@ -77,3 +77,21 @@ class GhostDeriv < GhostBase
   end
 end
 p GhostDeriv.new.ghost(1, x: 2)
+
+# super inside an aliased inherited method: original name, original owner.
+class NCB
+  def store(k, v)
+    "ncb-#{k}-#{v}"
+  end
+end
+class MB < NCB
+  def store(k, v)
+    "mb(" + super + ")"
+  end
+end
+class MapLike < MB
+  alias_method :put2, :store
+  alias put3 store
+end
+p MapLike.new.put2(:a, 1)
+p MapLike.new.put3(:b, 2)

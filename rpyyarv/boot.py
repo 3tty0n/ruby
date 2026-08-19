@@ -339,6 +339,9 @@ rb_sym_name = _ext('rpyyarv_sym_name', [VALUE], VALUE, reenters=True)
 rb_current_receiver = _ext('rpyyarv_current_receiver', [], VALUE,
                            reenters=True)
 rb_block_sentinel = _ext('rpyyarv_block_sentinel', [], VALUE, reenters=True)
+rb_kw_hash_p = _ext('rpyyarv_kw_hash_p', [VALUE], rffi.INT)
+rb_kw_hash_dup = _ext('rpyyarv_kw_hash_dup', [VALUE, INTP], VALUE,
+                      reenters=True)
 rb_dir_of = _ext('rpyyarv_dir_of', [VALUE], VALUE, reenters=True)
 rb_cvar_get = _ext('rpyyarv_cvar_get', [VALUE, VALUE, INTP], VALUE,
                    reenters=True)
@@ -1066,6 +1069,21 @@ def current_receiver():
 def block_sentinel():
     """The self handle procs capture; equality means CRuby did not rebind."""
     return rffi.cast(lltype.Signed, rb_block_sentinel())
+
+
+def kw_hash_p(v):
+    """RHASH_PASS_AS_KEYWORDS: a ruby2_keywords-forwarded Hash."""
+    return rffi.cast(lltype.Signed, rb_kw_hash_p(_v(v))) != 0
+
+
+def kw_hash_dup(v):
+    """A flagged copy, as Hash.ruby2_keywords_hash makes."""
+    state = _enter_status()
+    r = rb_kw_hash_dup(_v(v), state)
+    failed = _leave_status(state)
+    if failed:
+        _failed('kw_hash_dup')
+    return rffi.cast(lltype.Signed, r)
 
 
 def sym_name(sym):

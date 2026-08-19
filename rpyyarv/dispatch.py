@@ -103,9 +103,13 @@ def _table_for(klass):
     return table
 
 
-def define(klass, mid, w_iseq, private, cref=0, lexical=None):
-    entry = MethodEntry(w_iseq, private, klass, mid, cref, KIND_ISEQ, 0,
-                        lexical)
+def define(klass, mid, w_iseq, private, cref=0, lexical=None,
+           orig_mid=0, orig_owner=0):
+    # An alias keeps its source's mid and owner, so super resumes as CRuby's.
+    entry = MethodEntry(w_iseq, private,
+                        orig_owner if orig_owner != 0 else klass,
+                        orig_mid if orig_mid != 0 else mid,
+                        cref, KIND_ISEQ, 0, lexical)
     _table_for(klass)[mid] = entry
     registry.version = Version()
     flush_trampoline_cache()

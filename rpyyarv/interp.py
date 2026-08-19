@@ -500,6 +500,12 @@ def invoke(frame, w_ci, w_block=None):
             and (dispatch.is_known_class(recv)
                  or dispatch.is_known_module(recv)):
         return _remove_or_undef(frame, mid, recv, recv_at, argc)
+    if mid == RUBY2_KEYWORDS and fcall and argc == 1 \
+            and (dispatch.is_known_class(recv)
+                 or dispatch.is_known_module(recv)):
+        v = _ruby2_keywords(frame, recv, recv_at)
+        if v != value.Q_UNDEF:
+            return v
     if mid == CORE_ALIAS or mid == CORE_UNDEF:
         return _core_method(frame, mid, recv, recv_at, argc)
     if mid == ALIAS_METHOD and argc == 2 and entry is None \
@@ -1402,6 +1408,13 @@ def _splat_args(frame, at, npos, trailing):
     return args
 
 
+def _splat_kw(args, kw_splat, trailing):
+    """A ruby2_keywords-flagged trailing Hash turns a splat call into kw."""
+    if kw_splat or trailing != 0 or len(args) == 0:
+        return kw_splat
+    return boot.kw_hash_p(args[len(args) - 1])
+
+
 @unroll_safe
 def _splat_invoke(frame, w_ci, recv_at, argc, w_block, mid, fcall):
     """A *splat call; the expansion may outrun the frame's sized stack."""
@@ -1409,6 +1422,7 @@ def _splat_invoke(frame, w_ci, recv_at, argc, w_block, mid, fcall):
     nkw = len(kw_names)
     trailing = 1 if w_ci.kw_splat else nkw
     args = _splat_args(frame, recv_at + 1, argc - trailing, trailing)
+    kw_splat = _splat_kw(args, w_ci.kw_splat, trailing)
     rubycall.gc_stress_point()
     recv = frame.stack[recv_at]
     klass = promote(value.class_of(recv))
@@ -1427,10 +1441,10 @@ def _splat_invoke(frame, w_ci, recv_at, argc, w_block, mid, fcall):
             return _attr_send_args(frame, entry, recv, recv_at, args, w_block)
         if w_block is None or w_ci.blockarg:
             return _enter_args(frame, entry, recv, recv_at, args, mid,
-                               w_block, kw_names, w_ci.kw_splat)
+                               w_block, kw_names, kw_splat)
         try:
             return _enter_args(frame, entry, recv, recv_at, args, mid,
-                               w_block, kw_names, w_ci.kw_splat)
+                               w_block, kw_names, kw_splat)
         except block_mod.BlockBreak, e:
             if e.w_block is not w_block:
                 raise
@@ -1438,15 +1452,15 @@ def _splat_invoke(frame, w_ci, recv_at, argc, w_block, mid, fcall):
     if proxy.value != 0 and recv == proxy.value:
         _drop(frame, recv_at)
         return _block_send_args(mid, frame.block, args, kw_names,
-                                w_ci.kw_splat)
+                                kw_splat)
     if len(blocks.by_proc) > 0 and _is_proxy_call(mid) \
             and recv in blocks.by_proc:
         w_proc = blocks.by_proc[recv]
         _drop(frame, recv_at)
-        return _block_send_args(mid, w_proc, args, kw_names, w_ci.kw_splat)
+        return _block_send_args(mid, w_proc, args, kw_names, kw_splat)
     # Built while the arguments are still on the marked stack.
-    pass_kw = w_ci.kw_splat or nkw > 0
-    if w_ci.kw_splat:
+    pass_kw = kw_splat or nkw > 0
+    if kw_splat:
         # `**{}` compiles to a putnil, which stands for no keywords at all.
         if len(args) > 0 and args[len(args) - 1] == value.Q_NIL:
             args.pop()
@@ -1592,6 +1606,13 @@ def setup_params(w_iseq, callee, args, is_block, kw_names=NO_KEYWORDS,
             args = args[:end]
         if not takes_kw or empty:
             splat_hash = 0
+        if w_iseq.r2k and not takes_kw and not empty:
+            # ruby2_keywords: the kw hash rides the rest array, flagged.
+            end = len(args) - 1
+            assert end >= 0
+            flagged = boot.kw_hash_dup(args[end])
+            args = args[:end]
+            args.append(flagged)
     # No kw params: CRuby folds them to a trailing Hash (args_kw_argv_to_hash).
     fold = nkw > 0 and not takes_kw
     lead = w_iseq.nparams
@@ -1623,7 +1644,12 @@ def setup_params(w_iseq, callee, args, is_block, kw_names=NO_KEYWORDS,
     kw_hash = 0
     if fold:
         args = _kw_to_positional(args, kw_names)
-        kw_hash = args[len(args) - 1]
+        end = len(args) - 1
+        assert end >= 0
+        if w_iseq.r2k:
+            # ruby2_keywords: the folded hash carries the forwarding flag.
+            args[end] = boot.kw_hash_dup(args[end])
+        kw_hash = args[end]
         gcroots.hold(kw_hash)
         kw_names = NO_KEYWORDS
         nkw = 0
@@ -1892,6 +1918,25 @@ def _super_to_cruby_args(frame, klass, owner, mid, recv_at, args, kw_splat,
 
 
 METHOD_MISSING = symbols.intern('method_missing')
+RUBY2_KEYWORDS = symbols.intern('ruby2_keywords')
+
+
+def _ruby2_keywords(frame, recv, recv_at):
+    """Module#ruby2_keywords on a registry method: mark its ISeq."""
+    mid = _name_mid(frame.stack[recv_at + 1])
+    if mid == rubycall.NO_MID:
+        return value.Q_UNDEF
+    entry = dispatch.lookup_owned(recv, mid)
+    if entry is None or entry.kind != dispatch.KIND_ISEQ:
+        # A CRuby-owned method: its own Module#ruby2_keywords handles it.
+        return value.Q_UNDEF
+    w = entry.w_iseq
+    # CRuby only marks a *rest method without keyword parameters; else warns.
+    if w.rest_start < 0 or len(w.kw_table) > 0 or w.kwrest >= 0:
+        return value.Q_UNDEF
+    w.r2k = True
+    _drop(frame, recv_at)
+    return value.Q_NIL
 
 
 @unroll_safe
@@ -1957,9 +2002,11 @@ def invoke_super(frame, w_ci, w_block=None, has_block=False):
         target = dispatch.lookup_owned(owner, entry.mid)
     if target is None and owner == value.Q_NIL:
         # vm_call_method_missing: a missing super falls back to it.
+        kw_splat = w_ci.kw_splat
         if w_ci.splat:
-            trailing = 1 if w_ci.kw_splat else len(w_ci.kw_names)
+            trailing = 1 if kw_splat else len(w_ci.kw_names)
             args = _splat_args(frame, recv_at + 1, argc - trailing, trailing)
+            kw_splat = _splat_kw(args, kw_splat, trailing)
         else:
             args = []
             i = 0
@@ -1967,18 +2014,19 @@ def invoke_super(frame, w_ci, w_block=None, has_block=False):
                 args.append(frame.stack[recv_at + 1 + i])
                 i += 1
         return _super_missing_args(frame, entry.mid, recv_at, args,
-                                   w_ci.kw_splat, w_ci.kw_names, blk)
+                                   kw_splat, w_ci.kw_names, blk)
     if w_ci.splat:
         trailing = 1 if w_ci.kw_splat else len(w_ci.kw_names)
         args = _splat_args(frame, recv_at + 1, argc - trailing, trailing)
+        kw_splat = _splat_kw(args, w_ci.kw_splat, trailing)
         if target is None:
             return _super_to_cruby_args(frame, klass, entry.owner, entry.mid,
-                                        recv_at, args, w_ci.kw_splat,
+                                        recv_at, args, kw_splat,
                                         w_ci.kw_names, blk)
         if target.kind != dispatch.KIND_ISEQ:
             return _attr_send_args(frame, target, recv, recv_at, args, blk)
         return _enter_args(frame, target, recv, recv_at, args, entry.mid,
-                           blk, w_ci.kw_names, w_ci.kw_splat)
+                           blk, w_ci.kw_names, kw_splat)
     if target is None:
         return _super_to_cruby(frame, klass, entry.owner, entry.mid, recv_at,
                                argc, w_ci.kw_splat, w_ci.kw_names, blk)
@@ -2208,7 +2256,7 @@ def _core_method(frame, mid, recv, recv_at, argc):
     if entry is not None and entry.kind == dispatch.KIND_ISEQ:
         # An RPyYARV method: define installs CRuby's resolving trampoline.
         dispatch.define(cbase, name, entry.w_iseq, entry.private,
-                        entry.cref, entry.lexical)
+                        entry.cref, entry.lexical, entry.mid, entry.owner)
         _drop(frame, recv_at)
         return value.Q_NIL
     if entry is not None:
@@ -2233,7 +2281,8 @@ def _alias_method(frame, recv, recv_at):
             dispatch.undefine(recv, name)
             if entry.kind == dispatch.KIND_ISEQ:
                 dispatch.define(recv, name, entry.w_iseq, entry.private,
-                                entry.cref, entry.lexical)
+                                entry.cref, entry.lexical,
+                                entry.mid, entry.owner)
                 _drop(frame, recv_at)
                 return new_v
             dispatch.define_attr(recv, name, entry.ivar, entry.kind)

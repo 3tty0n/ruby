@@ -11,6 +11,8 @@
 #include "internal/array.h"
 /* RCLASS_SINGLETON_P/RCLASS_INITIALIZED_P: raises alloc_fast must rule out. */
 #include "internal/class.h"
+/* RHASH_PASS_AS_KEYWORDS: the ruby2_keywords forwarding flag on a Hash. */
+#include "internal/hash.h"
 /* Its STATIC_ASSERTs let the ivar fast path read imemo/fields as RObject. */
 #include "internal/imemo.h"
 #include "internal/numeric.h"
@@ -1622,6 +1624,31 @@ uintptr_t
 rpyyarv_block_sentinel(void)
 {
     return (uintptr_t)sentinel_self();
+}
+
+int
+rpyyarv_kw_hash_p(uintptr_t h)
+{
+    return (RB_TYPE_P((VALUE)h, T_HASH) &&
+            (RBASIC((VALUE)h)->flags & RHASH_PASS_AS_KEYWORDS)) ? 1 : 0;
+}
+
+static VALUE
+kw_hash_dup_body(VALUE h)
+{
+    VALUE dup = rb_hash_dup(h);
+    FL_SET(dup, RHASH_PASS_AS_KEYWORDS);
+    return dup;
+}
+
+/* A flagged copy, as Hash.ruby2_keywords_hash makes; the input is unharmed. */
+uintptr_t
+rpyyarv_kw_hash_dup(uintptr_t h, int *state)
+{
+    *state = 0;
+    VALUE r = rb_protect(kw_hash_dup_body, (VALUE)h, state);
+    if (*state) return (uintptr_t)Qnil;
+    return (uintptr_t)r;
 }
 
 static VALUE

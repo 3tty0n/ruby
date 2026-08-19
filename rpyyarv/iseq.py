@@ -37,8 +37,11 @@ class W_ISeq(object):
                           'kw_table[*]', 'kw_defaults[*]', 'kw_required',
                           'kw_start', 'kw_bits', 'kwrest', 'path',
                           'line_pcs[*]', 'line_nums[*]', 'shares_locals',
-                          'local_names[*]']
+                          'local_names[*]', 'r2k?']
     # once_cache is written once per body and is deliberately not immutable.
+
+    # Module#ruby2_keywords marks the method after the def; quasi-immutable.
+    r2k = False
 
     def __init__(self, name, code, consts, iseqs, callinfos, nlocals,
                  stack_max, nparams=0, simple_params=True, catches=None,
