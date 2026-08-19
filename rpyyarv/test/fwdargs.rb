@@ -29,3 +29,21 @@ def deep(...)
   fwd(...)
 end
 p deep(9, b: 10)
+
+# new(...) — opt_new fused with forwarding (json's Parser.parse shape).
+class FParser
+  class << self
+    def parse(...)
+      new(...).run
+    end
+  end
+  def initialize(src, opts = nil)
+    @src = src
+    @opts = opts
+  end
+  def run
+    [@src, @opts]
+  end
+end
+p FParser.parse("s")
+p FParser.parse("s", {a: 1})

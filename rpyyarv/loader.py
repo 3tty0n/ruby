@@ -678,13 +678,17 @@ class Loader(object):
         flags = operand.flag
         argc_extra = 0
         if flags & optable.CALL_FLAG_FORWARDING:
-            # f(...): the `...` rest local is on the stack; run as f(*rest).
-            flags = (flags & ~optable.CALL_FLAG_FORWARDING) | \
-                optable.CALL_FLAG_ARGS_SPLAT
-            if op == insns.SENDFORWARD:
-                # Blockarg-shaped: a forwarded break unwinds past this frame.
-                flags |= optable.CALL_FLAG_ARGS_BLOCKARG
-            argc_extra = 1
+            if op == insns.OPT_NEW:
+                # opt_new's argc already counts the `...` slot on the stack.
+                flags &= ~optable.CALL_FLAG_FORWARDING
+            else:
+                # f(...): the `...` rest local is on the stack; run f(*rest).
+                flags = (flags & ~optable.CALL_FLAG_FORWARDING) | \
+                    optable.CALL_FLAG_ARGS_SPLAT
+                if op == insns.SENDFORWARD:
+                    # Blockarg-shaped: a forwarded break unwinds past here.
+                    flags |= optable.CALL_FLAG_ARGS_BLOCKARG
+                argc_extra = 1
         # Not ARGS_SIMPLE: CRuby clears it whenever a block ISeq is attached.
         simple = (not operand.has_kwarg
                   and (flags & ~optable.SIMPLE_CALL_FLAGS) == 0)
