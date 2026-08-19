@@ -45,7 +45,7 @@ extern int madvise(caddr_t, size_t, int);
 
 static const int DEBUG = 0;
 
-// NULL until rpyyarv registers; a plain ruby then pays one predicted branch per fiber switch.
+// NULL until rpyyarv registers; a plain ruby pays one predicted branch.
 static const rb_rpyyarv_fiber_hooks_t *rpyyarv_fiber_hooks;
 
 void
@@ -54,7 +54,7 @@ rb_rpyyarv_set_fiber_hooks(const rb_rpyyarv_fiber_hooks_t *hooks)
     rpyyarv_fiber_hooks = hooks;
 }
 
-// rpyyarv carries a fiber kill through its own frames as a raise, so their ensures run; here it becomes the fatal unwind again.
+// rpyyarv raises a fiber kill so ensures run; here it is fatal again.
 void
 rb_rpyyarv_fiber_kill_rethrow(void)
 {
@@ -1263,7 +1263,7 @@ fiber_free(void *ptr)
     rb_fiber_t *fiber = ptr;
     RUBY_FREE_ENTER("fiber");
 
-    /* a fiber the GC reaped mid-flight passes here too, so this is the one death notice */
+    /* GC-reaped fibers pass here too, so this is the one death notice */
     if (rpyyarv_fiber_hooks) rpyyarv_fiber_hooks->died((long)fiber);
 
     if (DEBUG) fprintf(stderr, "fiber_free: %p[%p]\n", (void *)fiber, fiber->stack.base);

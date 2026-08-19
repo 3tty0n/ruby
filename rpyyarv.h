@@ -1,8 +1,6 @@
 #ifndef RPYYARV_H
 #define RPYYARV_H 1
-//
-// This file contains definitions rpyyarv exposes to the CRuby codebase
-//
+// Definitions rpyyarv exposes to the CRuby codebase.
 
 #include "ruby/internal/config.h"
 #include "ruby/internal/dllexport.h"
@@ -11,8 +9,8 @@
 void rb_rpyyarv_constant_state_changed(ID id);
 void rb_rpyyarv_method_state_changed(void);
 
-// Every fiber switch brackets coroutine_transfer with park/unpark, keyed by the rb_fiber_t address; born fires on a new fiber's first instruction and died from fiber_free.
-// unpark/born also carry the arriving fiber's machine stack (base 0 for the root fiber), so the JIT's stack-depth window can follow the stack actually running.
+// A switch brackets coroutine_transfer, keyed by the rb_fiber_t address.
+// unpark/born carry the arriving stack so the JIT depth window follows it.
 typedef struct rb_rpyyarv_fiber_hooks {
     void (*park)(long key);
     void (*unpark)(long key, long stack_base, long stack_size);
@@ -21,7 +19,7 @@ typedef struct rb_rpyyarv_fiber_hooks {
 } rb_rpyyarv_fiber_hooks_t;
 
 RBIMPL_SYMBOL_EXPORT_BEGIN()
-// rpyyarv links against libruby from outside the tree, so unlike YJIT it cannot be compiled in and registers its callback at runtime instead.
+// rpyyarv links libruby from outside the tree, so it registers at runtime.
 void rb_rpyyarv_set_constant_hook(void (*fn)(ID id));
 void rb_rpyyarv_set_method_hook(void (*fn)(void));
 void rb_rpyyarv_set_fiber_hooks(const rb_rpyyarv_fiber_hooks_t *hooks);

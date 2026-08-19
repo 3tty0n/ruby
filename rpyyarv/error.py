@@ -8,15 +8,14 @@ class UnsupportedOperation(RPyYarvError):
 
 
 class RubyException(Exception):
-    """A Ruby exception in flight; apart from RPyYarvError because this one is Ruby's to catch."""
+    """A Ruby exception in flight; apart from RPyYarvError, Ruby catches it."""
     def __init__(self, value, name):
-        # Marked through the catch frame or gcroots slot holding it while the
-        # unwinding runs.
+        # Marked through the catch frame or gcroots slot while unwinding.
         self.value = value
         # The call that raised, for the message when nothing rescues it.
         self.name = name
 
 
 class LoadError(RPyYarvError):
-    # Kept apart from UnsupportedOperation so the count of unimplemented instructions stays a count of real work.
+    # Apart from UnsupportedOperation: that count is unimplemented insns only.
     pass

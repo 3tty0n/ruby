@@ -1,4 +1,4 @@
-"""W_ISeq.code is a flat list of ints; operands that aren't already ints go into type-split pools since `consts` holds raw VALUEs an int list can't hold."""
+"""W_ISeq.code is a flat int list; other operands go into typed pools."""
 
 from rpyyarv import symbols
 
@@ -12,7 +12,7 @@ CATCH_RETRY = 3
 
 
 class W_Catch(object):
-    """One catch-table entry; it covers a pc when start < epc <= end, epc being the pc *after* the raising instruction (vm.c:2911)."""
+    """Covers a pc when start < epc <= end, epc after the insn (vm.c:2911)."""
     _immutable_fields_ = ['kind', 'start', 'end', 'cont', 'sp', 'w_iseq']
 
     def __init__(self, kind, start, end, cont, sp, w_iseq):
@@ -26,7 +26,7 @@ class W_Catch(object):
 
 
 class W_ISeq(object):
-    # Nothing appends after the loader, so the JIT may fold code[pc] and consts[idx] away when pc and iseq are green.
+    # Nothing appends after the loader, so the JIT folds green reads away.
     _immutable_fields_ = ['name', 'code[*]', 'consts[*]', 'iseqs[*]',
                           'callinfos[*]', 'nlocals', 'stack_max', 'nparams',
                           'simple_params', 'catches[*]', 'paths[*]',
@@ -49,14 +49,14 @@ class W_ISeq(object):
                  kw_required=0, kw_start=-1, kw_bits=-1, kwrest=-1, path='',
                  case_tables=None, line_pcs=None, line_nums=None,
                  shares_locals=False, local_names=None):
-        # One name per local slot, '' where the slot has none; string eval declares the caller's names in the source it compiles.
+        # One name per local slot, '' where none; string eval reads them.
         self.local_names = local_names if local_names is not None else []
-        # A nested ISeq (block, rescue, once) can reach these locals, so a frame keeps them on the heap instead of in the virtualizable.
+        # A nested ISeq reaches these locals, so the frame heaps them.
         self.shares_locals = shares_locals
-        # Source lines, one pair per line change rather than per instruction; line_for walks them.
+        # Source lines, one pair per line change, not per instruction.
         self.line_pcs = line_pcs if line_pcs is not None else []
         self.line_nums = line_nums if line_nums is not None else []
-        # The file this ISeq was compiled from; require_relative in a method body resolves against it, since no CRuby frame carries it.
+        # require_relative resolves against it; no CRuby frame carries it.
         self.path = path
         self.name = name
         self.code = code
@@ -68,11 +68,9 @@ class W_ISeq(object):
         self.stack_max = stack_max
         # Leading required parameters, which YARV puts in locals[0:nparams].
         self.nparams = nparams
-        # False once the loader saw anything but leading required parameters;
-        # the call path then walks the full shape below.
+        # False once the loader saw more than leading required parameters.
         self.simple_params = simple_params
-        # One start pc per number of optionals given (vm_args.c:906), empty
-        # when the ISeq takes none.
+        # One start pc per number of optionals given (vm_args.c:906).
         self.opt_table = opt_table if opt_table is not None else []
         # Local slots for *rest and the post parameters; -1 when absent.
         self.rest_start = rest_start
@@ -84,15 +82,14 @@ class W_ISeq(object):
         self.autosplat = autosplat
         # This ISeq or one nested in it says `return` from a block.
         self.has_return_throw = has_return_throw
-        # ...and this one is the method (or toplevel) such a return names, so execute() has to catch it. Green, so the check folds away.
+        # ...and this is the method such a return names; execute() catches it.
         self.catches_return = catches_return
         # Keyword parameter names as symbol ids, the required ones first.
         self.kw_table = kw_table if kw_table is not None else []
         # Parallel to kw_table; Q_UNDEF where the body computes the default.
         self.kw_defaults = kw_defaults if kw_defaults is not None else []
         self.kw_required = kw_required
-        # Local slots: the keywords sit at kw_start, the unspecified-optionals
-        # mask at kw_bits, and **rest at kwrest; -1 when the kind is absent.
+        # Local slots for keywords, the unspecified mask, **rest; -1 if absent.
         self.kw_start = kw_start
         self.kw_bits = kw_bits
         self.kwrest = kwrest
@@ -101,13 +98,13 @@ class W_ISeq(object):
         self.paths = paths if paths is not None else []
         # One inline cache slot per entry of paths, parallel to it.
         self.path_sites = path_sites if path_sites is not None else []
-        # One slot per nested ISeq; `once` fills its body's, Q_UNDEF meaning unrun.
+        # One slot per nested ISeq; `once` fills its body's, Q_UNDEF unrun.
         self.once_cache = [0x24] * len(self.iseqs)
         # Integer literal -> destination pc for opt_case_dispatch.
         self.case_tables = case_tables if case_tables is not None else []
 
     def line_for(self, pc):
-        """The source line of the instruction at pc, or 0 when the ISeq carries none."""
+        """The source line at pc, or 0 when the ISeq carries none."""
         found = 0
         i = 0
         while i < len(self.line_pcs):
@@ -129,11 +126,11 @@ class W_CallInfo(object):
                  blockarg=False, kw_names=None, kw_splat=False, splat=False):
         # VM_CALL_ARGS_SPLAT: the last positional is an Array to spread there.
         self.splat = splat
-        # VM_CALL_KWARG: the last len(kw_names) of the argc values on the stack are keyword values, named here in push order.
+        # VM_CALL_KWARG: the last len(kw_names) argc values, in push order.
         self.kw_names = kw_names if kw_names is not None else []
         # VM_CALL_KW_SPLAT: instead, the topmost argument is a Hash of them.
         self.kw_splat = kw_splat
-        # CALL_FLAG_ARGS_BLOCKARG: one more value above the arguments, which vm_caller_setup_arg_block pops first (vm_args.c:1119).
+        # CALL_FLAG_ARGS_BLOCKARG: one value above the args (vm_args.c:1119).
         self.blockarg = blockarg
         # invokesuper's call data names no method: the running one is implied.
         self.is_super = is_super

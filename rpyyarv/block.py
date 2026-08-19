@@ -1,4 +1,4 @@
-"""KIND_ISEQ carries no VALUE (self comes from the defining frame, walked by the mark hook); KIND_PROC/KIND_SYM hold a VALUE, so gcroots marks them too."""
+"""KIND_PROC/KIND_SYM hold a VALUE gcroots marks; KIND_ISEQ holds none."""
 
 KIND_ISEQ = 0
 KIND_PROC = 1
@@ -16,10 +16,10 @@ class W_Block(object):
         self.frame = frame
         # A `yield` inside a block reaches the enclosing method's block.
         self.outer = outer
-        # KIND_PROC: the Proc itself. KIND_ISEQ: the Proc getblockparam materialises for it, once one exists; the handle table owns it.
+        # KIND_PROC: the Proc; KIND_ISEQ: getblockparam's Proc, handle-owned.
         self.proc_value = proc_value
         self.mid = mid
-        # A lambda checks arity like a method and owns its `return` (VM_FRAME_FLAG_LAMBDA).
+        # A lambda checks arity and owns its `return` (VM_FRAME_FLAG_LAMBDA).
         self.is_lambda = is_lambda
 
 
@@ -38,20 +38,20 @@ class BlockNext(Exception):
 
 
 class BlockJump(Exception):
-    """An unwind out of a block, as vm_throw starts one; not an error, so it may park and be re-raised."""
+    """Unwind out of a block (vm_throw); not an error, so it may park."""
     def __init__(self, value):
         self.value = value
 
 
 class BlockReturn(BlockJump):
-    """A non-local `return`: the tag is the frame of the block's defining method, found as its local EP (vm_throw_start, vm_insnhelper.c:1827)."""
+    """`return`: tag is the defining method's frame (vm_insnhelper.c:1827)."""
     def __init__(self, frame, value):
         BlockJump.__init__(self, value)
         self.frame = frame
 
 
 class BlockBreak(BlockJump):
-    """`break`: the block itself is the tag, so it unwinds to the send that passed this exact one."""
+    """`break`: the block is the tag, unwinding to the send that passed it."""
     def __init__(self, w_block, value):
         BlockJump.__init__(self, value)
         self.w_block = w_block

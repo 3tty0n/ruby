@@ -18,7 +18,7 @@ from rpyyarv import value
 from rpyyarv.error import RPyYarvError, RubyException
 from rpyyarv.rlib import StackOverflow, check_stack_overflow, set_stack_length
 
-# rpy_stacktoobig starts at MAX_STACK_SIZE, 768 KB of the 8 MB main stack; libruby shares that stack and checks itself, so take half, not all.
+# libruby shares the 8 MB main stack and checks itself, so take half.
 STACK_LIMIT = 4 * 1024 * 1024
 
 
@@ -108,7 +108,7 @@ def entry_point(argv):
         program = bootiseq.load(iseqw)
         result = loader.load(program)
         if len(result.reasons) > 0:
-            # No per-method granularity: a method body RPyYARV cannot run needs a cref/binding RPyYARV's frames don't carry, so the whole file goes to CRuby.
+            # No per-method split: one unsupported iseq sends the file to CRuby.
             debug.record_file(program.path, result.total, result.supported,
                               result.reasons[0])
             debug.note('running under CRuby instead: %d unsupported iseq(s), '

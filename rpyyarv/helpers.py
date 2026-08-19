@@ -1,4 +1,4 @@
-"""opt_* instructions: a fixnum/Array fast path touching no rb_* API, else value.Q_UNDEF as vm_opt_plus and friends do (vm_insnhelper.c:6880), so interp.py runs the real send."""
+"""opt_* fast paths: no rb_* call, else Q_UNDEF (vm_insnhelper.c:6880)."""
 
 import math
 
@@ -96,11 +96,11 @@ FORMAT_MID = symbols.intern('format')
 SPRINTF_MID = symbols.intern('sprintf')
 ESCAPE_HTML_MID = symbols.intern('escapeHTML')
 
-# RB_FIXABLE for a double (arithmetic/fixnum.h); both bounds are exact powers of two.
+# RB_FIXABLE for a double (arithmetic/fixnum.h); bounds are exact powers of 2.
 FIXNUM_MAX_PLUS_1_DBL = float(value.FIXNUM_MAX + 1)
 FIXNUM_MIN_DBL = float(value.FIXNUM_MIN)
 
-# One bit per (class, operator) pair, in the order boot_shim.c's rpyyarv_bop_mask sets them.
+# One bit per (class, op), in boot_shim.c's rpyyarv_bop_mask order.
 B_INT_PLUS = 0
 B_INT_MINUS = 1
 B_INT_MULT = 2
@@ -177,11 +177,11 @@ _FLT_AS_INT = [B_INT_PLUS, B_INT_MINUS, B_INT_MULT, B_INT_DIV, B_INT_LT,
 
 
 class _Bops(object):
-    # Quasi-immutable: a fast path's guard folds into the trace and refresh() invalidates it; see value._Classes for why not a plain immutable field.
+    # Quasi-immutable: refresh() invalidates the guard a fast path folded in.
     _immutable_fields_ = ['mask?']
 
     def __init__(self):
-        # Every bit set until refresh() runs, so nothing takes a fast path before CRuby has been asked.
+        # Every bit set until refresh(): no fast path before CRuby is asked.
         self.mask = -1
 
 
@@ -189,7 +189,7 @@ bops = _Bops()
 
 
 class _Modules(object):
-    # Quasi-immutable: interp.install() writes it once, before any Ruby code runs.
+    # Quasi-immutable: interp.install() writes it once before Ruby runs.
     _immutable_fields_ = ['kernel?']
 
     def __init__(self):
@@ -200,7 +200,7 @@ modules = _Modules()
 
 
 def refresh():
-    """Re-ask CRuby which watched operators it still owns; a redefinition made inside a CRuby call with no RPyYARV definition after it is still missed."""
+    """Re-ask CRuby for the watched operators; some redefinitions missed."""
     dispatch.invalidate_owners()
     count, mask = boot.bop_mask()
     if count != B_COUNT:
@@ -214,7 +214,7 @@ def _cruby_owns(bit):
 
 
 def kernel_send_pristine():
-    """Kernel#send is still rb_f_send, so a send may be resolved here instead."""
+    """Kernel#send is still rb_f_send, so a send may be resolved here."""
     return _cruby_owns(B_KERNEL_SEND)
 
 
@@ -223,7 +223,7 @@ def basic_send_pristine():
 
 
 def _int_op(bit):
-    """CRuby still owns the operator and RPyYARV hasn't defined one; the registry lookup is elidable on the method version, invalidated by a later `class Integer`."""
+    """CRuby owns the op and RPyYARV defined none; elidable on the version."""
     return (_cruby_owns(bit)
             and dispatch.lookup_core(value.core_class(value.C_INTEGER),
                                      _INT_MID[bit]) is None)
@@ -267,8 +267,7 @@ def _fix2(a, b, bit):
     return value.is_fixnum(a) and value.is_fixnum(b) and _int_op(bit)
 
 
-# Above this a Fixnum no longer converts to a double exactly, and the
-# comparisons CRuby answers with rb_integer_float_cmp would disagree.
+# Above this a Fixnum is not exact as a double; rb_integer_float_cmp differs.
 FLOAT_EXACT_INT = 1 << 53
 
 
@@ -282,7 +281,7 @@ def _mixable(v, exact):
 
 
 def _flt2(a, b, bit, exact=False):
-    """One Float operand and one Float or Fixnum, with the receiver's own class still owning the operator; a Bignum falls back, as CRuby's Float methods reach rb_big2dbl for it."""
+    """Float with Float/Fixnum, the class still owning it; Bignum goes back."""
     if value.is_float(a):
         if not (value.is_float(b) or _mixable(b, exact)):
             return False
@@ -299,7 +298,7 @@ def _dbl(v):
 
 
 def _from_dbl(d):
-    """A flonum when the encoding reaches d, else the heap Float DBL2NUM falls back to."""
+    """A flonum when the encoding reaches d, else DBL2NUM's heap Float."""
     v = value.dbl2flonum(d)
     if v != value.Q_UNDEF:
         return v
@@ -366,7 +365,7 @@ def ge(a, b):
 
 
 def math_cos(recv, arg):
-    """Math.cos of a Float or Fixnum; cos is total over the reals, so only the receiver and the argument type are tested."""
+    """Math.cos of Float/Fixnum; cos is total, so nothing can raise."""
     if recv != value.core_class(value.C_MATH) or not _cruby_owns(B_MATH_COS):
         return value.Q_UNDEF
     if not (value.is_float(arg) or value.is_fixnum(arg)):
@@ -375,13 +374,13 @@ def math_cos(recv, arg):
 
 
 def _core_op(klass_i, bit, mid):
-    """CRuby still has its own definition and RPyYARV has not defined one over it, as _int_op tests the operators."""
+    """CRuby has its own definition and RPyYARV defined none over it."""
     return (_cruby_owns(bit)
             and dispatch.lookup_core(value.core_class(klass_i), mid) is None)
 
 
 def flt_pow(a, b):
-    """x ** y with a Float operand; a negative base with a fractional exponent is a Complex in Ruby, and an overflow raises here, so both go back to CRuby."""
+    """Float **; a negative base gives a Complex and an overflow raises."""
     if not (value.is_float(a) or value.is_fixnum(a)):
         return value.Q_UNDEF
     if not (value.is_float(b) or value.is_fixnum(b)):
@@ -405,7 +404,7 @@ def flt_pow(a, b):
 
 
 def to_f(recv):
-    """Integer#to_f and Float#to_f; a Bignum's magnitude is CRuby's to convert."""
+    """Integer#to_f and Float#to_f; a Bignum goes back to CRuby."""
     if value.is_float(recv):
         if _core_op(value.C_FLOAT, B_FLT_TO_F, TO_F):
             return recv
@@ -416,12 +415,12 @@ def to_f(recv):
 
 
 def _hash_key_cannot_reenter(key):
-    """Immediates and plain Strings hash and compare in C, so a lookup with one never runs Ruby and needs no rb_protect."""
+    """Immediates and plain Strings hash in C: no Ruby, so no rb_protect."""
     return value.is_immediate(key) or value.is_plain_string(key)
 
 
 def hash_aref(recv, key):
-    """Hash#[] whole in one protected call, the default value or proc included, so a miss no longer pays a second full send."""
+    """Hash#[] in one protected call, the default value or proc included."""
     if value.is_immediate(recv) \
             or raw_word(recv, value.KLASS_WORD) != value.core_class(value.C_HASH):
         return value.Q_UNDEF
@@ -436,7 +435,7 @@ def hash_aref(recv, key):
 
 
 def str_to_s(recv):
-    """String#to_s is the receiver itself, but only for a direct String: a subclass answers a new String (string.c:11845)."""
+    """String#to_s is the receiver; not for a subclass (string.c:11845)."""
     if not value.is_plain_string(recv):
         return value.Q_UNDEF
     if not _core_op(value.C_STRING, B_STR_TO_S, TO_S):
@@ -445,7 +444,7 @@ def str_to_s(recv):
 
 
 def sym_name(recv):
-    """Symbol#name is the symbol's own frozen String, one per symbol (symbol.c), so the cache is as permanent as the symbol."""
+    """Symbol#name: one frozen String per symbol (symbol.c), cached once."""
     if (recv & value.SYMBOL_MASK) != value.SYMBOL_FLAG:
         return value.Q_UNDEF
     if not _core_op(value.C_SYMBOL, B_SYM_NAME, NAME):
@@ -454,7 +453,7 @@ def sym_name(recv):
 
 
 def instance_eval_pristine(mid):
-    """BasicObject#instance_eval/#instance_exec are still CRuby's own; a `def` on BasicObject is invisible to a walk from the receiver's class, so the registry is asked too."""
+    """instance_eval/exec still CRuby's; a BasicObject def needs registry."""
     if mid == INSTANCE_EVAL:
         return _core_op(value.C_BASIC_OBJECT, B_BASIC_INSTANCE_EVAL,
                         INSTANCE_EVAL)
@@ -462,19 +461,18 @@ def instance_eval_pristine(mid):
 
 
 def basic_initialize_pristine():
-    """BasicObject#initialize is still rb_obj_dummy_initialize: no argument, no effect, nil."""
+    """BasicObject#initialize is still rb_obj_dummy_initialize: no arg, nil."""
     return _cruby_owns(B_BASIC_INITIALIZE)
 
 
 def basic_initialize(klass):
-    """The receiver inherits BasicObject#initialize, which takes no argument and does nothing."""
     return (basic_initialize_pristine()
             and dispatch.owner_of(klass, INITIALIZE)
             == value.core_class(value.C_BASIC_OBJECT))
 
 
 def math_sqrt(recv, arg):
-    """Math.sqrt of a non-negative Float or Fixnum; a negative one keeps CRuby's Math::DomainError (math.c:765)."""
+    """Math.sqrt of non-negative Float/Fixnum; negative raises (math.c:765)."""
     if recv != value.core_class(value.C_MATH) or not _cruby_owns(B_MATH_SQRT):
         return value.Q_UNDEF
     if not (value.is_float(arg) or value.is_fixnum(arg)):
@@ -488,7 +486,7 @@ def math_sqrt(recv, arg):
 
 
 def _sym_eq(a, mid):
-    """Symbol#== is rb_obj_equal (string.c:12227) and a name has exactly one Symbol VALUE, so a word compare answers it."""
+    """Symbol#== is rb_obj_equal (string.c:12227); one VALUE per name."""
     if value.class_of(a) != value.core_class(value.C_SYMBOL):
         return False
     if not _sym_op(B_SYM_EQ):
@@ -499,7 +497,7 @@ def _sym_eq(a, mid):
 
 
 def identity_op(recv, mid):
-    """vm_opt_equality's second half: the receiver still resolves the operator to BasicObject's, so comparing is comparing the words."""
+    """vm_opt_equality's second half: mid still resolves to BasicObject's."""
     klass = value.class_of(recv)
     if klass == 0:
         return False
@@ -519,7 +517,7 @@ def identity_send(recv, mid):
 
 
 def kind_of(recv, target, mid):
-    """Kernel#kind_of?/#is_a? cached per (class, module), so a promoted receiver folds it to a constant."""
+    """Kernel#kind_of?/#is_a? cached per (class, module), so it folds."""
     bit = B_KERNEL_KIND_OF if mid == KIND_OF_P else B_KERNEL_IS_A
     if not _cruby_owns(bit):
         return value.Q_UNDEF
@@ -535,7 +533,7 @@ def kind_of(recv, target, mid):
 
 
 def sym_eqq(a, b):
-    """Symbol#=== is Kernel's, which is ==, which for a Symbol compares the words."""
+    """Symbol#=== is Kernel's ==, which for a Symbol compares the words."""
     if value.class_of(a) != value.core_class(value.C_SYMBOL):
         return value.Q_UNDEF
     if not _cruby_owns(B_KERNEL_EQQ) or not _sym_op(B_SYM_EQ):
@@ -546,7 +544,7 @@ def sym_eqq(a, b):
 
 
 def responds_to(recv, sym):
-    """Object#respond_to? cached per (class, symbol), so a promoted receiver folds it to a constant; a class that overrides respond_to? or respond_to_missing? answers per receiver and goes back to CRuby."""
+    """respond_to? cached per (class, symbol); an override is per-receiver."""
     if (sym & value.SYMBOL_MASK) != value.SYMBOL_FLAG:
         return value.Q_UNDEF
     klass = value.class_of(recv)
@@ -568,7 +566,7 @@ START_WITH_P = symbols.intern('start_with?')
 
 
 def _real_class_of(recv, mid):
-    """The class Kernel#class answers, when the receiver's class is no singleton and resolves mid to the pristine Kernel one; 0 otherwise."""
+    """Kernel#class's answer: no singleton, mid still Kernel's; else 0."""
     if modules.kernel == 0:
         return 0
     klass = value.class_of(recv)
@@ -587,7 +585,7 @@ def _real_class_of(recv, mid):
 
 
 def instance_of(recv, target):
-    """Kernel#instance_of? is one class comparison; a target that is no Class or Module must raise, so it goes back to CRuby."""
+    """Kernel#instance_of? is one class compare; a bad target must raise."""
     klass = _real_class_of(recv, INSTANCE_OF_P)
     if klass == 0:
         return value.Q_UNDEF
@@ -609,7 +607,7 @@ def obj_class(recv):
 
 
 def frozen_p(recv):
-    """Kernel#frozen? is the FL_FREEZE bit; immediates go back to CRuby, which answers true for them."""
+    """Kernel#frozen? is the FL_FREEZE bit; immediates go back to CRuby."""
     if value.is_immediate(recv):
         return value.Q_UNDEF
     if _real_class_of(recv, FROZEN_P) == 0:
@@ -619,7 +617,7 @@ def frozen_p(recv):
 
 
 def hash_key_p(recv, key, mid):
-    """Hash#key? through the same lookup as Hash#[]: absence is exactly the Qundef a miss answers, and an error raised instead."""
+    """Hash#key? through Hash#[]'s lookup: absence is the Qundef of a miss."""
     if value.is_immediate(recv) \
             or raw_word(recv, value.KLASS_WORD) != value.core_class(value.C_HASH):
         return value.Q_UNDEF
@@ -647,7 +645,7 @@ def hash_aset(recv, key, val):
 
 
 def set_include(recv, elt):
-    """Set#include? of a direct core Set, which the shim checks; the guard here is only that nothing redefined it."""
+    """Set#include? on a direct core Set; the guard is only redefinition."""
     if value.is_immediate(recv) or not _cruby_owns(B_SET_INCLUDE):
         return value.Q_UNDEF
     if dispatch.lookup(promote(value.class_of(recv)), INCLUDE_P) is not None:
@@ -656,7 +654,7 @@ def set_include(recv, elt):
 
 
 def str_start_with(recv, prefix):
-    """String#start_with? with one String argument: a byte compare in the shim."""
+    """String#start_with? with one String arg: a byte compare in the shim."""
     if not value.is_plain_string(recv) \
             or not _core_op(value.C_STRING, B_STR_START_WITH, START_WITH_P):
         return value.Q_UNDEF
@@ -664,7 +662,7 @@ def str_start_with(recv, prefix):
 
 
 def _owned_by_core(recv, klass_i, mid):
-    """CRuby's own core method still answers mid for recv; elidable on the method version like every owner_of."""
+    """CRuby's core method still answers mid; elidable on the version."""
     return dispatch.owner_of(promote(value.class_of(recv)),
                              mid) == value.core_class(klass_i)
 
@@ -709,7 +707,7 @@ def int_div_word(recv, arg):
 
 
 def str_case(recv, mid):
-    """String#downcase/#upcase and bang forms; the shim takes only 7-bit Strings. A subclass goes back: the plain forms answer a plain String there."""
+    """String#down/upcase(!): shim takes 7-bit only; a subclass goes back."""
     if not value.is_plain_string(recv):
         return value.Q_UNDEF
     if not _owned_by_core(recv, value.C_STRING, mid):
@@ -781,7 +779,7 @@ def str_byteslice(recv, beg, length):
 
 
 def str_match_p(recv, arg):
-    """String#match? of a Regexp: no backref, so nothing but the search itself leaves RPython. The unprotected shim is tried first; it answers Qundef itself whenever it cannot rule out a raise, and the rb_protect'd search runs then."""
+    """String#match? of a Regexp: the shim answers Qundef when it may raise."""
     if value.is_immediate(recv) or value.is_immediate(arg) \
             or not boot.is_string(recv):
         return value.Q_UNDEF
@@ -794,7 +792,7 @@ def str_match_p(recv, arg):
 
 
 def str_gsub2(recv, pat, rep, mid):
-    """String#gsub/gsub!/sub/sub! with a Regexp|String pattern and a String replacement: the shim rules out a backreference escape and encoding mismatch in C."""
+    """gsub/sub(!): the shim rules out backref escapes and encoding mismatch."""
     if not value.is_plain_string(recv):
         return value.Q_UNDEF
     if not _owned_by_core(recv, value.C_STRING, mid):
@@ -803,7 +801,7 @@ def str_gsub2(recv, pat, rep, mid):
 
 
 def str_eq_tilde(a, b):
-    """String#=~ Regexp and Regexp#=~ String: rb_reg_match is the whole method and sets the backref itself; the shim decides which operand is the String and which is the Regexp."""
+    """String#=~ / Regexp#=~: rb_reg_match is all of it, backref included."""
     if value.is_plain_string(a):
         if not _owned_by_core(a, value.C_STRING, MATCH_TILDE):
             return value.Q_UNDEF
@@ -814,26 +812,25 @@ def str_eq_tilde(a, b):
 
 
 def reg_eqq(re, s):
-    """Regexp#=== String: same rb_reg_match core as =~, answered as true/false; a Regexp subclass or non-String argument falls back."""
+    """Regexp#=== via rb_reg_match; subclass or non-String falls back."""
     if value.is_immediate(re) or not value.is_plain_string(s):
         return value.Q_UNDEF
     return boot.reg_eqq(re, s)
 
 
 def last_match0():
-    """Regexp.last_match with no argument."""
     return boot.last_match0()
 
 
 def last_match1(n):
-    """Regexp.last_match(n); anything but a Fixnum n falls back to the name/symbol-aware generic path."""
+    """Regexp.last_match(n); anything but a Fixnum n falls back."""
     if not value.is_fixnum(n):
         return value.Q_UNDEF
     return boot.last_match1(n)
 
 
 def str_match(recv, arg):
-    """String#match with a Regexp pattern, no offset, no block: rb_reg_match plus the backref it sets, skipping the generic Regexp#match funcall."""
+    """String#match Regexp, no offset, no block: rb_reg_match plus backref."""
     if not value.is_plain_string(recv):
         return value.Q_UNDEF
     if not _owned_by_core(recv, value.C_STRING, MATCH_MID):
@@ -842,7 +839,7 @@ def str_match(recv, arg):
 
 
 def kernel_format(recv, fmt, args, mid):
-    """Kernel#format / Kernel#sprintf: rb_str_format directly, skipping the varargs Kernel dispatch; coercion and a bad format spec both run under rb_protect in the shim."""
+    """Kernel#format/sprintf via rb_str_format; the shim rb_protects it."""
     if modules.kernel == 0 or not value.is_plain_string(fmt):
         return value.Q_UNDEF
     klass = promote(value.class_of(recv))
@@ -854,7 +851,7 @@ def kernel_format(recv, fmt, args, mid):
 
 
 def cgi_escape_html(str_arg):
-    """CGI.escapeHTML for an ascii-compatible String; the shim itself falls back (Qundef) for anything else, a non-String included."""
+    """CGI.escapeHTML; the shim answers Qundef for anything not ascii."""
     if value.is_immediate(str_arg):
         return value.Q_UNDEF
     return boot.cgi_escape_html(str_arg)
@@ -906,7 +903,7 @@ def ary_unshift1(recv, arg):
 
 
 def ary_flatten_bang(recv):
-    """Array#flatten! for literal-Array elements only; a #to_ary-quacking non-Array element is a known corner, left untouched here."""
+    """Array#flatten! for Array elements only; a #to_ary quacker is a gap."""
     if not value.is_plain_array(recv) \
             or raw_word(recv, value.FLAGS_WORD) & value.FL_FREEZE != 0:
         return value.Q_UNDEF
@@ -916,7 +913,7 @@ def ary_flatten_bang(recv):
 
 
 def ary_hash_freeze(recv):
-    """Array#freeze / Hash#freeze: OBJ_FREEZE_RAW cannot re-enter Ruby for either type."""
+    """Array#freeze / Hash#freeze: OBJ_FREEZE_RAW cannot re-enter Ruby."""
     if value.is_immediate(recv):
         return value.Q_UNDEF
     if value.is_plain_array(recv):
@@ -968,7 +965,7 @@ def str_length(recv, mid):
 
 
 def str_bytesize(recv):
-    """String#bytesize: RSTRING_LEN, which allocates nothing and cannot raise."""
+    """String#bytesize is RSTRING_LEN: no allocation, nothing to raise."""
     if value.is_immediate(recv) or not boot.is_string(recv):
         return value.Q_UNDEF
     if not _owned_by_core(recv, value.C_STRING, BYTESIZE):
@@ -977,7 +974,7 @@ def str_bytesize(recv):
 
 
 def str_ascii_only_p(recv):
-    """String#ascii_only?: the coderange scan behind it neither allocates nor raises."""
+    """String#ascii_only?: the coderange scan neither allocates nor raises."""
     if value.is_immediate(recv) or not boot.is_string(recv):
         return value.Q_UNDEF
     if not _owned_by_core(recv, value.C_STRING, ASCII_ONLY_P):
@@ -986,7 +983,7 @@ def str_ascii_only_p(recv):
 
 
 def ary_sub_aref(recv, idx):
-    """Array#[] with an Integer on a subclass that kept Array's; rb_ary_entry handles bounds and negatives."""
+    """Array#[] on a subclass keeping Array's; rb_ary_entry handles bounds."""
     if value.is_immediate(recv) or not value.is_fixnum(idx) \
             or not boot.is_array(recv):
         return value.Q_UNDEF
@@ -1020,7 +1017,7 @@ def str_eqq(a, b):
 
 
 def mod_eqq(a, b):
-    """Module#=== is kind_of? with the operands swapped, answered from the two classes alone."""
+    """Module#=== is kind_of? with the operands swapped, from the classes."""
     if value.is_immediate(a):
         return value.Q_UNDEF
     t = raw_word(a, value.FLAGS_WORD) & value.T_MASK
@@ -1040,10 +1037,10 @@ def mod_eqq(a, b):
 
 
 def _ary_eq_false(a, b):
-    """rb_ary_equal (array.c:5382) answers false for an argument that is neither an Array nor something answering to_ary; no BOP flag watches Array#==, so ask CRuby who owns it, as int_abs does."""
+    """rb_ary_equal (array.c:5382) is false for a non-Array with no to_ary."""
     if not (value.is_plain_array(a) and value.is_immediate(b)):
         return False
-    # TODO: a respond_to? or respond_to_missing? that claims a to_ary the class does not define is still read as no to_ary, as in opt_not's note.
+    # TODO: a respond_to? claiming an undefined to_ary reads as no to_ary.
     if dispatch.owner_of(promote(value.class_of(b)), TO_ARY) != value.Q_NIL:
         return False
     klass = value.core_class(value.C_ARRAY)
@@ -1052,13 +1049,13 @@ def _ary_eq_false(a, b):
 
 
 def _str_eq(a, b):
-    """vm_opt_str_eq's arm (vm_insnhelper.c:2540); an argument that is neither a String nor something answering to_str is false, as rb_str_equal answers it (string.c:4271)."""
+    """vm_opt_str_eq (vm_insnhelper.c:2540); no to_str false (string.c:4271)."""
     if not (value.is_plain_string(a) and _str_eq_op()):
         return value.Q_UNDEF
     v = boot.str_eq(a, b)
     if v != value.Q_UNDEF:
         return v
-    # TODO: a respond_to_missing? claiming a to_str the class does not define is still read as no to_str, as in _ary_eq_false.
+    # TODO: a respond_to_missing? claiming an undefined to_str reads as none.
     if value.is_immediate(b) \
             and dispatch.owner_of(promote(value.class_of(b)),
                                   TO_STR) == value.Q_NIL:
@@ -1071,7 +1068,7 @@ def eq(a, b):
         return value.newbool(a == b)
     if _flt2(a, b, B_FLT_EQ, True):
         return value.newbool(_dbl(a) == _dbl(b))
-    # `n == nil`: Integer#== hands a non-numeric to the argument's ==, which for an untouched NilClass is identity (numeric.c num_equal).
+    # n == nil: Integer#== defers to the arg's == (numeric.c num_equal).
     if b == value.Q_NIL and value.is_fixnum(a) and _int_op(B_INT_EQ) \
             and identity_op(b, EQ):
         return value.Q_FALSE
@@ -1097,7 +1094,7 @@ def int_eqq_pristine():
 
 
 def neq(a, b):
-    # BOP_NEQ is never flagged: vm_opt_neq resolves `!=` to BasicObject#!= then asks opt_equality, so Integer#== is the definition that counts.
+    # BOP_NEQ is never flagged: vm_opt_neq defers to opt_equality's Integer#==
     if _fix2(a, b, B_INT_EQ):
         return value.newbool(a != b)
     if _flt2(a, b, B_FLT_EQ, True):
@@ -1140,12 +1137,12 @@ def xor(a, b):
 
 
 def rshift(a, b):
-    """Integer#>> for a non-negative fixnum shift; a negative one is a left shift CRuby may widen to a Bignum, so it goes back to CRuby."""
+    """Integer#>> for a non-negative shift; a negative one may widen."""
     if _fix2(a, b, B_INT_RSHIFT):
         n = value.fix2int(a)
         s = value.fix2int(b)
         if s >= 0:
-            # A fixnum is under 63 bits, so any wider shift is already the sign; RPython leaves a shift of the full word width undefined.
+            # A fixnum is under 63 bits; a full-word shift is undefined.
             if s >= LONG_BIT - 1:
                 s = LONG_BIT - 1
             return value.int2fix(n >> s)
@@ -1153,7 +1150,7 @@ def rshift(a, b):
 
 
 def range_part(recv, mid):
-    """Range#begin, #end, #exclude_end? read straight off the Range; the shim answers Qundef for anything but a direct Range instance."""
+    """Range#begin/#end/#exclude_end?; the shim answers Qundef otherwise."""
     if value.is_immediate(recv):
         return value.Q_UNDEF
     if mid == BEGIN and _cruby_owns(B_RNG_BEGIN):
@@ -1166,7 +1163,7 @@ def range_part(recv, mid):
 
 
 def int_abs(recv):
-    """Integer#abs for a Fixnum; no BOP flag watches it, so ask CRuby who owns it, as identity_op does."""
+    """Integer#abs for a Fixnum; no BOP flag, so ask CRuby who owns it."""
     if not value.is_fixnum(recv):
         return value.Q_UNDEF
     klass = value.core_class(value.C_INTEGER)
@@ -1183,14 +1180,14 @@ def int_abs(recv):
 
 
 def _int_owns(mid):
-    """No BOP flag watches these, so ask CRuby who owns them, as int_abs does."""
+    """No BOP flag watches these, so ask CRuby who owns them."""
     klass = value.core_class(value.C_INTEGER)
     return (dispatch.owner_of(klass, mid) == klass
             and dispatch.lookup_core(klass, mid) is None)
 
 
 def int_uminus(recv):
-    """Integer#-@ for a Fixnum; the fixnum minimum negates to a Bignum, which only CRuby builds."""
+    """Integer#-@; the fixnum minimum negates to a CRuby-only Bignum."""
     if not value.is_fixnum(recv) or not _int_owns(UMINUS):
         return value.Q_UNDEF
     n = -value.fix2int(recv)
@@ -1200,7 +1197,7 @@ def int_uminus(recv):
 
 
 def int_bitref(a, b):
-    """Integer#[] for a non-negative Fixnum index; a Range or negative index (rb_int_aref, numeric.c:5001) goes back to CRuby."""
+    """Integer#[] non-negative index; Range or negative (numeric.c:5001)."""
     if not (value.is_fixnum(a) and value.is_fixnum(b)) or not _int_owns(AREF):
         return value.Q_UNDEF
     s = value.fix2int(b)
@@ -1213,7 +1210,7 @@ def int_bitref(a, b):
 
 
 def str_concat(a, b):
-    """String#<< appending a String, or a byte to a binary String; a frozen receiver and an encoding negotiation stay with CRuby's rb_str_concat."""
+    """String#<< a String or byte; frozen or re-encoding stays with CRuby."""
     if not value.is_plain_string(a):
         return value.Q_UNDEF
     if not (value.is_plain_string(b) or value.is_fixnum(b)):
@@ -1223,7 +1220,7 @@ def str_concat(a, b):
     v = boot.str_append(a, b)
     if v != value.Q_UNDEF or not value.is_plain_string(b):
         return v
-    # The raw arm refused (encoding negotiation or a frozen receiver): still one protected call instead of a full send.
+    # The raw arm refused: still one protected call, not a full send.
     return boot.str_push(a, b)
 
 
@@ -1240,7 +1237,7 @@ def lshift(a, b):
     s = value.fix2int(b)
     if s < 0 or s > LONG_BIT - 2:
         return value.Q_UNDEF
-    # Bound the operand instead of shifting first: an overflowing shift is undefined in RPython.
+    # Bound the operand first: an overflowing shift is undefined in RPython.
     limit = 1 << (LONG_BIT - 2 - s)
     if n >= limit or n < -limit:
         return value.Q_UNDEF
@@ -1248,14 +1245,14 @@ def lshift(a, b):
 
 
 def _flt_owns(mid):
-    """No BOP flag watches these, so ask CRuby who owns them, as int_abs does."""
+    """No BOP flag watches these, so ask CRuby who owns them."""
     klass = value.core_class(value.C_FLOAT)
     return (dispatch.owner_of(klass, mid) == klass
             and dispatch.lookup_core(klass, mid) is None)
 
 
 def flt_to_i(recv):
-    """flo_to_i (numeric.c:2562) truncates toward zero; NaN, an infinity and anything outside the fixnum range go back to CRuby, which raises FloatDomainError or builds the Bignum."""
+    """flo_to_i (numeric.c:2562) truncates; NaN, inf and wide values back."""
     if not value.is_float(recv) or not _flt_owns(TO_I):
         return value.Q_UNDEF
     d = value.float_val(recv)
@@ -1269,7 +1266,7 @@ def flt_to_i(recv):
 
 
 def flt_uminus(recv):
-    """rb_float_uminus (numeric.c:1048) is a plain IEEE negate, so 0.0 and -0.0 swap."""
+    """rb_float_uminus (numeric.c:1048) is an IEEE negate: 0.0/-0.0 swap."""
     if not value.is_float(recv) or not _flt_owns(UMINUS):
         return value.Q_UNDEF
     return _from_dbl(-value.float_val(recv))
@@ -1336,13 +1333,13 @@ def zero_arg(recv, mid):
 
 
 def _both_positive(a, b):
-    # Ruby's / and % floor, RPython's truncate: only take operands where the two agree.
+    # Ruby's / and % floor, RPython's truncate: take only where they agree.
     return (value.is_fixnum(a) and value.is_fixnum(b)
             and value.fix2int(a) >= 0 and value.fix2int(b) > 0)
 
 
 def _fdiv(x, y):
-    """Float#/ never raises: a zero denominator gives NaN or a signed Infinity (numeric.c:1150)."""
+    """Float#/ never raises: /0 is NaN or a signed Inf (numeric.c:1150)."""
     if y != 0.0:
         return x / y
     if x == 0.0:
@@ -1365,7 +1362,7 @@ def mod(a, b):
 
 
 def aref(recv, idx):
-    """Array[Fixnum] reads the elements in place; a Hash goes straight to the lookup."""
+    """Array[Fixnum] reads in place; a Hash goes straight to the lookup."""
     v = hash_aref(recv, idx)
     if v != value.Q_UNDEF:
         return v
@@ -1382,7 +1379,7 @@ def aref(recv, idx):
 
 
 def aset(recv, idx, val):
-    """A store inside a writable Array goes in place; growth, sharing and FrozenError stay with rb_ary_store."""
+    """In-place store; growth, sharing and FrozenError go to rb_ary_store."""
     if value.is_plain_array(recv) and value.is_fixnum(idx) \
             and _ary_op(B_ARY_ASET):
         immediate = value.is_immediate(val)
@@ -1429,14 +1426,14 @@ def empty_p(recv):
 
 
 def ary_new_pristine(recv):
-    """A direct Array whose Array.new and Array#initialize are still CRuby's own, on both sides, so RPyYARV may build the array itself."""
+    """Array.new and Array#initialize both still CRuby's, on both sides."""
     return (recv == value.core_class(value.C_ARRAY)
             and _cruby_owns(B_ARY_NEW) and _cruby_owns(B_ARY_INITIALIZE)
             and dispatch.lookup_core(recv, INITIALIZE) is None)
 
 
 def nil_p(recv):
-    """vm_opt_nil_p's first arm, plus the false a receiver whose class still resolves nil? to Kernel's owes; the owner is the pristine Kernel, so redefining it anywhere in the chain is seen."""
+    """vm_opt_nil_p; the owner is pristine Kernel, so a redefine is seen."""
     if recv == value.Q_NIL:
         if _cruby_owns(B_NIL_NIL_P) \
                 and dispatch.lookup_core(value.core_class(value.C_NILCLASS),
@@ -1447,7 +1444,7 @@ def nil_p(recv):
     if klass == 0 or modules.kernel == 0 or not _cruby_owns(B_KERNEL_NIL_P):
         return value.Q_UNDEF
     klass = promote(klass)
-    # The registry too: a `nil?` RPyYARV defined in a module is invisible to CRuby's owner.
+    # The registry too: a module's nil? is invisible to CRuby's owner.
     if dispatch.lookup(klass, NIL_P) is not None:
         return value.Q_UNDEF
     if dispatch.owner_of(klass, NIL_P) != modules.kernel:
@@ -1456,25 +1453,25 @@ def nil_p(recv):
 
 
 def str_freeze_pristine():
-    """String#freeze still CRuby's own, so opt_str_freeze may push the literal."""
+    """String#freeze still CRuby's, so opt_str_freeze may push the literal."""
     return (_cruby_owns(B_STR_FREEZE)
             and dispatch.lookup_core(value.core_class(value.C_STRING),
                                      FREEZE) is None)
 
 
 def opt_not(recv):
-    # TODO: vm_opt_not asks whether `!` still resolves to rb_obj_not, which no BOP flag records, so a redefined #! is still ignored here.
+    # TODO: no BOP flag records #!, so a redefined #! is ignored here.
     return value.newbool(not value.is_true(recv))
 
 
 def check_float_layout():
-    """The Float fast paths decode flonums and read RFloat by hand; refuse a CRuby they misread."""
+    """Float fast paths read RFloat by hand; refuse a CRuby they misread."""
     got = boot.float_layout()
     return got == [value.FLOAT_VALUE_WORD, 1, 1]
 
 
 def check_flonum_encoding():
-    """value.dbl2flonum against DBL2NUM itself, on the doubles the rotation reaches and the ones it does not."""
+    """value.dbl2flonum against DBL2NUM, on and off the rotation's range."""
     for d in [0.0, -0.0, 1.0, -1.0, 0.5, 1e-10, 1e10, 3.141592653589793,
               1.727233711018889e-77, 1.7272337110188893e-77, 1e300, 1e-300,
               INFINITY, -INFINITY]:
@@ -1490,7 +1487,7 @@ def check_flonum_encoding():
 
 
 def check_array_layout():
-    """The Array fast paths read RArray by hand; refuse a CRuby they misread."""
+    """Array fast paths read RArray by hand; refuse a CRuby they misread."""
     got = boot.array_layout()
     want = [value.ARY_EMBED_FLAG, value.ARY_EMBED_LEN_SHIFT,
             value.ARY_EMBED_LEN_MASK, value.ARY_HEAP_LEN_WORD,

@@ -1,7 +1,7 @@
 from rpyyarv import value
 from rpyyarv.rlib import hint
 
-# Which throw a rescue/ensure ISeq runs under, so its trailing `throw 0` can continue it (vm_insnhelper.c:1733).
+# Which throw the rescue/ensure ISeq runs under (vm_insnhelper.c:1733).
 PENDING_NONE = 0
 PENDING_RAISE = 1
 PENDING_BREAK = 2
@@ -11,7 +11,7 @@ PENDING_RETRY = 5
 
 
 class SharedLocals(object):
-    """Locals a nested ISeq (block, rescue, once) can reach; on the heap, so a nested trace reads them without forcing this frame's virtualizable."""
+    """Heap locals a nested ISeq reads without forcing this virtualizable."""
     def __init__(self, n):
         self.values = [value.Q_NIL] * n
 
@@ -21,22 +21,22 @@ class Frame(object):
     _virtualizable_ = ['sp', 'pc', 'stack[*]', 'locals[*]']
     _immutable_fields_ = ['shared']
 
-    # VM_FRAME_FLAG_MODIFIED_BLOCK_PARAM (insns.def:111); left to the rtyper's zero-init so the common no-block-param call pays no store.
+    # VM_FRAME_FLAG_MODIFIED_BLOCK_PARAM (insns.def:111); zero-init, no store.
     block_param_set = False
 
-    # A module body that ran `module_function` with no arguments; every def after it becomes private plus a singleton method (vm_method.c rb_mod_modfunc).
+    # Bare `module_function`: later defs go private + singleton (vm_method.c).
     module_func = False
 
-    # A class/module body that ran `private` with no arguments; every def after it lands private, until `public` flips it back.
+    # Bare `private` in a class/module body: later defs land private.
     private_pragma = False
 
-    # Set on the way out of execute(); a `return` whose target frame is already gone is the orphaned Proc vm_throw_start answers with a LocalJumpError.
+    # Set leaving execute(); `return` to a dead frame is a LocalJumpError.
     dead = False
 
-    # The gc_mark_state.generation that last marked this frame; block chains revisit frames, and one mark per collection is enough.
+    # Generation that last marked this frame; block chains revisit frames.
     marked_gen = 0
 
-    # Almost every frame is a plain method call: no block, no unwind pending, not itself a block's frame. Zero-init covers all of that.
+    # Almost every frame is a plain method call; zero-init covers all of it.
     block = None
     own_block = None
     defining_frame = None
@@ -60,7 +60,7 @@ class Frame(object):
             self.locals = [value.Q_NIL] * iseq.nlocals
             self.shared = None
         self.self_val = self_val
-        # The interp.Cref a class body pushed, None outside one; its klass is what a def in the body lands on.
+        # The Cref a class body pushed; its klass is where a def lands.
         self.cref = cref
         # The running MethodEntry, which invokesuper resumes above.
         self.entry = entry

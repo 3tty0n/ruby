@@ -1,29 +1,24 @@
-# Stand-in for ruby-bench's harness/harness.rb that rpyyarv can run natively.
-# Mirrors upstream ruby-bench/harness/harness.rb (WARMUP_ITRS, MIN_BENCH_ITRS,
-# MIN_BENCH_TIME) without the CSV/RSS/JIT-stats parts; upstream harness/loader.rb
-# and harness-common.rb use constructs rpyyarv delegates. Output is the ITER/DONE
-# protocol scripts/bench.rb parses for both suites.
+# Stand-in harness: upstream loader.rb uses constructs rpyyarv delegates.
+# Output is the ITER/DONE protocol scripts/bench.rb parses.
 
 WARMUP_ITRS = Integer(ENV.fetch('WARMUP_ITRS', '15'))
-# Seconds of warmup a tracing JIT needs regardless of the iteration count; both floors apply, and warmup keeps extending while iterations still get faster, up to WARMUP_MAX.
+# Seconds of warmup a tracing JIT needs; both floors apply, up to WARMUP_MAX.
 WARMUP_TIME = Float(ENV.fetch('WARMUP_TIME', '0'))
-# 60: rubyboy's deterministic re-trace burst ends near iteration 17 (~40 s in); 30 capped warmup mid-burst and left stalled iterations in the window.
+# 60: rubyboy's re-trace burst ends near iteration 17; 30 capped it mid-burst.
 WARMUP_MAX = Float(ENV.fetch('WARMUP_MAX', '60'))
 MIN_BENCH_ITRS = Integer(ENV.fetch('MIN_BENCH_ITRS', '10'))
 MIN_BENCH_TIME = Integer(ENV.fetch('MIN_BENCH_TIME', '10'))
 
 Random.srand(1337)
 
-# Noop stand-in for harness-common's Ractor.make_shareable; the benchmarks run in one ractor.
+# Noop stand-in for Ractor.make_shareable; benchmarks run in one ractor.
 def make_shareable(obj, *_rest)
   obj
 end
 
-# harness-common's use_gemfile without the `bundle install` shell-out: gems must already be installed.
+# use_gemfile without the `bundle install` shell-out: gems must be installed.
 def use_gemfile(*_rest)
-  # RubyGems and Bundler initialized the embedded CRuby before RPyYARV starts.
-  # Let CRuby own their bootstrap requires, then restore interception so the
-  # benchmark gem's Ruby files are compiled and executed by RPyYARV.
+  # CRuby owns RubyGems/Bundler bootstrap; restore interception for gem files.
   previous = ENV["RPYYARV_FOREIGN_REQUIRE"]
   ENV["RPYYARV_FOREIGN_REQUIRE"] = "1"
   begin
@@ -56,7 +51,8 @@ def run_benchmark(_num_itrs_hint, *_rest)
     recent.shift if recent.length > 10
     n += 1
     if warmed.nil? && n >= WARMUP_ITRS && total >= WARMUP_TIME * 1000
-      # Warm once the last five iterations stopped improving AND contain no spike; a min-only test read rubyboy's 2.4x re-trace burst as settled and put 2-3 stalled iterations in every measured window. WARMUP_TIME 0 keeps the plain iteration-count behavior.
+      # Warm when the last five stop improving AND contain no spike.
+      # WARMUP_TIME 0 keeps the plain iteration-count behavior.
       settled = WARMUP_TIME == 0 ||
                 (recent.length >= 10 &&
                  recent[5, 5].min >= recent[0, 5].min * 0.97 &&

@@ -1,21 +1,9 @@
 #!/usr/bin/env ruby
 # frozen_string_literal: true
 #
-# One driver for both benchmark suites: AWFY and ruby-bench (formerly
-# Shopify/yjit-bench). Each suite only supplies how a benchmark is located and
-# what script to run; timing, the delegation gate, the tables and the aggregation are
-# shared.
-#
-# Neither suite's own harness is usable here: AWFY's run.rb uses getspecial and
-# ruby-bench's harness/loader.rb uses retry, so rpyyarv delegates the whole file to
-# CRuby and the run silently measures CRuby. Both suites therefore run through a
-# generated driver / a shim harness that speaks the same ITER/DONE protocol.
-#
-# A TIMED RUN MUST NEVER CARRY INSTRUMENTATION ENV. RPYYARV_COVERAGE=1 alone
-# moved cd from 200 ms to 172 ms -- coverage counting changes what the tracing
-# JIT selects, so instrumented numbers are a different configuration and are not
-# comparable with anything else on this project. The delegation gate therefore runs as
-# a separate cheap probe with coverage on, and the timed series runs clean.
+# One driver for AWFY and ruby-bench; timing and aggregation are shared.
+# Suite harnesses use getspecial/retry, so they would silently time CRuby.
+# A TIMED RUN MUST NEVER CARRY INSTRUMENTATION ENV (coverage: cd 200->172 ms).
 
 require "open3"
 require "json"
@@ -38,9 +26,8 @@ BASE_ENGINES = [
   ["rpyyarv-jit", [File.join(ROOT, "rpyyarv-jit")]]
 ].freeze
 
-# name => [class, inner, warmup, measured]; inner targets ~80 ms per iteration
-# under CRuby. cd, havlak, mandelbrot and nbody only verify at fixed inner
-# values, so those take the nearest allowed one and fewer iterations instead.
+# name => [class, inner, warmup, measured]; inner targets ~80 ms under CRuby.
+# cd/havlak/mandelbrot/nbody verify only at fixed inner values, so fewer iters.
 AWFY_BENCHMARKS = {
   "bounce"     => ["Bounce",     200,    10, 15],
   "cd"         => ["CD",         100,    10, 15],
@@ -63,8 +50,7 @@ DRV_PREFIX = "bench_tmp_drv_"
 
 # --- shared machinery -------------------------------------------------------
 
-# Only the children get DYLD_LIBRARY_PATH: pointing it at the build tree breaks
-# whatever ruby runs this harness.
+# Children only: pointing DYLD_LIBRARY_PATH at build breaks this harness's ruby.
 def base_env
   { LIBVAR => BUILD + File::PATH_SEPARATOR + (ENV[LIBVAR] || "") }
 end
@@ -78,8 +64,7 @@ end
 # Only the probe gets this; see the header note on cd 172 vs 200 ms.
 COVERAGE_ENV = { "RPYYARV_COVERAGE" => "1" }.freeze
 
-# The gem set scripts/bench-setup filled, so Bundler.setup finds the versions
-# each Gemfile.lock pins rather than whatever is installed globally.
+# The gem set bench-setup filled, so Bundler.setup finds the pinned versions.
 BENCH_GEMS = ENV.fetch("BENCH_GEMS", File.join(ROOT, ".bench-gems"))
 
 def bench_gems_env
@@ -114,7 +99,7 @@ def timeout_argv(secs, argv)
   ["perl", "-e", "alarm shift; exec @ARGV", secs.to_s] + argv
 end
 
-# One process. Returns [times, err, info]; a delegated run is an error, never a number.
+# Returns [times, err, info]; a delegated run is an error, never a number.
 def run_once(argv, script, env, timeout)
   out, err, status = Open3.capture3(env, *timeout_argv(timeout, argv + [script]))
   # Benchmarks emit binary data; scrub before any regex touches it.
@@ -122,8 +107,7 @@ def run_once(argv, script, env, timeout)
   err = err.scrub
   text = out + err
   info = coverage_of(text)
-  # Per-file delegation is the hybrid working as designed and stays a number;
-  # only a main script CRuby ran wholesale would time the wrong engine.
+  # Per-file delegation stays a number; only a wholesale CRuby run misleads.
   if text.include?("running under CRuby instead")
     return [nil, "DELEGATED", info.merge("delegated" => first_delegation(text))]
   end
@@ -167,8 +151,7 @@ def why(err, status)
   msg.gsub(%r{\S*/bench_tmp_drv_\S+\.rb:?}, "").strip[0, 100]
 end
 
-# Every engine is timed inside the same benchmark loop, so an A/B pair is
-# interleaved process by process rather than suite after suite.
+# Engines are interleaved process by process, not suite after suite.
 def time_engine(argv, script, env, warm, procs, timeout)
   pooled = []
   per_proc = []
@@ -213,9 +196,7 @@ class AwfySuite
 
   def timeout = 600
 
-  # Yields [script, env, warmup] and cleans up the generated driver; a probe
-  # script runs one iteration at the real inner count, enough to load the file
-  # (where delegations are decided) without paying for the full series.
+  # A probe runs one iteration at the real inner count: enough to load the file.
   def with_script(bench, probe: false)
     klass, inner, warm, meas = AWFY_BENCHMARKS[bench]
     src = <<~RUBY
@@ -251,7 +232,7 @@ class RubyBenchSuite
     @warm = opts[:warmup] || 5
     @meas = opts[:iters] || 5
     @gem_require = opts[:gem_require]
-    # An explicit --ruby-bench is used as given, never silently replaced by a fallback.
+    # An explicit --ruby-bench is used as given, never replaced by a fallback.
     candidates = opts[:dir] ? [opts[:dir]] : [ENV["RUBY_BENCH"], File.join(ROOT, "ruby-bench"),
                                               File.join(ROOT, "yjit-bench")].compact
     @dir = candidates.find { |d| File.directory?(File.join(d, "benchmarks")) }
@@ -283,9 +264,7 @@ class RubyBenchSuite
 
   def gems?(bench) = File.exist?(File.join(File.dirname(paths[bench]), "Gemfile"))
 
-  # Whether RPyYARV compiles and runs this benchmark's gems itself, rather than
-  # leaving their requires to CRuby. Probed once per benchmark and cached: a
-  # gem tree RPyYARV cannot load must not turn a timing into a crash.
+  # Probed once and cached: a gem tree RPyYARV cannot load must not crash it.
   def native_requires?(bench)
     return @gem_require unless @gem_require.nil?
     @native ||= {}
@@ -303,34 +282,24 @@ class RubyBenchSuite
     ok
   end
 
-  # The shim is inlined ahead of the benchmark and its harness/loader require
-  # dropped: loading upstream loader.rb delegates the run (it uses retry). The driver
-  # sits in the benchmark's own dir so __dir__ and sibling requires still resolve.
+  # The shim is inlined and harness/loader dropped: loader.rb uses retry.
+  # The driver sits in the benchmark's dir so __dir__ and requires resolve.
   def with_script(bench, probe: false, force_native: false)
     warm = probe ? 0 : @warm
     meas = probe ? 1 : @meas
-    # Before the driver is written: probing runs with_script again for the same
-    # benchmark, and its ensure would delete the file out from under this call.
+    # Before the driver is written: the probe's ensure would delete it.
     no_require = gems?(bench) && !force_native && !native_requires?(bench)
     src = File.read(paths[bench]).gsub(/^\s*require_relative\s+['"][.\/]*harness\/loader['"].*$/, "")
     path = File.join(File.dirname(paths[bench]), "#{DRV_PREFIX}#{bench}_#{Process.pid}.rb")
     File.write(path, File.read(File.join(SHIM_DIR, "harness.rb")) + "\n" + src)
     env = base_env.merge("WARMUP_ITRS" => warm.to_s,
-                         # Same wall-clock warmup floor for every engine; a tracing JIT is not warm after 5 short iterations.
+                         # Wall-clock warmup floor: a tracing JIT needs it.
                          "WARMUP_TIME" => probe ? "0" : "5",
                          "MIN_BENCH_ITRS" => meas.to_s,
-                         # Seconds of measured series. Long enough that periodic
-                         # stalls -- rpyyarv-jit has ~300 ms ones on liquid every
-                         # few dozen iterations -- land in every window rather
-                         # than in some, which is what made the median jump 3x
-                         # between runs.
+                         # Long enough that ~300 ms stalls land in every window.
                          "MIN_BENCH_TIME" => probe ? "0" : "5",
                          "RUBYLIB" => uninstalled_rubylib).merge(bench_gems_env)
-    # CRuby owns Bundler/RubyGems loading; RPyYARV can load a gem's own tree,
-    # but not RubyGems' -- re-running the files CRuby already loaded at boot
-    # redefines Gem's constants and then crashes. Which gems RPyYARV can own is
-    # per benchmark, so it is probed rather than assumed: --gem-require forces
-    # it on, --no-gem-require off, and the default is what the probe found.
+    # RPyYARV must not re-load RubyGems' tree: it redefines Gem and crashes.
     env["RPYYARV_NO_REQUIRE"] = "1" if no_require
     yield path, env, warm
   ensure
@@ -340,8 +309,7 @@ end
 
 # --- coverage ---------------------------------------------------------------
 
-# What each benchmark still hands to CRuby, ranked. This is a probe, never a
-# timed run: RPYYARV_COVERAGE=1 changes what the JIT selects (see the header).
+# A probe, never a timed run: RPYYARV_COVERAGE=1 changes JIT selection.
 def foreign_report(suite, names, top)
   names.each do |bench|
     suite.with_script(bench, probe: true) do |script, env, _warm|
@@ -365,9 +333,8 @@ rescue JSON::ParserError
   {}
 end
 
-# Classify under the plain interpreter: NATIVE / DELEGATED / CRASH / TIMEOUT / NEEDS-GEMS.
-# A Gemfile alone is not a verdict -- some bundled benchmarks (optcarrot) run
-# natively anyway -- so it only explains a failure.
+# Classify: NATIVE / DELEGATED / CRASH / TIMEOUT / NEEDS-GEMS.
+# A Gemfile alone is not a verdict; it only explains a failure.
 def probe(suite, bench)
   suite.with_script(bench, probe: true) do |script, env, _warm|
     _times, err, info = run_once([File.join(ROOT, "rpyyarv")], script, env.merge(COVERAGE_ENV), 90)
@@ -424,8 +391,7 @@ def run_suite(suite, names, engines, procs, raw)
       rows << [bench, suite.label(bench), {}, skip]
       next
     end
-    # The delegation verdict and the coverage counts come from an instrumented probe;
-    # the timed series below runs without it.
+    # Verdict and coverage come from the probe; the timed series runs clean.
     probes = {}
     suite.with_script(bench, probe: true) do |script, env, _warm|
       engines.each do |ename, eargv|
@@ -507,7 +473,7 @@ def summarize(all_rows, engines)
   table = []
   totals = Hash.new { |h, k| h[k] = [] }
   all_rows.each do |suite_name, rows|
-    # Counted from rpyyarv-jit's own verdict: a cruby number says nothing about what rpyyarv ran.
+    # From rpyyarv-jit's verdict: a cruby number says nothing about rpyyarv.
     primary = engines.map(&:first).include?("rpyyarv-jit") ? "rpyyarv-jit" : engines.first.first
     verdicts = rows.map { |_b, _l, r, s| s ? "SKIP" : (r[primary] && r[primary][:status]) }
     native = verdicts.count(&:nil?)
@@ -622,8 +588,7 @@ def main(argv)
     end
     if suite.is_a?(RubyBenchSuite)
       inv = inventory_for(suite, names, refresh || inventory_only)
-      # Delegated benchmarks are still timed (the probe reports them per engine);
-      # only ones that cannot run at all become rows with their classification.
+      # Delegated benchmarks are still timed; only unrunnable ones become rows.
       suite.define_singleton_method(:skip_reason) do |bench|
         s = inv[bench] && inv[bench]["status"]
         s && !%w[NATIVE DELEGATED].include?(s) ? "#{s}: #{inv[bench]['why']}" : nil

@@ -1,4 +1,4 @@
-"""Load raw ISeqs into W_ISeqs, transforming operands by their insns.def type."""
+"""Load raw ISeqs into W_ISeqs, transforming operands by insns.def type."""
 
 from rpyyarv import boot
 from rpyyarv import dispatch
@@ -16,7 +16,7 @@ from rpyyarv.iseq import (CATCH_ENSURE, CATCH_RESCUE, CATCH_RETRY,
                   W_CallInfo, W_ISeq)
 
 
-# break/next/redo unwind as RPython exceptions; retry is here because the compiler emits an entry around every rescue clause regardless, and `throw` with the retry tag refuses it.
+# break/next/redo unwind as RPython exceptions; `throw` refuses the retry tag.
 IGNORED_CATCH_TYPES = ['break', 'next', 'redo']
 
 CATCH_KINDS = {'rescue': CATCH_RESCUE, 'ensure': CATCH_ENSURE,
@@ -24,7 +24,7 @@ CATCH_KINDS = {'rescue': CATCH_RESCUE, 'ensure': CATCH_ENSURE,
 
 
 class ConstPool(object):
-    # One pool per operand type: an RPython list of raw VALUE ints cannot also hold W_ISeq or W_CallInfo.
+    # One pool per type: a list of VALUE ints cannot hold W_ISeq or W_CallInfo.
     def __init__(self):
         self.consts = []
         self.iseqs = []
@@ -62,7 +62,7 @@ class ConstPool(object):
 
 
 class LoadResult(object):
-    """Root ISeq, how much of the program RPyYARV could represent, and why not the rest."""
+    """Root ISeq, how much RPyYARV could represent, and why not the rest."""
     def __init__(self, w_iseq, total, supported, reasons):
         self.w_iseq = w_iseq
         self.total = total
@@ -88,7 +88,7 @@ class Loader(object):
                           self.reasons)
 
     def account_for_the_rest(self):
-        """An ISeq the loader gave up on never reached the ones nested in it, so without loading them too the coverage figure reads as one big failure."""
+        """A skipped ISeq hides the ones nested in it from the coverage."""
         if len(self.reasons) == 0:
             return
         for index in range(len(self.program.iseqs)):
@@ -101,7 +101,7 @@ class Loader(object):
                                                 e.msg)
 
     def parents_of(self, index):
-        """The naming scopes around an ISeq, innermost first; empty for a front end that did not record them (rawiseq.RawISeq.parent)."""
+        """Naming scopes around an ISeq, innermost first (RawISeq.parent)."""
         out = []
         at = self.program.iseqs[index].parent
         while at >= 0 and len(out) <= optable.MAX_LOCAL_LEVEL:
@@ -130,7 +130,7 @@ class Loader(object):
         return op
 
     def operands_of(self, insn, op, raw):
-        """Operands in insns.def order, with the ones a specialized variant fixes spliced back in from insns.SPEC_FILL."""
+        """Operands in insns.def order, specialized ones from SPEC_FILL."""
         want = len(insns.OPERAND_TYPES[op])
         given = insn.operands
         if insn.name not in insns.SPEC_FILL:
@@ -164,7 +164,7 @@ class Loader(object):
         return operands
 
     def load_iseq(self, index, parents):
-        """A getlocal at level N names a local of parents[N-1]; an unrepresentable ISeq becomes a stub, not a failed load, so the rest still loads for the CRuby fallback."""
+        """A getlocal at level N names a local of parents[N-1]."""
         if index in self.w_iseqs:
             return self.w_iseqs[index]
         if index < 0 or index >= len(self.program.iseqs):
@@ -216,7 +216,7 @@ class Loader(object):
             at = raw.labels[name]
             labels[name] = pc if at >= len(starts) else starts[at]
 
-        # Only where the line changes, so a long ISeq costs one pair per source line rather than one per instruction.
+        # Only where the line changes: one pair per source line, not per insn.
         line_pcs = []
         line_nums = []
         for i in range(len(starts)):
@@ -225,7 +225,7 @@ class Loader(object):
                 line_pcs.append(starts[i])
                 line_nums.append(n)
 
-        # W_ISeq declares code and consts immutable, so neither may ever be resized; pc already holds the final length.
+        # W_ISeq declares code and consts immutable: neither may be resized.
         pool = ConstPool()
         code = [0] * pc
         at = 0
@@ -242,7 +242,7 @@ class Loader(object):
 
         opt_table = self.opt_table(raw, labels)
         if raw.extra_params != '':
-            # Refused here, not at the send: a parameter shape the call path cannot place must fall back for the whole program, not raise on first call.
+            # Refused here, not at the send: fall back for the whole program.
             raise UnsupportedOperation(
                 "'%s' takes %s parameter(s), which RPyYARV does not support"
                 % (raw.name, raw.extra_params))
@@ -259,7 +259,7 @@ class Loader(object):
         returns = self.throws_return(opcodes, operands, raw, pool, catches)
         shares = raw.shares_locals
         for entry in catches:
-            # A rescue/ensure ISeq reads `$!` and the surrounding locals through defining_frame.
+            # A rescue/ensure ISeq reads `$!` and locals via defining_frame.
             if entry.w_iseq is not None:
                 shares = True
         consts = [v for v in pool.consts]
@@ -277,15 +277,15 @@ class Loader(object):
                         [p for p in line_pcs], [n for n in line_nums],
                         shares, [n for n in raw.local_names])
         gcroots.register_consts(consts)
-        # The values `once` caches live here, and the mark hook walks the list itself.
+        # The `once` cache lives here; the mark hook walks the list.
         gcroots.register_consts(w_iseq.once_cache)
         return w_iseq
 
-    # The ISeq types a non-local return may name; a class body gets LocalJumpError instead (vm_insnhelper.c:1893).
+    # ISeq types a non-local return may name (vm_insnhelper.c:1893).
     RETURN_TARGETS = ['method', 'top', 'main']
 
     def throws_return(self, opcodes, operands, raw, pool, catches):
-        """Whether a `return` from a block can reach here: this ISeq throws one, or something nested in it does."""
+        """Whether a `return` from a block can reach here, direct or nested."""
         for i in range(len(opcodes)):
             if opcodes[i] != insns.THROW:
                 continue
@@ -300,18 +300,18 @@ class Loader(object):
                 return True
         return False
 
-    # Everything the compiler may push between the FrozenCore receiver and the send that consumes it, for `alias`, `undef` and the keyword merges.
+    # What the compiler may push between the FrozenCore receiver and its send.
     VMCORE_PUSHES = [insns.PUTSPECIALOBJECT, insns.PUTOBJECT, insns.PUTNIL,
                      insns.PUTSELF, insns.GETLOCAL, insns.NEWHASH,
                      insns.DUPHASH, insns.SWAP]
-    # The merges build the one Hash a `**` or a bare `super` hands on; they are ordinary sends of a public method, so rb_funcallv runs them.
+    # Ordinary public sends, so rb_funcallv runs them.
     VMCORE_SENDS = ['core#set_method_alias', 'core#undef_method',
                     'core#set_variable_alias',
                     'core#hash_merge_ptr', 'core#hash_merge_kwd',
                     'lambda']
 
     def check_vmcore(self, opcodes, operands, raw):
-        """FrozenCore receives `alias`, `undef`, the keyword merges and `lambda` alike (vm.c:4274); the send taking it must be one of the implemented ones."""
+        """FrozenCore's send (vm.c:4274) must be one of the implemented ones."""
         for i in range(len(opcodes)):
             if opcodes[i] != insns.PUTSPECIALOBJECT:
                 continue
@@ -325,15 +325,13 @@ class Loader(object):
             if j < len(opcodes) and (opcodes[j] == insns.SEND or
                                      opcodes[j] == insns.OPT_SEND_WITHOUT_BLOCK):
                 mid = operands[j][0].strval
-            # A keyword/hash value can contain arbitrary sends between the
-            # FrozenCore push and core#hash_merge_*. The runtime still guards
-            # the actual FrozenCore receiver, so defer an inconclusive scan.
+            # The runtime guards the real receiver; defer an inconclusive scan.
             if mid != '' and mid not in self.VMCORE_SENDS:
                 raise UnsupportedOperation(
                     "RubyVM::FrozenCore#%s is not supported" % mid)
 
     def opt_table(self, raw, labels):
-        """iseq.c:3425 writes opt_num+1 labels; anything shorter is not a table vm_args.c:906 could index."""
+        """iseq.c:3425 writes opt_num+1 labels; vm_args.c:906 indexes them."""
         if len(raw.opt_labels) == 0:
             return []
         if len(raw.opt_labels) < 2:
@@ -348,7 +346,7 @@ class Loader(object):
         return out
 
     def keywords(self, raw, pool):
-        """Keyword names as symbol ids, their static defaults as VALUEs (Qundef where the body computes one), and the slot the first one lives in."""
+        """Keyword ids, static defaults (Qundef if computed), first slot."""
         if len(raw.kw_names) == 0:
             if raw.kwrest >= 0 and (raw.kwrest >= raw.nlocals):
                 raise LoadError("'%s' puts **rest in slot %d, outside its %d "
@@ -393,7 +391,7 @@ class Loader(object):
                             % (raw.name, top, raw.nlocals))
 
     def catches(self, raw, labels, parents):
-        """A catch ISeq reads the enclosing locals at level 1, so raw itself is its parent, the way a block's is."""
+        """A catch ISeq reads enclosing locals at level 1: raw is its parent."""
         n = 0
         for entry in raw.catches:
             if entry.kind in CATCH_KINDS:
@@ -534,7 +532,7 @@ class Loader(object):
                                    operand.describe()))
             if op == insns.SEND or op == insns.INVOKESUPER \
                     or op == insns.ONCE:
-                # The nested ISeq runs against this frame's locals, which therefore move to the heap.
+                # The nested ISeq shares these locals: they move to the heap.
                 raw.shares_locals = True
             return pool.add_iseq(
                 self.load_iseq(operand.intval, [raw] + parents))
@@ -560,7 +558,7 @@ class Loader(object):
         return table
 
     def const_path(self, operand, op, raw, pool):
-        """An IC reaches to_a as one Symbol per path segment (iseq.c:3503); an absolute `::Foo` has the empty name first."""
+        """One Symbol per segment (iseq.c:3503); `::Foo` leads with empty."""
         if operand.kind != rawiseq.OP_ARRAY:
             raise LoadError("%s in '%s' wants a constant path, got %s"
                             % (insns.NAMES[op], raw.name, operand.describe()))
@@ -583,7 +581,7 @@ class Loader(object):
         return pool.add(v)
 
     def literal_value(self, operand, op, raw):
-        """A real CRuby VALUE: until its pool is registered nothing CRuby scans reaches it, hence the keepalive."""
+        """Until the pool is registered nothing CRuby scans reaches it."""
         v = self._literal_value(operand, op, raw)
         gcroots.keepalive(v)
         return v
@@ -617,7 +615,7 @@ class Loader(object):
 
     def local_slot(self, operand, op, raw, parents, level):
         idx = self.int_of(operand, op, raw, 'local index')
-        # The index counts down from the top of the *naming* scope's environment, an enclosing ISeq when level is non-zero.
+        # The index counts down from the top of the naming scope's environment.
         owner = raw
         if level > 0:
             if level > len(parents):
@@ -653,12 +651,12 @@ class Loader(object):
                             % (insns.NAMES[op], raw.name, operand.describe()))
         if operand.intval == 1 and (operand.strval == 'refine'
                                     or operand.strval == 'using'):
-            # A whole file, since a refinement is lexically scoped and neither RPyYARV's dispatch nor a boundary rb_funcall consults CRuby's table; rb_mod_refine also refuses any block that is not CRuby's own. A method of either name that means something else costs coverage, not correctness.
+            # Refinements are lexical; RPyYARV's dispatch never consults them.
             raise UnsupportedOperation(
                 "the call to '%s' needs CRuby's lexical refinements"
                 % operand.strval)
         flags = operand.flag
-        # Not ARGS_SIMPLE itself: CRuby clears it whenever a block ISeq is attached, and every other reason has its own bit outside this mask.
+        # Not ARGS_SIMPLE: CRuby clears it whenever a block ISeq is attached.
         simple = (not operand.has_kwarg
                   and (flags & ~optable.SIMPLE_CALL_FLAGS) == 0)
         kw_names = []
@@ -666,7 +664,7 @@ class Loader(object):
         splat = (flags & optable.CALL_FLAG_ARGS_SPLAT) != 0
         blockarg = (flags & optable.CALL_FLAG_ARGS_BLOCKARG) != 0
         if not simple:
-            # Refused here, not at the send: an ISeq holding a call site the interpreter cannot make is one it cannot finish running.
+            # Refused here, not at the send: the ISeq could not finish running.
             if (len(operand.kw_names) == 0 and not kw_splat and not splat) or \
                     (len(operand.kw_names) > 0 and kw_splat) or \
                     (flags & ~optable.SPLAT_CALL_FLAGS) != 0:
@@ -677,7 +675,7 @@ class Loader(object):
                 kw_names.append(symbols.intern(name))
         if blockarg and (flags & optable.CALL_FLAG_SUPER) != 0:
             raise UnsupportedOperation('super with a block is not supported')
-        # iseq.c:3537 reports orig_argc without them; on the stack they are the topmost arguments. A **splat's one Hash is already counted.
+        # iseq.c:3537 reports orig_argc without them; a **splat Hash counts.
         return W_CallInfo(symbols.intern(operand.strval),
                           operand.intval + len(kw_names),
                           simple, (flags & optable.CALL_FLAG_FCALL) != 0,
@@ -719,5 +717,5 @@ def load_strict(program):
 
 
 def load_dump(text):
-    """The only format-aware entry point; no CRuby to fall back to here, so it refuses what it cannot load."""
+    """No CRuby to fall back to here, so it refuses what it cannot load."""
     return load_strict(iseqdump.parse(text))

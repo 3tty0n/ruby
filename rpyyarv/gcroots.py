@@ -1,4 +1,4 @@
-"""CRuby's conservative stack scan misses frame stacks/locals and const pools since they're RPython objects; this keeps them enumerable for the shim's mark hook."""
+"""RPython objects CRuby's stack scan misses, for the shim's mark hook."""
 
 from rpyyarv import block as block_mod
 from rpyyarv import boot
@@ -14,8 +14,8 @@ class Registry(object):
         self.classes = []       # classes RPyYARV defined, keys of the registry
         self.held = []          # exception VALUEs parked outside any frame
         self.blocks = None      # interp's handle table, once it exists
-        self.fibers = None      # fibers.mark_suspended, once fibers are installed
-        # ponytail: grows monotonically, a redefined name leaks its old block until process end -- bounded by define_method call count.
+        self.fibers = None      # fibers.mark_suspended, once installed
+        # ponytail: leaks redefined blocks, bounded by define_method count.
         self.bmethods = []
 
 
@@ -23,17 +23,17 @@ state = Registry()
 
 
 def register_blocks(blocks):
-    """The blocks CRuby can reach through a handle; their defining frames may already have returned, so nothing else keeps their locals marked."""
+    """Handle-reachable blocks: nothing else keeps their locals marked."""
     state.blocks = blocks
 
 
 def register_fibers(fn):
-    """fibers.mark_suspended, passed as a function so this module keeps its place below fibers.py."""
+    """Passed as a function to keep this module below fibers.py."""
     state.fibers = fn
 
 
 def register_bmethod(w_block):
-    """A define_method body dispatch.define_bmethod now runs directly, kept alive for the life of the process."""
+    """A define_method body, kept alive for the life of the process."""
     state.bmethods.append(w_block)
 
 
@@ -57,7 +57,7 @@ def release_load_temporaries():
 
 
 def hold(v):
-    """Keep a VALUE reachable while it waits in an RPython field no frame covers."""
+    """Keep a VALUE reachable while no frame covers it."""
     state.held.append(v)
 
 
@@ -103,7 +103,7 @@ def _mark_frame_now(f):
         _mark_array(s.values)
     if not value.is_immediate(f.self_val):
         boot.gc_mark_value(f.self_val)
-    # f.cref needs no mark: every class a Cref names went through dispatch.root_base, which roots it for good.
+    # f.cref needs no mark: dispatch.root_base roots every Cref class.
     if not value.is_immediate(f.pending_value):
         boot.gc_mark_value(f.pending_value)
     _mark_block_procs(f.block)
@@ -112,7 +112,7 @@ def _mark_frame_now(f):
 
 
 def _mark_block_procs(w_block):
-    """A block whose frames something else already marks: only the Proc it may carry is left."""
+    """Frames are marked elsewhere; only the Proc it carries is left."""
     while w_block is not None:
         if not value.is_immediate(w_block.proc_value):
             boot.gc_mark_value(w_block.proc_value)
@@ -120,7 +120,7 @@ def _mark_block_procs(w_block):
 
 
 def _mark_block_deep(w_block):
-    """An escaped block's env, from its owner Proc's dmark: its defining frames may have returned, so nothing else roots their locals. Undeduplicated, since an incremental remark must see stores made since the first pass; the ISEQ block's own Proc is the caller being marked."""
+    """Undeduplicated: an incremental remark must see stores since pass 1."""
     while w_block is not None:
         if w_block.kind != block_mod.KIND_ISEQ \
                 and not value.is_immediate(w_block.proc_value):
@@ -134,7 +134,7 @@ def _mark_block_deep(w_block):
 
 @dont_look_inside
 def mark_handle(h):
-    """One handle's env, called from its owner Proc's dmark: alive exactly as long as the Proc, so a clique of Procs and Scopes nobody holds dies whole."""
+    """One handle's env, alive exactly as long as its owner Proc."""
     b = state.blocks
     if b is None or h < 0 or h >= len(b.table):
         return
@@ -156,14 +156,13 @@ def _mark_word(w):
     boot.gc_mark_maybe(w)
 
 
-# Installed at import time so force_now can walk a compiled frame's jitframe
-# words instead of deoptimizing it (metainterp/virtualizable.py, patch 0003).
+# Import time: force_now walks jitframe words (virtualizable.py, 0003).
 gc_mark_state.mark_word = _mark_word
 
 
 @dont_look_inside
 def mark_roots():
-    # Reading a frame mid-trace is correct and not an escape; without this flag every GC during a residual call aborted the trace being recorded.
+    # Reading a frame mid-trace is not an escape; else every GC aborts it.
     gc_mark_state.generation += 1
     gc_mark_state.marking = True
     try:
@@ -173,7 +172,7 @@ def mark_roots():
 
 
 def _mark_all():
-    # Not _mark_array: this list is resized, the pools are not, and the annotator will not merge the two list kinds.
+    # Not _mark_array: resizable list, which the annotator keeps apart.
     pinned = state.pinned
     k = 0
     while k < len(pinned):
@@ -203,18 +202,18 @@ def _mark_all():
     while i < len(bmethods):
         _mark_block_deep(bmethods[i])
         i += 1
-    # The handle table is not walked here: each handle's env is marked from its owner Proc's dmark (mark_handle), so unreferenced Procs can die.
-    # A frame in compiled code is not forced: its stale heap arrays are read (harmless extra marks) and its live jitframe words are walked once via mark_word.
+    # Not the handle table: mark_handle does it, so dead Procs can die.
+    # A compiled frame is not forced; mark_word walks its jitframe words.
     f = state.top
     while f is not None:
         _mark_frame(f)
         f = f.prev_frame
-    # A suspended fiber's frames are on no chain of ours; its own saved one still holds them.
+    # A suspended fiber's frames are on no chain of ours.
     if state.fibers is not None:
         state.fibers()
 
 
 def install():
-    # A plain function, not an llhelper pointer, so rffi wraps it in the enter-RPython-from-C prologue. See boot.install_block_callback.
+    # A plain function, so rffi adds the enter-RPython-from-C prologue.
     boot.set_mark_hook(mark_roots)
     boot.set_handle_mark(mark_handle)

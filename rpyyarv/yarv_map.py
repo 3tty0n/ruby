@@ -1,6 +1,6 @@
-"""insns.py holds facts derived from insns.def, this file the decisions; rpyvmgen/verify.rb cross-checks the two, and anything absent from EMIT is unsupported (the loader fails loudly, never skips)."""
+"""Anything absent from EMIT is unsupported; the loader fails loudly."""
 
-# YARV name -> operand positions the loader emits as ints in W_ISeq.code; an operand carrying more than an int goes into the constant pool instead, and the code stream holds its index.
+# YARV name -> operand positions emitted as ints; the rest go to the pool.
 EMIT = {
     'nop': [],
     'putnil': [],
@@ -10,7 +10,7 @@ EMIT = {
     'putchilledstring': [0],
     'getlocal': [0],        # level is packed into the slot, see LOCAL_*
     'setlocal': [0],
-    'getblockparam': [0],   # same packing; the level walks to the local env
+    'getblockparam': [0],
     'setblockparam': [0],
     'getblockparamproxy': [0],
     'dup': [],
@@ -36,16 +36,16 @@ EMIT = {
     'newrange': [0],
     'getglobal': [0],
     'setglobal': [0],
-    'getspecial': [0, 1],   # $~ and its captures; CRuby owns the current backref
-    'opt_aref': [],         # CALL_DATA dropped
+    'getspecial': [0, 1],   # $~ and its captures; CRuby owns the backref
+    'opt_aref': [],
     'opt_aset': [],
     'opt_length': [],
     'opt_size': [],
     'opt_empty_p': [],
     'opt_not': [],
     'opt_ltlt': [],
-    'opt_nil_p': [],        # CALL_DATA dropped
-    'opt_succ': [],         # CALL_DATA dropped
+    'opt_nil_p': [],
+    'opt_succ': [],
     'opt_str_freeze': [0],  # the literal, frozen once at load time
     'opt_str_uminus': [0],  # the literal; interned at each execution
     'opt_ary_freeze': [0],
@@ -53,7 +53,7 @@ EMIT = {
     'opt_case_dispatch': [0, 1],
     'opt_newarray_send': [0, 1],
     'expandarray': [0, 1],  # count and the splat/post flag
-    'opt_plus': [],         # CALL_DATA dropped
+    'opt_plus': [],
     'opt_minus': [],
     'opt_mult': [],
     'opt_lt': [],
@@ -63,15 +63,15 @@ EMIT = {
     'opt_eq': [],
     'opt_div': [],
     'opt_mod': [],
-    'opt_neq': [],          # both CALL_DATA dropped
+    'opt_neq': [],
     'getinstancevariable': [0],     # IVC dropped
     'setinstancevariable': [0],
     'getclassvariable': [0],        # ICVARC dropped
     'setclassvariable': [0],
-    'once': [0],                    # IC dropped: the cache is a slot per body ISeq
+    'once': [0],                    # IC dropped: one cache slot per body ISeq
     'defined': [0, 1, 2],
     'definedivar': [0, 2],          # IVC dropped
-    'getconstant': [0],             # dynamic A::B; base and lexical flag are stack values
+    'getconstant': [0],             # dynamic A::B; base and flag on the stack
     'opt_getconstant_path': [0],    # IC carries the constant path segments
     'setconstant': [0],
     'putspecialobject': [0],
@@ -98,7 +98,7 @@ EMIT = {
     'leave': [],
 }
 
-# Operand types the loader can transform (else silently mis-decoded): VALUE->pool idx, lindex_t->EP-relative local slot, OFFSET->label to pc, rb_num_t->int, ID->interned id (symbols.py), ISEQ->nested iseq pool idx, CALL_DATA->W_CallInfo (non-SIMPLE flags clear .simple), IC->constant path segments (iseq.c), CDHASH->integer case-dispatch table.
+# Operand types the loader can transform; anything else is mis-decoded silently.
 SUPPORTED_OPERAND_TYPES = frozenset([
     'VALUE',
     'lindex_t',
@@ -121,14 +121,14 @@ DISCARDED_OPERAND_TYPES = frozenset([
 # The block-chain walk must stay bounded for the tracer to unroll it.
 MAX_LOCAL_LEVEL = 16
 
-# getlocal/setlocal pack slot and level into one operand, so level 0 is just "the operand equals its own slot bits". No scope has 2**20 locals.
+# getlocal/setlocal pack slot and level into one operand; no 2**20 locals.
 LOCAL_LEVEL_SHIFT = 20
 LOCAL_SLOT_MASK = (1 << LOCAL_LEVEL_SHIFT) - 1
 
-# vm_core.h. A lindex_t operand counts down from the top of the environment: slot = nlocals - operand + ENV_DATA_SIZE - 1
+# vm_core.h: slot = nlocals - operand + ENV_DATA_SIZE - 1
 ENV_DATA_SIZE = 3
 
-# vm_callinfo.h, enum vm_call_flag_bits. Outside SIMPLE_CALL_FLAGS the arguments reach the callee differently.
+# vm_callinfo.h enum vm_call_flag_bits; non-SIMPLE args arrive otherwise.
 CALL_FLAG_ARGS_SPLAT = 0x01
 CALL_FLAG_ARGS_BLOCKARG = 0x02
 CALL_FLAG_KWARG = 0x20
@@ -155,19 +155,17 @@ CALL_FLAG_TAILCALL = 0x80
 # invokesuper only; a bare `super` (ZSUPER) pushes the parameters the same way.
 CALL_FLAG_SUPER = 0x100
 CALL_FLAG_ZSUPER = 0x200
-# ARGS_BLOCKARG is in here because the arguments below it still arrive the plain way; the block value on top of them is what W_CallInfo.blockarg names.
+# ARGS_BLOCKARG: the args below it arrive plainly, the block rides on top.
 SIMPLE_CALL_FLAGS = (CALL_FLAG_FCALL | CALL_FLAG_VCALL |
                      CALL_FLAG_ARGS_SIMPLE | CALL_FLAG_TAILCALL |
                      CALL_FLAG_SUPER | CALL_FLAG_ZSUPER |
                      CALL_FLAG_ARGS_BLOCKARG)
 
-# ...plus literal keywords, whose values ride above the positionals, or a
-# **splat, whose one Hash is the topmost argument (MUT only says it is fresh).
+# ...plus keywords above the positionals, or a **splat Hash on top.
 KWARG_CALL_FLAGS = (SIMPLE_CALL_FLAGS | CALL_FLAG_KWARG |
                     CALL_FLAG_KW_SPLAT | CALL_FLAG_KW_SPLAT_MUT)
 
-# ...plus a *splat, whose Array is the last positional; the compiler pushes any
-# argument after it into that Array, and MUT only says the Array is fresh.
+# ...plus a *splat Array as the last positional (MUT: the Array is fresh).
 SPLAT_CALL_FLAGS = (KWARG_CALL_FLAGS | CALL_FLAG_ARGS_SPLAT |
                     CALL_FLAG_ARGS_SPLAT_MUT)
 
@@ -182,7 +180,7 @@ DEFINECLASS_TYPE_MODULE = 0x02
 DEFINECLASS_FLAG_SCOPED = 0x08
 DEFINECLASS_FLAG_HAS_SUPERCLASS = 0x10
 
-# vm_core.h, enum vm_opt_newarray_send_type, as argument counts indexed by method-1; -1 refuses PACK_BUFFER, whose buffer: is a keyword.
+# vm_core.h vm_opt_newarray_send_type: argc by method-1, -1 = no PACK_BUFFER.
 NEWARRAY_SEND_ARGC = [0, 0, 0, 1, 2, 1]
 
 # vm_core.h, enum vm_special_object_type.
@@ -190,7 +188,7 @@ SPECIAL_OBJECT_VMCORE = 1
 SPECIAL_OBJECT_CBASE = 2
 SPECIAL_OBJECT_CONST_BASE = 3
 
-# vm_core.h, enum vm_check_match_type. WHEN answers the pattern itself, CASE and RESCUE run `pattern === target`; ARRAY means an Array of patterns.
+# vm_core.h vm_check_match_type: CASE/RESCUE run ===, ARRAY is a list.
 CHECKMATCH_TYPE_MASK = 0x03
 CHECKMATCH_TYPE_WHEN = 1
 CHECKMATCH_TYPE_CASE = 2

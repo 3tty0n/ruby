@@ -1,4 +1,4 @@
-/* Thin C layer over CRuby APIs an FFI cannot call: macros, the variadic rb_funcall, and anything that may longjmp past the caller's frame. */
+/* Thin C layer over CRuby macros, variadics, and anything that may longjmp. */
 #ifndef RPYYARV_BOOT_SHIM_H
 #define RPYYARV_BOOT_SHIM_H
 
@@ -8,12 +8,12 @@
 extern "C" {
 #endif
 
-/* Returns the main script's compiled ISeq unexecuted, NULL with *status_out the exit status; a wrapper because ruby_init_stack needs a machine-stack address or the conservative GC scan range is wrong. */
+/* Compiled ISeq unexecuted; ruby_init_stack needs a machine-stack address. */
 void *rpyyarv_boot(int argc, char **argv, int *status_out);
 
 int rpyyarv_cleanup(int status);
 
-/* ruby_run_node on rpyyarv_boot's node: runs the script under CRuby and cleans up, answering the exit status. */
+/* ruby_run_node on the boot node: runs under CRuby, cleans up, exit status. */
 int rpyyarv_run_node(void *n);
 
 /* Zero-arg method call guarded by rb_protect. *state is non-zero on raise. */
@@ -34,7 +34,7 @@ uintptr_t rpyyarv_toregexp(int opt, int n, const uintptr_t *parts,
 /* Largest argc rpyyarv_funcallv* copies onto the machine stack. */
 #define RPYYARV_MAX_ARGC 256
 
-/* rb_funcallv under rb_protect; *state is non-zero on raise, -1 when argc exceeds RPYYARV_MAX_ARGC; argv may live in memory CRuby never scans, so it is copied to the machine stack first. */
+/* rb_funcallv under rb_protect; argv is copied to the machine stack first. */
 uintptr_t rpyyarv_funcallv_id(uintptr_t recv, uintptr_t mid, int argc,
                               const uintptr_t *argv, int *state);
 uintptr_t rpyyarv_funcallv(uintptr_t recv, const char *mid, int argc,
@@ -52,7 +52,7 @@ uintptr_t rpyyarv_top_self(void);
 
 uintptr_t rpyyarv_int2inum(long n);
 
-/* The immediate tags this libruby uses, checked against the compiled-in ones. */
+/* The immediate tags this libruby uses, checked against compiled-in ones. */
 void rpyyarv_special_consts(uintptr_t *qfalse, uintptr_t *qnil,
                             uintptr_t *qtrue, uintptr_t *fixnum_flag);
 
@@ -83,13 +83,13 @@ uintptr_t rpyyarv_hash_aref(uintptr_t hash, const char *key);
 
 const char *rpyyarv_sym_cstr(uintptr_t sym);
 
-/* VALUEs escaped into a foreign heap are invisible to the conservative stack scan: the hook is a GC-rooted TypedData whose dmark calls fn, which marks them with rpyyarv_gc_mark_value; NULL disables it. */
+/* Escaped VALUEs are invisible to the stack scan; a TypedData dmark marks. */
 void rpyyarv_gc_set_mark_hook(void (*fn)(void));
 
 /* rb_gc_mark on a VALUE; only meaningful while the mark hook is running. */
 void rpyyarv_gc_mark_value(uintptr_t v);
 
-/* rb_gc_mark_maybe on a machine word that may not be a VALUE at all; jitframe words are scanned with this. */
+/* rb_gc_mark_maybe on a word that may not be a VALUE; jitframes use it. */
 void rpyyarv_gc_mark_maybe(uintptr_t v);
 
 uintptr_t rpyyarv_int_to_s(uintptr_t v);
@@ -133,41 +133,41 @@ uintptr_t rpyyarv_unpack1_double(uintptr_t str, uintptr_t fmt, uintptr_t offv);
 uintptr_t rpyyarv_str_ascii_only_p(uintptr_t str);
 uintptr_t rpyyarv_pack_double_into(uintptr_t ary, uintptr_t fmt, uintptr_t buf);
 
-/* Kernel#format / Kernel#sprintf: rb_str_format(argc, argv, fmt) under rb_protect. */
+/* Kernel#format: rb_str_format(argc, argv, fmt) under rb_protect. */
 uintptr_t rpyyarv_sprintf(int argc, const uintptr_t *argv, uintptr_t fmt,
                           int *state);
-/* CGI.escapeHTML for a String; Qundef for anything else, including a non-ascii-compatible encoding. */
+/* CGI.escapeHTML for a String; Qundef for anything else. */
 uintptr_t rpyyarv_cgi_escape_html(uintptr_t str);
-/* String#match? without rb_protect, taken only when the search cannot raise; see boot_shim.c for the exact eligibility rule. */
+/* String#match? unprotected, only if the search cannot raise (boot_shim.c). */
 uintptr_t rpyyarv_str_match_p_fast(uintptr_t str, uintptr_t re);
 
 /* RUBY_FATAL_FIBER_KILLED, the errinfo a killed fiber unwinds with. */
 uintptr_t rpyyarv_fiber_killed_value(void);
 
-/* 0 unless v is the fiber kill, which never returns: it goes back to being a fatal unwind. */
+/* 0 unless v is the fiber kill, which never returns: a fatal unwind. */
 int rpyyarv_rethrow_if_fiber_kill(uintptr_t v);
 
-/* One fiber switch: park hands back the buffer the shadowstack is copied into, unpark hands back the one it is copied from. */
+/* One fiber switch: park returns the copy-into buffer, unpark copy-from. */
 typedef void *(*rpyyarv_fiber_save_fn)(long key);
-/* unpark/born also receive the arriving stack's bounds so RPython can re-anchor its stack-depth window. */
+/* unpark/born get the arriving stack's bounds for the stack-depth window. */
 typedef void *(*rpyyarv_fiber_arrive_fn)(long key, long stack_base, long stack_size);
 typedef void (*rpyyarv_fiber_born_fn)(long key, long stack_base, long stack_size);
 typedef void (*rpyyarv_fiber_key_fn)(long key);
-/* base_slot/top_slot are the addresses of RPython's shadowstack base and top pointers, which the copy needs and RPython alone can name. */
+/* base_slot/top_slot: addresses of RPython's shadowstack base and top. */
 void rpyyarv_set_fiber_hooks(rpyyarv_fiber_save_fn park,
                              rpyyarv_fiber_arrive_fn unpark,
                              rpyyarv_fiber_born_fn born,
                              rpyyarv_fiber_key_fn died,
                              void **base_slot, void **top_slot);
 
-/* Called from a block-handle owner's dmark with its handle, so the block's frames live exactly as long as the owning Proc. */
+/* From the handle owner's dmark: block frames live as long as the Proc. */
 typedef void (*rpyyarv_handle_mark_fn)(long handle);
 void rpyyarv_set_handle_mark_callback(rpyyarv_handle_mark_fn fn);
 
-/* Called from rb_clear_constant_cache_for_id, beside the notifications YJIT and ZJIT take; the ID is dropped because RPyYARV's cache is invalidated whole. */
+/* From rb_clear_constant_cache_for_id; RPyYARV invalidates its cache whole. */
 void rpyyarv_set_const_hook(void (*fn)(void));
 
-/* Called from rb_clear_method_cache, CRuby's own funnel for every def, undef, alias, include and prepend. */
+/* From rb_clear_method_cache: CRuby's funnel for def/undef/alias/include. */
 void rpyyarv_set_method_hook(void (*fn)(void));
 
 void rpyyarv_gc_start(void);
@@ -179,49 +179,49 @@ uintptr_t rpyyarv_ary_new(int n, const uintptr_t *elems);
 uintptr_t rpyyarv_ary_subseq(uintptr_t ary, long beg, long len);
 uintptr_t rpyyarv_str_concat(int n, const uintptr_t *parts);
 
-/* Fetched once at boot so class_of() needs no rb_* call; slot order is value.py's C_* constants. */
+/* Fetched once at boot; slot order is value.py's C_* constants. */
 #define RPYYARV_NCLASS 14
 void rpyyarv_core_classes(uintptr_t *out);
 
-/* The module a class resolves an instance method through, or Qnil when it has no such method. */
+/* The module a class resolves an instance method through, or Qnil. */
 uintptr_t rpyyarv_method_owner(uintptr_t klass, uintptr_t id);
 
-/* The module `super` from owner's copy of id reaches next, along klass's chain; Qnil when there is none. */
+/* The module `super` from owner's id reaches next along klass's chain. */
 uintptr_t rpyyarv_super_owner(uintptr_t klass, uintptr_t owner, uintptr_t id);
 
-/* Module#<=: 1 when klass is target or below it, 0 when it is not or they are unrelated, -1 when the question is not a module's. */
+/* Module#<=: 1 klass is target or below, 0 not, -1 not a module. */
 int rpyyarv_class_le(uintptr_t klass, uintptr_t target);
 
-/* respond_to? for every instance of klass: 1 yes, 0 no, -1 only the receiver can answer. */
+/* respond_to? for every instance of klass: 1 yes, 0 no, -1 receiver only. */
 int rpyyarv_responds(uintptr_t klass, uintptr_t sym);
 
 /* rb_ary_to_ary: what expandarray expands a non-Array into. */
 uintptr_t rpyyarv_ary_to_ary(uintptr_t obj, int *state);
 
-/* The self of the frame running now; a block RPyYARV hands over records it, so a later yield can tell whether instance_eval substituted another. */
+/* The self of the frame running now; a yield can spot instance_eval's swap. */
 uintptr_t rpyyarv_current_receiver(void);
 
 /* The frozen String Symbol#name returns, or Qundef for a dynamic symbol. */
 uintptr_t rpyyarv_sym_name(uintptr_t sym);
 
-/* dirname(realpath(path)), which is what __dir__ answers for a file; Qundef when the path has no realpath. */
+/* dirname(realpath(path)), what __dir__ answers; Qundef without a realpath. */
 uintptr_t rpyyarv_dir_of(uintptr_t path);
 
-/* Class variables, resolved against the cbase the caller picked; *state is non-zero when the read raised. */
+/* Class variables against the caller's cbase; *state non-zero on raise. */
 uintptr_t rpyyarv_cvar_get(uintptr_t klass, uintptr_t id, int *state);
 void rpyyarv_cvar_set(uintptr_t klass, uintptr_t id, uintptr_t val, int *state);
 int rpyyarv_cvar_defined(uintptr_t klass, uintptr_t id);
 int rpyyarv_is_singleton_class(uintptr_t klass);
 
-/* String#<< of one String onto another of the same encoding, or Qundef when only rb_str_concat can do it. */
+/* String#<< of two Strings of one encoding; else Qundef (rb_str_concat). */
 uintptr_t rpyyarv_str_append(uintptr_t str, uintptr_t other);
 
-/* The method after owner's along klass's chain, called on recv: what `super` lands on when CRuby owns it. Qundef when there is none. */
+/* The method after owner's along klass's chain; Qundef when there is none. */
 uintptr_t rpyyarv_call_super(uintptr_t klass, uintptr_t owner, uintptr_t recv,
                              uintptr_t id, int argc, const uintptr_t *argv,
                              int kw, uintptr_t proc, int *state);
 
-/* The heap Float the flonum encoding cannot represent, and the RFloat layout value.py reads by hand. */
+/* The heap Float flonums cannot hold, plus the RFloat layout value.py reads. */
 uintptr_t rpyyarv_float_new(double d);
 void rpyyarv_float_layout(int *out);
 
@@ -241,8 +241,8 @@ void rpyyarv_const_set(uintptr_t klass, uintptr_t id, uintptr_t val,
 uintptr_t rpyyarv_ivar_get(uintptr_t obj, uintptr_t id, int *state);
 void rpyyarv_ivar_set(uintptr_t obj, uintptr_t id, uintptr_t val, int *state);
 
-/* shape_iv_index answers 1 (found, *index set), 0 (no such ivar) or -1 (fast path unusable), allocating and raising nothing; object_layout reports the RObject layout the RPython side compiles in, so a drifting CRuby is caught at boot. */
-/* The write barrier alone, for an ivar store made by raw word write; wb_direct says whether this build's barrier is the one boot_shim.c vouches for. */
+/* shape_iv_index: 1 found, 0 absent, -1 no fast path, allocating nothing. */
+/* Write barrier alone for a raw-word ivar store; wb_direct vouches for it. */
 void rpyyarv_obj_written(uintptr_t a, uintptr_t b);
 int rpyyarv_wb_direct(void);
 
@@ -250,7 +250,7 @@ int rpyyarv_wb_direct(void);
 int rpyyarv_shape_iv_index(unsigned int shape_id, uintptr_t id, int *index);
 void rpyyarv_object_layout(int *out);
 
-/* 1 when an object wearing shape `before` can gain `id` by a raw store to *index followed by a raw write of the shape id `after`; 0 when only rb_ivar_set can do it. */
+/* 1 when a raw store to *index plus a raw write of `after` can add `id`. */
 int rpyyarv_shape_add_ivar_fits(unsigned int before, unsigned int after,
                                 uintptr_t id, int *index);
 
@@ -274,11 +274,11 @@ void rpyyarv_ary_cat(uintptr_t ary, int n, const uintptr_t *elems, int *state);
 uintptr_t rpyyarv_range_new(uintptr_t low, uintptr_t high, int excl,
                             int *state);
 
-/* By name, not by ID: libruby exports rb_gv_get/rb_gv_set but not the rb_gvar_* pair getglobal/setglobal use. */
+/* By name, not by ID: libruby exports rb_gv_get/rb_gv_set, not rb_gvar_*. */
 uintptr_t rpyyarv_gvar_get(const char *name, int *state);
 void rpyyarv_gvar_set(const char *name, uintptr_t val, int *state);
 
-/* A CRuby object refers back into RPyYARV only through an integer handle, since RPython's GC moves objects and a raw pointer must never reach C; the handle is valid only for the extent of the call. */
+/* An integer handle, not a pointer: RPython's GC moves objects. */
 typedef uintptr_t (*rpyyarv_block_fn)(long handle, int argc,
                                       uintptr_t *argv, uintptr_t sub_self);
 void rpyyarv_set_block_callback(rpyyarv_block_fn fn);
@@ -291,10 +291,10 @@ uintptr_t rpyyarv_call_with_proc(uintptr_t recv, uintptr_t mid, int argc,
                                  const uintptr_t *argv, uintptr_t proc, int kw,
                                  int *state);
 
-/* A block leaving a CRuby method early cannot unwind as an RPython exception through libruby's frames, so the yielder raises RPyYARV::Unwind (under Exception, not StandardError, so a bare `rescue` cannot eat it) standing in for CRuby's EC_JUMP_TAG (vm_insnhelper.c:1929); every rb_protect boundary below swallows it and leaves *state zero so the RPython side re-raises the parked unwind. */
+/* Early exit raises RPyYARV::Unwind for EC_JUMP_TAG (vm_insnhelper.c:1929). */
 void rpyyarv_set_block_unwind(void);
 
-/* One generic trampoline re-enters RPyYARV for every method entry in CRuby's tables, resolving the name with rb_frame_this_func at call time so redefinition and inheritance stay right; an RPython exception must never cross back into libruby, so failures come out through *status and *errval for the shim to raise. */
+/* No RPython exception may cross into libruby; failures use *status. */
 #define RPYYARV_TRAMP_OK          0
 #define RPYYARV_TRAMP_RAISE       1   /* *errval is the exception to re-raise */
 #define RPYYARV_TRAMP_UNSUPPORTED 2   /* *errval is the message String */
@@ -307,7 +307,7 @@ void rpyyarv_set_trampoline_callback(rpyyarv_tramp_fn fn);
 void rpyyarv_define_method(uintptr_t klass, uintptr_t mid, int is_private,
                            int *state);
 
-/* A Proc over the same handle: it must stay valid as long as the Proc is reachable, so RPyYARV's handle table never releases one of these. */
+/* The handle must outlive the Proc, so the handle table never releases it. */
 uintptr_t rpyyarv_proc_new(long handle, int *state);
 
 /* One handle whose GC owner died, or -1 when none are pending. */
@@ -325,10 +325,10 @@ int rpyyarv_is_proc(uintptr_t v);
 
 int rpyyarv_is_class(uintptr_t v);
 
-/* The exception a failed rb_protect left behind, cleared on the way out; must be called on every non-zero *state or the next raise inherits this one as its cause. */
+/* Call on every non-zero *state or the next raise inherits this as cause. */
 uintptr_t rpyyarv_take_errinfo(void);
 
-/* RPyYARV pushes no CRuby frame, so rb_ec_get_errinfo (eval.c) falls back to ec->errinfo; a rescue body must put `$!` there for a bare `raise` to work. */
+/* rb_ec_get_errinfo (eval.c) falls back to ec->errinfo; `$!` must go there. */
 uintptr_t rpyyarv_swap_errinfo(uintptr_t v);
 
 /* make_localjump_error (vm.c:2175); reason is a ruby_tag_type. */
@@ -337,7 +337,7 @@ uintptr_t rpyyarv_local_jump_error(const char *mesg, uintptr_t value,
 
 int rpyyarv_obj_is_kind_of(uintptr_t obj, uintptr_t klass, int *state);
 
-/* ruby_cleanup with an exception pending: CRuby prints it and answers the exit status. */
+/* ruby_cleanup with an exception pending: CRuby prints it, gives status. */
 int rpyyarv_cleanup_with_error(uintptr_t err);
 
 /* Hash literals: the ops themselves stay on the funcallv path. */
@@ -346,12 +346,12 @@ void rpyyarv_hash_aset(uintptr_t hash, uintptr_t key, uintptr_t val,
                        int *state);
 uintptr_t rpyyarv_hash_resurrect(uintptr_t hash, int *state);
 
-/* A **splat's Hash, read one declared keyword at a time; lookup answers Qundef for an absent key. */
+/* A **splat's Hash; lookup answers Qundef for an absent key. */
 long rpyyarv_hash_size(uintptr_t hash);
 uintptr_t rpyyarv_hash_lookup(uintptr_t hash, uintptr_t key, int *state);
 void rpyyarv_hash_delete(uintptr_t hash, uintptr_t key, int *state);
 uintptr_t rpyyarv_hash_keys(uintptr_t hash, int *state);
-/* vm_caller_setup_keyword_hash: a ** that is not a Hash goes through to_hash. */
+/* vm_caller_setup_keyword_hash: a ** that is not a Hash goes to to_hash. */
 uintptr_t rpyyarv_to_hash_type(uintptr_t v, int *state);
 
 uintptr_t rpyyarv_splat_array(uintptr_t ary, int flag, int *state);
@@ -366,13 +366,13 @@ uintptr_t rpyyarv_vm_core(void);
 /* Pin a VALUE for the process lifetime; used for the classes RPyYARV made. */
 void rpyyarv_gc_register_mark_object(uintptr_t v);
 
-/* An ArgumentError worded exactly as rb_arity_error_new does; max < 0 is CRuby's UNLIMITED_ARGUMENTS. */
+/* ArgumentError as rb_arity_error_new words it; max < 0 is unlimited. */
 uintptr_t rpyyarv_arity_error(int given, int min, int max, int *state);
 
 /* kind is "missing" or "unknown"; keys is an Array of Symbols. */
 uintptr_t rpyyarv_keyword_error(const char *kind, uintptr_t keys, int *state);
 
-/* One bit per (class, basic operator) pair, set when the pair is no longer CRuby's own definition; the pair count rides above the bits so a caller can refuse a shim it disagrees with. */
+/* One bit per (class, basic operator) pair redefined; count rides above. */
 uintptr_t rpyyarv_bop_mask(int *count);
 
 /* One field of a direct Range instance, or Qundef for anything else. */
@@ -390,7 +390,7 @@ int rpyyarv_method_defined(uintptr_t obj, uintptr_t id, int include_private);
 uintptr_t rpyyarv_str_getbyte(uintptr_t str, uintptr_t index);
 uintptr_t rpyyarv_str_setbyte(uintptr_t str, uintptr_t index, uintptr_t value);
 
-/* Resolved the way load.c's search_required does but with the public API only; *path_out is the expanded path on RPYYARV_REQ_RB. */
+/* As load.c's search_required, public API only; *path_out on REQ_RB. */
 #define RPYYARV_REQ_LOADED   0  /* $LOADED_FEATURES already has it */
 #define RPYYARV_REQ_RB       1  /* a .rb file RPyYARV may compile itself */
 #define RPYYARV_REQ_FOREIGN  2  /* .so/.bundle, or nowhere on $LOAD_PATH */
@@ -399,7 +399,7 @@ int rpyyarv_require_resolve(uintptr_t fname, uintptr_t *path_out, int *state);
 /* rb_provide, so a later CRuby require of the same feature is a no-op. */
 void rpyyarv_provide(uintptr_t path, int *state);
 
-/* For require_relative: RPyYARV pushes no CRuby frame, so rb_current_realfilepath cannot name the requiring file. */
+/* RPyYARV pushes no CRuby frame: rb_current_realfilepath cannot name it. */
 uintptr_t rpyyarv_absolute_path(uintptr_t fname, uintptr_t base, int *state);
 
 #ifdef __cplusplus

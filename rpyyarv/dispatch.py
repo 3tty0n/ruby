@@ -1,4 +1,4 @@
-"""Lookup is elidable in (klass, mid, version) and a send promotes class_of(recv), so dispatch folds to one guard_value."""
+"""Lookup is elidable in (klass, mid, version), so a send folds to one guard."""
 
 from rpyyarv import boot
 from rpyyarv import debug
@@ -22,7 +22,7 @@ KIND_ISEQ = 0
 KIND_ATTR_READER = 1
 KIND_ATTR_WRITER = 2
 KIND_BMETHOD = 3
-# undef_method's poison: present but never returned by _walk, so it blocks the ancestor lookup remove_method's plain delete lets through.
+# undef_method's poison: blocks the ancestor lookup a delete lets through.
 KIND_UNDEF = 4
 
 
@@ -36,7 +36,7 @@ class MethodEntry(object):
         self.kind = kind
         # For an accessor kind, the rpyyarv symbol id of the `@name` it reads.
         self.ivar = ivar
-        # Class the body's constants resolve against; not owner, since `def self.x` lands on the singleton class.
+        # Constants resolve here, not owner: def self.x is on the singleton.
         self.cref = cref
         # The interp.Cref chain the def was written in, for lexical constants.
         self.lexical = lexical
@@ -49,7 +49,7 @@ class MethodEntry(object):
         self.w_block = w_block
 
 
-# Never reaches a caller of lookup: it only says the owner table has no answer yet.
+# Never reaches a caller of lookup: the owner table has no answer yet.
 OWNER_PENDING = MethodEntry(None, False)
 
 
@@ -60,10 +60,10 @@ class Registry(object):
     def __init__(self):
         self.methods = {}       # klass VALUE -> {mid: MethodEntry}
         self.supers = {}        # klass VALUE -> superclass VALUE
-        # Modules RPyYARV defined; they are never in supers, which only holds a walkable superclass chain.
+        # Modules RPyYARV defined; never in supers, which holds only classes.
         self.modules = {}
         self.version = Version()
-        # Set once RPyYARV defines a module, which is the only way an entry can sit outside registry.supers; until then _lookup skips the owner detour entirely.
+        # Set when a module is defined; else _lookup skips the owner detour.
         self.module_owned = False
 
 
@@ -79,13 +79,13 @@ trampoline = _Trampoline()
 
 
 def enable_trampolines():
-    """Off during the prelude: its Integer#times and Array#each must not replace CRuby's for CRuby's own callers."""
+    """Off during the prelude: its methods must not replace CRuby's own."""
     trampoline.enabled = True
 
 
 @dont_look_inside
 def _install_trampoline(klass, mid, private):
-    """A CRuby entry beside the registry one; it binds nothing and resolves through lookup, so redefine/undef needs no revisit."""
+    """A CRuby entry beside the registry one; it resolves through lookup."""
     if not trampoline.enabled:
         return
     boot.define_method_entry(klass, rubycall.rid(mid), private)
@@ -109,7 +109,7 @@ def define(klass, mid, w_iseq, private, cref=0, lexical=None):
 
 
 def define_attr(klass, mid, ivar, kind, private=False):
-    """No trampoline: CRuby's own attr entry is still there, so a call from C reaches it directly."""
+    """No trampoline: CRuby's own attr entry still answers a call from C."""
     _table_for(klass)[mid] = MethodEntry(None, private, klass, mid, 0, kind,
                                          ivar)
     registry.version = Version()
@@ -118,7 +118,7 @@ def define_attr(klass, mid, ivar, kind, private=False):
 
 
 def define_bmethod(klass, mid, w_block, private):
-    """No trampoline either: CRuby's own send already installed a real bmethod for mid, which reflection/super/respond_to? and any C caller still reach directly."""
+    """No trampoline: CRuby's send already installed a bmethod for mid."""
     _table_for(klass)[mid] = MethodEntry(None, private, klass, mid, 0,
                                          KIND_BMETHOD, 0, None, w_block)
     registry.version = Version()
@@ -129,7 +129,7 @@ def define_bmethod(klass, mid, w_block, private):
 
 @dont_look_inside
 def define_singleton(obj, mid, w_iseq, cref=0, lexical=None):
-    """definesmethod targets the receiver's singleton class, always public (vm_insnhelper.c:6034)."""
+    """definesmethod targets the singleton, public (vm_insnhelper.c:6034)."""
     klass = boot.singleton_class(obj)
     if klass == 0 or value.is_immediate(klass):
         raise UnsupportedOperation(
@@ -141,7 +141,7 @@ def define_singleton(obj, mid, w_iseq, cref=0, lexical=None):
 
 @dont_look_inside
 def define_singleton_bmethod(obj, mid, w_block):
-    """As define_singleton, for a KIND_BMETHOD entry: module_function's define_method form needs both the private instance copy define_bmethod gives it and this public singleton one."""
+    """As define_singleton for KIND_BMETHOD; module_function needs both."""
     klass = boot.singleton_class(obj)
     if klass == 0 or value.is_immediate(klass):
         raise UnsupportedOperation(
@@ -153,7 +153,7 @@ def define_singleton_bmethod(obj, mid, w_block):
 
 @dont_look_inside
 def _record_ancestry(klass):
-    """Copy CRuby's chain above klass into the map so lookup stays in RPython; singleton classes reach the map only here."""
+    """Copy CRuby's chain above klass into the map; lookup stays in RPython."""
     k = klass
     n = 0
     while k != 0 and not value.is_immediate(k) and n < MAX_ANCESTORS:
@@ -169,7 +169,7 @@ def _record_ancestry(klass):
 
 @dont_look_inside
 def lookup_from_cruby(klass, mid):
-    """CRuby already resolved, so the module it owns mid through names the entry; the walk below is the fallback for a klass the owner table cannot answer for, and skips iclasses."""
+    """CRuby resolved, so its owner names the entry; the walk is fallback."""
     entry = own_lookup(owner_of(klass, mid), mid)
     if entry is not None:
         return entry
@@ -184,11 +184,11 @@ def lookup_from_cruby(klass, mid):
     return None
 
 
-# Direct-mapped cache of the trampoline's (rid, receiver class) -> (mid, entry); that pair is monomorphic in practice, so a hit skips rubycall.mid_of_rid, owner_of and own_lookup entirely.
+# Direct-mapped (rid, class) -> (mid, entry) cache; monomorphic in practice.
 _TC_SIZE = 512
 _TC_MASK = _TC_SIZE - 1
 _tc_rids = [0] * _TC_SIZE
-_tc_klasses = [0] * _TC_SIZE     # 0 marks a slot empty: VALUE 0 is never a class
+_tc_klasses = [0] * _TC_SIZE    # 0 marks a slot empty: VALUE 0 is never a class
 _tc_mids = [0] * _TC_SIZE
 _tc_entries = [None] * _TC_SIZE
 
@@ -203,7 +203,7 @@ def flush_trampoline_cache():
 
 @dont_look_inside
 def lookup_from_trampoline(rid, klass):
-    """trampoline_callback's entry point: mid and its MethodEntry for a CRuby-resolved (rid, klass), cached by rid xor klass."""
+    """trampoline_callback's entry point, cached by rid xor klass."""
     idx = intmask(rid * 1000003 ^ klass) & _TC_MASK
     if _tc_klasses[idx] == klass and _tc_rids[idx] == rid:
         return _tc_mids[idx], _tc_entries[idx]
@@ -229,7 +229,7 @@ def undefine(klass, mid):
 
 
 def undef_method(klass, mid):
-    """Module#undef_method: unlike remove_method, a later lookup must not see the ancestor's method either, so this leaves a poison entry rather than deleting."""
+    """Module#undef_method leaves a poison entry, so ancestors are blocked."""
     _table_for(klass)[mid] = MethodEntry(None, False, klass, mid, 0, KIND_UNDEF)
     registry.version = Version()
     flush_trampoline_cache()
@@ -256,7 +256,7 @@ def _is_known_class(klass, version):
 
 
 def is_known_class(klass):
-    """Elidable on the method version, so a promoted klass folds the dict lookup out of the trace."""
+    """Elidable on the method version, so a promoted klass folds it away."""
     return _is_known_class(klass, registry.version)
 
 
@@ -266,7 +266,7 @@ def _is_known_module(mod, version):
 
 
 def is_known_module(mod):
-    """A module RPyYARV's own `module` body made; is_known_class cannot answer, since a module has no superclass to record."""
+    """A module RPyYARV made; is_known_class cannot: modules have no super."""
     return _is_known_module(mod, registry.version)
 
 
@@ -280,7 +280,7 @@ def _walk(klass, mid):
         if table is not None:
             entry = table.get(mid, None)
             if entry is not None:
-                # A poison entry blocks the ancestors too, as CRuby's own undef does.
+                # Poison blocks the ancestors too, as CRuby's undef does.
                 return None if entry.kind == KIND_UNDEF else entry
         k = supers.get(k, 0)
         n += 1
@@ -293,7 +293,7 @@ def _walk(klass, mid):
 
 
 def _module_lookup(klass, mid):
-    """registry.supers holds Class#superclass, which skips every iclass, so a module RPyYARV defined is invisible to _walk; CRuby's own owner names it."""
+    """supers skips iclasses, so an RPyYARV module is invisible to _walk."""
     owner = owners.tab.get((klass, mid), OWNER_UNKNOWN)
     if owner == OWNER_UNKNOWN:
         return OWNER_PENDING
@@ -307,7 +307,7 @@ def _module_lookup(klass, mid):
 
 @elidable
 def _lookup(klass, mid, version):
-    """The walk and the owner check in one elidable, so a trace records one call_pure where two shifted its inlining."""
+    """Walk and owner check in one elidable: one call_pure, not two."""
     entry = _walk(klass, mid)
     if entry is None:
         if not registry.module_owned:
@@ -317,7 +317,7 @@ def _lookup(klass, mid, version):
     if owner == OWNER_UNKNOWN:
         return OWNER_PENDING
     if owner != entry.owner and owner != value.Q_NIL:
-        # A module included behind supers' back shadows what the walk found; the owner's own table has the real entry, if it is ours.
+        # A module included behind supers' back shadows the walk's find.
         table = registry.methods.get(owner, None)
         if table is None:
             return None
@@ -326,7 +326,7 @@ def _lookup(klass, mid, version):
 
 
 def lookup(klass, mid):
-    """registry.supers holds Class#superclass, which skips iclasses, so a module could own mid and the walk above never see it; CRuby knows and every registry entry has a CRuby entry beside it."""
+    """supers skips iclasses, so CRuby is asked who owns mid."""
     entry = _lookup(klass, mid, registry.version)
     if entry is OWNER_PENDING:
         _fill_owner(klass, mid)
@@ -343,13 +343,13 @@ def _own_lookup(klass, mid, version):
 
 
 def lookup_owned(klass, mid):
-    """own_lookup, but elidable on the method version, so a trace folds it away."""
+    """own_lookup, but elidable on the method version."""
     return _own_lookup(klass, mid, registry.version)
 
 
 @elidable
 def _lookup_core(klass, mid, version):
-    """No Object fallback, so a toplevel `def +` does not read as a redefinition of Integer#+."""
+    """No Object fallback, so a toplevel `def +` is no Integer#+ redefine."""
     methods = registry.methods
     supers = registry.supers
     k = klass
@@ -371,7 +371,7 @@ def lookup_core(klass, mid):
 
 @dont_look_inside
 def _reopened(cbase, rid):
-    """Reopening e.g. Integer via rb_define_class_id_under with Object as super would be a superclass mismatch. cbase's own table only, as vm_const_get_under does: rb_const_get inherits, so `class Compiler; class Binding; end; end` would reopen ::Binding instead of making a nested class."""
+    """cbase's own table only, as vm_const_get_under: const_get inherits."""
     try:
         v = boot.const_at(cbase, rid)
     except RubyException:
@@ -397,14 +397,14 @@ def define_class(cbase, mid, super_v):
     if parent == 0 or value.is_immediate(parent):
         parent = value.core_class(value.C_OBJECT)
     record_class(klass, parent)
-    # A singleton method inherited from Foo is found only once meta(Bar) -> meta(Foo) is in the map.
+    # An inherited singleton needs meta(Bar) -> meta(Foo) in the map.
     _record_ancestry(boot.singleton_class(klass))
     return klass
 
 
 @dont_look_inside
 def define_module(cbase, mid):
-    """No entry in registry.supers: a module has no superclass to walk, and nothing is ever an instance of one."""
+    """No entry in registry.supers: a module has no superclass to walk."""
     mod = boot.define_module(cbase, rubycall.rid(mid))
     registry.module_owned = True
     registry.modules[mod] = True
@@ -424,7 +424,7 @@ def alloc(klass):
 
 
 class ConstEntry(object):
-    # A box, not the bare VALUE: Qfalse is 0, so no VALUE is free to stand for "not cached".
+    # A box, not the VALUE: Qfalse is 0, so none is free for "not cached".
     _immutable_fields_ = ['value']
 
     def __init__(self, v):
@@ -432,7 +432,7 @@ class ConstEntry(object):
 
 
 class SiteEntry(object):
-    """What one opt_getconstant_path site resolved, and the cbase it resolved against."""
+    """What one opt_getconstant_path site resolved, and its cbase."""
     _immutable_fields_ = ['base', 'value']
 
     def __init__(self, base, v):
@@ -440,18 +440,18 @@ class SiteEntry(object):
         self.value = v
 
 
-# A second cbase at one site parks it here for good; no cbase VALUE is 0, so the guard can never match again.
+# A second cbase parks the site here: no cbase is 0, so the guard never hits.
 SITE_POLY = SiteEntry(0, 0)
 
 
 class ConstSite(object):
-    """One inline cache slot per opt_getconstant_path operand; the site is green, so its entry folds into the trace."""
+    """One inline cache slot per opt_getconstant_path operand; it is green."""
     def __init__(self):
         self.entry = None
 
 
 class _Consts(object):
-    # Quasi-immutable: a constant can be reassigned or removed, so every write replaces the tag and drops the traces that folded it.
+    # Quasi-immutable: a write replaces the tag, dropping traces that folded it.
     _immutable_fields_ = ['version?']
 
     def __init__(self):
@@ -473,7 +473,7 @@ def new_const_site():
 
 
 def invalidate_consts():
-    """CRuby's rb_clear_constant_cache_for_id, by way of the shim's const hook."""
+    """CRuby's rb_clear_constant_cache_for_id, via the shim's const hook."""
     consts.tab = {}
     consts.attab = {}
     sites = consts.sites
@@ -486,7 +486,7 @@ def invalidate_consts():
 
 @elidable
 def const_site(site, version):
-    """Both arguments are green in a trace, so the entry and the VALUE it holds fold to literals."""
+    """Both arguments are green, so the entry folds to a literal."""
     return site.entry
 
 
@@ -505,7 +505,7 @@ def const_site_fill(site, base, v):
 
 def root_base(v):
     if v not in consts.rooted:
-        # Kept alive: cbase roots the const table the cached VALUE still lives in, and a recycled class VALUE would otherwise read as a hit.
+        # Kept alive: a recycled class VALUE would otherwise read as a hit.
         consts.rooted[v] = None
         gcroots.register_class(v)
 
@@ -528,7 +528,7 @@ def _const_at_cached(klass, mid, version):
 
 
 def const_at(klass, mid):
-    """rb_const_lookup: what klass's own table holds, Qundef when it holds nothing."""
+    """rb_const_lookup: klass's own table, Qundef when it holds nothing."""
     entry = _const_at_cached(klass, mid, consts.version)
     if entry is None:
         entry = _const_at_fill(klass, mid)
@@ -559,12 +559,12 @@ def const_set(klass, mid, v):
 
 
 class _Owners(object):
-    # Tagged by registry.version, not one of its own: a lookup reads both, and one quasi-immutable is one guard_not_invalidated.
+    # Tagged by registry.version: one quasi-immutable, one guard.
     def __init__(self):
         self.tab = {}       # (klass VALUE, mid) -> owning module VALUE
         self.stab = {}      # the same, for the module above that one
-        self.rtab = {}      # (klass VALUE, Symbol VALUE) -> respond_to? for every instance
-        self.ktab = {}      # (klass VALUE, module VALUE) -> kind_of? for every instance
+        self.rtab = {}  # (klass VALUE, Symbol VALUE) -> respond_to? per inst
+        self.ktab = {}  # (klass VALUE, module VALUE) -> kind_of? per instance
         self.invalidations = 0
 
 
@@ -574,7 +574,7 @@ OWNER_UNKNOWN = -1
 
 
 def invalidate_owners():
-    """CRuby's rb_clear_method_cache, by way of the shim's method hook: every def, undef, alias, include and prepend reaches it."""
+    """rb_clear_method_cache: def, undef, alias, include, prepend all hit."""
     if len(owners.tab) == 0 and len(owners.stab) == 0 \
             and len(owners.rtab) == 0 and len(owners.ktab) == 0:
         return
@@ -596,7 +596,7 @@ def _owner_of(klass, mid, version):
 @dont_look_inside
 def _fill_owner(klass, mid):
     owner = boot.method_owner(klass, rubycall.rid(mid))
-    # Kept alive: a recycled class VALUE would otherwise read as a hit, and the owner is in the registered class's ancestry.
+    # Kept alive: a recycled class VALUE would otherwise read as a hit.
     gcroots.register_class(klass)
     owners.tab[(klass, mid)] = owner
     registry.version = Version()
@@ -604,7 +604,7 @@ def _fill_owner(klass, mid):
 
 
 def owner_of(klass, mid):
-    """The module klass resolves mid through; asked of CRuby, so modules included behind our back count."""
+    """The module klass resolves mid through; CRuby answers, iclasses count."""
     got = _owner_of(klass, mid, registry.version)
     if got == OWNER_UNKNOWN:
         _fill_owner(klass, mid)
@@ -631,7 +631,7 @@ def _fill_responds(klass, sym):
 
 
 def responds(klass, sym):
-    """respond_to? answered from the class alone, or RESPONDS_RECV when an overridden respond_to?/respond_to_missing? makes it a per-receiver question."""
+    """respond_to? from the class alone, or RESPONDS_RECV when per-receiver."""
     got = _responds(klass, sym, registry.version)
     if got == RESPONDS_UNKNOWN:
         _fill_responds(klass, sym)
@@ -655,7 +655,7 @@ def _sym_name(sym, version):
 @dont_look_inside
 def _fill_sym_name(sym):
     v = boot.sym_name(sym)
-    # Held, not registered as a class: it is a String, and no frame covers this table.
+    # Held, not registered as a class: it is a String, in no frame.
     gcroots.hold(v)
     sym_names.tab[sym] = v
     registry.version = Version()
@@ -663,7 +663,7 @@ def _fill_sym_name(sym):
 
 
 def sym_name(sym):
-    """The String Symbol#name returns; one per symbol for the life of the process, so the entry is only ever filled."""
+    """One frozen String per symbol for the process, so it is only filled."""
     got = _sym_name(sym, registry.version)
     if got == 0:
         _fill_sym_name(sym)
@@ -687,7 +687,7 @@ def _fill_kind_of(klass, target):
 
 
 def kind_of(klass, target):
-    """kind_of? answered from the two classes; every instance of klass gives the same answer, and an include or prepend clears the table."""
+    """kind_of? from the two classes; include or prepend clears the table."""
     got = _kind_of(klass, target, registry.version)
     if got == RESPONDS_UNKNOWN:
         _fill_kind_of(klass, target)
@@ -741,7 +741,7 @@ def _fill_super_owner(klass, owner, mid):
 
 
 def super_owner(klass, owner, mid):
-    """Where `super` from owner's mid lands, along klass's chain; CRuby answers, so the iclasses registry.supers skips still count."""
+    """Where `super` from owner's mid lands; CRuby counts the iclasses."""
     got = _super_owner(klass, owner, mid, registry.version)
     if got == OWNER_UNKNOWN:
         _fill_super_owner(klass, owner, mid)
@@ -750,7 +750,7 @@ def super_owner(klass, owner, mid):
 
 
 def owns_identity(klass, mid):
-    """True when klass resolves mid to BasicObject's, which is a pointer compare."""
+    """True when klass resolves mid to BasicObject's, a pointer compare."""
     return owner_of(klass, mid) == value.core_class(value.C_BASIC_OBJECT)
 
 
@@ -766,7 +766,7 @@ IV_UNKNOWN = -3
 
 @elidable
 def iv_slot(shape_id, rid):
-    """Elidable: a shape node never changes, and gaining an ivar moves the object to a different shape_id, this cache's key."""
+    """Elidable: a shape never changes; a new ivar means a new shape_id."""
     key = (shape_id, rid)
     got = slots.tab.get(key, IV_UNKNOWN)
     if got == IV_UNKNOWN:
@@ -776,7 +776,7 @@ def iv_slot(shape_id, rid):
 
 
 def _data_fields(obj, flags):
-    """The imemo/fields a typed T_DATA keeps its ivars in, which internal/imemo.h gives the RObject layout; 0 for anything else, including the shareable receivers ivar_ractor_check (variable.c:1220) may raise for."""
+    """A typed T_DATA's fields; 0 for a shareable one (variable.c:1220)."""
     if (flags & value.T_MASK) == value.T_DATA \
             and (flags & (value.FL_TYPED_DATA | value.FL_SHAREABLE)) \
             == value.FL_TYPED_DATA:
@@ -785,14 +785,14 @@ def _data_fields(obj, flags):
 
 
 def _class_fields(obj, hdr):
-    """The imemo/fields a class or module keeps its ivars in; 0 for a boxable one, whose prime classext is not the only one it may have (internal/class.h:314)."""
+    """A class's fields object; 0 for a boxable one (internal/class.h:314)."""
     if hdr & value.RCLASS_BOXABLE:
         return 0
     return raw_word(obj, value.CLASS_FIELDS_WORD)
 
 
 def ivar_get(obj, mid):
-    """T_OBJECT reads compile to a shape guard plus a raw field load, and a typed T_DATA or a class to the same over its fields object."""
+    """T_OBJECT reads compile to a shape guard plus a raw field load."""
     if obj != 0 and (obj & value.IMMEDIATE_MASK) == 0:
         flags = raw_word(obj, value.FLAGS_WORD)
         fields = obj
@@ -802,7 +802,7 @@ def ivar_get(obj, mid):
         klass = kind == value.T_CLASS or kind == value.T_MODULE
         if kind != value.T_OBJECT:
             if klass:
-                # Re-read every time: growing a class's ivars replaces its fields object.
+                # Re-read: growing ivars replaces the fields object.
                 fields = _class_fields(obj, hdr)
             else:
                 fields = _data_fields(obj, flags)
@@ -817,7 +817,7 @@ def ivar_get(obj, mid):
                     got = raw_word(raw_word(fields, value.FIELDS_WORD), slot)
                 else:
                     got = raw_word(fields, value.FIELDS_WORD + slot)
-                # An unshareable class ivar read from a non-main ractor raises (variable.c:1457), which only CRuby can tell.
+                # Unshareable read off the main ractor raises (variable.c:1457).
                 if not klass or value.is_immediate(got) \
                         or (raw_word(got, value.FLAGS_WORD)
                             & value.FL_SHAREABLE):
@@ -852,7 +852,7 @@ class TransEntry(object):
 
 
 class _Trans(object):
-    # Quasi-immutable: a shape edge does not exist until the first object takes it, so recording one drops the traces that folded its absence.
+    # Quasi-immutable: recording an edge drops traces that folded its absence.
     _immutable_fields_ = ['version?']
 
     def __init__(self):
@@ -869,15 +869,15 @@ def _iv_transition(shape_id, rid, version):
 
 
 def ivar_set(obj, mid, v):
-    """Raw store: an immediate needs no write barrier (ruby/internal/gc.h:788), a heap value takes CRuby's; frozen or missing slot falls back."""
+    """Raw store; an immediate needs no barrier (ruby/internal/gc.h:788)."""
     if obj != 0 and (obj & value.IMMEDIATE_MASK) == 0:
         immediate = value.is_immediate(v)
         if immediate or barrier.direct:
             flags = raw_word(obj, value.FLAGS_WORD)
-            # One promoted word, so the four tests below fold into its one guard.
+            # One promoted word: the four tests below fold into its guard.
             hdr = promote(flags & value.IV_SET_HEADER_MASK)
             if (hdr & value.FL_FREEZE) == 0:
-                # Only an object holding its own fields may gain one here: a separate imemo/fields may have to be reallocated and hung back off its owner.
+                # Only an object holding its own fields may gain one here.
                 own = (hdr & value.T_MASK) == value.T_OBJECT
                 fields = obj
                 if not own:
@@ -902,7 +902,7 @@ def ivar_set(obj, mid, v):
                         else:
                             set_raw_word(fields, value.FIELDS_WORD + slot, v)
                         if after != shape_id:
-                            # The field is stored first: nothing can collect between two raw stores, and the new shape would expose the slot before it holds a VALUE.
+                            # Field first: a new shape exposes an empty slot.
                             set_raw_word(obj, value.FLAGS_WORD,
                                          intmask((r_uint(flags)
                                                   & r_uint(value.SHAPE_FLAG_MASK))
@@ -919,7 +919,7 @@ def ivar_set(obj, mid, v):
 
 @dont_look_inside
 def _ivar_add_slow(obj, before, rid, v):
-    """The first store of an ivar transitions the shape, which may allocate, so CRuby has to do it; the edge it creates is permanent, so the next object takes it in RPython."""
+    """First store allocates the edge in CRuby; the edge is permanent."""
     boot.ivar_set(obj, rid, v)
     if (before, rid) in trans.tab:
         return
@@ -938,7 +938,7 @@ def _ivar_set_slow(obj, mid, v):
 
 
 def check_object_layout():
-    """The ivar fast path reads RObject by hand and writes its shape id back; refuse a CRuby it misreads."""
+    """The ivar fast path reads RObject by hand; refuse a bad CRuby."""
     got = boot.object_layout()
     want = [value.SHAPE_SHIFT, value.SHAPE_ID_BITS, value.ROBJECT_HEAP,
             value.FIELDS_WORD, value.T_MASK, value.T_OBJECT,

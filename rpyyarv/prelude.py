@@ -1,4 +1,4 @@
-"""prelude.rb, compiled by the embedded CRuby and run before the main script; read at import time, so translation bakes the source into the binary."""
+"""prelude.rb, read at import time so translation bakes it into the binary."""
 
 import os
 
@@ -19,7 +19,7 @@ _f.close()
 
 
 def _compile(source):
-    """RubyVM::InstructionSequence.compile(source) -> an iseqw bootiseq reads."""
+    """InstructionSequence.compile(source) -> an iseqw bootiseq reads."""
     rubyvm = boot.const_get(value.core_class(value.C_OBJECT),
                             boot.intern('RubyVM'))
     iseq_class = boot.const_get(rubyvm, boot.intern('InstructionSequence'))
@@ -32,7 +32,7 @@ def _compile(source):
 
 
 def run(source):
-    """Ruby source through the embedded CRuby's compiler, run by RPyYARV with self = main."""
+    """Ruby source compiled by CRuby, run by RPyYARV with self = main."""
     w_iseq = loader.load_strict(bootiseq.load(_compile(source)))
     interp.execute(w_iseq, Frame(w_iseq, boot.top_self()))
 

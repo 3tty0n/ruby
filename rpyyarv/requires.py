@@ -1,4 +1,4 @@
-"""Kernel#require/#require_relative: resolves the path as load.c does, compiles via embedded CRuby, and runs the toplevel ISeq in RPyYARV with self = main."""
+"""Kernel#require: resolves as load.c does, runs the toplevel ISeq here."""
 
 import os
 
@@ -22,9 +22,7 @@ CRUBY_REQUIRE = symbols.intern('__rpyyarv_cruby_require__')
 DELETE = symbols.intern('delete')
 LOADED_FEATURES = '$LOADED_FEATURES'
 
-# CRuby dispatches some requires itself -- autoload does (variable.c:3287) --
-# and the send hook below never sees those. This entry is RPyYARV's, so
-# CRuby's dispatch reaches it through the trampoline and lands in _Hook.
+# CRuby dispatches some requires itself (variable.c:3287), past the hook.
 OVERRIDE = """module Kernel
   alias_method :__rpyyarv_cruby_require__, :require
   def require(feature)
@@ -42,11 +40,11 @@ end
 
 class _Files(object):
     def __init__(self):
-        # The files whose toplevel ISeq is running, innermost last; require_relative's base since RPyYARV pushes no CRuby frame (load.c:1042).
+        # Running files, innermost last: require_relative's base (load.c:1042).
         self.stack = []
-        # Expanded paths whose load has not finished, so a cycle answers false instead of recurring.
+        # Loads not finished, so a cycle answers false instead of recurring.
         self.loading = {}
-        # RPYYARV_DELEGATE_FILES: substrings of paths to leave to CRuby. Code whose hot path is C calls runs faster there, and which files those are is a measured, per-workload fact.
+        # RPYYARV_DELEGATE_FILES: path substrings to leave to CRuby.
         self.delegated = []
 
 
@@ -55,9 +53,7 @@ files = _Files()
 
 class _Hook(rubycall.RequireHook):
     def handle(self, mid, arg):
-        # Bootstrap code such as RubyGems/Bundler is already active in the
-        # embedded CRuby.  Re-running that tree under RPyYARV redefines global
-        # state; callers may temporarily leave only those requires to CRuby.
+        # Re-running RubyGems/Bundler under RPyYARV redefines global state.
         if os.environ.get(FOREIGN_REQUIRE_ENV) == '1':
             return rubycall.NOT_HANDLED
         if value.is_immediate(arg) or not boot.is_string(arg):
@@ -72,7 +68,7 @@ class _Hook(rubycall.RequireHook):
 
 
 def install(main_path):
-    """RPYYARV_NO_REQUIRE=1 leaves every require to CRuby, as before."""
+    """RPYYARV_NO_REQUIRE=1 leaves every require to CRuby."""
     if os.environ.get('RPYYARV_NO_REQUIRE') == '1':
         return
     spec = os.environ.get('RPYYARV_DELEGATE_FILES')
@@ -92,8 +88,7 @@ def _require(mid, arg):
         candidate = os.path.join(base, boot.str_of(arg))
         if not os.path.exists(candidate) and \
                 not os.path.exists(candidate + '.rb'):
-            # A delegated CRuby frame called through the hook; its real frame
-            # has the authoritative base directory.
+            # A delegated CRuby frame's own frame has the real base dir.
             return rubycall.NOT_HANDLED
         fname = boot.absolute_path(arg, boot.str_new(base))
     # Held, not pinned: a require in a loop would pin one string per turn.
@@ -109,7 +104,7 @@ def _load(fname):
     if kind == boot.REQ_LOADED:
         return value.Q_FALSE
     if kind != boot.REQ_RB:
-        # A C extension, or a name no $LOAD_PATH entry holds: CRuby's either way, and not a fallback, so the requiring file stays on RPyYARV.
+        # A C extension or unknown name: CRuby's, the requirer stays here.
         return _delegate(fname)
     gcroots.hold(path)
     try:
@@ -141,10 +136,7 @@ def _load_rb(fname, path):
 
     files.loading[name] = True
     files.stack.append(name)
-    # Before the body, where load.c has its loading table (load.c:939) and this
-    # has none: while an autoloaded file runs, CRuby answers every constant
-    # lookup under the autoloaded name with NameError until the feature stops
-    # being one it still has to require (variable.c:3088).
+    # Before the body, as load.c:939 does; else NameError (variable.c:3088).
     boot.provide(path)
     done = False
     try:
@@ -162,7 +154,7 @@ def _load_rb(fname, path):
 
 
 def _unprovide(path):
-    """Undo the boot.provide above; $LOADED_FEATURES is the array rb_provide_feature pushed onto."""
+    """Undo boot.provide; the array rb_provide_feature pushed onto."""
     features = boot.gvar_get(LOADED_FEATURES)
     boot.funcallv(features, rubycall.rid(DELETE), [path], DELETE)
 
@@ -188,18 +180,17 @@ def _delegate_file(fname, name, total, supported, reason):
 
 
 def _delegate(fname):
-    """CRuby's own require, which keeps its own $LOADED_FEATURES bookkeeping; the name OVERRIDE aliased it to, since `require` is now RPyYARV's."""
+    """CRuby's own require, under the name OVERRIDE aliased it to."""
     debug.count_foreign(rubycall.REQUIRE)
     return boot.funcallv(boot.top_self(), rubycall.rid(CRUBY_REQUIRE),
                          [fname], CRUBY_REQUIRE)
 
 
 def _current_dir():
-    # The calling ISeq's own file when the send stamped one: a require_relative in a method body runs long after its file's toplevel left the stack.
+    # The calling ISeq's file: a method body outlives its toplevel.
     path = rubycall.relative.path
     rubycall.relative.path = ''
-    # No stamp means CRuby called require_relative while executing a file we
-    # delegated. Let its real control frame resolve the path.
+    # No stamp: CRuby's own frame resolves the path for a delegated file.
     if path == '':
         return ''
     at = path.rfind('/')

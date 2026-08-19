@@ -5,18 +5,18 @@
 #include <ruby.h>
 #include <ruby/re.h>
 
-/* In-tree, so the object-shape API libruby does not export is still reachable. */
+/* In-tree: the object-shape API libruby does not export stays reachable. */
 #include "shape.h"
 #include "internal/array.h"
-/* RCLASS_SINGLETON_P/RCLASS_INITIALIZED_P, the raises Class#allocate's fast path has to rule out. */
+/* RCLASS_SINGLETON_P/RCLASS_INITIALIZED_P: raises alloc_fast must rule out. */
 #include "internal/class.h"
-/* Its STATIC_ASSERTs are what let the RPython ivar fast path read an imemo/fields with the RObject layout. */
+/* Its STATIC_ASSERTs let the ivar fast path read imemo/fields as RObject. */
 #include "internal/imemo.h"
 #include "internal/numeric.h"
 #include "internal/range.h"
 /* rb_str_eql_internal, which YJIT relies on to neither allocate nor raise. */
 #include "internal/string.h"
-/* rb_hrtime_t, for reading a Regexp's own onigmo timelimit alongside the process-global one. */
+/* rb_hrtime_t, for a Regexp's onigmo timelimit and the global one. */
 #include "hrtime.h"
 #include "rpyyarv.h"
 
@@ -28,7 +28,7 @@ VALUE rb_iseqw_new(const struct rb_iseq_struct *iseq);
 
 static int block_unwind;
 
-/* RPyYARV::Unwind carries a parked unwind across libruby's C frames; under Exception so no bare `rescue` can eat it. */
+/* Unwind crosses libruby's C frames; under Exception so `rescue` misses it. */
 static VALUE
 unwind_class(void)
 {
@@ -47,10 +47,10 @@ rpyyarv_set_block_unwind(void)
     block_unwind = 1;
 }
 
-/* internal/thread.h's RUBY_FATAL_FIBER_KILLED, spelled out rather than pulling that header in here. */
+/* internal/thread.h's RUBY_FATAL_FIBER_KILLED, spelled out here. */
 #define RPYYARV_FIBER_KILLED RB_INT2FIX(2)
 
-/* A failed rb_protect whose exception is the carrier: the RPython side holds the real unwind, so report success. */
+/* The RPython side holds the real unwind, so report success. */
 static void
 absorb_unwind(int *state)
 {
@@ -63,7 +63,7 @@ absorb_unwind(int *state)
     }
 }
 
-/* Fiber#kill arrives as a TAG_FATAL rb_protect failure, which RPyYARV carries as an ordinary raise so its ensures run; at the last of its frames it goes back to being fatal, since no rescue may see it and the fiber has to die. */
+/* Fiber#kill rides as a raise so ensures run, fatal again at its last frame. */
 uintptr_t
 rpyyarv_fiber_killed_value(void)
 {
@@ -81,10 +81,10 @@ rpyyarv_rethrow_if_fiber_kill(uintptr_t v)
 void *
 rpyyarv_boot(int argc, char **argv, int *status_out)
 {
-    /* On the machine stack: ruby_init_stack records its address as the lower bound of the conservative GC scan. */
+    /* ruby_init_stack takes its address as the conservative scan bound. */
     VALUE variable_in_this_stack_frame;
 
-    /* main.c does this before ruby_sysinit; without it the locale encoding is US-ASCII. */
+    /* main.c does this first, or the locale encoding is US-ASCII. */
     setlocale(LC_CTYPE, "");
 
     ruby_sysinit(&argc, &argv);
@@ -109,7 +109,7 @@ rpyyarv_cleanup(int status)
     return ruby_cleanup(status);
 }
 
-/* rpyyarv_boot's node is ISEQ_TYPE_MAIN, which vm_set_top_stack (vm.c:888) refuses to eval. */
+/* The boot node is ISEQ_TYPE_MAIN; vm_set_top_stack (vm.c:888) refuses it. */
 int
 rpyyarv_run_node(void *n)
 {
@@ -260,7 +260,7 @@ uintptr_t
 rpyyarv_funcallv_id(uintptr_t recv, uintptr_t mid, int argc,
                     const uintptr_t *argv, int *state)
 {
-    /* On the machine stack, so the conservative scan covers the arguments until rb_funcallv copies them onto the VM stack. */
+    /* On the machine stack: scanned until rb_funcallv copies the args. */
     VALUE buf[RPYYARV_MAX_ARGC];
     struct funcallv_args a;
     int i;
@@ -290,7 +290,7 @@ funcallv_public_body(VALUE argp)
     return rb_funcallv_public(a->recv, a->mid, a->argc, a->argv);
 }
 
-/* rb_funcallv is CALL_FCALL and reaches a private method; a send with an explicit receiver must be refused one, since a toplevel def leaves a private trampoline on Object. */
+/* rb_funcallv is CALL_FCALL: it reaches private methods, a send must not. */
 uintptr_t
 rpyyarv_funcallv_public_id(uintptr_t recv, uintptr_t mid, int argc,
                            const uintptr_t *argv, int *state)
@@ -327,7 +327,7 @@ funcallv_kw_body(VALUE argp)
     return rb_funcallv_kw(a->recv, a->mid, a->argc, a->argv, RB_PASS_KEYWORDS);
 }
 
-/* The last argument is a Hash of keywords; RB_PASS_KEYWORDS is what tells the callee to unpack it rather than take it as a positional. */
+/* RB_PASS_KEYWORDS makes the callee unpack the last Hash as keywords. */
 uintptr_t
 rpyyarv_funcallv_kw_id(uintptr_t recv, uintptr_t mid, int argc,
                        const uintptr_t *argv, int pub, int *state)
@@ -415,7 +415,7 @@ uintptr_t
 rpyyarv_iseqw_new(void *iseq)
 {
     VALUE v = rb_iseqw_new((const struct rb_iseq_struct *)iseq);
-    /* Held only in FFI-side memory the GC never scans; pinning it also marks the wrapped iseq, and this runs once at boot. */
+    /* Held only where the GC never scans; pinning marks the iseq too. */
     rb_gc_register_mark_object(v);
     return (uintptr_t)v;
 }
@@ -722,7 +722,7 @@ super_owner_body(VALUE argp)
     struct super_args *p = (struct super_args *)argp;
     ID owner_id = rb_intern("owner");
     ID super_id = rb_intern("super_method");
-    /* UnboundMethod#super_method carries the iclass it was found through, so a prepended or included module counts. */
+    /* super_method carries the iclass, so prepended/included modules count. */
     VALUE m = rb_funcall(p->klass, rb_intern("instance_method"), 1,
                          ID2SYM(p->id));
     while (!NIL_P(m)) {
@@ -757,7 +757,7 @@ static VALUE
 responds_body(VALUE argp)
 {
     struct owner_args *p = (struct owner_args *)argp;
-    /* respond_to? excludes protected as well as private (rb_method_boundp with BOUND_RESPONDS). */
+    /* respond_to? excludes protected too (rb_method_boundp BOUND_RESPONDS). */
     return rb_funcall(p->klass, rb_intern("public_method_defined?"), 1,
                       ID2SYM(p->id));
 }
@@ -782,9 +782,7 @@ call_super_body(VALUE argp)
     int i;
     ID owner_id = rb_intern("owner");
     ID super_id = rb_intern("super_method");
-    /* The method after the running one along the receiver's own chain, which is
-       the only walk that sees a prepended module; instance_method(owner) would
-       resolve back to the prepended copy and recurse forever. */
+    /* The only walk seeing a prepended module; instance_method recurses. */
     VALUE m = rb_funcall(p->klass, rb_intern("instance_method"), 1,
                          ID2SYM(p->id));
     while (!NIL_P(m)) {
@@ -793,10 +791,10 @@ call_super_body(VALUE argp)
         if (found == p->owner) break;
     }
     if (NIL_P(m)) return Qundef;
-    /* UnboundMethod#bind_call, not rb_call_super: super needs a CRuby control frame, binding one method does not. */
+    /* bind_call, not rb_call_super: super needs a CRuby control frame. */
     args[0] = p->recv;
     for (i = 0; i < p->argc; i++) args[i + 1] = p->argv[i];
-    /* With the block, since a bare `super` forwards the one its method was given (vm_insnhelper.c:5033); Qnil means none. */
+    /* A bare `super` forwards its method's block (vm_insnhelper.c:5033). */
     return rb_funcall_with_block_kw(m, rb_intern("bind_call"), p->argc + 1,
                                     args, p->proc, p->kw_splat);
 }
@@ -813,7 +811,7 @@ rpyyarv_call_super(uintptr_t klass, uintptr_t owner, uintptr_t recv,
         *state = -1;
         return (uintptr_t)Qnil;
     }
-    /* argv may live in memory CRuby never scans, so it is copied to the machine stack first, as funcallv does. */
+    /* argv may live where CRuby never scans: copied to the machine stack. */
     for (i = 0; i < argc; i++) local[i] = (VALUE)argv[i];
     a.klass = (VALUE)klass;
     a.owner = (VALUE)owner;
@@ -885,7 +883,7 @@ rpyyarv_cvar_defined(uintptr_t klass, uintptr_t id)
     return rb_cvar_defined((VALUE)klass, (ID)id) ? 1 : 0;
 }
 
-/* A `class << self` scope names no class variables of its own (vm_get_cvar_base). */
+/* A `class << self` scope names no class variables (vm_get_cvar_base). */
 int
 rpyyarv_is_singleton_class(uintptr_t klass)
 {
@@ -917,7 +915,7 @@ uintptr_t
 rpyyarv_sym_name(uintptr_t sym)
 {
     if (!RB_STATIC_SYM_P((VALUE)sym)) return (uintptr_t)Qundef;
-    /* rb_sym2str is the symbol's own frozen name; Symbol#name returns exactly this object. */
+    /* rb_sym2str is the frozen name, the object Symbol#name returns. */
     return (uintptr_t)rb_sym2str((VALUE)sym);
 }
 
@@ -930,7 +928,7 @@ rpyyarv_responds(uintptr_t klass, uintptr_t sym)
     if (!RB_STATIC_SYM_P((VALUE)sym)) return -1;
     a.klass = (VALUE)klass;
     a.id = SYM2ID((VALUE)sym);
-    /* An overridden respond_to? or respond_to_missing? can answer per receiver, so no per-class answer exists. */
+    /* An overridden respond_to? answers per receiver, not per class. */
     if (!rb_method_basic_definition_p(a.klass, rb_intern("respond_to?")) ||
         !rb_method_basic_definition_p(a.klass, rb_intern("respond_to_missing?")))
         return -1;
@@ -948,7 +946,7 @@ ary_to_ary_body(VALUE obj)
     return rb_ary_to_ary(obj);
 }
 
-/* vm_expandarray's conversion: to_ary when the object has one, else a one-element Array. */
+/* vm_expandarray: to_ary when there is one, else a one-element Array. */
 uintptr_t
 rpyyarv_ary_to_ary(uintptr_t obj, int *state)
 {
@@ -984,7 +982,7 @@ rpyyarv_define_class(uintptr_t cbase, uintptr_t id, uintptr_t super,
     return (uintptr_t)r;
 }
 
-/* rb_define_module_id_under reopens an existing module itself, so no separate lookup. */
+/* rb_define_module_id_under reopens an existing module, so no lookup. */
 static VALUE
 define_module_body(VALUE argp)
 {
@@ -1026,7 +1024,7 @@ static VALUE
 singleton_class_body(VALUE argp)
 {
     struct obj_args *p = (struct obj_args *)argp;
-    /* Checks the receiver may have one and is not frozen (vm_insnhelper.c:6035). */
+    /* The receiver may have one and is unfrozen (vm_insnhelper.c:6035). */
     return rb_singleton_class(p->a);
 }
 
@@ -1059,14 +1057,14 @@ rpyyarv_obj_alloc(uintptr_t klass, int *state)
     return (uintptr_t)r;
 }
 
-/* No rb_protect: dispatch.py only allocates classes it defined itself, which always kept Object's allocator. */
+/* No rb_protect: only classes dispatch.py defined, with Object's allocator. */
 uintptr_t
 rpyyarv_obj_alloc_fast(uintptr_t klass)
 {
     return (uintptr_t)rb_obj_alloc((VALUE)klass);
 }
 
-/* Class#allocate without rb_protect: Qundef unless every raise rb_obj_alloc reaches is ruled out first -- its Check_Type, class_get_alloc_func's uninitialized/singleton/undefined-allocator trio, and, since only Object's own allocator gets through, class_call_alloc_func's wrong-instance-allocation check, which that allocator cannot trip. */
+/* Unprotected: Qundef unless every rb_obj_alloc raise is ruled out first. */
 uintptr_t
 rpyyarv_alloc_default(uintptr_t klass)
 {
@@ -1102,7 +1100,7 @@ static VALUE
 const_at_body(VALUE argp)
 {
     struct obj_args *p = (struct obj_args *)argp;
-    /* rb_const_lookup, which vm_get_ev_const walks the cref chain with: this class's own table, no ancestors and no Object fallback. */
+    /* rb_const_lookup: this class's own table, no ancestors, no Object. */
     if (!rb_const_defined_at(p->a, p->id)) return Qundef;
     return rb_const_get_at(p->a, p->id);
 }
@@ -1201,14 +1199,14 @@ rpyyarv_shape_iv_index(unsigned int shape_id, uintptr_t id, int *index)
     return 0;
 }
 
-/* RB_OBJ_WRITE's barrier half for a raw ivar store: gc/default/default.c:6085 only sets remembered/marking bits and raw-mallocs a mark-stack chunk, allocating no Ruby object and running no mark callback, so boot.py may declare it without random_effects_on_gcobjs. */
+/* Barrier half only: gc/default/default.c:6085 sets bits, allocating none. */
 void
 rpyyarv_obj_written(uintptr_t a, uintptr_t b)
 {
     RB_OBJ_WRITTEN((VALUE)a, Qundef, (VALUE)b);
 }
 
-/* False when rb_gc_writebarrier is a modular-GC function pointer instead of the barrier above, which this shim cannot make the same promise about. */
+/* False when rb_gc_writebarrier is a modular-GC pointer, not that barrier. */
 int
 rpyyarv_wb_direct(void)
 {
@@ -1229,17 +1227,17 @@ rpyyarv_object_layout(int *out)
     out[4] = (int)RUBY_T_MASK;
     out[5] = (int)RUBY_T_OBJECT;
     out[6] = (int)RUBY_FL_FREEZE;
-    /* Nonzero would put the shape id in its own word, not in the flags the RPython side reads and writes. */
+    /* Nonzero puts the shape id in its own word, not in the flags read here. */
     out[7] = (int)RBASIC_SHAPE_ID_FIELD;
     out[8] = (int)RUBY_T_DATA;
     out[9] = (int)RUBY_TYPED_FL_IS_TYPED_DATA;
-    /* Where a typed T_DATA keeps its imemo/fields; RData puts a function pointer here, hence the flag above. */
+    /* Where a typed T_DATA keeps imemo/fields; RData puts a pointer here. */
     out[10] = (int)(offsetof(struct RTypedData, fields_obj) / SIZEOF_VALUE);
     /* Set on the objects ivar_ractor_check (variable.c:1220) may raise for. */
     out[11] = (int)RUBY_FL_SHAREABLE;
-    /* Where a class or module keeps its ivars: the prime classext's fields_obj. */
+    /* A class keeps its ivars in the prime classext's fields_obj. */
     out[12] = (int)(offsetof(struct RClass_and_rb_classext_t, classext.fields_obj) / SIZEOF_VALUE);
-    /* Only a boxable class can hold another classext, so the prime one is the sole one without it (internal/class.h:314). */
+    /* Only a boxable class holds another classext (internal/class.h:314). */
     out[13] = (int)RCLASS_BOXABLE;
 }
 
@@ -1252,16 +1250,16 @@ rpyyarv_shape_add_ivar_fits(unsigned int before, unsigned int after,
     if (before == INVALID_SHAPE_ID || after == INVALID_SHAPE_ID) return 0;
     if (rb_shape_too_complex_p((shape_id_t)before)) return 0;
     if (rb_shape_too_complex_p((shape_id_t)after)) return 0;
-    /* Same flags and same parent, so the shape id write changes nothing but the offset. */
+    /* Same flags and parent, so the shape id write changes only the offset. */
     if (!RSHAPE_DIRECT_CHILD_P((shape_id_t)before, (shape_id_t)after)) return 0;
 
     rb_shape_t *shape = RSHAPE((shape_id_t)after);
     if (shape->type != SHAPE_IVAR || shape->edge_name != (ID)id) return 0;
-    /* One field more than before, so the slot is the first unused one and no field is left uninitialized for the GC to scan. */
+    /* One field more: the slot is the first unused, none left uninitialized. */
     if (shape->next_field_index != RSHAPE_LEN((shape_id_t)before) + 1) return 0;
 
     attr_index_t slot = shape->next_field_index - 1;
-    /* The condition obj_field_set reallocates the fields on (variable.c:1957), which a raw store cannot do. */
+    /* When obj_field_set reallocates the fields (variable.c:1957): not raw. */
     if (slot >= RSHAPE_CAPACITY((shape_id_t)before)) return 0;
 
     *index = (int)slot;
@@ -1283,7 +1281,7 @@ rpyyarv_array_layout(int *out)
     out[9] = (int)T_ARRAY;
 }
 
-/* vm_opt_str_eq's arm (vm_insnhelper.c:2540); Qundef when the argument is no String, which helpers.py answers for. No rb_protect: rb_str_eql_internal neither allocates nor raises. */
+/* vm_opt_str_eq (vm_insnhelper.c:2540); rb_str_eql_internal cannot raise. */
 uintptr_t
 rpyyarv_str_eq(uintptr_t a, uintptr_t b)
 {
@@ -1354,21 +1352,21 @@ rpyyarv_ary_new_capa(long capa, int *state)
     return (uintptr_t)r;
 }
 
-/* No rb_protect: interp.py checks 0 <= capa, and the only other raise here is NoMemoryError. */
+/* No rb_protect: interp.py checks 0 <= capa; only NoMemoryError remains. */
 uintptr_t
 rpyyarv_ary_new_capa_fast(long capa)
 {
     return (uintptr_t)rb_ary_new_capa(capa);
 }
 
-/* No rb_protect: the array is one _array_new_block just made, so it is neither frozen nor shared, and 0 <= idx < its capacity. */
+/* No rb_protect: a fresh array, unfrozen, unshared, 0 <= idx < capacity. */
 void
 rpyyarv_ary_store_fresh(uintptr_t ary, long idx, uintptr_t val)
 {
     rb_ary_store((VALUE)ary, idx, (VALUE)val);
 }
 
-/* rb_ary_initialize's non-block half (array.c:1194): every element is the same VALUE, not a copy. */
+/* rb_ary_initialize's non-block half (array.c:1194): one VALUE, not copies. */
 static VALUE
 ary_new_filled_body(VALUE argp)
 {
@@ -1396,7 +1394,7 @@ rpyyarv_ary_new_filled(long len, uintptr_t val, int *state)
     return (uintptr_t)r;
 }
 
-/* No rb_protect: interp.py checks 0 <= len <= ARY_NEW_FILL_MAX, so nothing below raises but NoMemoryError. */
+/* No rb_protect: 0 <= len <= ARY_NEW_FILL_MAX, so only NoMemoryError. */
 uintptr_t
 rpyyarv_ary_new_filled_fast(long len, uintptr_t val)
 {
@@ -1510,7 +1508,7 @@ rpyyarv_set_block_callback(rpyyarv_block_fn fn)
     block_callback = fn;
 }
 
-/* A handle's owner: kept alive by the ifunc (imemo.c marks ifunc->data), so it dies only when nothing in CRuby can call the block any more; its dfree queues the handle for reuse instead of the eager release that broke stored blocks (Hash default_proc, Liquid callbacks). */
+/* Kept alive by the ifunc (imemo.c marks ifunc->data); dfree queues it. */
 static long *dead_handles;
 static int n_dead, cap_dead;
 
@@ -1527,7 +1525,7 @@ handle_owner_dfree(void *p)
     dead_handles[n_dead++] = (long)(uintptr_t)p - 1;
 }
 
-/* The shadowstack swap runs here rather than in RPython: entering RPython pushes a frame of its own, and the copy has to happen with none of ours on the stack. */
+/* Swapped here, not in RPython: the copy needs none of our frames on stack. */
 static rpyyarv_fiber_save_fn fiber_park_callback;
 static rpyyarv_fiber_arrive_fn fiber_unpark_callback;
 static void **fiber_ss_base;
@@ -1583,7 +1581,7 @@ rpyyarv_set_handle_mark_callback(rpyyarv_handle_mark_fn fn)
     handle_mark_callback = fn;
 }
 
-/* The owner traces its block's frames itself, so a Proc nobody holds dies together with everything only it kept alive. */
+/* The owner traces its block's frames, so an unheld Proc dies with them. */
 static void
 handle_owner_dmark(void *p)
 {
@@ -1606,7 +1604,7 @@ rpyyarv_pop_dead_handle(void)
 static VALUE
 block_yielder(RB_BLOCK_CALL_FUNC_ARGLIST(yielded, callback_arg))
 {
-    /* On the machine stack, so the yielded values stay scannable until the RPython side copies them into a frame the mark hook reaches. */
+    /* On the machine stack: the yielded values stay scannable until copied. */
     VALUE buf[RPYYARV_MAX_ARGC];
     int i, n = argc;
     VALUE r, here;
@@ -1617,13 +1615,13 @@ block_yielder(RB_BLOCK_CALL_FUNC_ARGLIST(yielded, callback_arg))
     if (n < 0) n = 0;
     if (n > RPYYARV_MAX_ARGC) n = RPYYARV_MAX_ARGC;
     for (i = 0; i < n; i++) buf[i] = argv[i];
-    /* The self this yield runs under; RPyYARV holds the one the block was handed over with and compares. A Fixnum arg is a permanent handle (rpyyarv_proc_new); a TypedData one is GC-owned. */
+    /* A Fixnum handle is permanent (proc_new); a TypedData one is GC-owned. */
     here = rb_current_receiver();
     r = (VALUE)block_callback(FIXNUM_P(callback_arg)
                               ? (long)FIX2LONG(callback_arg)
                               : (long)(uintptr_t)RTYPEDDATA_DATA(callback_arg) - 1,
                               n, (uintptr_t *)buf, (uintptr_t)here);
-    /* The block left early and parked why; abort the CRuby method running it instead of letting it iterate on. */
+    /* The block left early and parked why; abort the CRuby method. */
     if (block_unwind) {
         block_unwind = 0;
         rb_raise(unwind_class(), "rpyyarv: non-local exit from a block");
@@ -1668,7 +1666,7 @@ call_with_proc_body(VALUE argp)
                                     a->proc, a->kw_splat);
 }
 
-/* The Proc itself as the block, not an ifunc over it: module_eval yields with a cref only its own block sees, and a bounce back through RPyYARV would lose it. */
+/* The Proc itself, not an ifunc: a bounce through RPyYARV loses its cref. */
 uintptr_t
 rpyyarv_call_with_proc(uintptr_t recv, uintptr_t mid, int argc,
                        const uintptr_t *argv, uintptr_t proc, int kw,
@@ -1737,10 +1735,10 @@ rpyyarv_set_trampoline_callback(rpyyarv_tramp_fn fn)
 static VALUE
 rpyyarv_trampoline(int argc, VALUE *argv, VALUE self)
 {
-    /* argv points into CRuby's VM stack, which rb_execution_context_mark already covers for the extent of the call; no second root here. */
+    /* argv is on the VM stack, already covered by rb_execution_context_mark. */
     ID mid = rb_frame_this_func();
     VALUE blockproc = rb_block_given_p() ? rb_block_proc() : Qnil;
-    /* A cfunc taking -1 arguments is handed the keyword Hash as its last positional; only this says the caller meant it as keywords. */
+    /* A -1 cfunc gets the keyword Hash as a positional; only this flags it. */
     int kw = rb_keyword_given_p() ? 1 : 0;
     int status = RPYYARV_TRAMP_OK;
     VALUE err = Qnil;
@@ -1752,7 +1750,7 @@ rpyyarv_trampoline(int argc, VALUE *argv, VALUE self)
     r = (VALUE)tramp_callback((uintptr_t)self, (uintptr_t)mid, argc,
                               (uintptr_t *)argv, (uintptr_t)blockproc, kw,
                               &status, (uintptr_t *)&err);
-    /* Raised here, not on the RPython side: unwinding an RPython exception through this C frame back into libruby is undefined. */
+    /* Raised here: an RPython exception must not unwind through this frame. */
     if (status == RPYYARV_TRAMP_RAISE) rb_exc_raise(err);
     if (status == RPYYARV_TRAMP_UNWIND) {
         rb_raise(unwind_class(), "rpyyarv: non-local exit from a method");
@@ -1776,7 +1774,7 @@ define_method_body(VALUE argp)
     rb_define_method_id(p->klass, p->mid,
                         RUBY_METHOD_FUNC(rpyyarv_trampoline), -1);
     if (p->is_private) {
-        /* A toplevel def lands on Object as private, and no ID-taking rb_define_private_method exists. */
+        /* A toplevel def is private on Object; no ID-taking API exists. */
         rb_funcall(p->klass, rb_intern("private"), 1, ID2SYM(p->mid));
     }
     return Qnil;
@@ -1797,7 +1795,7 @@ rpyyarv_define_method(uintptr_t klass, uintptr_t mid, int is_private,
 static VALUE
 proc_new_body(VALUE handle)
 {
-    /* The ifunc marks its data (imemo.c), so the owner lives exactly as long as the Proc: its dmark walks the env, its dfree frees the handle. */
+    /* The ifunc marks its data (imemo.c), so the owner lives with the Proc. */
     VALUE owner = TypedData_Wrap_Struct(0, &handle_owner_type,
                                         (void *)(uintptr_t)(FIX2LONG(handle) + 1));
     return rb_proc_new(block_yielder, owner);
@@ -1986,7 +1984,7 @@ hash_aref_body(VALUE argp)
     return rb_hash_aref(p->hash, p->key);
 }
 
-/* Hash#[] whole: hit, miss and the default value or proc, in one protected call; _v apart from the C-string-keyed rpyyarv_hash_aref above. */
+/* Hash#[] whole: hit, miss and the default, in one protected call. */
 uintptr_t
 rpyyarv_hash_aref_v(uintptr_t hash, uintptr_t key, int *state)
 {
@@ -1999,7 +1997,7 @@ rpyyarv_hash_aref_v(uintptr_t hash, uintptr_t key, int *state)
     return (uintptr_t)r;
 }
 
-/* An immediate or String key hashes and compares in C, so a plain lookup cannot reenter Ruby; Qundef on miss, defaults not consulted. */
+/* An immediate or String key cannot reenter Ruby; Qundef on miss. */
 uintptr_t
 rpyyarv_hash_lookup_fast(uintptr_t hash, uintptr_t key)
 {
@@ -2029,7 +2027,7 @@ hash_pairs_body(VALUE h)
     return out;
 }
 
-/* [k0, v0, k1, v1, ...] in entry order: one call and one Array where keys-then-aref cost a C call per key. */
+/* [k0, v0, k1, v1, ...] in entry order: one call, one Array. */
 uintptr_t
 rpyyarv_hash_pairs(uintptr_t hash, int *state)
 {
@@ -2072,7 +2070,7 @@ set_include_body(VALUE argp)
     return rb_set_lookup(p->hash, p->key) ? Qtrue : Qfalse;
 }
 
-/* Set#include? of an exact core Set; the element's #hash can be Ruby code, so protected. */
+/* Set#include? of an exact core Set; #hash may be Ruby, so protected. */
 uintptr_t
 rpyyarv_set_include(uintptr_t set, uintptr_t elt, int *state)
 {
@@ -2095,7 +2093,7 @@ str_push_body(VALUE argp)
     return rb_str_concat(p->hash, p->key);
 }
 
-/* String#<< of a String needing what the raw arm refuses: encoding negotiation or the frozen check, both of which can raise. */
+/* String#<< needing encoding negotiation or the frozen check: both raise. */
 uintptr_t
 rpyyarv_str_push(uintptr_t str, uintptr_t other, int *state)
 {
@@ -2110,7 +2108,7 @@ rpyyarv_str_push(uintptr_t str, uintptr_t other, int *state)
     return (uintptr_t)r;
 }
 
-/* Integer#to_s with no base argument: rb_fix2str never re-enters Ruby for a FIXNUM. */
+/* Integer#to_s, no base: rb_fix2str never re-enters Ruby for a FIXNUM. */
 uintptr_t
 rpyyarv_int_to_s(uintptr_t v)
 {
@@ -2118,7 +2116,7 @@ rpyyarv_int_to_s(uintptr_t v)
     return (uintptr_t)rb_fix2str((VALUE)v, 10);
 }
 
-/* String#casecmp of two 7-bit Strings: the ASCII fold CRuby's own uses there. */
+/* String#casecmp of two 7-bit Strings: the ASCII fold CRuby uses there. */
 uintptr_t
 rpyyarv_str_casecmp(uintptr_t a, uintptr_t b)
 {
@@ -2160,7 +2158,7 @@ str_gsub2_body(VALUE argp)
     return rb_funcallv(a->recv, a->mid, 2, argv);
 }
 
-/* String#gsub/gsub!/sub/sub! for a Regexp|String pattern and a String replacement with no backreference escape and no block: rb_funcallv still runs the real method (so a redefined pattern-to-source coercion is honoured, and gsub/sub set $~ exactly as they always did), but skips RPyYARV's own dispatch bookkeeping; the replacement writes no backref itself and calls no Ruby method, so only encoding negotiation and Regexp.timeout can still raise, both under rb_protect. */
+/* gsub/sub, backref-free replacement: only encoding and timeout raise. */
 uintptr_t
 rpyyarv_str_gsub2(uintptr_t str, uintptr_t pat, uintptr_t rep, uintptr_t mid,
                   int *state)
@@ -2250,7 +2248,7 @@ rpyyarv_str_dup(uintptr_t v)
     return (uintptr_t)rb_str_dup(s);
 }
 
-/* String#start_with? for one String prefix of the same encoding: a byte compare, nothing to raise. */
+/* String#start_with? of a same-encoding String: a byte compare, no raise. */
 uintptr_t
 rpyyarv_str_start_with(uintptr_t str, uintptr_t prefix)
 {
@@ -2324,7 +2322,7 @@ splat_array_body(VALUE argp)
     struct splat_args *p = (struct splat_args *)argp;
     VALUE tmp;
     if (NIL_P(p->ary)) return rb_ary_new();
-    /* to_a, as rb_check_to_array does; to_ary would leave a Range as [range]. */
+    /* to_a, as rb_check_to_array does; to_ary leaves a Range as [range]. */
     tmp = check_to_array(p->ary);
     if (NIL_P(tmp)) return rb_ary_new3(1, p->ary);
     if (p->flag) return rb_ary_dup(tmp);
@@ -2381,7 +2379,7 @@ rpyyarv_concat_array(uintptr_t ary1, uintptr_t ary2, int to, int *state)
     return (uintptr_t)r;
 }
 
-/* FrozenCore is hidden: rb_set_class_path names it but defines no constant (vm.c:4274), so only the exported variable reaches it. */
+/* FrozenCore has no constant (vm.c:4274); only the exported variable. */
 extern VALUE rb_mRubyVMFrozenCore;
 
 uintptr_t
@@ -2480,7 +2478,7 @@ rpyyarv_local_jump_error(const char *mesg, uintptr_t value, int reason,
     return (uintptr_t)r;
 }
 
-/* rb_keyword_error_new is class.c's, the same one vm_args.c raises with, so the message matches CRuby's byte for byte. */
+/* class.c's rb_keyword_error_new, the one vm_args.c raises: same message. */
 uintptr_t
 rpyyarv_keyword_error(const char *kind, uintptr_t keys, int *state)
 {
@@ -2506,7 +2504,7 @@ rpyyarv_arity_error(int given, int min, int max, int *state)
     return (uintptr_t)r;
 }
 
-/* ruby_vm_redefined_flag is hidden in libruby so BASIC_OP_UNREDEFINED_P is unreachable; rb_method_basic_definition_p asks the same question per entry (vm.c:2341), one bit per (class, operator) pair in the order helpers.py names them. */
+/* ruby_vm_redefined_flag is hidden; vm.c:2341 asks it per entry. */
 uintptr_t
 rpyyarv_bop_mask(int *count)
 {
@@ -2552,7 +2550,7 @@ rpyyarv_bop_mask(int *count)
     BOP(rb_cFloat, ">");
     BOP(rb_cFloat, ">=");
     BOP(rb_cFloat, "==");
-    /* Math.sqrt is a singleton method of the module, so the pair is its metaclass. */
+    /* Math.sqrt is a singleton method, so the pair is its metaclass. */
     BOP(CLASS_OF(rb_mMath), "sqrt");
     BOP(CLASS_OF(rb_cArray), "new");
     BOP(rb_cArray, "initialize");
@@ -2586,12 +2584,12 @@ rpyyarv_bop_mask(int *count)
     BOP(rb_cString, "start_with?");
 #undef BOP
 
-    /* The count is an out-parameter, so every bit of the word stays available to the mask. */
+    /* The count is an out-parameter, so every bit stays free for the mask. */
     *count = i;
     return mask;
 }
 
-/* Qundef for anything but a direct Range instance, so an overriding subclass falls back to normal dispatch; fields come from internal/range.h, so no RRange layout is compiled into the RPython side. */
+/* Qundef unless a direct Range; fields from internal/range.h, no layout. */
 uintptr_t
 rpyyarv_range_part(uintptr_t range, int which)
 {
@@ -2702,7 +2700,7 @@ static VALUE
 class_le_body(VALUE argp)
 {
     struct owner_args *p = (struct owner_args *)argp;
-    /* Module#<= is kind_of? asked of the class instead of an instance: true when klass is the target or below it, nil when they are unrelated. */
+    /* Module#<=: true when klass is target or below, nil when unrelated. */
     return rb_funcall(p->klass, rb_intern("<="), 1, (VALUE)p->id);
 }
 
@@ -2730,7 +2728,7 @@ rpyyarv_str_append(uintptr_t str, uintptr_t other)
     VALUE o = (VALUE)other;
     if (!RB_TYPE_P(s, T_STRING) || RB_OBJ_FROZEN_RAW(s)) return (uintptr_t)Qundef;
     if (RB_FIXNUM_P(o)) {
-        /* rb_str_concat's codepoint arm, only where a codepoint is one byte: a binary receiver and a byte value. */
+        /* rb_str_concat's codepoint arm: binary receiver, one-byte value. */
         long n = FIX2LONG(o);
         char c;
         if (n < 0 || n > 0xff) return (uintptr_t)Qundef;
@@ -2739,7 +2737,7 @@ rpyyarv_str_append(uintptr_t str, uintptr_t other)
         return (uintptr_t)rb_str_cat(s, &c, 1);
     }
     if (!RB_TYPE_P(o, T_STRING)) return (uintptr_t)Qundef;
-    /* Same encoding: rb_str_buf_append would otherwise negotiate one and can raise. */
+    /* Same encoding: rb_str_buf_append would negotiate one and can raise. */
     if (ENCODING_GET(s) != ENCODING_GET(o)) return (uintptr_t)Qundef;
     return (uintptr_t)rb_str_buf_append(s, o);
 }
@@ -2841,7 +2839,7 @@ rpyyarv_require_resolve(uintptr_t fname, uintptr_t *path_out, int *state)
 static VALUE
 provide_body(VALUE argp)
 {
-    /* Not rb_provide: rb_fstring_cstr keeps the caller's bytes, and these belong to a String the GC frees under it. */
+    /* Not rb_provide: rb_fstring_cstr keeps bytes the GC frees under it. */
     rb_ary_push(rb_gv_get("$LOADED_FEATURES"),
                 rb_str_new_frozen(rb_get_path((VALUE)argp)));
     return Qnil;
@@ -2959,7 +2957,7 @@ str_match_p_body(VALUE argp)
            == ONIG_MISMATCH ? Qfalse : Qtrue;
 }
 
-/* String#match? with a Regexp, no offset: writes no backref, so only the search itself runs under protect (encoding mismatch, Regexp.timeout). */
+/* String#match?, no offset: no backref; only the search runs protected. */
 uintptr_t
 rpyyarv_str_match_p(uintptr_t str, uintptr_t re, int *state)
 {
@@ -2987,7 +2985,7 @@ eq_tilde_body(VALUE argp)
     return rb_reg_match(a->re, a->str);
 }
 
-/* String#=~ Regexp and Regexp#=~ String: rb_reg_match is the whole method (it sets $~ itself), tried in whichever operand order has a String and a Regexp. */
+/* =~ either way: rb_reg_match is the whole method and sets $~ itself. */
 uintptr_t
 rpyyarv_str_eq_tilde(uintptr_t a, uintptr_t b, int *state)
 {
@@ -3008,7 +3006,7 @@ rpyyarv_str_eq_tilde(uintptr_t a, uintptr_t b, int *state)
     }
 }
 
-/* Regexp#=== String: the same rb_reg_match core as =~, answered as true/false instead of a position. */
+/* Regexp#=== String: the rb_reg_match core as =~, true/false instead. */
 uintptr_t
 rpyyarv_reg_eqq(uintptr_t re, uintptr_t str, int *state)
 {
@@ -3023,7 +3021,7 @@ rpyyarv_reg_eqq(uintptr_t re, uintptr_t str, int *state)
     return (uintptr_t)(NIL_P(r) ? Qfalse : Qtrue);
 }
 
-/* Regexp.last_match with no argument: rb_backref_get plus the rb_match_busy mark match_getter (re.c) also sets, so a later match cannot mutate this MatchData out from under it. */
+/* rb_backref_get plus rb_match_busy (re.c match_getter): no later mutation. */
 uintptr_t
 rpyyarv_last_match0(void)
 {
@@ -3033,7 +3031,7 @@ rpyyarv_last_match0(void)
     return (uintptr_t)md;
 }
 
-/* Regexp.last_match(n) for a Fixnum n: rb_reg_nth_match answers nil for any out-of-range n, so nothing here can raise. */
+/* rb_reg_nth_match answers nil for an out-of-range n, so nothing raises. */
 uintptr_t
 rpyyarv_last_match1(uintptr_t n)
 {
@@ -3055,7 +3053,7 @@ str_match_body(VALUE argp)
     return md;
 }
 
-/* String#match with a Regexp pattern, no offset, no block: rb_reg_match sets $~, which is exactly what Regexp#match itself returns (rb_match_busy and all). */
+/* String#match, no offset or block: rb_reg_match sets $~ as Regexp#match. */
 uintptr_t
 rpyyarv_str_match(uintptr_t str, uintptr_t re, int *state)
 {
@@ -3084,7 +3082,7 @@ rpyyarv_hash_empty_p(uintptr_t v)
     return (uintptr_t)(rb_hash_size_num((VALUE)v) == 0 ? Qtrue : Qfalse);
 }
 
-/* String#-@: the deduplicated frozen copy, or the receiver when already interned. */
+/* String#-@: the deduplicated frozen copy, or the receiver if interned. */
 uintptr_t
 rpyyarv_str_uminus(uintptr_t v)
 {
@@ -3116,7 +3114,7 @@ rpyyarv_ary_unshift1(uintptr_t v, uintptr_t elt)
     return (uintptr_t)rb_ary_unshift(a, (VALUE)elt);
 }
 
-/* Array#freeze / Hash#freeze: OBJ_FREEZE_RAW cannot re-enter Ruby for either type. */
+/* Array/Hash#freeze: OBJ_FREEZE_RAW cannot re-enter Ruby for either. */
 uintptr_t
 rpyyarv_ary_hash_freeze(uintptr_t v)
 {
@@ -3141,7 +3139,7 @@ hash_keys_fast_body(VALUE h)
     return out;
 }
 
-/* Hash#keys in entry order, an rb_hash_foreach loop in place of rpyyarv_hash_keys's rb_funcall (that one stays, for the keyword-splat error path, which does not need the extra speed). */
+/* Hash#keys in entry order by rb_hash_foreach, not rpyyarv_hash_keys. */
 uintptr_t
 rpyyarv_hash_keys_fast(uintptr_t hash, int *state)
 {
@@ -3151,7 +3149,7 @@ rpyyarv_hash_keys_fast(uintptr_t hash, int *state)
     return (uintptr_t)r;
 }
 
-/* Array#flatten! for literal-Array elements only (no #to_ary duck-typing, a known corner); nil if nothing to flatten, self otherwise; Q_UNDEF past one level of nesting or a frozen receiver. */
+/* Array#flatten! one level, literal Arrays only; Q_UNDEF otherwise. */
 uintptr_t
 rpyyarv_ary_flatten_bang1(uintptr_t v)
 {
@@ -3198,7 +3196,7 @@ rpyyarv_ary_push1(uintptr_t v, uintptr_t elt)
     return (uintptr_t)rb_ary_push(a, (VALUE)elt);
 }
 
-/* Mirror of ext/strscan/strscan.c's struct strscanner, version-locked to this checkout's bundled strscan; ss_of verifies the TypedData name before trusting it. */
+/* Mirrors ext/strscan/strscan.c's struct strscanner; ss_of checks the name. */
 struct rpyyarv_ss {
     unsigned long flags;      /* bit 0: matched */
     VALUE str;
@@ -3301,7 +3299,7 @@ ss_skip_body(VALUE argp)
     return LONG2FIX(p->regs.end[0]);
 }
 
-/* StringScanner#skip with a Regexp: strscan_do_scan(headonly, succptr, no getstr). */
+/* StringScanner#skip: strscan_do_scan(headonly, succptr, no getstr). */
 uintptr_t
 rpyyarv_ss_skip(uintptr_t v, uintptr_t re, int *state)
 {
@@ -3320,7 +3318,7 @@ rpyyarv_ss_skip(uintptr_t v, uintptr_t re, int *state)
     return (uintptr_t)r;
 }
 
-/* String#byteslice with two Integers; rb_str_subseq indexes bytes and shares. */
+/* String#byteslice of two Integers; rb_str_subseq indexes bytes, shares. */
 uintptr_t
 rpyyarv_str_byteslice2(uintptr_t str, uintptr_t begv, uintptr_t lenv)
 {
@@ -3339,7 +3337,7 @@ rpyyarv_str_byteslice2(uintptr_t str, uintptr_t begv, uintptr_t lenv)
     return (uintptr_t)rb_str_subseq(s, beg, len);
 }
 
-/* String#force_encoding without rb_protect: Qundef unless every raise its body reaches is ruled out first -- str_modifiable's whole STR_UNMODIFIABLE_MASK (FL_FREEZE, string.c's STR_TMPLOCK == FL_USER7, and STR_CHILLED, whose deprecation warning can itself raise), rb_to_encoding's TypeError (an Encoding instance takes enc_check_encoding's own arm, so rb_to_encoding_index never reaches to_str), and rb_enc_associate_index's SPECIAL_CONST ArgumentError and rb_str_change_terminator_length regrow, which an encoding of the same mbminlen never reaches. */
+/* Unprotected: Qundef unless mask and encoding raises are ruled out. */
 uintptr_t
 rpyyarv_str_force_encoding_fast(uintptr_t str, uintptr_t enc)
 {
@@ -3365,7 +3363,7 @@ rpyyarv_str_force_encoding_fast(uintptr_t str, uintptr_t enc)
     return (uintptr_t)s;
 }
 
-/* String#unpack1("E") only: Qundef unless the eight little-endian bytes lie wholly inside str, which is every check pack.c's 'E' arm makes before its own memcpy. The host is assumed little-endian; a big-endian one falls back. */
+/* unpack1("E") only: Qundef unless 8 bytes fit; host assumed little-endian. */
 uintptr_t
 rpyyarv_unpack1_double(uintptr_t str, uintptr_t fmt, uintptr_t offv)
 {
@@ -3386,7 +3384,7 @@ rpyyarv_unpack1_double(uintptr_t str, uintptr_t fmt, uintptr_t offv)
     return (uintptr_t)rb_float_new(v);
 }
 
-/* String#ascii_only?: rb_enc_str_coderange only scans and caches the range in the flags, so it neither allocates nor raises. */
+/* rb_enc_str_coderange scans and caches in the flags: no alloc, no raise. */
 uintptr_t
 rpyyarv_str_ascii_only_p(uintptr_t str)
 {
@@ -3395,7 +3393,7 @@ rpyyarv_str_ascii_only_p(uintptr_t str)
     return (uintptr_t)RBOOL(rb_enc_str_coderange(s) == ENC_CODERANGE_7BIT);
 }
 
-/* [Float].pack("E", buffer: buf) without rb_protect: Qundef unless every raise pack_pack reaches is ruled out -- its buffer TypeError, rb_str_modify's whole STR_UNMODIFIABLE_MASK, the TOO_FEW on an empty Array, and rb_to_float's TypeError, which a Float element cannot trip. 'E' takes pack.c's default enc_info arm, so the buffer keeps whatever encoding and coderange rb_str_buf_cat leaves it. The host is assumed little-endian, as HTOVD is a no-op there; a big-endian one falls back. */
+/* Unprotected: Qundef unless pack_pack's raises are out; host assumed LE. */
 uintptr_t
 rpyyarv_pack_double_into(uintptr_t ary, uintptr_t fmt, uintptr_t buf)
 {
@@ -3431,7 +3429,7 @@ sprintf_body(VALUE argp)
     return rb_str_format(a->argc, a->argv, a->fmt);
 }
 
-/* Kernel#format / Kernel#sprintf: rb_str_format itself, the worker rb_f_sprintf calls, skipping only the varargs Kernel dispatch around it -- argument to_s/to_str coercion can re-enter Ruby and a bad format spec raises ArgumentError, so the call runs under rb_protect. */
+/* rb_str_format itself; coercion may re-enter Ruby, so it runs protected. */
 uintptr_t
 rpyyarv_sprintf(int argc, const uintptr_t *argv, uintptr_t fmt, int *state)
 {
@@ -3452,7 +3450,7 @@ rpyyarv_sprintf(int argc, const uintptr_t *argv, uintptr_t fmt, int *state)
 
 struct cgi_esc { unsigned char len; char str[6]; };
 
-/* Mirrors ext/cgi/escape/escape.c's html_escape_table exactly: the five characters CGI.escapeHTML replaces. */
+/* Mirrors ext/cgi/escape/escape.c's html_escape_table: five characters. */
 static const struct cgi_esc cgi_html_escape_table[UCHAR_MAX + 1] = {
     ['\''] = {5, "&#39;"},
     ['&']  = {5, "&amp;"},
@@ -3461,7 +3459,7 @@ static const struct cgi_esc cgi_html_escape_table[UCHAR_MAX + 1] = {
     ['>']  = {4, "&gt;"},
 };
 
-/* CGI.escapeHTML for an ascii-compatible-encoded String: ext/cgi/escape/escape.c's optimized_escape_html byte loop, taken only when that C extension itself would take it (rb_enc_str_asciicompat_p); a dummy/non-ascii-compatible encoding falls back to the pure-Ruby CGI::Escape#escapeHTML, which handles it via re-encoding. Neither branch can re-enter Ruby or raise for a String receiver, so no rb_protect. */
+/* escape.c's optimized_escape_html loop, only when ascii-compatible. */
 uintptr_t
 rpyyarv_cgi_escape_html(uintptr_t str)
 {
@@ -3501,9 +3499,7 @@ rpyyarv_cgi_escape_html(uintptr_t str)
     return (uintptr_t)escaped;
 }
 
-/* String#match? without rb_protect: taken only when onig_search cannot raise. re.c's rb_reg_prepare_re returns its regexp unchanged, with no recompile or ArgumentError, whenever the string's encoding already equals the compiled pattern's -- the exact-match branch of rb_reg_prepare_enc -- and a broken string is ruled out separately, since that raises before the encoding check runs.
- *
- * The timeout question: re.c keeps a per-Regexp deadline (onigmo.h's regex_t::timelimit, a public struct field) and a process-global fallback (re.c's rb_reg_match_time_limit, which -- unlike the timelimit field -- turned out not to be exported for linking, confirmed by ld at this shim's build time). re.c's own rb_reg_timeout_p *is* exported (regint.h declares it; declared again here rather than pulling in that whole internal onigmo header) and folds both into one end-time on its first call (the *end_time == 0 arm), touching no state and calling no clock when neither is armed; asking it that once, the same way onig_search's periodic callback would, is how this shim learns "no timeout is armed" without the hidden symbol. */
+/* Unprotected: encodings equal and rb_reg_timeout_p says no timeout armed. */
 extern bool rb_reg_timeout_p(regex_t *reg, void *end_time);
 
 uintptr_t

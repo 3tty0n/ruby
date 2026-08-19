@@ -1,6 +1,6 @@
 """Front end over an embedded CRuby: iseqw.to_a -> rawiseq objects."""
 
-# Only this module and boot.py import rpython; the rest stays importable on plain CPython.
+# Only this module and boot.py import rpython; the rest is CPython-safe.
 
 from rpyyarv import boot
 from rpyyarv import rawiseq
@@ -13,12 +13,12 @@ EVENT_PREFIX = 'RUBY_EVENT_'
 
 _MOVED = 'iseq_data_to_ary in iseq.c moved a field; update to_a_layout.py'
 
-# Keys of the params hash (iseq.c:3425-3462): use_block is a hint on `initialize` methods (iseq.c:615) not a parameter, ambiguous_param0 only enables block autosplat (unused here), block_start needs no call-path handling until getblockparam(proxy) reads it.
+# params hash keys that are not parameters (iseq.c:3425-3462, 615).
 PLAIN_PARAM_KEYS = ['lead_num', 'use_block', 'opt', 'rest_start',
                     'post_start', 'post_num', 'ambiguous_param0',
                     'block_start', 'keyword', 'kwbits', 'kwrest']
 
-# Anything outside this means the ISeq declares real parameters, so arg_size is not the lead count.
+# Outside this the ISeq has real params, so arg_size isn't lead_num.
 NO_PARAM_KEYS = ['use_block', 'ambiguous_param0']
 
 
@@ -128,7 +128,7 @@ def _read_iseq(program, pending, owners, ary, parent):
             if not name.startswith(EVENT_PREFIX):
                 raw.add_label(name)
         elif boot.is_fixnum(e):
-            # A bare Integer in the body is the source line the instructions after it come from (iseq.c iseq_data_to_ary).
+            # A bare Integer in the body is the source line that follows it.
             raw.set_line(boot.num2long(e))
 
 
@@ -155,7 +155,7 @@ def _operand(pending, owners, v, me):
     if boot.is_symbol(v):
         return rawiseq.RawOperand(rawiseq.OP_SYM, 0, boot.sym_of(v))
     if boot.is_string(v):
-        # The VALUE itself, not its bytes: rb_str_new would hand back an ASCII-8BIT copy and the literal would lose its encoding.
+        # The VALUE, not its bytes: rb_str_new would lose the encoding.
         return rawiseq.RawOperand(rawiseq.OP_VALUE, v, boot.str_of(v))
     if boot.is_array(v):
         if is_iseq(v):
@@ -188,7 +188,7 @@ def _operand(pending, owners, v, me):
 
 
 def _catches(pending, owners, catch, me):
-    """An entry's ISeq joins the same pending queue the body's nested ISeqs use; see rawiseq.RawCatch for the layout."""
+    """An entry's ISeq joins the same pending queue as nested ISeqs."""
     out = []
     n = boot.ary_len(catch)
     i = 0
@@ -223,14 +223,14 @@ def _label(v):
 
 
 def _lead_num(misc, params):
-    """Leading required parameter count: iseq.c:3437 omits lead_num unless flags.has_lead is set, which a `for` block param is not; arg_size counts it either way."""
+    """iseq.c:3437 omits lead_num without has_lead; arg_size counts it."""
     if len(_param_keys(params, NO_PARAM_KEYS)) == 0:
         return _int_or(boot.hash_aref(misc, 'arg_size'), 0)
     return _int_or(boot.hash_aref(params, 'lead_num'), 0)
 
 
 def _opt_labels(params):
-    """The opt table as label names; entry i starts the body with i optionals filled (vm_args.c:906)."""
+    """Entry i starts the body with i optionals filled (vm_args.c:906)."""
     v = boot.hash_aref(params, 'opt')
     if boot.is_nil(v):
         return []
@@ -247,7 +247,7 @@ def _opt_labels(params):
 
 
 def _keywords(pending, owners, params, me):
-    """The keyword section (iseq.c:3442): a bare Symbol is required, [name] has a default the body computes, [name, value] a static one."""
+    """iseq.c:3442: bare Symbol required, [name] computed, [n, v] static."""
     v = boot.hash_aref(params, 'keyword')
     if boot.is_nil(v):
         return [], 0, []
@@ -286,7 +286,7 @@ def _keywords(pending, owners, params, me):
 
 
 def _kw_arg_names(v):
-    """The call site's keyword names (iseq.c:3532), one per value pushed above the positionals."""
+    """The call site's keyword names (iseq.c:3532), one per value."""
     kw = boot.hash_aref(v, 'kw_arg')
     if boot.is_nil(kw):
         return []
@@ -306,7 +306,7 @@ def _kw_arg_names(v):
 
 
 def _local_names(ary):
-    """One name per slot in local_slot's order; a hidden slot holds no Symbol and stays ''."""
+    """One name per slot in local_slot's order; a hidden slot stays ''."""
     out = []
     n = boot.ary_len(ary)
     i = 0
@@ -324,7 +324,7 @@ def _int_or(v, default):
 
 
 def _extra_params(params):
-    """The parameter kinds RPyYARV cannot place: keyword, kwrest, block and the block-only ambiguous_param0."""
+    """The parameter kinds RPyYARV cannot place."""
     return ','.join(_param_keys(params, PLAIN_PARAM_KEYS))
 
 

@@ -24,7 +24,7 @@ K_SYMBOL = 'Symbol'
 K_ARRAY = 'Array'
 K_HASH = 'Hash'
 
-# Enough of the shape that no single field can move undetected: bootiseq.check(), scripts/dump_iseq.rb, and test_boot_ctypes.py all check it.
+# Enough shape that no single field can move undetected (bootiseq.check()).
 EXPECTED = [
     (I_MAGIC, K_STRING),
     (I_MAJOR, K_INTEGER),

@@ -26,7 +26,7 @@ def _arch_include_dir():
         % base)
 
 
-# The arch name, not a path: which one the extensions were built for is fixed by the libruby this binary links against.
+# The arch name, not a path: fixed by the libruby this binary links against.
 _ARCH = os.path.basename(_arch_include_dir())
 
 
@@ -72,12 +72,12 @@ BLOCK_HOOK = lltype.Ptr(lltype.FuncType([lltype.Signed, rffi.INT, VALUEP,
 TRAMP_HOOK = lltype.Ptr(lltype.FuncType(
     [VALUE, VALUE, rffi.INT, VALUEP, VALUE, rffi.INT, INTP, VALUEP], VALUE))
 
-# Mirrors RPYYARV_MAX_ARGC; a splat can expand past the old 32 (fileutils passes 47).
+# Mirrors RPYYARV_MAX_ARGC; a splat can expand past 32 (fileutils passes 47).
 MAX_ARGC = 256
 
 
 def _ext(name, args, result, reenters=False):
-    # releasegil=False: all calls hold the GVL; reenters=True on any call that can allocate, so a GC in a callback cannot move objects out from under C locals.
+    # releasegil=False: all hold the GVL; reenters=True if a GC can move locals.
     return rffi.llexternal(name, args, result, compilation_info=eci,
                            releasegil=False,
                            random_effects_on_gcobjs=reenters)
@@ -108,7 +108,7 @@ rb_is_false = _ext('rpyyarv_is_false', [VALUE], rffi.INT)
 rb_num2long = _ext('rpyyarv_num2long', [VALUE], rffi.LONG, reenters=True)
 rb_hash_aref = _ext('rpyyarv_hash_aref', [VALUE, rffi.CCHARP], VALUE, reenters=True)
 rb_sym_cstr = _ext('rpyyarv_sym_cstr', [VALUE], rffi.CCHARP, reenters=True)
-# No reenters: the codewriter rejects it inside an elidable; safe -- neither this nor rb_shape_iv_index allocates, and elidable calls never survive into an optimized trace.
+# No reenters: rejected inside an elidable; nothing here allocates.
 rb_intern_ = _ext('rpyyarv_intern', [rffi.CCHARP], VALUE)
 rb_sym_new = _ext('rpyyarv_sym_new', [rffi.CCHARP], VALUE, reenters=True)
 rb_getspecial = _ext('rpyyarv_getspecial', [rffi.INT, INTP], VALUE,
@@ -176,9 +176,9 @@ rb_const_set_ = _ext('rpyyarv_const_set', [VALUE, VALUE, VALUE, INTP],
 rb_ivar_get_ = _ext('rpyyarv_ivar_get', [VALUE, VALUE, INTP], VALUE, reenters=True)
 rb_ivar_set_ = _ext('rpyyarv_ivar_set', [VALUE, VALUE, VALUE, INTP],
                     lltype.Void, reenters=True)
-rb_shape_iv_index = _ext('rpyyarv_shape_iv_index',   # no reenters: see rb_intern_
+rb_shape_iv_index = _ext('rpyyarv_shape_iv_index', # no reenters: see rb_intern_
                          [rffi.UINT, VALUE, INTP], rffi.INT)
-rb_shape_add_ivar_fits = _ext('rpyyarv_shape_add_ivar_fits',  # no reenters: see rb_intern_
+rb_shape_add_ivar_fits = _ext('rpyyarv_shape_add_ivar_fits',
                               [rffi.UINT, rffi.UINT, VALUE, INTP], rffi.INT)
 rb_object_layout = _ext('rpyyarv_object_layout', [INTP], lltype.Void)
 rb_set_block_callback = _ext('rpyyarv_set_block_callback', [BLOCK_HOOK],
@@ -195,7 +195,7 @@ rb_define_method_id = _ext('rpyyarv_define_method',
                            [VALUE, VALUE, rffi.INT, INTP], lltype.Void,
                            reenters=True)
 rb_array_layout = _ext('rpyyarv_array_layout', [INTP], lltype.Void)
-# No reenters: rb_str_eql_internal neither allocates nor raises, see rb_range_part.
+# No reenters: rb_str_eql_internal neither allocates nor raises.
 rb_str_eq = _ext('rpyyarv_str_eq', [VALUE, VALUE], VALUE)
 rb_ary_resurrect = _ext('rpyyarv_ary_resurrect', [VALUE, INTP], VALUE, reenters=True)
 rb_ary_store_ = _ext('rpyyarv_ary_store', [VALUE, rffi.LONG, VALUE, INTP],
@@ -368,7 +368,7 @@ rb_call_super = _ext('rpyyarv_call_super',
                      [VALUE, VALUE, VALUE, VALUE, rffi.INT, VALUEP,
                       rffi.INT, VALUE, INTP],
                      VALUE, reenters=True)
-# No reenters: the barrier sets bits in preallocated page bitmaps and reaches no mark callback; see the comment on rpyyarv_obj_written.
+# No reenters: sets bits in preallocated bitmaps, reaching no mark callback.
 rb_obj_written = _ext('rpyyarv_obj_written', [VALUE, VALUE], lltype.Void)
 rb_wb_direct = _ext('rpyyarv_wb_direct', [], rffi.INT)
 
@@ -383,7 +383,7 @@ def _v(n):
     return rffi.cast(VALUE, n)
 
 
-# One preallocated cell per shim nesting level; a CRuby call can trampoline back into RPyYARV, so these really do nest.
+# One cell per shim nesting level; CRuby can trampoline back in, so they nest.
 SHIM_DEPTH = 64
 
 _status_pool = lltype.malloc(INTP.TO, SHIM_DEPTH, flavor='raw',
@@ -402,7 +402,7 @@ _nesting = _Nesting()
 
 
 def _enter_status():
-    """The status cell for one shim call; past SHIM_DEPTH it falls back to a fresh raw cell rather than reusing a slot."""
+    """Status cell for one shim call; past SHIM_DEPTH, a fresh raw cell."""
     d = _nesting.status
     _nesting.status = d + 1
     if d >= SHIM_DEPTH:
@@ -423,7 +423,7 @@ def _leave_status(p):
 
 
 def _enter_argv(n):
-    """An argument buffer for one shim call; the shim copies it to the machine stack before anything can allocate, so this one need not be scanned."""
+    """Copied to the machine stack before anything allocates, so unscanned."""
     assert n <= MAX_ARGC
     d = _nesting.argv
     _nesting.argv = d + 1
@@ -451,7 +451,7 @@ def _failed(name):
 
 
 def _failed_mid(mid):
-    """As _failed, but off the send path, where resolving the name costs a dict lookup on every call that does not raise."""
+    """Off the send path, where resolving the name costs a dict lookup."""
     _failed(symbols.name_of(mid))
 
 
@@ -529,7 +529,7 @@ def hash_aref(hash_v, key):
 
 
 def str_of(v):
-    # Length-based read: rb_string_value_cstr raises on an embedded NUL, and that longjmp would cross the RPython frame unprotected.
+    # rb_string_value_cstr raises on embedded NUL: longjmp past this frame.
     n = rffi.cast(lltype.Signed, rb_str_len(_v(v)))
     if n < 0:
         raise RubyError('to_s')
@@ -547,7 +547,7 @@ _intern_memo = {}
 
 
 def intern(name):
-    """rb_intern is idempotent per name, so a call site that passes the same string every time (RubyVM, InstructionSequence, ...) pays the FFI crossing once."""
+    """rb_intern is idempotent per name; the FFI crossing is paid once."""
     if name in _intern_memo:
         return _intern_memo[name]
     with rffi.scoped_str2charp(name) as c_name:
@@ -666,7 +666,7 @@ def ary_new(values):
 
 
 def _ary_new_chunked(values):
-    """`ary` stays an RPython local, which the conservative stack scan covers between chunks."""
+    """`ary` is an RPython local; the conservative stack scan covers it."""
     n = len(values)
     ary = 0
     state = _enter_status()
@@ -696,7 +696,7 @@ def _ary_new_chunked(values):
 
 
 def call_with_proc(recv, rid, args, proc, mid, kw=False):
-    """A foreign Proc as the block; CRuby runs it itself, so its cref and its own break/return stay CRuby's."""
+    """CRuby runs the Proc itself, so its cref and break/return stay CRuby's."""
     argc = len(args)
     if argc > MAX_ARGC:
         raise RubyError(symbols.name_of(mid))
@@ -741,12 +741,11 @@ def call_with_block(recv, rid, args, handle, mid, kw=False):
 
 
 def install_block_callback(fn):
-    """A plain function, not an llhelper pointer: only then does rffi build the enter-RPython-from-C wrapper."""
+    """Plain function, not an llhelper: rffi builds the enter-from-C wrapper."""
     rb_set_block_callback(fn)
 
 
 def install_trampoline_callback(fn):
-    """As install_block_callback: a plain function, so rffi builds the enter-RPython-from-C wrapper for it."""
     rb_set_trampoline_callback(fn)
 
 
@@ -765,7 +764,7 @@ def as_signed(v):
 
 
 def as_int(v):
-    """An rffi.INT the shim passed; too small for RPython arithmetic until it is widened."""
+    """An rffi.INT from the shim, widened for RPython arithmetic."""
     return rffi.cast(lltype.Signed, v)
 
 
@@ -789,7 +788,7 @@ def read_values(argv, argc):
 
 
 def read_value_at(argv, i):
-    """One argv slot, for a caller that writes each straight into a Frame's locals instead of collecting a list first."""
+    """One argv slot, for a caller that writes straight into Frame locals."""
     return rffi.cast(lltype.Signed, argv[i])
 
 
@@ -816,7 +815,7 @@ def ary_store(ary, idx, val):
 
 
 def ary_store_fresh(ary, idx, val):
-    """No status cell: the shim call cannot raise, so there is nothing to report."""
+    """No status cell: the shim call cannot raise."""
     rb_ary_store_fresh(_v(ary), rffi.cast(rffi.LONG, idx), _v(val))
 
 
@@ -988,7 +987,7 @@ def str_getbyte(string, index):
 
 
 def call_super(klass, owner, recv, rid, args, mid, kw=False, proc=0):
-    """The method after owner's along klass's chain, called on recv; where `super` lands when CRuby owns it."""
+    """The method after owner's along klass's chain: where `super` lands."""
     argc = len(args)
     if argc > MAX_ARGC:
         raise RubyError(symbols.name_of(mid))
@@ -1012,7 +1011,7 @@ def call_super(klass, owner, recv, rid, args, mid, kw=False, proc=0):
 
 
 def str_append(string, other):
-    """String#<< of one String onto another, or Qundef when only rb_str_concat can do it."""
+    """String#<< of String onto String; Qundef when only rb_str_concat can."""
     return rffi.cast(lltype.Signed, rb_str_append(_v(string), _v(other)))
 
 
@@ -1053,12 +1052,11 @@ def is_singleton_class(klass):
 
 
 def dir_of(path):
-    """dirname(realpath(path)), what __dir__ answers for a file; Qundef when it has no realpath."""
+    """dirname(realpath(path)); Qundef when the path has no realpath."""
     return rffi.cast(lltype.Signed, rb_dir_of(_v(path)))
 
 
 def current_receiver():
-    """The self of the frame running now."""
     return rffi.cast(lltype.Signed, rb_current_receiver())
 
 
@@ -1073,12 +1071,12 @@ def class_le(klass, target):
 
 
 def responds(klass, sym):
-    """Whether every instance of klass responds to sym: 1 yes, 0 no, -1 unanswerable per class."""
+    """Every instance of klass responds to sym: 1 yes, 0 no, -1 unanswerable."""
     return rffi.cast(lltype.Signed, rb_responds(_v(klass), _v(sym)))
 
 
 def ary_to_ary(obj):
-    """rb_ary_to_ary: to_ary when the object has one, otherwise a one-element Array."""
+    """to_ary when the object has one, otherwise a one-element Array."""
     state = _enter_status()
     v = rb_ary_to_ary(_v(obj), state)
     failed = _leave_status(state)
@@ -1089,7 +1087,7 @@ def ary_to_ary(obj):
 
 
 def super_owner(klass, owner, rid):
-    """The module `super` from owner's copy of rid reaches next, or Qnil when there is none."""
+    """The module `super` from owner's rid reaches next, or Qnil."""
     return rffi.cast(lltype.Signed,
                      rb_super_owner(_v(klass), _v(owner), _v(rid)))
 
@@ -1140,7 +1138,7 @@ def obj_alloc_fast(klass):
 
 
 def alloc_default(klass):
-    """The unprotected Class#allocate: Qundef whenever the shim is not sure the allocation cannot raise."""
+    """Unprotected: Qundef unless the shim knows the alloc cannot raise."""
     return rffi.cast(lltype.Signed, rb_alloc_default(_v(klass)))
 
 
@@ -1241,7 +1239,7 @@ def str_eq(a, b):
 
 
 def shape_iv_index(shape_id, rid):
-    """The field slot holding rid in shape_id: >= 0 found, -1 provably absent, -2 fast path unusable."""
+    """Slot holding rid in shape_id: >= 0 found, -1 absent, -2 no fast path."""
     with lltype.scoped_alloc(INTP.TO, 1) as idx:
         idx[0] = rffi.cast(rffi.INT, -1)
         found = rffi.cast(lltype.Signed,
@@ -1256,7 +1254,7 @@ def shape_iv_index(shape_id, rid):
 
 
 def shape_add_ivar_slot(before, after, rid):
-    """The slot a raw store may put rid in when it moves an object from before to after, or -1 when only rb_ivar_set may."""
+    """Slot a raw store may put rid in going before->after, else -1."""
     with lltype.scoped_alloc(INTP.TO, 1) as idx:
         idx[0] = rffi.cast(rffi.INT, -1)
         ok = rffi.cast(lltype.Signed,
@@ -1354,7 +1352,7 @@ def hash_lookup(hash_v, key):
 
 
 def hash_aref_value(hash_v, key):
-    """Hash#[] whole, defaults included; the VALUE-keyed one, unlike hash_aref's C-string key."""
+    """Hash#[] with defaults, VALUE-keyed unlike hash_aref's C-string key."""
     state = _enter_status()
     v = rb_hash_aref_full(_v(hash_v), _v(key), state)
     failed = _leave_status(state)
@@ -1365,12 +1363,12 @@ def hash_aref_value(hash_v, key):
 
 
 def hash_lookup_fast(hash_v, key):
-    """Unprotected Hash lookup for a key that cannot call Ruby; Q_UNDEF on miss."""
+    """Unprotected: only for a key that cannot call Ruby; Q_UNDEF on miss."""
     return rffi.cast(lltype.Signed, rb_hash_lookup_fast(_v(hash_v), _v(key)))
 
 
 def hash_aset_fast(hash_v, key, val):
-    """Unprotected Hash store; only for an unfrozen plain Hash and a key that cannot call Ruby."""
+    """Unprotected: only an unfrozen plain Hash, key that cannot call Ruby."""
     rb_hash_aset_fast(_v(hash_v), _v(key), _v(val))
 
 
@@ -1425,7 +1423,7 @@ def int_to_s(v):
 
 
 def str_gsub2(recv, pat, rep, rid, mid):
-    """String#gsub / #gsub! of a Regexp|String pattern and a backref-free String replacement."""
+    """gsub/gsub! of a Regexp|String pattern, backref-free replacement."""
     state = _enter_status()
     v = rb_str_gsub2(_v(recv), _v(pat), _v(rep), rffi.cast(VALUE, rid), state)
     failed = _leave_status(state)
@@ -1436,7 +1434,7 @@ def str_gsub2(recv, pat, rep, rid, mid):
 
 
 def str_eq_tilde(a, b):
-    """=~ between a String and a Regexp in either order: Qundef for the wrong types, a raise inside the match comes back out."""
+    """String =~ Regexp in either order; Qundef for the wrong types."""
     state = _enter_status()
     v = rb_str_eq_tilde(_v(a), _v(b), state)
     failed = _leave_status(state)
@@ -1530,12 +1528,12 @@ def str_match_p(s, re):
 
 
 def str_match_p_fast(s, re):
-    """The unprotected match?: Qundef whenever the shim is not sure the search cannot raise, same as a type mismatch."""
+    """Unprotected: Qundef unless the shim knows the search cannot raise."""
     return rffi.cast(lltype.Signed, rb_str_match_p_fast(_v(s), _v(re)))
 
 
 def str_format(fmt, args):
-    """Kernel#format / Kernel#sprintf; the caller keeps len(args) within MAX_ARGC, as every other variable-argc boot call here does."""
+    """Kernel#format; the caller keeps len(args) within MAX_ARGC."""
     argc = len(args)
     argv = _enter_argv(argc)
     i = 0
@@ -1589,7 +1587,7 @@ def ary_hash_freeze(v):
 
 
 def hash_keys_fast(hash_v):
-    """[k0, k1, ...] of a Hash in entry order, one C call; distinct from rubycall.hash_keys, which serves the keyword-splat error path."""
+    """[k0, k1, ...] in entry order; not rubycall.hash_keys (error path)."""
     state = _enter_status()
     v = rb_hash_keys_fast(_v(hash_v), state)
     failed = _leave_status(state)
@@ -1636,12 +1634,12 @@ def str_byteslice2(s, beg, length):
 
 
 def str_force_encoding_fast(s, enc):
-    """The unprotected String#force_encoding: Qundef whenever the shim is not sure the association cannot raise."""
+    """Unprotected: Qundef unless the shim knows it cannot raise."""
     return rffi.cast(lltype.Signed, rb_str_force_encoding_fast(_v(s), _v(enc)))
 
 
 def unpack1_double(s, fmt, offset):
-    """The unprotected String#unpack1: Qundef unless the format is "E" and the eight bytes are in range."""
+    """Unprotected unpack1: Qundef unless format "E" and 8 bytes in range."""
     return rffi.cast(lltype.Signed,
                      rb_unpack1_double(_v(s), _v(fmt), _v(offset)))
 
@@ -1655,7 +1653,7 @@ def str_ascii_only_p(v):
 
 
 def pack_double_into(ary, fmt, buf):
-    """The unprotected Array#pack: Qundef unless the format is "E" and the one Float goes into a writable buffer."""
+    """Unprotected pack: Qundef unless format "E" and a writable buffer."""
     return rffi.cast(lltype.Signed,
                      rb_pack_double_into(_v(ary), _v(fmt), _v(buf)))
 
@@ -1714,7 +1712,7 @@ def vm_core():
 
 
 def keyword_error(kind, keys):
-    """The ArgumentError VALUE for 'missing' or 'unknown' keywords; keys is an Array of Symbols."""
+    """ArgumentError for 'missing'/'unknown'; keys is an Array of Symbols."""
     state = _enter_status()
     with rffi.scoped_str2charp(kind) as c_kind:
         v = rb_keyword_error(c_kind, _v(keys), state)
@@ -1759,7 +1757,7 @@ def set_block_unwind():
 
 
 def bop_mask():
-    """(pair count, one bit per redefined pair) as the shim orders them; the count is separate so the mask may use every bit."""
+    """(pair count, one bit per redefined pair) as the shim orders them."""
     with lltype.scoped_alloc(INTP.TO, 1) as count:
         count[0] = rffi.cast(rffi.INT, 0)
         v = rffi.cast(lltype.Signed, rb_bop_mask(count))
@@ -1767,7 +1765,7 @@ def bop_mask():
 
 
 def require_resolve(fname):
-    """(REQ_*, expanded path VALUE); the path is 0 unless the answer is REQ_RB."""
+    """(REQ_*, expanded path VALUE); the path is 0 unless REQ_RB."""
     path = 0
     kind = REQ_FOREIGN
     with lltype.scoped_alloc(rffi.CArray(VALUE), 1) as out:
@@ -1809,7 +1807,7 @@ def gc_mark_value(v):
 
 
 def gc_mark_maybe(w):
-    """A machine word that may or may not be a VALUE; rb_gc_mark_maybe checks."""
+    """A word that may or may not be a VALUE; rb_gc_mark_maybe checks."""
     rb_gc_mark_maybe(rffi.cast(VALUE, w))
 
 
@@ -1822,7 +1820,7 @@ def set_mark_hook(fn):
 
 
 def set_handle_mark(fn):
-    """As install_block_callback: a plain function, so rffi builds the enter-RPython-from-C wrapper for it."""
+    """A plain function: rffi builds the enter-RPython-from-C wrapper."""
     rb_set_handle_mark(fn)
 
 
@@ -1831,17 +1829,15 @@ def fiber_killed_value():
 
 
 def rethrow_if_fiber_kill(v):
-    """Returns for anything but Fiber#kill, which resumes its fatal unwind here rather than crossing back into CRuby as a raise."""
+    """Fiber#kill resumes its fatal unwind here, not as a raise into CRuby."""
     rb_rethrow_if_fiber_kill(_v(v))
 
 
 def set_fiber_hooks(park, unpark, born, died, base_slot, top_slot):
-    """As install_block_callback: plain functions, so rffi builds the enter-RPython-from-C wrappers."""
     rb_set_fiber_hooks(park, unpark, born, died, base_slot, top_slot)
 
 
 def set_const_hook(fn):
-    """As install_block_callback: a plain function, so rffi builds the enter-RPython-from-C wrapper for it."""
     rb_set_const_hook(fn)
 
 
@@ -1859,7 +1855,7 @@ node = _Node()
 
 
 def _uninstalled_dirs():
-    """CRuby derives its load path from the executable, and that is not $BUILD/ruby: the uninstalled build's lib/ and extensions, the same set ruby-runner.c puts in RUBYLIB."""
+    """The uninstalled build's lib/ and .ext, missed by the exe path."""
     build = os.environ.get('RPYYARV_BUILD')
     if build is None or build == '':
         return []
@@ -1872,7 +1868,7 @@ def _uninstalled_dirs():
 
 
 def _boot_argv(argv):
-    """-I, not a setenv of RUBYLIB: allocating before ruby_init moves the heap enough to swing AWFY towers by 38%, and CRuby reads the two the same way."""
+    """-I, not RUBYLIB: allocating before ruby_init swings AWFY towers 38%."""
     args = [argv[0]]
     if os.environ.get('RPYYARV_GEMS') != '1':
         args.append('--disable-gems')
@@ -1884,7 +1880,7 @@ def _boot_argv(argv):
 def boot(argv):
     """Return (iseqw, status). iseqw is 0 when there is no ISeq to run."""
     argv = _boot_argv(argv)
-    # Never freed: ruby_sysinit keeps this pointer in origarg (ruby.c) for the process lifetime.
+    # Never freed: ruby_sysinit keeps it in origarg (ruby.c) for process life.
     c_argv = rffi.liststr2charpp(argv)
     with lltype.scoped_alloc(INTP.TO, 1) as status:
         status[0] = rffi.cast(rffi.INT, 0)

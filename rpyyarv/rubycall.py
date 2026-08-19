@@ -9,7 +9,7 @@ from rpyyarv.rlib import dont_look_inside, elidable
 
 class _State(object):
     def __init__(self):
-        # A list, not a dict: symbol ids are dense, and this is read on every foreign send. 0 means not resolved yet; no CRuby ID is 0.
+        # A list, not a dict: ids are dense; 0 means unresolved, no ID is 0.
         self.rids = []      # rpyyarv symbol id -> CRuby ID
         self.mids = {}      # CRuby ID -> rpyyarv symbol id
         # Same shape, for the Symbol object a keyword name becomes.
@@ -20,7 +20,7 @@ state = _State()
 
 
 class _Stress(object):
-    # Quasi-immutable, so the check folds away but entry_point's write to a prebuilt instance still invalidates it. See value._Classes.
+    # Quasi-immutable: the check folds away, entry_point's write kills it.
     _immutable_fields_ = ['flag?']
 
     def __init__(self):
@@ -37,17 +37,17 @@ NOT_HANDLED = -1
 
 
 class RequireHook(object):
-    """Replaced by requires.install(); the base one hands every require back to CRuby, which is what happens when interception is off."""
+    """Replaced by requires.install(); the base hands require to CRuby."""
     def handle(self, mid, arg):
         return NOT_HANDLED
 
     def from_cruby(self, arg):
-        """The Kernel#require override's body; nothing defines that method until requires.install() does."""
+        """The Kernel#require override's body, defined by requires.install()."""
         return value.Q_NIL
 
 
 class _Relative(object):
-    """The file a require_relative resolves against, stamped by the send; load.c reads a CRuby frame for this and RPyYARV pushes none."""
+    """What require_relative resolves against; load.c reads a CRuby frame."""
     def __init__(self):
         self.path = ''
 
@@ -84,7 +84,7 @@ def _resolve_rid(mid):
 
 @dont_look_inside
 def sym_value(mid):
-    """The static Symbol for an interned name; ID2SYM of an rb_intern, so CRuby pins it."""
+    """The Symbol for an interned name; ID2SYM of rb_intern, so pinned."""
     if mid < len(state.syms):
         v = state.syms[mid]
         if v != 0:
@@ -101,7 +101,7 @@ NO_MID = -1
 
 @dont_look_inside
 def mid_of_rid(r):
-    """The trampoline's rb_frame_this_func ID back to the id the registry is keyed on; every trampolined method went through rid() to get installed."""
+    """rb_frame_this_func's ID back to the id the registry is keyed on."""
     return state.mids.get(r, NO_MID)
 
 
@@ -118,7 +118,7 @@ def call(recv, mid, args, public_only=False):
 
 @dont_look_inside
 def call_kw(recv, mid, args, public_only=False):
-    """args[-1] is the keyword Hash; CRuby unpacks it because of RB_PASS_KEYWORDS."""
+    """args[-1] is the keyword Hash, unpacked by RB_PASS_KEYWORDS."""
     debug.count_foreign(mid)
     return boot.funcallv_kw(recv, rid(mid), args, mid, public_only)
 

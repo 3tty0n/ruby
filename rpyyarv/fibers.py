@@ -1,4 +1,4 @@
-"""A fiber suspends without unwinding, so every process-global stack RPyYARV keeps outside the machine stack is saved and restored around each switch, keyed by rb_fiber_t*."""
+"""Every process-global stack is saved and restored at each switch."""
 
 from rpython.rlib import rgc
 from rpython.rlib import rstack
@@ -19,7 +19,7 @@ SIZEADDR = llmemory.sizeof(llmemory.Address)
 
 
 class _Anchors(object):
-    """RPython's stack-depth window (rpy_stacktoobig end/length). Left on the main stack, a coroutine stack reads as permanently full: tracing, bridges and even entry into compiled loops are then silently refused, so the JIT dies inside every fiber."""
+    """Stack-depth window; left on the main stack, a fiber reads as full."""
 
     def __init__(self):
         self.end_adr = 0
@@ -32,7 +32,7 @@ anchors = _Anchors()
 
 
 def _anchor_stack(base, size):
-    """Point the depth window at the stack now running; base 0 is the root fiber, whose window was captured at install."""
+    """Point the depth window at the running stack; base 0 is the root."""
     if anchors.end_adr == 0:
         return
     if base == 0:
@@ -44,17 +44,15 @@ def _anchor_stack(base, size):
 
 
 class FiberState(object):
-    """One fiber's half of the globals. ss.s_sscopy holds its shadowstack copy while it is suspended, which the GC walks through STACKLET's custom trace hook."""
+    """ss.s_sscopy holds the shadowstack copy while the fiber is suspended."""
 
     def __init__(self):
         self.ss = alloc_stacklet()
         self.cap = 0                # bytes s_sscopy can hold, minus the header
         self.dead = False
         self.top = None             # gcroots' innermost frame
-        # The pooled shim cells are indexed by a global counter, which a fiber
-        # suspended inside a boundary call would leave behind; past SHIM_DEPTH
-        # every cell is freshly malloced instead.
-        # ponytail: a fiber pays a raw_malloc per boundary call. Give FiberState its own pool if a fiber-heavy workload measures it.
+        # Past SHIM_DEPTH every shim cell is freshly malloced.
+        # ponytail: raw_malloc per boundary call; give FiberState a pool if hot.
         self.status_depth = boot.SHIM_DEPTH
         self.argv_depth = boot.SHIM_DEPTH
         self.foreign_depth = 0
@@ -73,7 +71,7 @@ registry = _Registry()
 
 
 def _reap():
-    """Entries fiber_free could only flag, since it runs inside CRuby's sweep."""
+    """Entries fiber_free could only flag, running in CRuby's sweep."""
     if registry.dead == 0:
         return
     registry.dead = 0
@@ -92,7 +90,7 @@ def _state_for(key):
         st = registry.states[key]
         if not st.dead:
             return st
-        # CRuby handed the same address to a new fiber; drop the old entry first.
+        # CRuby reused the address for a new fiber; drop the old entry.
         _reap()
     st = FiberState()
     registry.states[key] = st
@@ -117,7 +115,7 @@ def _restore(st):
     interp.foreign_stack.depth = st.foreign_depth
     requires.files.stack = st.files
     rubycall.relative.path = st.relative
-    # The stack-depth check is one process-wide flag, so it follows whichever fiber is running.
+    # The stack-depth check is one process-wide flag; it follows the fiber.
     if st.foreign_depth > 0:
         unchecked_stack_start()
     else:
@@ -125,12 +123,12 @@ def _restore(st):
 
 
 def park(key):
-    """The buffer the shim copies this fiber's shadowstack into. Nothing here may allocate once the buffer is attached: its length still reads 0, so a collection would walk none of the roots it is about to hold."""
+    """Nothing may allocate once the buffer is attached: its length reads 0."""
     st = _state_for(key)
     _save(st)
     top = llop.gc_adr_of_root_stack_top(llmemory.Address).address[0]
     base = llop.gc_adr_of_root_stack_base(llmemory.Address).address[0]
-    # Measured with this call's own frame on the stack, so never smaller than what the shim copies once it returns.
+    # Measured with this frame on the stack, so never too small.
     length = top - base
     buf = st.ss.s_sscopy
     if length > st.cap or not buf:
@@ -150,7 +148,7 @@ def park(key):
 
 
 def unpark(key, stack_base, stack_size):
-    """The buffer the shim copies back; it stays attached, with its length zeroed, so the next park can reuse it."""
+    """The buffer the shim copies back; it stays attached for the next park."""
     _anchor_stack(stack_base, stack_size)
     if key not in registry.states:
         return lltype.nullptr(rffi.VOIDP.TO)
@@ -161,7 +159,7 @@ def unpark(key, stack_base, stack_size):
 
 
 def born(key, stack_base, stack_size):
-    """A fiber running its first instruction: the resuming fiber left the shadowstack empty, and none of the globals belong to this one."""
+    """First instruction: the shadowstack is empty and no globals are ours."""
     _anchor_stack(stack_base, stack_size)
     _reap()
     st = _state_for(key)
@@ -176,7 +174,7 @@ def born(key, stack_base, stack_size):
 
 
 def died(key):
-    """From fiber_free, so a fiber the GC reaped mid-flight passes here too. Called during CRuby's sweep: flag it and let the next born reclaim it."""
+    """Called during CRuby's sweep: only flag, the next born reclaims."""
     if key not in registry.states:
         return
     st = registry.states[key]
@@ -188,7 +186,7 @@ def died(key):
 
 
 def mark_suspended():
-    """Every suspended fiber's frames, from the shim's mark hook; CRuby marks their machine stacks conservatively for as long, so this adds no lifetime."""
+    """Every suspended fiber's frames; this adds no lifetime."""
     live = registry.live
     i = 0
     while i < len(live):
@@ -203,7 +201,7 @@ def mark_suspended():
 def install():
     rgc.register_custom_trace_hook(STACKLET, lambda_customtrace)
     gcroots.register_fibers(mark_suspended)
-    # Capture the main stack's depth window as _raise_stack_limit left it (touching the length here would undo the 4MB deep-recursion limit); the slowpath only anchors the lazy end without changing it.
+    # Capture the window as-is; writing length would undo the 4MB limit.
     anchors.end_adr = rstack._stack_get_end_adr()
     anchors.length_adr = rstack._stack_get_length_adr()
     if raw_word(anchors.end_adr, 0) == 0:
@@ -214,5 +212,5 @@ def install():
                           llop.gc_adr_of_root_stack_base(llmemory.Address))
     top_slot = rffi.cast(rffi.VOIDP,
                          llop.gc_adr_of_root_stack_top(llmemory.Address))
-    # Plain functions, not llhelper pointers: only then does rffi build the enter-RPython-from-C wrappers. See boot.install_block_callback.
+    # Plain functions, so rffi builds the enter-RPython-from-C wrappers.
     boot.set_fiber_hooks(park, unpark, born, died, base_slot, top_slot)

@@ -1,15 +1,4 @@
-"""Tracing hooks for watching the interpreter run.
-
-RPYYARV_DEBUG names the channels to turn on, comma separated:
-
-    insn     one line per dispatched instruction
-    stack    the operand stack alongside it
-    call     method enter and leave, with arguments and return value
-    iseq     disassemble the loaded code before running it
-    summary  how many times each instruction ran, at exit
-    all      every channel above
-
-"""
+"""RPYYARV_DEBUG names the channels to turn on, comma separated."""
 
 import os
 
@@ -46,7 +35,7 @@ state = _State()
 
 
 class _Coverage(object):
-    # Quasi-immutable, so the count in the send path folds away when it is off; see rubycall._Stress.
+    # Quasi-immutable, so the count folds away when it is off.
     _immutable_fields_ = ['enabled?']
 
     def __init__(self):
@@ -60,7 +49,7 @@ class _Coverage(object):
         self.iseqs_native = 0
         self.delegated = []     # 'path: why RPyYARV would not run it'
         self.by_name = {}       # method name -> foreign sends of it
-        self.by_site = {}       # (mid, receiver class, argument class) -> the same
+        self.by_site = {}       # (mid, receiver class, arg class) -> the same
 
 
 coverage = _Coverage()
@@ -73,7 +62,7 @@ def count_native():
 
 @dont_look_inside
 def count_foreign(mid):
-    # The mid, not its name: resolving one costs a dict lookup on every foreign send, and only a coverage run ever reads it.
+    # The mid, not its name: resolving costs a lookup per foreign send.
     if coverage.enabled:
         coverage.foreign += 1
         name = symbols.name_of(mid)
@@ -82,7 +71,7 @@ def count_foreign(mid):
 
 @dont_look_inside
 def count_foreign_site(mid, recv, arg):
-    """count_foreign, plus the receiver and argument classes; the class VALUEs are named only when the report is printed."""
+    """count_foreign, plus receiver and argument classes, named at report."""
     if coverage.enabled:
         count_foreign(mid)
         key = (mid, value.class_of(recv),
@@ -96,7 +85,7 @@ def configure_coverage():
 
 
 def record_file(path, total, supported, reason):
-    """One .rb file's outcome; a non-empty reason means RPyYARV delegated it to CRuby, whose method definitions its own dispatch never sees."""
+    """One .rb file's outcome; a non-empty reason means CRuby ran it."""
     if not coverage.enabled:
         return
     coverage.iseqs_total += total
@@ -109,7 +98,7 @@ def record_file(path, total, supported, reason):
 
 
 def report():
-    """What actually ran, not what could have: an iseq figure alone reads as 100% while every send goes out to CRuby."""
+    """What actually ran: an iseq figure alone reads as 100%."""
     if not coverage.enabled:
         return
     note('sends: rpyyarv %d, cruby %d' % (coverage.native, coverage.foreign))
@@ -185,7 +174,7 @@ def note(msg):
 
 
 def note_invalidation(n):
-    """One line per method-cache invalidation, only under coverage: their timing tells load-time noise from a steady-state trace killer."""
+    """One line per invalidation; timing tells load noise from a killer."""
     if coverage.enabled:
         note('invalidation #%d' % n)
 

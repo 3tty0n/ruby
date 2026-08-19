@@ -13,7 +13,7 @@ try:
     from rpython.rtyper.lltypesystem import lltype, rffi
 
     def set_stack_length(nbytes):
-        """Raise RPython's soft stack limit; stack.c clamps it to 3/4 of RLIMIT_STACK, so it cannot outrun the real stack."""
+        """Raise the soft stack limit; stack.c clamps it to 3/4 RLIMIT_STACK."""
         cur = rstack._stack_get_length()
         if cur > 0 and nbytes > cur:
             rstack._stack_set_length_fraction(float(nbytes) / float(cur))
@@ -22,7 +22,7 @@ try:
     from rpython.rtyper.lltypesystem.lloperation import llop
 
     def on_foreign_stack():
-        """True when the machine stack is not the one RPython measures against; CRuby runs a Fiber on its own, and the depth check reads any address on it as an overflow."""
+        """True on a foreign stack; the depth check would read overflow."""
         current = llop.stack_current(lltype.Signed)
         return r_uint(rstack._stack_get_end() - current) \
             > r_uint(rstack._stack_get_length())
@@ -37,19 +37,16 @@ try:
     _SHORTP = rffi.CArrayPtr(rffi.SHORT)
 
     def raw_word(addr, index):
-        """The index'th machine word at a raw address, as a signed word."""
         return rffi.cast(lltype.Signed, rffi.cast(_WORDP, addr)[index])
 
     def set_raw_word(addr, index, v):
-        """Store a signed word at the index'th word of a raw address."""
         rffi.cast(_WORDP, addr)[index] = rffi.cast(rffi.LONG, v)
 
     def raw_short(addr, index):
-        """The index'th C short at a raw address, as a signed word."""
         return rffi.cast(lltype.Signed, rffi.cast(_SHORTP, addr)[index])
 
     def bits2float(w):
-        """The double whose IEEE bit pattern is the machine word w; a JIT-visible reinterpret, not a call."""
+        """Word w as a double: a JIT-visible reinterpret, not a call."""
         return longlong2float(rffi.cast(rffi.LONGLONG, w))
 
     def float2bits(f):

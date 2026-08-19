@@ -1,6 +1,6 @@
-"""The seam between front end and loader: iseqdump.py and bootiseq.py both fill these in; loader.py works on them without knowing which ran."""
+"""The seam between front end and loader; either front end fills these."""
 
-# Flat kinds, not a class hierarchy: the loader takes the meaning from the operand's declared type in insns.def and never downcasts.
+# Flat kinds: the loader reads insns.def types and never downcasts.
 OP_INT = 0
 OP_NIL = 1
 OP_TRUE = 2
@@ -25,7 +25,7 @@ class RawOperand(object):
         self.strval = strval
         self.flag = flag
         self.has_kwarg = has_kwarg
-        # The call site's literal keywords, in the order their values are pushed; empty when the front end reported none by name.
+        # The call site's literal keywords, in value push order.
         self.kw_names = kw_names if kw_names is not None else []
         self.items = items if items is not None else []
 
@@ -51,7 +51,7 @@ class RawInsn(object):
 
 
 class RawCatch(object):
-    """[type, iseq, start, end, cont, sp], as iseq_data_to_ary spells it (iseq.c:3605); the three pc fields arrive as label names."""
+    """[type, iseq, start, end, cont, sp] (iseq.c:3605); pcs are labels."""
     def __init__(self, kind, iseq_index=-1, start='', end='', cont='', sp=0):
         self.kind = kind        # 'rescue', 'ensure', 'break', ...
         self.iseq_index = iseq_index    # -1 when the entry has no ISeq
@@ -83,25 +83,24 @@ class RawISeq(object):
         self.post_num = post_num
         # `{|a| }`, whose single parameter takes a yielded Array whole.
         self.ambiguous_param0 = ambiguous_param0
-        # Keyword parameters (iseq.c:3442), required ones first; they occupy
-        # the slots below kw_bits, which holds the unspecified-optionals mask.
+        # Keyword parameters (iseq.c:3442), required first, below kw_bits.
         self.kw_names = kw_names if kw_names is not None else []
         self.kw_required = kw_required
         # One per keyword, None where the default is computed by the body.
         self.kw_defaults = kw_defaults if kw_defaults is not None else []
         self.kw_bits = kw_bits
         self.kwrest = kwrest
-        # One name per local slot, '' for a slot with no name; only bootiseq.py fills it in, and only string eval reads it.
+        # One name per local slot, '' when it has none; string eval reads it.
         self.local_names = []
         # Set by the loader on the first block or once operand it wires.
         self.shares_locals = False
         self.insns = []
-        # Source line of each entry of insns; the bare Integers in iseq_data_to_ary's body set it.
+        # Source line of each insn; the bare Integers in the body set it.
         self.lines = []
         self.cur_line = 0
         # label name -> index into insns; the loader turns it into a pc.
         self.labels = {}
-        # Enclosing ISeq, -1 for the outermost; the naming scope a getlocal at level 1 reaches. Only bootiseq.py fills it in.
+        # Enclosing ISeq, -1 for the outermost: getlocal level 1's scope.
         self.parent = -1
 
     def add_insn(self, insn):
