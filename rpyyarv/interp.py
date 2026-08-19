@@ -2517,11 +2517,15 @@ def trampoline_callback(self_v, rid, owner_v, def_v, argc, argv, blockv, kw,
     recv = boot.as_signed(self_v)
     # The def CRuby dispatched: exact across alias/define_method copies.
     entry = dispatch.lookup_from_def(boot.as_signed(def_v))
+    mid = rubycall.NO_MID
     if entry is not None:
         mid = rubycall.mid_of_rid(boot.as_signed(rid))
         if mid == rubycall.NO_MID:
             mid = entry.mid
-    else:
+        elif mid != entry.mid:
+            # A recycled def address: distrust the map, resolve by owner.
+            entry = None
+    if entry is None:
         # From the owner CRuby chose: super/bind_call name an ancestor, and
         # re-deriving from self's class would loop back to the most derived.
         owner = boot.as_signed(owner_v)

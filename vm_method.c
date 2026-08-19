@@ -378,10 +378,13 @@ rb_rpyyarv_frame_method_def(void)
 const void *
 rb_rpyyarv_method_def(VALUE klass, ID mid)
 {
-    const rb_method_entry_t *me = rb_method_entry(klass, mid);
-    // A prepend can shadow the fresh entry; a wrong def would poison the map.
-    if (!me || me->owner != klass) return NULL;
-    return (const void *)me->def;
+    // Own table only (behind any prepend origin), never the chain: a
+    // shadowing method's def must not poison the identity map, and every
+    // fresh define must overwrite a recycled def address.
+    const rb_method_entry_t *me =
+        lookup_method_table(RCLASS_ORIGIN(klass), mid);
+    if (!me) me = lookup_method_table(klass, mid);
+    return me ? (const void *)me->def : NULL;
 }
 
 void
