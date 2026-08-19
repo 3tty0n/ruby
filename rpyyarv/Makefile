@@ -54,7 +54,7 @@ RUBY    ?= $(BUILD)/ruby
 GCLIMIT   ?= 16384
 GCTIMEOUT ?= 60
 
-.PHONY: all test microbench awfy bench bench-setup gccheck build-interp build-jit link clean
+.PHONY: all test microbench awfy bench bench-setup setup gccheck build-interp build-jit link clean
 
 link: $(SHIM)
 
@@ -63,8 +63,6 @@ $(SHIM): boot_shim.c boot_shim.h
 	$(CC) $(CFLAGS) $(CPPFLAGS) $(SHARED) -o $@ boot_shim.c $(LDFLAGS) $(LDLIBS)
 	$(call fix_install_name,$@)
 
-# TODO: test_interp/test_debug/test_loader are parked on this branch; they
-# assert on the W_* object model the VALUE-direct rewrite replaced.
 test: $(SHIM)
 	RPYYARV_BUILD=$(BUILD) $(PYTHON) test/test_boot_ctypes.py $(SCRIPT)
 	RPYYARV_BUILD=$(BUILD) $(PYTHON) test/test_gc_ctypes.py
@@ -72,12 +70,9 @@ test: $(SHIM)
 microbench:
 	RPYYARV_BUILD=$(BUILD) $(RUBY_CMD) scripts/microbench.rb $(MICROBENCHFLAGS)
 
-# AWFY steady state. AWFY_RUBYLIB supplies set/subclass_compatible.rb, which
-# CRuby 4.0's Set.inherited hook needs before deltablue will load anywhere.
 awfy:
 	RPYYARV_BUILD=$(BUILD) AWFY_RUBYLIB=$(AWFY_RUBYLIB) $(RUBY_CMD) scripts/awfy.rb $(AWFYFLAGS)
 
-# Both suites through one driver; RUBY_BENCH points at the ruby-bench checkout.
 bench:
 	RPYYARV_BUILD=$(BUILD) AWFY_RUBYLIB=$(AWFY_RUBYLIB) RUBY_BENCH=$(RUBY_BENCH) \
 	  BENCH_GEMS=$(BENCH_GEMS) $(RUBY_CMD) scripts/bench.rb $(BENCHFLAGS)
@@ -85,12 +80,13 @@ bench:
 $(RUBY_BENCH):
 	git clone --depth=1 https://github.com/ruby/ruby-bench $@
 
-# Each benchmark's Gemfile.lock, installed by the CRuby under test into
-# $(BENCH_GEMS), so another machine resolves the same versions.
 BENCH_GEMS ?= $(CURDIR)/.bench-gems
 bench-setup: | $(RUBY_BENCH)
 	RPYYARV_BUILD=$(BUILD) RUBY_BENCH=$(RUBY_BENCH) BENCH_GEMS=$(BENCH_GEMS) \
 	  scripts/bench-setup $(BENCH)
+
+setup:
+	RPYYARV_BUILD=$(BUILD) BENCH_GEMS=$(BENCH_GEMS) $(RUBY_CMD) scripts/setup.rb
 
 # Compare stdout of both rpyyarv binaries against CRuby under a tight GC limit.
 gccheck:
@@ -128,7 +124,8 @@ gccheck:
 	          test/defaultgems.rb test/modevalproc.rb \
 	          test/strevallocals.rb test/refinements.rb test/superblock.rb \
 	          test/bmethod.rb test/visibility.rb test/fiberblock.rb \
-	          test/allocfast.rb test/strwire.rb \
+	          test/allocfast.rb test/strwire.rb test/evalcref.rb \
+	          test/superchain.rb test/blockself.rb \
 	          $(TOP)/benchmark/app_*.rb $(TOP)/benchmark/so_*.rb; do \
 	   n=`basename $$s`; \
 	   case $$s in test/*) \
