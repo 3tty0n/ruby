@@ -55,7 +55,7 @@ CRUBY_CONFIGURE_ARGS ?=
 GCLIMIT   ?= 16384
 GCTIMEOUT ?= 60
 
-.PHONY: all test microbench awfy bench bench-setup setup gccheck build build-cruby build-interp build-jit link clean
+.PHONY: all test microbench awfy bench bench-bootstrap bench-setup setup gccheck build build-cruby build-interp build-jit link clean
 
 build: build-cruby
 
@@ -93,6 +93,10 @@ $(RUBY_BENCH):
 	git clone --depth=1 https://github.com/ruby/ruby-bench $@
 
 BENCH_GEMS ?= $(CURDIR)/.bench-gems
+bench-bootstrap:
+	RPYYARV_BUILD=$(BUILD) RUBY_BENCH=$(RUBY_BENCH) BENCH_GEMS=$(BENCH_GEMS) \
+	  CRUBY_CONFIGURE_ARGS='$(CRUBY_CONFIGURE_ARGS)' scripts/bench-bootstrap $(BENCH)
+
 bench-setup: | $(RUBY_BENCH)
 	RPYYARV_BUILD=$(BUILD) RUBY_BENCH=$(RUBY_BENCH) BENCH_GEMS=$(BENCH_GEMS) \
 	  scripts/bench-setup $(BENCH)

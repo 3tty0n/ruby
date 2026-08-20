@@ -16,14 +16,21 @@ TOP=`cd "$HERE/.." && pwd`
 BUILD=${RPYYARV_BUILD:-$TOP/build}
 BENCH=${RUBY_BENCH:-$HERE/ruby-bench}
 GEMS=${BENCH_GEMS:-$HERE/.bench-gems}
-ARCH=`ls -d "$BUILD"/.ext/*/ 2>/dev/null | grep -v common | head -1`
+ARCH=
+for candidate in "$BUILD"/.ext/*; do
+    if [ -f "$candidate/monitor.so" ]; then
+        ARCH=$candidate
+        break
+    fi
+done
 
 [ -x "$BUILD/ruby" ] || { echo "build CRuby first: no $BUILD/ruby" >&2; exit 1; }
+[ -n "$ARCH" ] || { echo "build CRuby extensions first: no monitor.so under $BUILD/.ext" >&2; exit 1; }
 [ -d "$BENCH/benchmarks" ] || { echo "no ruby-bench checkout at $BENCH" >&2; exit 1; }
 [ -f "$TOP/libexec/bundle" ] || { echo "no $TOP/libexec/bundle" >&2; exit 1; }
 
 # The uninstalled load path: $BUILD/ruby has no install prefix to find lib/ in.
-RUBYLIB="$TOP/lib:$BUILD/.ext/common:$BUILD:${ARCH%/}"
+RUBYLIB="$TOP/lib:$BUILD/.ext/common:$BUILD:$ARCH"
 export RUBYLIB
 export DYLD_LIBRARY_PATH=$BUILD LD_LIBRARY_PATH=$BUILD
 # extconf otherwise shells out to the install prefix baked into this build's
@@ -33,6 +40,22 @@ export RUBYOPT="-r$HERE/scripts/ruby-build-rbconfig"
 export GEM_HOME=$GEMS GEM_PATH=$GEMS
 export BUNDLE_PATH=$GEMS BUNDLE_APP_CONFIG=$GEMS/.bundle
 mkdir -p "$GEMS/log"
+
+if ! "$BUILD/ruby" -rpsych -e '' >/dev/null 2>&1; then
+    if [ "${BENCH_BOOTSTRAPPED:-0}" = 1 ]; then
+        echo "CRuby still has no working psych extension after bootstrapping." >&2
+        exit 1
+    fi
+    echo "CRuby has no working psych extension; bootstrapping libyaml and rebuilding CRuby." >&2
+    exec "$HERE/scripts/bench-bootstrap" "${1:-}"
+fi
+
+# A locked Bundler may otherwise restart the executable script via
+# /usr/bin/env ruby, selecting the system Ruby instead of this build.
+if [ -z "${BUNDLER_VERSION:-}" ]; then
+    BUNDLER_VERSION=`(cd "$HERE" && "$BUILD/ruby" "$TOP/libexec/bundle" --version)`
+    export BUNDLER_VERSION
+fi
 
 ok=0; skipped=0; failed=0
 for gf in "$BENCH"/benchmarks/*/Gemfile; do

@@ -1,0 +1,79 @@
+#!/bin/sh
+# Install the native dependency needed by Psych, rebuild CRuby, and install
+# ruby-bench's bundled gems. This target may prompt for sudo on Linux.
+
+set -e
+HERE=`cd "\`dirname "$0"\`/.." && pwd`
+TOP=`cd "$HERE/.." && pwd`
+BUILD=${RPYYARV_BUILD:-$TOP/build}
+extra_configure_args=${CRUBY_CONFIGURE_ARGS:-}
+
+# A usable cached build must include the shared library and native extensions,
+# and Psych must actually load. Directory existence alone is not sufficient.
+ARCH=
+for candidate in "$BUILD"/.ext/*; do
+    if [ -f "$candidate/monitor.so" ]; then
+        ARCH=$candidate
+        break
+    fi
+done
+SHARED_RUBY=
+for candidate in "$BUILD"/libruby.so "$BUILD"/libruby.*.dylib; do
+    if [ -e "$candidate" ]; then
+        SHARED_RUBY=$candidate
+        break
+    fi
+done
+if [ -x "$BUILD/ruby" ] && [ -n "$ARCH" ] && [ -n "$SHARED_RUBY" ] && \
+        RUBYLIB="$TOP/lib:$BUILD/.ext/common:$BUILD:$ARCH" \
+        LD_LIBRARY_PATH="$BUILD" DYLD_LIBRARY_PATH="$BUILD" RUBYOPT= \
+        "$BUILD/ruby" -rpsych -e '' >/dev/null 2>&1; then
+    echo "Using cached CRuby build in $BUILD"
+    exec env BENCH_BOOTSTRAPPED=1 "${MAKE:-make}" -C "$HERE" bench-setup BENCH="${1:-}"
+fi
+
+case `uname -s` in
+    Linux)
+        if command -v apt-get >/dev/null 2>&1; then
+            if [ "`id -u`" -eq 0 ]; then
+                apt-get update
+                apt-get install -y libyaml-dev
+            else
+                sudo apt-get update
+                sudo apt-get install -y libyaml-dev
+            fi
+        elif command -v dnf >/dev/null 2>&1; then
+            if [ "`id -u`" -eq 0 ]; then
+                dnf install -y libyaml-devel
+            else
+                sudo dnf install -y libyaml-devel
+            fi
+        else
+            echo "Unsupported Linux package manager; install the libyaml development package first." >&2
+            exit 1
+        fi
+        ;;
+    Darwin)
+        command -v brew >/dev/null 2>&1 || {
+            echo "Homebrew is required to install libyaml on macOS." >&2
+            exit 1
+        }
+        brew install libyaml
+        yaml_prefix=`brew --prefix libyaml`
+        extra_configure_args="$extra_configure_args --with-libyaml-dir=$yaml_prefix"
+        ;;
+    *)
+        echo "Unsupported operating system; install the libyaml development package first." >&2
+        exit 1
+        ;;
+esac
+
+# CRuby caches failed extension probes. If Psych was configured before the
+# libyaml headers existed, force extension discovery to run again.
+if [ -d "$BUILD/ext/psych" ]; then
+    rm -rf "$BUILD/ext/psych"
+    rm -f "$BUILD/exts.mk"
+fi
+
+"${MAKE:-make}" -C "$HERE" build-cruby CRUBY_CONFIGURE_ARGS="$extra_configure_args"
+BENCH_BOOTSTRAPPED=1 "${MAKE:-make}" -C "$HERE" bench-setup BENCH="${1:-}"
