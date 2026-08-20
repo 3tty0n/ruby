@@ -114,7 +114,7 @@ def run_once(argv, script, env, timeout)
   unless status.success?
     return [nil, status.exitstatus == 142 ? "TIMEOUT" : "FAIL",
             info.merge("why" => why(err, status),
-                       "err_tail" => err[-400..-1] || err)]
+                       "err_tail" => err[-1500..-1] || err)]
   end
   times = []
   done = nil
@@ -129,7 +129,7 @@ def run_once(argv, script, env, timeout)
   end
   if done != "true"
     return [nil, "FAIL", info.merge("why" => "no DONE line",
-                                    "err_tail" => err[-400..-1] || err)]
+                                    "err_tail" => err[-1500..-1] || err)]
   end
   [times, nil, info]
 end
