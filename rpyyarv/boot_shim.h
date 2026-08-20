@@ -315,6 +315,8 @@ uintptr_t rpyyarv_proc_new(long handle, int *state);
 /* One handle whose GC owner died, or -1 when none are pending. */
 long rpyyarv_pop_dead_handle(void);
 uintptr_t rpyyarv_block_sentinel(void);
+long rpyyarv_proc_handle(uintptr_t v);
+const char *rpyyarv_id_name(uintptr_t id);
 int rpyyarv_kw_hash_p(uintptr_t h);
 uintptr_t rpyyarv_kw_hash_dup(uintptr_t h, int *state);
 

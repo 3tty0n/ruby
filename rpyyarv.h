@@ -29,6 +29,7 @@ VALUE rb_rpyyarv_frame_owner(void);
 const void *rb_rpyyarv_frame_method_def(void);
 const void *rb_rpyyarv_method_def(VALUE klass, ID mid);
 VALUE rb_rpyyarv_proc_new(rb_block_call_func_t func, VALUE data, VALUE self_v);
+VALUE rb_rpyyarv_ifunc_data(VALUE procval, rb_block_call_func_t func);
 VALUE rb_rpyyarv_block_call_kw(VALUE obj, ID mid, int argc, const VALUE *argv,
                                rb_block_call_func_t bl_proc, VALUE data2,
                                int kw_splat, VALUE block_self);

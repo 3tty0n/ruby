@@ -454,11 +454,11 @@ def invoke(frame, w_ci, w_block=None):
                     return out
     if proxy.value != 0 and recv == proxy.value:
         return _block_send(frame, mid, recv_at, argc, frame.block)
-    if len(blocks.by_proc) > 0 \
-            and (_is_proxy_call(mid) or mid == ARITY or mid == LAMBDA_P) \
-            and recv in blocks.by_proc:
-        # A Proc RPyYARV made: run its block here, not out through CRuby.
-        return _block_send(frame, mid, recv_at, argc, blocks.by_proc[recv])
+    if _is_proxy_call(mid) or mid == ARITY or mid == LAMBDA_P:
+        w_own = _proc_block_of(recv)
+        if w_own is not None:
+            # A Proc RPyYARV made: run its block here, not out through CRuby.
+            return _block_send(frame, mid, recv_at, argc, w_own)
     if w_block is not None and entry is None \
             and (mid == INSTANCE_EVAL or mid == INSTANCE_EXEC) \
             and w_block.kind == block_mod.KIND_ISEQ \
@@ -1290,10 +1290,11 @@ def _kw_invoke(frame, w_ci, recv_at, argc, w_block, mid, fcall):
     if proxy.value != 0 and recv == proxy.value:
         return _block_send(frame, mid, recv_at, argc, frame.block,
                            w_ci.kw_names, w_ci.kw_splat)
-    if len(blocks.by_proc) > 0 and _is_proxy_call(mid) \
-            and recv in blocks.by_proc:
-        return _block_send(frame, mid, recv_at, argc, blocks.by_proc[recv],
-                           w_ci.kw_names, w_ci.kw_splat)
+    if _is_proxy_call(mid):
+        w_own = _proc_block_of(recv)
+        if w_own is not None:
+            return _block_send(frame, mid, recv_at, argc, w_own,
+                               w_ci.kw_names, w_ci.kw_splat)
     # Left in the marked frame until rb_hash_aset has copied each one.
     kw_names = w_ci.kw_names
     nkw = len(kw_names)
@@ -1454,11 +1455,11 @@ def _splat_invoke(frame, w_ci, recv_at, argc, w_block, mid, fcall):
         _drop(frame, recv_at)
         return _block_send_args(mid, frame.block, args, kw_names,
                                 kw_splat)
-    if len(blocks.by_proc) > 0 and _is_proxy_call(mid) \
-            and recv in blocks.by_proc:
-        w_proc = blocks.by_proc[recv]
-        _drop(frame, recv_at)
-        return _block_send_args(mid, w_proc, args, kw_names, kw_splat)
+    if _is_proxy_call(mid):
+        w_proc = _proc_block_of(recv)
+        if w_proc is not None:
+            _drop(frame, recv_at)
+            return _block_send_args(mid, w_proc, args, kw_names, kw_splat)
     # Built while the arguments are still on the marked stack.
     pass_kw = kw_splat or nkw > 0
     if kw_splat:
@@ -2533,8 +2534,9 @@ def trampoline_callback(self_v, rid, owner_v, def_v, argc, argv, blockv, kw,
     if entry is not None:
         mid = rubycall.mid_of_rid(boot.as_signed(rid))
         if mid == rubycall.NO_MID:
-            mid = entry.mid
-        elif mid != entry.mid:
+            # Interned so the identity check below never flies blind.
+            mid = rubycall.intern_rid(boot.as_signed(rid))
+        if mid != entry.mid:
             # A recycled def address: distrust the map, resolve by owner.
             entry = None
     if entry is None:
@@ -2722,6 +2724,18 @@ YIELD = symbols.intern('yield')
 AREF = symbols.intern('[]')
 EQQ_ = symbols.intern('===')
 SLICE = symbols.intern('slice')
+
+
+def _proc_block_of(recv):
+    """The live block a proxyable receiver stands for; the proc itself says.
+    A by_proc lookup could hit a stale entry once the address was recycled."""
+    if value.is_immediate(recv) or \
+            (raw_word(recv, value.FLAGS_WORD) & value.T_MASK) != value.T_DATA:
+        return None
+    h = boot.proc_handle(recv)
+    if h < 0 or h >= len(blocks.table):
+        return None
+    return blocks.table[h]
 
 
 def _is_proxy_call(mid):

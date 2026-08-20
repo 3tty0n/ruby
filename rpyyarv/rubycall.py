@@ -105,6 +105,19 @@ def mid_of_rid(r):
     return state.mids.get(r, NO_MID)
 
 
+def intern_rid(r):
+    """An unseen ID interned by name, so identity checks never fly blind."""
+    name = boot.id_name(r)
+    if name == '':
+        return NO_MID
+    mid = symbols.intern(name)
+    while len(state.rids) <= mid:
+        state.rids.append(0)
+    state.rids[mid] = r
+    state.mids[r] = mid
+    return mid
+
+
 @dont_look_inside
 def call(recv, mid, args, public_only=False):
     if (mid == REQUIRE or mid == REQUIRE_RELATIVE) and len(args) == 1:

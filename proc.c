@@ -3566,6 +3566,26 @@ rb_proc_new(
     return procval;
 }
 
+// The ifunc data when the proc wraps the given C function; Qundef otherwise.
+VALUE
+rb_rpyyarv_ifunc_data(VALUE procval, rb_block_call_func_t func)
+{
+    rb_proc_t *proc;
+    const struct rb_block *block;
+    const struct vm_ifunc *ifunc;
+    if (!rb_obj_is_proc(procval)) return Qundef;
+    GetProcPtr(procval, proc);
+    block = &proc->block;
+    while (vm_block_type(block) == block_type_proc) {
+        GetProcPtr(block->as.proc, proc);
+        block = &proc->block;
+    }
+    if (vm_block_type(block) != block_type_ifunc) return Qundef;
+    ifunc = block->as.captured.code.ifunc;
+    if ((rb_block_call_func_t)ifunc->func != func) return Qundef;
+    return (VALUE)ifunc->data;
+}
+
 // rb_proc_new with a chosen captured self, so a caller can plant a sentinel.
 VALUE
 rb_rpyyarv_proc_new(rb_block_call_func_t func, VALUE data, VALUE self_v)

@@ -339,6 +339,8 @@ rb_sym_name = _ext('rpyyarv_sym_name', [VALUE], VALUE, reenters=True)
 rb_current_receiver = _ext('rpyyarv_current_receiver', [], VALUE,
                            reenters=True)
 rb_block_sentinel = _ext('rpyyarv_block_sentinel', [], VALUE, reenters=True)
+rb_proc_handle = _ext('rpyyarv_proc_handle', [VALUE], rffi.LONG)
+rb_id_name = _ext('rpyyarv_id_name', [VALUE], rffi.CCHARP, reenters=True)
 rb_kw_hash_p = _ext('rpyyarv_kw_hash_p', [VALUE], rffi.INT)
 rb_kw_hash_dup = _ext('rpyyarv_kw_hash_dup', [VALUE, INTP], VALUE,
                       reenters=True)
@@ -1069,6 +1071,19 @@ def current_receiver():
 def block_sentinel():
     """The self handle procs capture; equality means CRuby did not rebind."""
     return rffi.cast(lltype.Signed, rb_block_sentinel())
+
+
+def proc_handle(v):
+    """The handle a live handle-proc stands for, from the proc itself."""
+    return rffi.cast(lltype.Signed, rb_proc_handle(_v(v)))
+
+
+def id_name(r):
+    """rb_id2name; empty when the ID has no name."""
+    p = rb_id_name(_v(r))
+    if not p:
+        return ''
+    return rffi.charp2str(p)
 
 
 def kw_hash_p(v):

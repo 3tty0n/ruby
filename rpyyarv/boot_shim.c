@@ -1893,6 +1893,26 @@ rpyyarv_is_proc(uintptr_t v)
     return rb_obj_is_proc((VALUE)v) == Qtrue ? 1 : 0;
 }
 
+const char *
+rpyyarv_id_name(uintptr_t id)
+{
+    return rb_id2name((ID)id);
+}
+
+/* The handle a live handle-proc stands for, from the proc itself; -1 else. */
+long
+rpyyarv_proc_handle(uintptr_t v)
+{
+    VALUE data = rb_rpyyarv_ifunc_data((VALUE)v,
+                                       (rb_block_call_func_t)block_yielder);
+    if (data == Qundef) return -1;
+    if (FIXNUM_P(data)) return (long)FIX2LONG(data);
+    if (RB_TYPE_P(data, T_DATA)) {
+        return (long)(uintptr_t)RTYPEDDATA_DATA(data) - 1;
+    }
+    return -1;
+}
+
 int
 rpyyarv_is_class(uintptr_t v)
 {
