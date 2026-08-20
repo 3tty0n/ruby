@@ -48,18 +48,30 @@ PYTHONPATH ?= $(TOP)
 RUBY_CMD ?= ruby
 RPYTHON ?= python2 $(PYPY)/rpython/bin/rpython
 RUBY    ?= $(BUILD)/ruby
+CRUBY_CONFIGURE_ARGS ?=
 
 # A tight malloc limit fires real GCs inside compiled traces; GC_STRESS cannot,
 # it escapes the vable and aborts tracing.
 GCLIMIT   ?= 16384
 GCTIMEOUT ?= 60
 
-.PHONY: all test microbench awfy bench bench-setup setup gccheck build-interp build-jit link clean
+.PHONY: all test microbench awfy bench bench-setup setup gccheck build build-cruby build-interp build-jit link clean
+
+build: build-cruby
+
+build-cruby:
+	mkdir -p "$(BUILD)"
+	cd "$(BUILD)" && "$(TOP)/configure" --enable-shared $(CRUBY_CONFIGURE_ARGS)
+	$(MAKE) -C "$(BUILD)"
 
 link: $(SHIM)
 
 $(SHIM): boot_shim.c boot_shim.h
 	@test -n "$(ARCHDIR)" || { echo "ERROR: build CRuby first (--enable-shared)"; exit 1; }
+	@test -n "$(LIBRUBY)" || { \
+	  echo "ERROR: $(BUILD) has no shared Ruby library; run 'make build-cruby'"; \
+	  exit 1; \
+	}
 	$(CC) $(CFLAGS) $(CPPFLAGS) $(SHARED) -o $@ boot_shim.c $(LDFLAGS) $(LDLIBS)
 	$(call fix_install_name,$@)
 
