@@ -2546,20 +2546,25 @@ def trampoline_callback(self_v, rid, owner_v, def_v, argc, argv, blockv, kw,
     boot.store_value(errp, value.Q_NIL)
     recv = boot.as_signed(self_v)
     # The def CRuby dispatched: exact across alias/define_method copies.
-    entry = dispatch.lookup_from_def(boot.as_signed(def_v))
+    from_def = dispatch.lookup_from_def(boot.as_signed(def_v))
+    entry = None
     mid = rubycall.NO_MID
-    if entry is not None:
+    owner = boot.as_signed(owner_v)
+    if from_def is not None:
         mid = rubycall.mid_of_rid(boot.as_signed(rid))
         if mid == rubycall.NO_MID:
             # Interned so the identity check below never flies blind.
             mid = rubycall.intern_rid(boot.as_signed(rid))
-        if mid != entry.mid:
-            # A recycled def address: distrust the map, resolve by owner.
-            entry = None
+        if mid != from_def.mid:
+            # A recycled def address: the name disagrees, the map lies.
+            from_def = None
+        elif owner == value.Q_NIL or owner == 0 or owner == from_def.owner:
+            entry = from_def
+        # Same name, other owner: a copied def is legit, a recycled address
+        # is not. The owner lookup below decides; from_def stays the net.
     if entry is None:
         # From the owner CRuby chose: super/bind_call name an ancestor, and
         # re-deriving from self's class would loop back to the most derived.
-        owner = boot.as_signed(owner_v)
         if owner == value.Q_NIL or owner == 0:
             owner = value.class_of(recv)
         mid, entry = dispatch.lookup_from_trampoline(boot.as_signed(rid),
@@ -2568,6 +2573,10 @@ def trampoline_callback(self_v, rid, owner_v, def_v, argc, argv, blockv, kw,
             # Aliases and the like keep the old dynamic resolution as a net.
             mid, entry = dispatch.lookup_from_trampoline(boot.as_signed(rid),
                                                          value.class_of(recv))
+        if entry is None and from_def is not None:
+            # The shared def is the best identity the maps still hold.
+            mid = from_def.mid
+            entry = from_def
     # argv lives on CRuby's VM stack for the call, so it needs no root.
     w_block = None
     proc_v = boot.as_signed(blockv)
