@@ -3,7 +3,6 @@
 #
 # Back-compat entry point for `make awfy`: the AWFY suite of scripts/bench.rb.
 
-require "rbconfig"
-
-exec(RbConfig.ruby, File.join(File.dirname(File.expand_path(__FILE__)), "bench.rb"),
+build = ENV.fetch("RPYYARV_BUILD", File.expand_path("../../build", __dir__))
+exec(File.join(build, "ruby"), File.join(__dir__, "bench.rb"),
      "--suite", "awfy", *ARGV)

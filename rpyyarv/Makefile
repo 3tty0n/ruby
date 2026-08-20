@@ -44,11 +44,13 @@ PYPY    ?= ./pypy
 RUBY_BENCH ?= $(CURDIR)/ruby-bench
 PYTHON  ?= python3
 PYTHONPATH ?= $(TOP)
-# The harness must not run on $(BUILD)/ruby: that is the system under test.
-RUBY_CMD ?= ruby
 RPYTHON ?= python2 $(PYPY)/rpython/bin/rpython
 RUBY    ?= $(BUILD)/ruby
+# Run benchmark drivers with the same local CRuby build as their child jobs.
+# This avoids accidentally selecting a system or rbenv Ruby from PATH.
+RUBY_CMD ?= $(RUBY)
 CRUBY_CONFIGURE_ARGS ?=
+CRUBY_JIT_CONFIGURE_ARGS ?= --enable-yjit --enable-zjit
 
 # A tight malloc limit fires real GCs inside compiled traces; GC_STRESS cannot,
 # it escapes the vable and aborts tracing.
@@ -61,7 +63,8 @@ build: build-cruby
 
 build-cruby:
 	mkdir -p "$(BUILD)"
-	cd "$(BUILD)" && "$(TOP)/configure" --enable-shared $(CRUBY_CONFIGURE_ARGS)
+	cd "$(BUILD)" && "$(TOP)/configure" --enable-shared \
+	  $(CRUBY_JIT_CONFIGURE_ARGS) $(CRUBY_CONFIGURE_ARGS)
 	$(MAKE) -C "$(BUILD)"
 
 link: $(SHIM)
@@ -80,14 +83,16 @@ test: $(SHIM)
 	RPYYARV_BUILD=$(BUILD) $(PYTHON) test/test_gc_ctypes.py
 
 microbench:
-	RPYYARV_BUILD=$(BUILD) $(RUBY_CMD) scripts/microbench.rb $(MICROBENCHFLAGS)
+	RPYYARV_BUILD=$(BUILD) RUBYLIB=$(UNINSTALLED_RUBYLIB) $(LIBPATH) $(RUBY_CMD) scripts/microbench.rb $(MICROBENCHFLAGS)
 
 awfy:
-	RPYYARV_BUILD=$(BUILD) AWFY_RUBYLIB=$(AWFY_RUBYLIB) $(RUBY_CMD) scripts/awfy.rb $(AWFYFLAGS)
+	RPYYARV_BUILD=$(BUILD) AWFY_RUBYLIB=$(AWFY_RUBYLIB) RUBYLIB=$(UNINSTALLED_RUBYLIB) \
+	  $(LIBPATH) $(RUBY_CMD) scripts/awfy.rb $(AWFYFLAGS)
 
 bench:
 	RPYYARV_BUILD=$(BUILD) AWFY_RUBYLIB=$(AWFY_RUBYLIB) RUBY_BENCH=$(RUBY_BENCH) \
-	  BENCH_GEMS=$(BENCH_GEMS) $(RUBY_CMD) scripts/bench.rb $(BENCHFLAGS)
+	  BENCH_GEMS=$(BENCH_GEMS) RUBYLIB=$(UNINSTALLED_RUBYLIB) \
+	  $(LIBPATH) $(RUBY_CMD) scripts/bench.rb $(BENCHFLAGS)
 
 $(RUBY_BENCH):
 	git clone --depth=1 https://github.com/ruby/ruby-bench $@
@@ -102,7 +107,8 @@ bench-setup: | $(RUBY_BENCH)
 	  scripts/bench-setup $(BENCH)
 
 setup:
-	RPYYARV_BUILD=$(BUILD) BENCH_GEMS=$(BENCH_GEMS) $(RUBY_CMD) scripts/setup.rb
+	RPYYARV_BUILD=$(BUILD) BENCH_GEMS=$(BENCH_GEMS) RUBYLIB=$(UNINSTALLED_RUBYLIB) \
+	  $(LIBPATH) $(RUBY_CMD) scripts/setup.rb
 
 # Compare stdout of both rpyyarv binaries against CRuby under a tight GC limit.
 gccheck:
