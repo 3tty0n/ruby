@@ -45,22 +45,24 @@ def _owner_of(klass, mid, version):
     return owners.tab.get((klass, mid), OWNER_UNKNOWN)
 
 
+# Filling never bumps the version: only a real redefinition invalidates.
 @dont_look_inside
 def _fill_owner(klass, mid):
+    got = owners.tab.get((klass, mid), OWNER_UNKNOWN)
+    if got != OWNER_UNKNOWN:
+        return got
     owner = boot.method_owner(klass, rubycall.rid(mid))
     # Kept alive: a recycled class VALUE would otherwise read as a hit.
     gcroots.register_class(klass)
     owners.tab[(klass, mid)] = owner
-    registry.version = Version()
-    flush_trampoline_cache()
+    return owner
 
 
 def owner_of(klass, mid):
     """The module klass resolves mid through; CRuby answers, iclasses count."""
     got = _owner_of(klass, mid, registry.version)
     if got == OWNER_UNKNOWN:
-        _fill_owner(klass, mid)
-        got = _owner_of(klass, mid, registry.version)
+        got = _fill_owner(klass, mid)
     return got
 
 
@@ -75,19 +77,20 @@ def _responds(klass, sym, version):
 
 @dont_look_inside
 def _fill_responds(klass, sym):
+    got = owners.rtab.get((klass, sym), RESPONDS_UNKNOWN)
+    if got != RESPONDS_UNKNOWN:
+        return got
     got = boot.responds(klass, sym)
     gcroots.register_class(klass)
     owners.rtab[(klass, sym)] = got
-    registry.version = Version()
-    flush_trampoline_cache()
+    return got
 
 
 def responds(klass, sym):
     """respond_to? from the class alone, or RESPONDS_RECV when per-receiver."""
     got = _responds(klass, sym, registry.version)
     if got == RESPONDS_UNKNOWN:
-        _fill_responds(klass, sym)
-        got = _responds(klass, sym, registry.version)
+        got = _fill_responds(klass, sym)
     return got
 
 
@@ -106,20 +109,21 @@ def _sym_name(sym, version):
 
 @dont_look_inside
 def _fill_sym_name(sym):
+    got = sym_names.tab.get(sym, 0)
+    if got != 0:
+        return got
     v = boot.sym_name(sym)
     # Held, not registered as a class: it is a String, in no frame.
     gcroots.hold(v)
     sym_names.tab[sym] = v
-    registry.version = Version()
-    flush_trampoline_cache()
+    return v
 
 
 def sym_name(sym):
     """One frozen String per symbol for the process, so it is only filled."""
     got = _sym_name(sym, registry.version)
     if got == 0:
-        _fill_sym_name(sym)
-        got = _sym_name(sym, registry.version)
+        got = _fill_sym_name(sym)
     return got
 
 
@@ -130,20 +134,21 @@ def _kind_of(klass, target, version):
 
 @dont_look_inside
 def _fill_kind_of(klass, target):
+    got = owners.ktab.get((klass, target), RESPONDS_UNKNOWN)
+    if got != RESPONDS_UNKNOWN:
+        return got
     got = boot.class_le(klass, target)
     gcroots.register_class(klass)
     gcroots.register_class(target)
     owners.ktab[(klass, target)] = got
-    registry.version = Version()
-    flush_trampoline_cache()
+    return got
 
 
 def kind_of(klass, target):
     """kind_of? from the two classes; include or prepend clears the table."""
     got = _kind_of(klass, target, registry.version)
     if got == RESPONDS_UNKNOWN:
-        _fill_kind_of(klass, target)
-        got = _kind_of(klass, target, registry.version)
+        got = _fill_kind_of(klass, target)
     return got
 
 
@@ -162,19 +167,22 @@ def _struct_index(klass, mid, version):
 
 @dont_look_inside
 def _fill_struct_index(klass, mid):
+    got = struct_slots.tab.get((klass, mid), IV_UNKNOWN)
+    if got != IV_UNKNOWN:
+        return got
     name = symbols.name_of(mid)
     if name.endswith('='):
         name = name[:-1]
-    struct_slots.tab[(klass, mid)] = \
-        boot.struct_member_index(klass, boot.intern(name))
+    got = boot.struct_member_index(klass, boot.intern(name))
+    struct_slots.tab[(klass, mid)] = got
+    return got
 
 
 def struct_member_index(klass, mid):
     """A Struct-generated reader/writer's slot, or -1 for another method."""
     got = _struct_index(klass, mid, registry.version)
     if got == IV_UNKNOWN:
-        _fill_struct_index(klass, mid)
-        got = _struct_index(klass, mid, registry.version)
+        got = _fill_struct_index(klass, mid)
     return got
 
 
@@ -185,19 +193,20 @@ def _super_owner(klass, owner, mid, version):
 
 @dont_look_inside
 def _fill_super_owner(klass, owner, mid):
+    got = owners.stab.get((klass, owner, mid), OWNER_UNKNOWN)
+    if got != OWNER_UNKNOWN:
+        return got
     found = boot.super_owner(klass, owner, rubycall.rid(mid))
     gcroots.register_class(klass)
     owners.stab[(klass, owner, mid)] = found
-    registry.version = Version()
-    flush_trampoline_cache()
+    return found
 
 
 def super_owner(klass, owner, mid):
     """Where `super` from owner's mid lands; CRuby counts the iclasses."""
     got = _super_owner(klass, owner, mid, registry.version)
     if got == OWNER_UNKNOWN:
-        _fill_super_owner(klass, owner, mid)
-        got = _super_owner(klass, owner, mid, registry.version)
+        got = _fill_super_owner(klass, owner, mid)
     return got
 
 

@@ -120,21 +120,26 @@ def const_at(klass, mid):
     return entry.value
 
 
+# Filling never bumps the version: only rb_clear_constant_cache invalidates.
 @dont_look_inside
 def _const_at_fill(klass, mid):
+    entry = consts.attab.get((klass, mid), None)
+    if entry is not None:
+        return entry
     entry = ConstEntry(boot.const_at(klass, rubycall.const_rid(mid)))
     root_base(klass)
     consts.attab[(klass, mid)] = entry
-    consts.version = Version()
     return entry
 
 
 @dont_look_inside
 def _const_fill(klass, mid):
+    entry = consts.tab.get((klass, mid), None)
+    if entry is not None:
+        return entry
     entry = ConstEntry(boot.const_get(klass, rubycall.const_rid(mid)))
     root_base(klass)
     consts.tab[(klass, mid)] = entry
-    consts.version = Version()
     return entry
 
 
