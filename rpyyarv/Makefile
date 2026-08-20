@@ -156,6 +156,7 @@ gccheck:
 	          test/allocfast.rb test/strwire.rb test/evalcref.rb \
 	          test/superchain.rb test/blockself.rb test/fcallproc.rb \
 	          test/splatkw.rb test/r2kwargs.rb test/fwdargs.rb \
+	          test/delegators.rb \
 	          $(TOP)/benchmark/app_*.rb $(TOP)/benchmark/so_*.rb; do \
 	   n=`basename $$s`; \
 	   case $$s in test/*) \

@@ -27,6 +27,7 @@ void rb_rpyyarv_set_fiber_hooks(const rb_rpyyarv_fiber_hooks_t *hooks);
 void rb_rpyyarv_fiber_kill_rethrow(void);
 VALUE rb_rpyyarv_frame_owner(void);
 const void *rb_rpyyarv_frame_method_def(void);
+int rb_rpyyarv_frame_bmethod(VALUE *owner_out, ID *mid_out, VALUE *proc_out);
 const void *rb_rpyyarv_method_def(VALUE klass, ID mid);
 VALUE rb_rpyyarv_proc_new(rb_block_call_func_t func, VALUE data, VALUE self_v);
 VALUE rb_rpyyarv_ifunc_data(VALUE procval, rb_block_call_func_t func);

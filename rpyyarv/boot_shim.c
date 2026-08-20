@@ -1668,10 +1668,23 @@ block_yielder(RB_BLOCK_CALL_FUNC_ARGLIST(yielded, callback_arg))
     for (i = 0; i < n; i++) buf[i] = argv[i];
     /* A Fixnum handle is permanent (proc_new); a TypedData one is GC-owned. */
     here = rb_current_receiver();
-    r = (VALUE)block_callback(FIXNUM_P(callback_arg)
+    {
+        VALUE bowner = Qnil;
+        ID bmid = 0;
+        VALUE bproc = Qnil;
+        /* Run as a bmethod, the proc IS the method: super needs its identity.
+           The proc must be this very handle-proc, not an enclosing bmethod. */
+        if (rb_rpyyarv_frame_bmethod(&bowner, &bmid, &bproc) &&
+            rb_rpyyarv_ifunc_data(bproc, block_yielder) != callback_arg) {
+            bowner = Qnil;
+            bmid = 0;
+        }
+        r = (VALUE)block_callback(FIXNUM_P(callback_arg)
                               ? (long)FIX2LONG(callback_arg)
                               : (long)(uintptr_t)RTYPEDDATA_DATA(callback_arg) - 1,
-                              n, (uintptr_t *)buf, (uintptr_t)here);
+                              n, (uintptr_t *)buf, (uintptr_t)here,
+                              (uintptr_t)bowner, (uintptr_t)bmid);
+    }
     /* The block left early and parked why; abort the CRuby method. */
     if (block_unwind) {
         block_unwind = 0;

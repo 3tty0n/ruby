@@ -375,6 +375,19 @@ rb_rpyyarv_frame_method_def(void)
     return me ? (const void *)me->def : NULL;
 }
 
+// A bmethod frame's identity, so a proc run as a method supers correctly.
+int
+rb_rpyyarv_frame_bmethod(VALUE *owner_out, ID *mid_out, VALUE *proc_out)
+{
+    const rb_callable_method_entry_t *me =
+        rb_vm_frame_method_entry(GET_EC()->cfp);
+    if (!me || me->def->type != VM_METHOD_TYPE_BMETHOD) return 0;
+    *owner_out = me->owner;
+    *mid_out = me->def->original_id;
+    *proc_out = me->def->body.bmethod.proc;
+    return 1;
+}
+
 const void *
 rb_rpyyarv_method_def(VALUE klass, ID mid)
 {

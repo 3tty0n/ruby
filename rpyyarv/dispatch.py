@@ -210,6 +210,21 @@ def flush_trampoline_cache():
         i += 1
 
 
+_bmethod_idents = {}
+
+
+@dont_look_inside
+def bmethod_identity(owner, mid, w_block):
+    """A cached KIND_BMETHOD entry naming (owner, mid), for frame identity."""
+    key = (owner, mid)
+    entry = _bmethod_idents.get(key, None)
+    if entry is None or entry.w_block is not w_block:
+        entry = MethodEntry(None, False, owner, mid, 0, KIND_BMETHOD, 0,
+                            None, w_block)
+        _bmethod_idents[key] = entry
+    return entry
+
+
 @dont_look_inside
 def lookup_from_def(key):
     """The entry a CRuby method-def address stands for; exact identity."""

@@ -903,7 +903,7 @@ def _attr_send(frame, entry, recv, recv_at, argc, w_block=None):
         if w_block is not None:
             return _call_with_block(recv, entry.mid, args, w_block)
         debug.count_native()
-        return _run_bmethod(entry.w_block, recv, args)
+        return _run_bmethod(entry, recv, args)
     if entry.kind == dispatch.KIND_ATTR_READER:
         if argc != 0:
             _arity_error(argc, 0, 0)
@@ -1497,7 +1497,7 @@ def _attr_send_args(frame, entry, recv, recv_at, args, w_block=None):
         if w_block is not None:
             return _call_with_block(recv, entry.mid, args, w_block)
         debug.count_native()
-        return _run_bmethod(entry.w_block, recv, args)
+        return _run_bmethod(entry, recv, args)
     if entry.kind == dispatch.KIND_ATTR_READER:
         if argc != 0:
             _arity_error(argc, 0, 0)
@@ -1981,7 +1981,8 @@ def invoke_super(frame, w_ci, w_block=None, has_block=False):
     entry = frame.entry
     if entry is None:
         raise UnsupportedOperation(
-            'super outside a method body is not supported')
+            "super outside a method body is not supported (in '%s', %s)"
+            % (frame.w_iseq.name, frame.w_iseq.path))
     if w_ci.blockarg:
         # Read before pop, so frame marks it across the alloc (vm_args.c:1119).
         top = frame.sp - 1
@@ -2458,6 +2459,18 @@ def _encoding_find(frame, recv, recv_at):
 PROXY_NAME = '__rpyyarv_block_param_proxy__'
 
 
+def _bmethod_identity(owner, rid, w_block):
+    """The MethodEntry a bmethod invocation stands for; None for plain yields."""
+    if owner == 0 or owner == value.Q_NIL:
+        return None
+    mid = rubycall.mid_of_rid(rid)
+    if mid == rubycall.NO_MID:
+        mid = rubycall.intern_rid(rid)
+    if mid == rubycall.NO_MID:
+        return None
+    return dispatch.bmethod_identity(owner, mid, w_block)
+
+
 def _sub_self(handle, cruby_self):
     """Q_UNDEF keeps the block's own self; else the self CRuby yielded under."""
     v = boot.as_signed(cruby_self)
@@ -2466,7 +2479,7 @@ def _sub_self(handle, cruby_self):
     return v
 
 
-def block_callback(handle, argc, argv, cruby_self):
+def block_callback(handle, argc, argv, cruby_self, bowner, bmid):
     """Called from C; no RPython exception may escape into libruby."""
     if blocks.error is not None or blocks.exc is not None \
             or blocks.jump is not None:
@@ -2477,11 +2490,15 @@ def block_callback(handle, argc, argv, cruby_self):
             'a block was called after its handle was released')
         return boot.as_value(value.Q_NIL)
     args = boot.read_values(argv, argc)
+    # Run as a bmethod the proc IS the method; super needs that identity.
+    override = _bmethod_identity(boot.as_signed(bowner),
+                                 boot.as_signed(bmid), w_block)
     foreign = _enter_foreign_stack()
     try:
         # CRuby owns the frame, so the block keeps its written cref.
         return boot.as_value(call_block(w_block, args, NO_KEYWORDS, False,
-                                        _sub_self(handle, cruby_self)))
+                                        _sub_self(handle, cruby_self),
+                                        None, override))
     except RubyException, e:
         # A kill goes back to CRuby as the fatal it was; ensures have run.
         boot.rethrow_if_fiber_kill(e.value)
@@ -2657,7 +2674,7 @@ def _attr_from_cruby(entry, recv, args, w_block=None):
         if w_block is not None:
             return _call_with_block(recv, entry.mid, args, w_block)
         debug.count_native()
-        return _run_bmethod(entry.w_block, recv, args)
+        return _run_bmethod(entry, recv, args)
     if entry.kind == dispatch.KIND_ATTR_READER:
         if len(args) != 0:
             _arity_error(len(args), 0, 0)
@@ -2821,7 +2838,7 @@ def _block_send_args(mid, w_block, args, kw_names=NO_KEYWORDS,
 
 @unroll_safe
 def call_block(w_block, args, kw_names=NO_KEYWORDS, kw_splat=False,
-               self_val=value.Q_UNDEF, cref=None):
+               self_val=value.Q_UNDEF, cref=None, entry_override=None):
     """Run a block's ISeq in a frame chaining to the defining one's locals."""
     keyed = len(kw_names) > 0 or kw_splat
     if w_block.kind != block_mod.KIND_ISEQ:
@@ -2835,7 +2852,8 @@ def call_block(w_block, args, kw_names=NO_KEYWORDS, kw_splat=False,
         self_val = outer.self_val
     if cref is None:
         cref = outer.cref
-    callee = Frame(b_iseq, self_val, cref, outer.entry)
+    entry = entry_override if entry_override is not None else outer.entry
+    callee = Frame(b_iseq, self_val, cref, entry)
     callee.defining_frame = outer
     callee.block = w_block.outer
     callee.own_block = w_block
@@ -2882,11 +2900,13 @@ def _run_lambda(w_block, b_iseq, callee, args, kw_names, kw_splat):
 
 
 @unroll_safe
-def _run_bmethod(w_block, recv, args, kw_names=NO_KEYWORDS, kw_splat=False):
+def _run_bmethod(entry, recv, args, kw_names=NO_KEYWORDS, kw_splat=False):
     """entry.w_block: method-style arity; return/break leave the method."""
+    w_block = entry.w_block
     b_iseq = promote(w_block.w_iseq)
     outer = w_block.frame
-    callee = Frame(b_iseq, recv, outer.cref, outer.entry)
+    # The method's own identity, not the defining frame's: super needs it.
+    callee = Frame(b_iseq, recv, outer.cref, entry)
     callee.defining_frame = outer
     callee.own_block = w_block
     return _run_lambda(w_block, b_iseq, callee, args, kw_names, kw_splat)
