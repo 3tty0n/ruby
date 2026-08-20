@@ -76,6 +76,22 @@ def _array_each_slice(ary, size, w_block):
     return ary
 
 
+def _integer_step(recv, limit, step, w_block):
+    """Integer#step over fixnums; every value stays inside [recv, limit]."""
+    i = value.fix2int(recv)
+    stop = value.fix2int(limit)
+    by = value.fix2int(step)
+    if by > 0:
+        while i <= stop:
+            call_block(w_block, [value.int2fix(i)])
+            i += by
+    else:
+        while i >= stop:
+            call_block(w_block, [value.int2fix(i)])
+            i += by
+    return recv
+
+
 def _array_each_with_index(ary, w_block):
     """Enumerable#each_with_index for a plain Array, no CRuby per element."""
     i = 0

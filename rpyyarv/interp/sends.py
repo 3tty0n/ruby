@@ -13,7 +13,7 @@ from rpyyarv.error import UnsupportedOperation
 from rpyyarv.frame import Frame
 from rpyyarv.rlib import dont_look_inside, promote, raw_word, unroll_safe
 
-from rpyyarv.interp.consts_ids import ALIAS_METHOD, ALLOCATE, ARITY, ATTR_ACCESSOR, ATTR_READER, ATTR_WRITER, BACKTRACE_PRIM, BLOCK_GIVEN, BUFFER, CALLEE_UNDERSCORE, CGI_CONST, CLASS_EVAL, CORE_ALIAS, CORE_GVAR_ALIAS, CORE_LAMBDA, CORE_UNDEF, DEFINE_METHOD, DIR_UNDERSCORE, EACH_SLICE, EACH_WITH_INDEX, ENC_FIND, EVAL, FORCE_ENCODING, GETBYTE, HASH_MERGE_KWD, HASH_MERGE_PTR, HASH_PAIRS_PRIM, INDEX, INITIALIZE, INSTANCE_EVAL, INSTANCE_EXEC, ITSELF, KERNEL_PROC, LAMBDA_P, MATCH, METHOD_UNDERSCORE, MODULE_EVAL, MODULE_FUNCTION, NEW, OFFSET, PRIVATE, PRIVATE_CLASS_METHOD, PUBLIC, REMOVE_METHOD, REQUIRE_PRIM, REVERSE_EACH, RUBY2_KEYWORDS, SEND, SEND2, SETBYTE, SLICE, UNDEF_METHOD, UNPACK1
+from rpyyarv.interp.consts_ids import ALIAS_METHOD, ALLOCATE, ARITY, ATTR_ACCESSOR, ATTR_READER, ATTR_WRITER, BACKTRACE_PRIM, BLOCK_GIVEN, BUFFER, CALLEE_UNDERSCORE, CGI_CONST, CLASS_EVAL, CORE_ALIAS, CORE_GVAR_ALIAS, CORE_LAMBDA, CORE_UNDEF, DEFINE_METHOD, DIR_UNDERSCORE, EACH_SLICE, EACH_WITH_INDEX, ENC_FIND, EVAL, FORCE_ENCODING, GETBYTE, HASH_MERGE_KWD, HASH_MERGE_PTR, HASH_PAIRS_PRIM, INDEX, INITIALIZE, INSTANCE_EVAL, INSTANCE_EXEC, ITSELF, KERNEL_PROC, LAMBDA_P, MATCH, METHOD_UNDERSCORE, MODULE_EVAL, MODULE_FUNCTION, NEW, OFFSET, PRIVATE, PRIVATE_CLASS_METHOD, PUBLIC, REMOVE_METHOD, REQUIRE_PRIM, REVERSE_EACH, RUBY2_KEYWORDS, SEND, SEND2, SETBYTE, SLICE, STEP, UNDEF_METHOD, UNPACK1
 from rpyyarv.interp.args import NO_KEYWORDS, _arity_error, _kw_to_positional, _refuse_iseq, setup_params
 
 @unroll_safe
@@ -235,6 +235,14 @@ def invoke(frame, w_ci, w_block=None):
             _drop(frame, recv_at)
             debug.count_native()
             return v
+    if entry is None and argc == 3 and mid == helpers.ASET:
+        v = helpers.ary_splice_set(recv, frame.stack[recv_at + 1],
+                                   frame.stack[recv_at + 2],
+                                   frame.stack[recv_at + 3])
+        if v != value.Q_UNDEF:
+            _drop(frame, recv_at)
+            debug.count_native()
+            return v
     if entry is None and mid == EVAL and fcall \
             and (argc == 1 or (argc == 3 \
                               and frame.stack[recv_at + 2] == value.Q_NIL)):
@@ -348,6 +356,21 @@ def invoke(frame, w_ci, w_block=None):
             _drop(frame, recv_at)
             try:
                 return _array_each_slice(recv, value.fix2int(size), w_block)
+            except block_mod.BlockBreak, e:
+                if e.w_block is not w_block:
+                    raise
+                return e.value
+    if w_block is not None and mid == STEP and entry is None \
+            and (argc == 1 or argc == 2) and value.is_fixnum(recv) \
+            and send_owners.integer_step != 0 \
+            and dispatch.owner_of(klass, STEP) == send_owners.integer_step:
+        limit = frame.stack[recv_at + 1]
+        step = frame.stack[recv_at + 2] if argc == 2 else value.int2fix(1)
+        if value.is_fixnum(limit) and value.is_fixnum(step) \
+                and value.fix2int(step) != 0:
+            _drop(frame, recv_at)
+            try:
+                return _integer_step(recv, limit, step, w_block)
             except block_mod.BlockBreak, e:
                 if e.w_block is not w_block:
                     raise
@@ -500,7 +523,7 @@ class _SendOwners(object):
     # Quasi-immutable: install() writes it once, before any Ruby code runs.
     _immutable_fields_ = ['kernel?', 'basic?', 'string_getbyte?',
                           'string_setbyte?', 'array_each_slice?',
-                          'array_each_with_index?',
+                          'array_each_with_index?', 'integer_step?',
                           'comparable?', 'class_allocate?',
                           'string_force_encoding?', 'string_unpack1?',
                           'array_pack?']
@@ -513,6 +536,7 @@ class _SendOwners(object):
         self.string_setbyte = 0
         self.array_each_slice = 0
         self.array_each_with_index = 0
+        self.integer_step = 0
         self.comparable = 0
         self.class_allocate = 0
         self.string_force_encoding = 0
@@ -612,6 +636,8 @@ def _native_binop(recv, arg, mid):
         return helpers.ary_push_one(recv, arg)
     if mid == helpers.UNSHIFT_MID:
         return helpers.ary_unshift1(recv, arg)
+    if mid == helpers.ROTATE_BANG:
+        return helpers.ary_rotate_bang(recv, arg)
     if mid == helpers.SKIP_MID:
         return helpers.ss_skip(recv, arg)
     if mid == helpers.POS_SET:
@@ -1100,7 +1126,7 @@ def _opt_send(frame, mid, argc):
 # Bottom import: breaks the cycle. By the time a sibling's
 # own bottom import asks this module for a name, everything
 # above is already bound.
-from rpyyarv.interp.builtins import _array_each_slice, _array_each_with_index, _array_new, _array_new_block, _backtrace, _comparable_op, _dir_of, _encoding_find, _running_method, encodings, proxy, regexp_class, vm_core
+from rpyyarv.interp.builtins import _array_each_slice, _array_each_with_index, _integer_step, _array_new, _array_new_block, _backtrace, _comparable_op, _dir_of, _encoding_find, _running_method, encodings, proxy, regexp_class, vm_core
 from rpyyarv.interp.supers import _ruby2_keywords
 from rpyyarv.interp.defs import _alias_method, _attr_name, _core_method, _define_attrs, _define_bmethod, _define_bmethod_modfunc, _in_body_of, _instance_eval, _module_eval_block, _module_function, _private_class_method, _remove_or_undef, _visibility_names, _visibility_pragma
 from rpyyarv.interp.evalsrc import _eval_receiver, _eval_rpy, _module_eval_rpy

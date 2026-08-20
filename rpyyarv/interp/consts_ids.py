@@ -75,6 +75,9 @@ EACH_SLICE = symbols.intern('each_slice')
 EACH_WITH_INDEX = symbols.intern('each_with_index')
 
 
+STEP = symbols.intern('step')
+
+
 INDEX = symbols.intern('index')
 
 

@@ -6,7 +6,7 @@ from rpyyarv import dispatch
 from rpyyarv import value
 from rpyyarv.rlib import promote, raw_word
 from rpyyarv.helpers.core import *
-from rpyyarv.helpers.core import _cruby_owns, _owned_by_core
+from rpyyarv.helpers.core import _ary_op, _cruby_owns, _owned_by_core
 
 
 def ary_pop(recv):
@@ -117,3 +117,61 @@ def check_array_layout():
             value.ARY_SHARED_FLAG, value.ARY_SHARED_ROOT_FLAG,
             value.ARY_HEAP_CAPA_WORD, value.T_ARRAY]
     return got == want
+
+
+def _ary_reverse(recv, lo, hi):
+    """Permutes what the array already holds, so no write barrier is due."""
+    hi -= 1
+    while lo < hi:
+        a = value.ary_at(recv, lo)
+        value.ary_set(recv, lo, value.ary_at(recv, hi))
+        value.ary_set(recv, hi, a)
+        lo += 1
+        hi -= 1
+
+
+def ary_rotate_bang(recv, cnt):
+    """Three reversals in place; rb_ary_rotate keeps the odd cases."""
+    if not value.is_plain_array(recv) or not value.is_fixnum(cnt) \
+            or not value.ary_writable(recv):
+        return value.Q_UNDEF
+    if not _owned_by_core(recv, value.C_ARRAY, ROTATE_BANG):
+        return value.Q_UNDEF
+    n = value.ary_len(recv)
+    if n > 1:
+        k = value.fix2int(cnt) % n
+        if k < 0:
+            k += n
+        if k != 0:
+            _ary_reverse(recv, 0, k)
+            _ary_reverse(recv, k, n)
+            _ary_reverse(recv, 0, n)
+    return recv
+
+
+def ary_splice_set(recv, beg, cnt, src):
+    """a[i, n] = ary only where it is an in-place copy of the same length."""
+    if not value.is_plain_array(recv) or not value.is_plain_array(src) \
+            or not value.is_fixnum(beg) or not value.is_fixnum(cnt):
+        return value.Q_UNDEF
+    if not _ary_op(B_ARY_ASET) or not value.ary_writable(recv):
+        return value.Q_UNDEF
+    i = value.fix2int(beg)
+    n = value.fix2int(cnt)
+    if i < 0 or n < 0 or i + n > value.ary_len(recv) \
+            or value.ary_len(src) != n or src == recv:
+        return value.Q_UNDEF
+    direct = dispatch.barrier.direct
+    j = 0
+    while j < n:
+        if not direct and not value.is_immediate(value.ary_at(src, j)):
+            return value.Q_UNDEF
+        j += 1
+    j = 0
+    while j < n:
+        v = value.ary_at(src, j)
+        value.ary_set(recv, i + j, v)
+        if not value.is_immediate(v):
+            boot.obj_written(recv, v)
+        j += 1
+    return src

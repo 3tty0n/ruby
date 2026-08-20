@@ -17,7 +17,7 @@ from rpyyarv.interp.consts import *
 from rpyyarv.interp.execute import *
 
 from rpyyarv.interp.cref import _cref_klass, _cref_of, _push_cref
-from rpyyarv.interp.builtins import _Encodings, _FiberKill, _Proxy, _RegexpClass, _VMCore, _array_each_slice, _array_each_with_index, _array_new, _array_new_block, _backtrace, _comparable_op, _dir_of, _encoding_find, _running_method, _vm_core
+from rpyyarv.interp.builtins import _integer_step, _Encodings, _FiberKill, _Proxy, _RegexpClass, _VMCore, _array_each_slice, _array_each_with_index, _array_new, _array_new_block, _backtrace, _comparable_op, _dir_of, _encoding_find, _running_method, _vm_core
 from rpyyarv.interp.args import _arity_error, _declare_locals, _iseq_arity, _keyword_error, _kw_to_positional, _refuse_iseq, _setup_keywords, _slot_named, _splat_leftovers, _splat_unknown
 from rpyyarv.interp.sends import _SendOwners, _ary_entry, _ary_len, _attr_send, _attr_send_args, _enter, _enter_args, _is_attr_mid, _is_hash, _kw_invoke, _kw_splat_hash, _name_mid, _native_binop, _new_with_block, _opt_send, _send_target, _send_target_of, _shift_off, _splat_args, _splat_invoke, _splat_kw, _splat_trailing
 from rpyyarv.interp.supers import _ruby2_keywords, _super_missing_args, _super_to_cruby, _super_to_cruby_args
