@@ -384,10 +384,7 @@ rb_rpyyarv_method_def(VALUE klass, ID mid)
     const rb_method_entry_t *me =
         lookup_method_table(RCLASS_ORIGIN(klass), mid);
     if (!me) me = lookup_method_table(klass, mid);
-    if (!me) return NULL;
-    // Pinned: the identity map outside must never see this address recycled.
-    RUBY_ATOMIC_FETCH_ADD(me->def->reference_count, 1);
-    return (const void *)me->def;
+    return me ? (const void *)me->def : NULL;
 }
 
 void
