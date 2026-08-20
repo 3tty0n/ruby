@@ -1595,6 +1595,8 @@ def setup_params(w_iseq, callee, args, is_block, kw_names=NO_KEYWORDS,
     """setup_parameters_complex; answers the opt table's pc (vm_args.c:906)."""
     nkw = len(kw_names)
     takes_kw = len(w_iseq.kw_table) > 0 or w_iseq.kwrest >= 0
+    held_flagged = 0
+    held_ary = 0
     # A **splat's Hash is the last argument; empty vanishes (vm_args.c:673).
     splat_hash = 0
     if kw_splat:
@@ -1612,6 +1614,9 @@ def setup_params(w_iseq, callee, args, is_block, kw_names=NO_KEYWORDS,
             end = len(args) - 1
             assert end >= 0
             flagged = boot.kw_hash_dup(args[end])
+            # Fresh, and an RPython list is no GC root: held until bound.
+            gcroots.hold(flagged)
+            held_flagged = flagged
             args = args[:end]
             args.append(flagged)
     # No kw params: CRuby folds them to a trailing Hash (args_kw_argv_to_hash).
@@ -1681,6 +1686,9 @@ def setup_params(w_iseq, callee, args, is_block, kw_names=NO_KEYWORDS,
             i += 1
         # The caller's frame holds these while the shim copies them.
         ary = rubycall.ary_new(values)
+        # The callee is not on the mark chain yet; only this hold roots it.
+        gcroots.hold(ary)
+        held_ary = ary
         assert rest >= 0
         callee.local_set(rest, ary)
 
@@ -1702,6 +1710,10 @@ def setup_params(w_iseq, callee, args, is_block, kw_names=NO_KEYWORDS,
         _setup_keywords(w_iseq, callee, args, len(args) - nkw, kw_names,
                         splat_hash)
 
+    if held_ary != 0:
+        gcroots.release(held_ary)
+    if held_flagged != 0:
+        gcroots.release(held_flagged)
     if opt_num > 0:
         return w_iseq.opt_table[filled]
     return 0

@@ -3,6 +3,7 @@
 # Only this module and boot.py import rpython; the rest is CPython-safe.
 
 from rpyyarv import boot
+from rpyyarv import gcroots
 from rpyyarv import rawiseq
 from rpyyarv import to_a_layout
 from rpyyarv.error import LoadError
@@ -66,7 +67,10 @@ def check(ary):
 def load(iseqw):
     """A RawProgram whose iseq 0 is iseqw."""
     program = rawiseq.RawProgram('', _path(iseqw))
-    pending = [boot.call0(iseqw, 'to_a')]
+    root = boot.call0(iseqw, 'to_a')
+    # An RPython list is no GC root: pinned until the pools register.
+    gcroots.keepalive(root)
+    pending = [root]
     owners = [-1]
     i = 0
     while i < len(pending):
