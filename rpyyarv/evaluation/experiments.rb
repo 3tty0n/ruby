@@ -2,6 +2,13 @@
 
 module EvaluationConfig
   ENGINES = %w[cruby cruby+yjit cruby+zjit rpyyarv rpyyarv-jit].freeze
+  REFERENCES = {
+    "cruby" => "cruby",
+    "yjit" => "cruby+yjit",
+    "zjit" => "cruby+zjit",
+    "truffleruby" => "truffleruby",
+    "jruby" => "jruby"
+  }.freeze
   GC_LIMITS = [16_384, 4096, 1024].freeze
 
   # Categories are disjoint by first match and intentionally file based.
@@ -31,4 +38,3 @@ module EvaluationConfig
     "mechanism" => "Per-case explanation of wins and losses"
   }.freeze
 end
-

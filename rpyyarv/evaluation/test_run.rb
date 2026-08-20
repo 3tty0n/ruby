@@ -25,7 +25,12 @@ Dir.mktmpdir("rpyyarv-evaluation-test") do |dir|
   ratios = File.readlines(File.join(dir, "ratios.csv"), chomp: true)
   assert(result["measurements"] == 4, "measurement count")
   assert(ratios.size == 2, "failed rows must not become ratios")
-  assert(ratios[1].split(",")[2].to_f == 0.8, "YJIT ratio")
+  yjit_column = ratios[0].split(",").index("rpyyarv_jit_over_yjit")
+  assert(ratios[1].split(",")[yjit_column].to_f == 0.8, "YJIT ratio")
+
+  plots = RPyYARVEvaluation::Plotter.plot(raw_path, dir)
+  assert(plots.all? { |path| File.exist?(path) }, "plot files")
+  assert(File.read(plots[0]).include?("bounce"), "ratio plot benchmark")
 
   log = File.join(dir, "boundary.log")
   File.write(log, "bounce sends: rpyyarv 90, cruby 10\nnoise\n")

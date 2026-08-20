@@ -9,6 +9,7 @@ require "rbconfig"
 require "time"
 
 require_relative "experiments"
+require_relative "plots"
 
 module RPyYARVEvaluation
   ROOT = File.expand_path("..", __dir__)
@@ -162,13 +163,14 @@ module RPyYARVEvaluation
       grouped.each_with_object([]) do |((suite, benchmark), group), result|
         by_engine = group.to_h { |r| [r["engine"], r] }
         jit = numeric(by_engine.dig("rpyyarv-jit", "median_ms"))
-        yjit = numeric(by_engine.dig("cruby+yjit", "median_ms"))
-        cruby = numeric(by_engine.dig("cruby", "median_ms"))
         next unless jit
 
-        result << { "suite" => suite, "benchmark" => benchmark,
-                    "rpyyarv_jit_over_yjit" => yjit && jit / yjit,
-                    "rpyyarv_jit_over_cruby" => cruby && jit / cruby }
+        row = { "suite" => suite, "benchmark" => benchmark }
+        EvaluationConfig::REFERENCES.each do |label, engine|
+          reference = numeric(by_engine.dig(engine, "median_ms"))
+          row["rpyyarv_jit_over_#{label}"] = reference && jit / reference
+        end
+        result << row
       end
     end
 
@@ -187,14 +189,15 @@ module RPyYARVEvaluation
       groups = ratios.group_by { |r| r["suite"] }
       groups["all"] = ratios
       groups.map do |suite, group|
-        yjit = group.map { |r| r["rpyyarv_jit_over_yjit"] }.compact
-        cruby = group.map { |r| r["rpyyarv_jit_over_cruby"] }.compact
-        { "suite" => suite, "n_yjit" => yjit.size,
-          "n_cruby" => cruby.size,
-          "geomean_jit_over_yjit" =>
-            geomean(yjit),
-          "geomean_jit_over_cruby" =>
-            geomean(cruby) }
+        row = { "suite" => suite }
+        EvaluationConfig::REFERENCES.each_key do |label|
+          values = group.map do |ratio|
+            ratio["rpyyarv_jit_over_#{label}"]
+          end.compact
+          row["n_#{label}"] = values.size
+          row["geomean_jit_over_#{label}"] = geomean(values)
+        end
+        row
       end
     end
 
@@ -205,14 +208,18 @@ module RPyYARVEvaluation
     end
 
     def write_ratios(path, rows)
-      headers = %w[suite benchmark rpyyarv_jit_over_yjit
-                   rpyyarv_jit_over_cruby]
+      headers = %w[suite benchmark] + EvaluationConfig::REFERENCES.keys.map do |label|
+        "rpyyarv_jit_over_#{label}"
+      end
       write_csv(path, headers, rows)
     end
 
     def write_summary(path, rows)
-      headers = %w[suite n_yjit n_cruby geomean_jit_over_yjit
-                   geomean_jit_over_cruby]
+      headers = ["suite"]
+      EvaluationConfig::REFERENCES.each_key do |label|
+        headers << "n_#{label}"
+        headers << "geomean_jit_over_#{label}"
+      end
       write_csv(path, headers, rows)
     end
 
@@ -280,13 +287,87 @@ module RPyYARVEvaluation
                                     File.join(TOP, "build")) }
   end
 
+  def find_command(name)
+    ENV.fetch("PATH", "").split(File::PATH_SEPARATOR).each do |dir|
+      path = File.join(dir, name)
+      return path if File.executable?(path)
+    end
+    nil
+  end
+
+  def installed_ruby(pattern, executable)
+    roots = []
+    roots << ENV["RBENV_ROOT"] if ENV["RBENV_ROOT"]
+    roots << File.join(Dir.home, ".rbenv")
+    roots << File.join(Dir.home, ".asdf")
+    roots.uniq.each do |root|
+      paths = Dir[File.join(root, "installs", "ruby", pattern, "bin",
+                            executable)]
+      paths += Dir[File.join(root, "versions", pattern, "bin", executable)]
+      path = paths.sort.last
+      return path if path && File.executable?(path)
+    end
+    nil
+  end
+
+  def usable_engine(path)
+    return nil unless path && File.executable?(path)
+
+    _output, ok = capture(path, "-e", "", chdir: ROOT)
+    ok ? path : nil
+  end
+
+  def optional_engines
+    return @optional_engines if defined?(@optional_engines)
+
+    truffle = ENV["TRUFFLERUBY_BIN"]
+    if !truffle && ENV["GRAALVM_HOME"]
+      truffle = File.join(ENV["GRAALVM_HOME"], "bin", "ruby")
+    end
+    truffle = usable_engine(truffle)
+    truffle ||= find_command("truffleruby")
+    truffle = usable_engine(truffle)
+    truffle ||= installed_ruby("truffleruby*", "ruby")
+    truffle = usable_engine(truffle)
+
+    jruby = ENV["JRUBY_BIN"]
+    jruby ||= File.join(ENV["JRUBY_HOME"], "bin", "jruby") if ENV["JRUBY_HOME"]
+    jruby = usable_engine(jruby)
+    jruby ||= find_command("jruby")
+    jruby = usable_engine(jruby)
+    jruby ||= installed_ruby("jruby*", "jruby")
+    jruby = usable_engine(jruby)
+
+    @optional_engines = {
+      "truffleruby" => truffle,
+      "jruby" => jruby
+    }.compact
+  end
+
+  def optional_engine_args
+    optional_engines.flat_map do |name, path|
+      ["--engine", "#{name}=#{path}"]
+    end
+  end
+
   def performance(args, results_root)
     run = Run.new("performance", results_root)
     raw = File.join(run.dir, "raw.json")
     argv = [RbConfig.ruby, File.join(ROOT, "scripts", "bench.rb"),
-            "--raw", raw] + args
+            "--raw", raw] + optional_engine_args + args
+    run.manifest["optional_engines"] = optional_engines
     ok = run.execute("performance", base_env, argv)
-    Analyzer.analyze(raw, run.dir) if File.exist?(raw)
+    if File.exist?(raw)
+      begin
+        Analyzer.analyze(raw, run.dir)
+        Plotter.plot(raw, run.dir)
+      rescue StandardError => error
+        run.manifest["postprocess_error"] =
+          "#{error.class}: #{error.message}"
+        warn "postprocessing failed: #{error.message}"
+        ok = false
+      end
+    end
     run.finish(ok)
     puts "artifacts: #{run.dir}"
     ok ? 0 : 1
@@ -331,6 +412,8 @@ module RPyYARVEvaluation
       "cruby" => File.join(TOP, "build", "ruby"),
       "rpyyarv" => File.join(ROOT, "rpyyarv"),
       "rpyyarv-jit" => File.join(ROOT, "rpyyarv-jit"),
+      "truffleruby (optional)" => optional_engines["truffleruby"],
+      "jruby (optional)" => optional_engines["jruby"],
       "rebench (optional)" => ENV.fetch("PATH", "").split(File::PATH_SEPARATOR)
                                   .map { |dir| File.join(dir, "rebench") }
                                   .find { |path| File.executable?(path) }
@@ -363,6 +446,7 @@ module RPyYARVEvaluation
         boundary [BENCH-ARGS]    run the non-timing delegation census
         gc [LIMIT ...]           run gccheck at each malloc limit
         analyze RAW [OUT-DIR]    convert bench.rb JSON to tidy CSV
+        plot RAW [OUT-DIR]       render ratio and log-log scatter SVGs
         loc [OUT.csv]            count the categorized implementation surface
 
       BENCH-ARGS are passed unchanged to scripts/bench.rb. Examples include
@@ -386,6 +470,11 @@ module RPyYARVEvaluation
       raw = argv.shift or abort usage
       out = argv.shift || File.dirname(File.expand_path(raw))
       puts JSON.pretty_generate(Analyzer.analyze(raw, out))
+      0
+    when "plot"
+      raw = argv.shift or abort usage
+      out = argv.shift || File.dirname(File.expand_path(raw))
+      puts Plotter.plot(raw, out)
       0
     when "loc"
       loc(argv.shift || File.join(DEFAULT_RESULTS, "implementation-loc.csv"))
