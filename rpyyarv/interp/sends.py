@@ -640,6 +640,11 @@ def _native_binop(recv, arg, mid):
         return helpers.instance_of(recv, arg)
     if mid == helpers.KEY_P or mid == helpers.HAS_KEY_P:
         return helpers.hash_key_p(recv, arg, mid)
+    if mid == helpers.INCLUDE_P or mid == helpers.COVER_P \
+            or mid == helpers.MEMBER_P or mid == helpers.EQQ:
+        v = helpers.range_include(recv, arg, mid)
+        if v != value.Q_UNDEF:
+            return v
     if mid == helpers.INCLUDE_P:
         return helpers.set_include(recv, arg)
     if mid == helpers.START_WITH_P:
@@ -683,6 +688,9 @@ def _native_binop(recv, arg, mid):
     if mid == helpers.COS:
         return helpers.math_cos(recv, arg)
     if mid == helpers.POW:
+        v = helpers.int_pow(recv, arg)
+        if v != value.Q_UNDEF:
+            return v
         return helpers.flt_pow(recv, arg)
     if mid == helpers.RESPOND_TO_P:
         return helpers.responds_to(recv, arg)

@@ -84,6 +84,29 @@ def math_cos(recv, arg):
     return _from_dbl(math.cos(_dbl(arg)))
 
 
+def int_pow(a, b):
+    """Integer ** a non-negative Integer, while it stays exact in a word."""
+    if not _fix2(a, b, B_INT_POW):
+        return value.Q_UNDEF
+    e = value.fix2int(b)
+    if e < 0:
+        return value.Q_UNDEF
+    base = value.fix2int(a)
+    r = 1
+    try:
+        while e > 0:
+            if e & 1:
+                r = ovfcheck(r * base)
+            e >>= 1
+            if e > 0:
+                base = ovfcheck(base * base)
+    except OverflowError:
+        return value.Q_UNDEF
+    if not value.fixable(r):
+        return value.Q_UNDEF
+    return value.int2fix(r)
+
+
 def flt_pow(a, b):
     """Float **; a negative base gives a Complex and an overflow raises."""
     if not (value.is_float(a) or value.is_fixnum(a)):

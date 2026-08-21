@@ -230,6 +230,31 @@ def range_part(recv, mid):
     return value.Q_UNDEF
 
 
+def range_include(recv, arg, mid):
+    """r_cover_p over Integers; a numeric Range never iterates (range.c)."""
+    if value.is_immediate(recv) or not value.is_fixnum(arg) \
+            or (raw_word(recv, value.FLAGS_WORD) & value.T_MASK) \
+            != value.T_STRUCT:
+        return value.Q_UNDEF
+    beg = boot.range_part(recv, boot.RANGE_BEG)
+    if not value.is_fixnum(beg):
+        return value.Q_UNDEF
+    end = boot.range_part(recv, boot.RANGE_END)
+    if not value.is_fixnum(end):
+        return value.Q_UNDEF
+    klass = promote(value.class_of(recv))
+    if dispatch.owner_of(klass, mid) != klass \
+            or dispatch.lookup_core(klass, mid) is not None:
+        return value.Q_UNDEF
+    v = value.fix2int(arg)
+    if v < value.fix2int(beg):
+        return value.Q_FALSE
+    e = value.fix2int(end)
+    if boot.range_part(recv, boot.RANGE_EXCL) == value.Q_TRUE:
+        return value.newbool(v < e)
+    return value.newbool(v <= e)
+
+
 def zero_arg(recv, mid):
     if mid == CLASS_MID:
         return obj_class(recv)
