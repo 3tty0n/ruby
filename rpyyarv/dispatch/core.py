@@ -243,12 +243,18 @@ def _lookup(klass, mid, version):
     return entry
 
 
+@dont_look_inside
+def _lookup_filled(klass, mid):
+    """Opaque on purpose: a trace must not reuse the pending answer."""
+    return _lookup(klass, mid, registry.version)
+
+
 def lookup(klass, mid):
     """supers skips iclasses, so CRuby is asked who owns mid."""
     entry = _lookup(klass, mid, registry.version)
     if entry is OWNER_PENDING:
         _fill_owner(klass, mid)
-        entry = _lookup(klass, mid, registry.version)
+        entry = _lookup_filled(klass, mid)
     return entry
 
 
