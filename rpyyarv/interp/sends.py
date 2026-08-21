@@ -374,8 +374,6 @@ def invoke(frame, w_ci, w_block=None):
     # a positional Struct takes those as members (struct.c:315).
     if mid == NEW and entry is None and w_block is None \
             and send_owners.struct_class != 0 \
-            and dispatch.owner_of(klass, NEW) == \
-            value.core_class(value.C_CLASS) \
             and dispatch.owner_of(promote(recv), INITIALIZE) == \
             send_owners.struct_class:
         v = _struct_new(frame, recv, recv_at, argc)

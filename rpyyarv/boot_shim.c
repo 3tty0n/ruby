@@ -2802,9 +2802,13 @@ static VALUE
 struct_arity_body(VALUE k)
 {
     VALUE members = rb_struct_s_members(k);
+    VALUE m;
     /* keyword_init: new takes a Hash, so the positional path is not it. */
     if (RTEST(rb_funcall(k, rb_intern("keyword_init?"), 0))) return Qnil;
     if (!RB_TYPE_P(members, T_ARRAY)) return Qnil;
+    /* struct.c installs a C `new`; a `def self.new` has a source location. */
+    m = rb_funcall(k, rb_intern("method"), 1, ID2SYM(rb_intern("new")));
+    if (!NIL_P(rb_funcall(m, rb_intern("source_location"), 0))) return Qnil;
     return LONG2NUM(RARRAY_LEN(members));
 }
 
