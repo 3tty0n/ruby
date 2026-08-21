@@ -192,11 +192,12 @@ def install_trampoline_callback(fn):
     rb_set_trampoline_callback(fn)
 
 
-def define_method_entry(klass, rid, private):
-    """A CRuby method entry over the generic trampoline; returns its def key."""
+def define_method_entry(klass, rid, visibility):
+    """A CRuby method entry over the generic trampoline; returns its def key.
+    visibility is 0 public, 1 private, 2 protected, as the shim spells it."""
     state = _enter_status()
     key = rb_define_method_id(_v(klass), _v(rid),
-                              rffi.cast(rffi.INT, 1 if private else 0), state)
+                              rffi.cast(rffi.INT, visibility), state)
     failed = _leave_status(state)
     if failed:
         _failed('define_method')

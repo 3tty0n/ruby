@@ -1887,7 +1887,7 @@ rpyyarv_trampoline(int argc, VALUE *argv, VALUE self)
 struct defmeth_args {
     VALUE klass;
     ID    mid;
-    int   is_private;
+    int   visibility;   /* 0 public, 1 private, 2 protected */
 };
 
 static VALUE
@@ -1896,21 +1896,23 @@ define_method_body(VALUE argp)
     struct defmeth_args *p = (struct defmeth_args *)argp;
     rb_define_method_id(p->klass, p->mid,
                         RUBY_METHOD_FUNC(rpyyarv_trampoline), -1);
-    if (p->is_private) {
+    if (p->visibility) {
         /* A toplevel def is private on Object; no ID-taking API exists. */
-        rb_funcall(p->klass, rb_intern("private"), 1, ID2SYM(p->mid));
+        rb_funcall(p->klass,
+                   rb_intern(p->visibility == 2 ? "protected" : "private"),
+                   1, ID2SYM(p->mid));
     }
     return Qnil;
 }
 
 uintptr_t
-rpyyarv_define_method(uintptr_t klass, uintptr_t mid, int is_private,
+rpyyarv_define_method(uintptr_t klass, uintptr_t mid, int visibility,
                       int *state)
 {
     struct defmeth_args a;
     a.klass = (VALUE)klass;
     a.mid = (ID)mid;
-    a.is_private = is_private;
+    a.visibility = visibility;
     *state = 0;
     rb_protect(define_method_body, (VALUE)&a, state);
     if (*state) return 0;

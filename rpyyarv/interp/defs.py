@@ -11,7 +11,7 @@ from rpyyarv import value
 from rpyyarv.error import UnsupportedOperation
 from rpyyarv.rlib import dont_look_inside, raw_word, unroll_safe
 
-from rpyyarv.interp.consts_ids import ALIAS_METHOD, NEW, ATTR_READER, ATTR_WRITER, CORE_ALIAS, CORE_UNDEF, INSTANCE_EXEC, MODULE_FUNCTION, PRIVATE, PRIVATE_CLASS_METHOD, UNDEF_METHOD
+from rpyyarv.interp.consts_ids import ALIAS_METHOD, NEW, PROTECTED, ATTR_READER, ATTR_WRITER, CORE_ALIAS, CORE_UNDEF, INSTANCE_EXEC, MODULE_FUNCTION, PRIVATE, PRIVATE_CLASS_METHOD, UNDEF_METHOD
 from rpyyarv.interp.cref import _cref_of, _push_cref
 from rpyyarv.interp.args import NO_KEYWORDS
 
@@ -26,7 +26,7 @@ def define_method(frame, mid, w_iseq):
         dispatch.define_singleton(node.klass, mid, w_iseq, node.klass, node)
     else:
         dispatch.define(node.klass, mid, w_iseq, frame.private_pragma,
-                        node.klass, node)
+                        node.klass, node, 0, 0, frame.protected_pragma)
 
 
 @unroll_safe
@@ -232,8 +232,9 @@ def _private_class_method(frame, recv, recv_at, argc):
 
 @unroll_safe
 def _visibility_pragma(frame, mid, recv, recv_at):
-    """Bare private/public: flips the default for every def that follows."""
+    """Bare private/protected/public: the default every later def takes."""
     frame.private_pragma = (mid == PRIVATE)
+    frame.protected_pragma = (mid == PROTECTED)
     _drop(frame, recv_at)
     return recv
 
@@ -250,7 +251,7 @@ def _visibility_names(frame, mid, recv, recv_at, argc):
     entries = _lookup_all(recv, args)
     # CRuby first, so a name it rejects raises before the registry is touched.
     ret = rubycall.call(recv, mid, args)
-    _mark_visibility(recv, args, entries, mid == PRIVATE)
+    _mark_visibility(recv, args, entries, mid == PRIVATE, mid == PROTECTED)
     return ret
 
 
@@ -264,7 +265,7 @@ def _lookup_all(klass, args):
 
 
 @dont_look_inside
-def _mark_visibility(klass, args, entries, private):
+def _mark_visibility(klass, args, entries, private, prot=False):
     i = 0
     while i < len(args):
         entry = entries[i]
@@ -272,13 +273,13 @@ def _mark_visibility(klass, args, entries, private):
             name_mid = symbols.intern(_attr_name(args[i]))
             if entry.kind == dispatch.KIND_ISEQ:
                 dispatch.define(klass, name_mid, entry.w_iseq, private,
-                                entry.cref, entry.lexical)
+                                entry.cref, entry.lexical, 0, 0, prot)
             elif entry.kind == dispatch.KIND_BMETHOD:
                 dispatch.define_bmethod(klass, name_mid, entry.w_block,
-                                        private)
+                                        private, prot)
             else:
                 dispatch.define_attr(klass, name_mid, entry.ivar,
-                                     entry.kind, private)
+                                     entry.kind, private, prot)
         i += 1
 
 

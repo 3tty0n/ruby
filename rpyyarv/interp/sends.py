@@ -13,7 +13,7 @@ from rpyyarv.error import UnsupportedOperation
 from rpyyarv.frame import Frame
 from rpyyarv.rlib import dont_look_inside, promote, raw_word, unroll_safe
 
-from rpyyarv.interp.consts_ids import ALIAS_METHOD, ALLOCATE, ARITY, ATTR_ACCESSOR, ATTR_READER, ATTR_WRITER, BACKTRACE_PRIM, BLOCK_GIVEN, BUFFER, CALLEE_UNDERSCORE, CGI_CONST, CLASS_EVAL, CORE_ALIAS, CORE_GVAR_ALIAS, CORE_LAMBDA, CORE_UNDEF, DEFINE_METHOD, DIR_UNDERSCORE, EACH_SLICE, EACH_WITH_INDEX, ENC_FIND, EVAL, FORCE_ENCODING, GETBYTE, HASH_MERGE_KWD, HASH_MERGE_PTR, HASH_PAIRS_PRIM, INDEX, INITIALIZE, INSTANCE_EVAL, INSTANCE_EXEC, ITSELF, KERNEL_PROC, LAMBDA_P, MATCH, METHOD_UNDERSCORE, MODULE_EVAL, MODULE_FUNCTION, NEW, OFFSET, OWNER, PARAMETERS, PRIVATE, PRIVATE_CLASS_METHOD, PUBLIC, REMOVE_METHOD, REQUIRE_PRIM, REVERSE_EACH, RUBY2_KEYWORDS, SEND, SEND2, SETBYTE, SLICE, STEP, UNDEF_METHOD, UNPACK1
+from rpyyarv.interp.consts_ids import ALIAS_METHOD, ALLOCATE, ARITY, ATTR_ACCESSOR, ATTR_READER, ATTR_WRITER, BACKTRACE_PRIM, BLOCK_GIVEN, BUFFER, CALLEE_UNDERSCORE, CGI_CONST, CLASS_EVAL, CORE_ALIAS, CORE_GVAR_ALIAS, CORE_LAMBDA, CORE_UNDEF, DEFINE_METHOD, DIR_UNDERSCORE, EACH_SLICE, EACH_WITH_INDEX, ENC_FIND, EVAL, FORCE_ENCODING, GETBYTE, HASH_MERGE_KWD, HASH_MERGE_PTR, HASH_PAIRS_PRIM, INDEX, INITIALIZE, INSTANCE_EVAL, INSTANCE_EXEC, ITSELF, KERNEL_PROC, LAMBDA_P, MATCH, METHOD_UNDERSCORE, MODULE_EVAL, MODULE_FUNCTION, NEW, OFFSET, OWNER, PARAMETERS, PRIVATE, PRIVATE_CLASS_METHOD, PROTECTED, PUBLIC, REMOVE_METHOD, REQUIRE_PRIM, REVERSE_EACH, RUBY2_KEYWORDS, SEND, SEND2, SETBYTE, SLICE, STEP, UNDEF_METHOD, UNPACK1
 from rpyyarv.interp.args import NO_KEYWORDS, _arity_error, _kw_to_positional, _refuse_iseq, setup_params
 
 @unroll_safe
@@ -60,7 +60,9 @@ def invoke(frame, w_ci, w_block=None):
         fcall = True
     entry = dispatch.lookup(klass, mid)
     callee_iseq = None
-    if entry is not None and (fcall or not entry.private):
+    if _protected_ok(frame, entry, fcall):
+        fcall = True
+    if entry is not None and (fcall or not (entry.private or entry.prot)):
         if entry.kind != dispatch.KIND_ISEQ:
             return _attr_send(frame, entry, recv, recv_at, argc, w_block)
         callee_iseq = entry.w_iseq
@@ -464,10 +466,11 @@ def invoke(frame, w_ci, w_block=None):
             and (dispatch.is_known_class(recv)
                  or dispatch.is_known_module(recv)):
         return _private_class_method(frame, recv, recv_at, argc)
-    if (mid == PRIVATE or mid == PUBLIC) and fcall and argc == 0 \
-            and _in_body_of(frame, recv):
+    if (mid == PRIVATE or mid == PUBLIC or mid == PROTECTED) \
+            and fcall and argc == 0 and _in_body_of(frame, recv):
         return _visibility_pragma(frame, mid, recv, recv_at)
-    if (mid == PRIVATE or mid == PUBLIC) and fcall and argc > 0 \
+    if (mid == PRIVATE or mid == PUBLIC or mid == PROTECTED) \
+            and fcall and argc > 0 \
             and (dispatch.is_known_class(recv)
                  or dispatch.is_known_module(recv)):
         return _visibility_names(frame, mid, recv, recv_at, argc)
@@ -551,6 +554,14 @@ def invoke(frame, w_ci, w_block=None):
     _check_block_error()
     debug.trace_leave(mid, ret)
     return ret
+
+
+def _protected_ok(frame, entry, fcall):
+    """protected: an explicit receiver is fine while the caller is kin."""
+    if fcall or entry is None or not entry.prot:
+        return False
+    return dispatch.kind_of(promote(value.class_of(frame.self_val)),
+                            entry.owner) == 1
 
 
 def _is_attr_mid(mid):
@@ -856,7 +867,9 @@ def _kw_invoke(frame, w_ci, recv_at, argc, w_block, mid, fcall):
         mid = target
         fcall = True
     entry = dispatch.lookup(klass, mid)
-    if entry is not None and (fcall or not entry.private):
+    if _protected_ok(frame, entry, fcall):
+        fcall = True
+    if entry is not None and (fcall or not (entry.private or entry.prot)):
         if entry.kind != dispatch.KIND_ISEQ:
             # attr_* takes no keywords: only the arity error CRuby raises.
             return _attr_send(frame, entry, recv, recv_at, argc, w_block)
@@ -1047,7 +1060,9 @@ def _splat_invoke(frame, w_ci, recv_at, argc, w_block, mid, fcall):
         mid = target
         fcall = True
     entry = dispatch.lookup(klass, mid)
-    if entry is not None and (fcall or not entry.private):
+    if _protected_ok(frame, entry, fcall):
+        fcall = True
+    if entry is not None and (fcall or not (entry.private or entry.prot)):
         if entry.kind != dispatch.KIND_ISEQ:
             return _attr_send_args(frame, entry, recv, recv_at, args, w_block)
         if w_block is None or w_ci.blockarg:

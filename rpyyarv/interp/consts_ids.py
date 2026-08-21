@@ -171,6 +171,9 @@ PRIVATE = symbols.intern('private')
 PUBLIC = symbols.intern('public')
 
 
+PROTECTED = symbols.intern('protected')
+
+
 REMOVE_METHOD = symbols.intern('remove_method')
 
 

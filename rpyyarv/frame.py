@@ -29,6 +29,8 @@ class Frame(object):
 
     # Bare `private` in a class/module body: later defs land private.
     private_pragma = False
+    # A bare `protected`: every def that follows is protected, not public.
+    protected_pragma = False
 
     # Set leaving execute(); `return` to a dead frame is a LocalJumpError.
     dead = False

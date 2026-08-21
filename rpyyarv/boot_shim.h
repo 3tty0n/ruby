@@ -310,7 +310,7 @@ typedef uintptr_t (*rpyyarv_tramp_fn)(uintptr_t self, uintptr_t mid,
                                       uintptr_t *argv, uintptr_t blockproc,
                                       int kw, int *status, uintptr_t *errval);
 void rpyyarv_set_trampoline_callback(rpyyarv_tramp_fn fn);
-uintptr_t rpyyarv_define_method(uintptr_t klass, uintptr_t mid, int is_private,
+uintptr_t rpyyarv_define_method(uintptr_t klass, uintptr_t mid, int visibility,
                                 int *state);
 
 /* The handle must outlive the Proc, so the handle table never releases it. */

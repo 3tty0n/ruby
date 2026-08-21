@@ -23,11 +23,11 @@ def enable_trampolines():
 
 
 @dont_look_inside
-def _install_trampoline(klass, mid, private, entry):
+def _install_trampoline(klass, mid, visibility, entry):
     """A CRuby entry beside the registry one; it resolves through lookup."""
     if not trampoline.enabled:
         return
-    key = boot.define_method_entry(klass, rubycall.rid(mid), private)
+    key = boot.define_method_entry(klass, rubycall.rid(mid), visibility)
     # Copies of the entry (alias, define_method(Method)) share this def.
     if key != 0:
         registry.defs[key] = entry

@@ -25,11 +25,12 @@ KIND_UNDEF = 4
 
 
 class MethodEntry(object):
-    _immutable_fields_ = ['w_iseq', 'private', 'owner', 'mid', 'cref',
+    _immutable_fields_ = ['w_iseq', 'private', 'prot', 'owner', 'mid', 'cref',
                           'kind', 'ivar', 'lexical', 'w_block']
 
     def __init__(self, w_iseq, private, owner=0, mid=0, cref=0,
-                 kind=KIND_ISEQ, ivar=0, lexical=None, w_block=None):
+                 kind=KIND_ISEQ, ivar=0, lexical=None, w_block=None,
+                 prot=False):
         self.w_iseq = w_iseq
         self.kind = kind
         # For an accessor kind, the rpyyarv symbol id of the `@name` it reads.
@@ -40,6 +41,8 @@ class MethodEntry(object):
         self.lexical = lexical
         # Toplevel defs land on Object as private: only an fcall may reach one.
         self.private = private
+        # protected: an explicit receiver is fine while the caller is kin.
+        self.prot = prot
         # invokesuper resumes the lookup above (owner, mid).
         self.owner = owner
         self.mid = mid
@@ -78,32 +81,33 @@ def _table_for(klass):
 
 
 def define(klass, mid, w_iseq, private, cref=0, lexical=None,
-           orig_mid=0, orig_owner=0):
+           orig_mid=0, orig_owner=0, prot=False):
     # An alias keeps its source's mid and owner, so super resumes as CRuby's.
     entry = MethodEntry(w_iseq, private,
                         orig_owner if orig_owner != 0 else klass,
                         orig_mid if orig_mid != 0 else mid,
-                        cref, KIND_ISEQ, 0, lexical)
+                        cref, KIND_ISEQ, 0, lexical, None, prot)
     _table_for(klass)[mid] = entry
     registry.version = Version()
     flush_trampoline_cache()
     invalidate_owners()
-    _install_trampoline(klass, mid, private, entry)
+    _install_trampoline(klass, mid, 2 if prot else (1 if private else 0),
+                        entry)
 
 
-def define_attr(klass, mid, ivar, kind, private=False):
+def define_attr(klass, mid, ivar, kind, private=False, prot=False):
     """No trampoline: CRuby's own attr entry still answers a call from C."""
     _table_for(klass)[mid] = MethodEntry(None, private, klass, mid, 0, kind,
-                                         ivar)
+                                         ivar, None, None, prot)
     registry.version = Version()
     flush_trampoline_cache()
     invalidate_owners()
 
 
-def define_bmethod(klass, mid, w_block, private):
+def define_bmethod(klass, mid, w_block, private, prot=False):
     """No trampoline: CRuby's send already installed a bmethod for mid."""
     _table_for(klass)[mid] = MethodEntry(None, private, klass, mid, 0,
-                                         KIND_BMETHOD, 0, None, w_block)
+                                         KIND_BMETHOD, 0, None, w_block, prot)
     registry.version = Version()
     flush_trampoline_cache()
     invalidate_owners()
