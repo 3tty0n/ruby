@@ -367,27 +367,34 @@ class Range
     return to_enum(:each) unless block_given?
     i = self.begin
     hi = self.end
-    # Only an Integer range steps by +1; a String one needs succ, so CRuby's
-    # own Range#to_a walks it and this only drives the block.
-    unless i.is_a?(Integer) && hi.is_a?(Integer)
-      a = self.to_a
-      j = 0
-      while j < a.length
-        yield a[j]
-        j = j + 1
+    # An Integer start steps by +1 whatever the end is: nil means endless and
+    # a Float only bounds it. Materialising would hang on both (range.c).
+    if i.is_a?(Integer)
+      if hi.nil?
+        while true
+          yield i
+          i = i + 1
+        end
+      end
+      if self.exclude_end?
+        while i < hi
+          yield i
+          i = i + 1
+        end
+      else
+        while i <= hi
+          yield i
+          i = i + 1
+        end
       end
       return self
     end
-    if self.exclude_end?
-      while i < hi
-        yield i
-        i = i + 1
-      end
-    else
-      while i <= hi
-        yield i
-        i = i + 1
-      end
+    # A String start needs succ, so CRuby's own to_a walks it.
+    a = self.to_a
+    j = 0
+    while j < a.length
+      yield a[j]
+      j = j + 1
     end
     self
   end

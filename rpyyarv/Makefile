@@ -166,6 +166,7 @@ gccheck:
 	          test/structnew.rb \
 	          test/parameters.rb \
 	          test/protected.rb \
+	          test/rangeeach.rb \
 	          $(TOP)/benchmark/app_*.rb $(TOP)/benchmark/so_*.rb; do \
 	   n=`basename $$s`; \
 	   case $$s in test/*) \
