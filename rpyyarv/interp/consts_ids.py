@@ -78,6 +78,12 @@ EACH_WITH_INDEX = symbols.intern('each_with_index')
 STEP = symbols.intern('step')
 
 
+PARAMETERS = symbols.intern('parameters')
+
+
+OWNER = symbols.intern('owner')
+
+
 INDEX = symbols.intern('index')
 
 

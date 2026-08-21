@@ -6,6 +6,7 @@ from rpyyarv import debug
 from rpyyarv import gcroots
 from rpyyarv import helpers
 from rpyyarv import rubycall
+from rpyyarv import symbols
 from rpyyarv import value
 from rpyyarv.iseq import W_CallInfo
 from rpyyarv.rlib import dont_look_inside, unroll_safe
@@ -74,6 +75,66 @@ def _array_each_slice(ary, size, w_block):
         call_block(w_block, [part])
         at += count
     return ary
+
+
+P_REQ = symbols.intern('req')
+P_OPT = symbols.intern('opt')
+P_REST = symbols.intern('rest')
+P_KEYREQ = symbols.intern('keyreq')
+P_KEY = symbols.intern('key')
+P_KEYREST = symbols.intern('keyrest')
+P_BLOCK = symbols.intern('block')
+
+
+def _local_name(w_iseq, slot):
+    if slot < 0 or slot >= len(w_iseq.local_names):
+        return ''
+    return w_iseq.local_names[slot]
+
+
+def _param(out, kind, name):
+    """An anonymous parameter is one element, as rb_iseq_parameters emits."""
+    if name == '':
+        boot.ary_push1(out, rubycall.ary_new([rubycall.sym_value(kind)]))
+    else:
+        boot.ary_push1(out, rubycall.ary_new(
+            [rubycall.sym_value(kind),
+             rubycall.sym_value(symbols.intern(name))]))
+
+
+def _iseq_parameters(w_iseq, is_proc):
+    """rb_iseq_parameters (iseq.c): the ISeq table, not CRuby's cfunc view."""
+    lead = P_OPT if is_proc else P_REQ
+    out = rubycall.ary_new([])
+    gcroots.hold(out)
+    try:
+        i = 0
+        while i < w_iseq.nparams:
+            _param(out, lead, _local_name(w_iseq, i))
+            i += 1
+        n_opt = len(w_iseq.opt_table) - 1 if len(w_iseq.opt_table) > 0 else 0
+        i = 0
+        while i < n_opt:
+            _param(out, P_OPT, _local_name(w_iseq, w_iseq.nparams + i))
+            i += 1
+        if w_iseq.rest_start >= 0:
+            _param(out, P_REST, _local_name(w_iseq, w_iseq.rest_start))
+        i = 0
+        while i < w_iseq.post_num:
+            _param(out, lead, _local_name(w_iseq, w_iseq.post_start + i))
+            i += 1
+        i = 0
+        while i < len(w_iseq.kw_table):
+            kind = P_KEYREQ if i < w_iseq.kw_required else P_KEY
+            _param(out, kind, symbols.name_of(w_iseq.kw_table[i]))
+            i += 1
+        if w_iseq.kwrest >= 0:
+            _param(out, P_KEYREST, _local_name(w_iseq, w_iseq.kwrest))
+        if w_iseq.block_start >= 0:
+            _param(out, P_BLOCK, _local_name(w_iseq, w_iseq.block_start))
+    finally:
+        gcroots.release(out)
+    return out
 
 
 def _integer_step(recv, limit, step, w_block):

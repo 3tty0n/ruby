@@ -64,6 +64,10 @@ def install():
         value.core_class(value.C_INTEGER), STEP)
     send_owners.struct_class = dispatch.const_get(
         value.core_class(value.C_OBJECT), symbols.intern('Struct'))
+    method_classes.method = dispatch.const_get(
+        value.core_class(value.C_OBJECT), symbols.intern('Method'))
+    method_classes.unbound = dispatch.const_get(
+        value.core_class(value.C_OBJECT), symbols.intern('UnboundMethod'))
     send_owners.class_allocate = dispatch.owner_of(
         value.core_class(value.C_CLASS), ALLOCATE)
     send_owners.string_force_encoding = dispatch.owner_of(
@@ -831,7 +835,7 @@ def run_in_cruby():
 # own bottom import asks this module for a name, everything
 # above is already bound.
 from rpyyarv.interp.builtins import _vm_core, encodings, fiber_kill, proxy, regexp_class
-from rpyyarv.interp.sends import _opt_send, _splat_invoke, invoke, send_owners
+from rpyyarv.interp.sends import _opt_send, _splat_invoke, invoke, method_classes, send_owners
 from rpyyarv.interp.supers import invoke_super
 from rpyyarv.interp.defs import define_method
 from rpyyarv.interp.blocks import _outer_frame, _to_proc, blocks, invoke_block

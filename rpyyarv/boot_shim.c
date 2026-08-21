@@ -2862,6 +2862,8 @@ rpyyarv_ivar_defined(uintptr_t obj, uintptr_t id)
 int
 rpyyarv_const_defined(uintptr_t klass, uintptr_t id, int inherit)
 {
+    /* 2 is vm_get_ev_const's cbase form: a hit on Object does not count. */
+    if (inherit == 2) return rb_const_defined_from((VALUE)klass, (ID)id) ? 1 : 0;
     return (inherit ? rb_const_defined((VALUE)klass, (ID)id)
                     : rb_const_defined_at((VALUE)klass, (ID)id)) ? 1 : 0;
 }

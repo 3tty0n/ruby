@@ -82,6 +82,8 @@ class RawISeq(object):
         # def m(...): bound as ruby2_keywords def m(*rest, &blk) would be.
         self.forwardable = False
         self.post_start = post_start
+        # Local slot of the &block parameter; -1 when the def names none.
+        self.block_start = -1
         self.post_num = post_num
         # `{|a| }`, whose single parameter takes a yielded Array whole.
         self.ambiguous_param0 = ambiguous_param0

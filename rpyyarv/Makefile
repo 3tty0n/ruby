@@ -164,6 +164,7 @@ gccheck:
 	          test/bighash.rb \
 	          test/rangeinc.rb test/intpow.rb \
 	          test/structnew.rb \
+	          test/parameters.rb \
 	          $(TOP)/benchmark/app_*.rb $(TOP)/benchmark/so_*.rb; do \
 	   n=`basename $$s`; \
 	   case $$s in test/*) \

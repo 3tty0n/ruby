@@ -66,3 +66,14 @@ class N
   def self.const_missing(name) = "missing #{name}"
 end
 puts N::NOPE
+
+# defined? on a qualified path follows the same rule as the lookup.
+p defined?(Q::TOPLEVEL_ONLY)
+p defined?(R::TOPLEVEL_ONLY)
+p defined?(::TOPLEVEL_ONLY)
+p defined?(Object::TOPLEVEL_ONLY)
+p defined?(S::INSIDE)
+p defined?(T::INSIDE)
+p defined?(V::IN_U)
+p defined?(X::Y::Z)
+p defined?(X::Y::NOPE)

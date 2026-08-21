@@ -37,7 +37,7 @@ class W_ISeq(object):
                           'kw_table[*]', 'kw_defaults[*]', 'kw_required',
                           'kw_start', 'kw_bits', 'kwrest', 'path',
                           'line_pcs[*]', 'line_nums[*]', 'shares_locals',
-                          'local_names[*]', 'r2k?']
+                          'local_names[*]', 'block_start', 'r2k?']
     # once_cache is written once per body and is deliberately not immutable.
 
     # Module#ruby2_keywords marks the method after the def; quasi-immutable.
@@ -51,7 +51,10 @@ class W_ISeq(object):
                  path_sites=None, kw_table=None, kw_defaults=None,
                  kw_required=0, kw_start=-1, kw_bits=-1, kwrest=-1, path='',
                  case_tables=None, line_pcs=None, line_nums=None,
-                 shares_locals=False, local_names=None):
+                 shares_locals=False, local_names=None,
+                 block_start=-1):
+        # Local slot of the &block parameter; -1 when the def names none.
+        self.block_start = block_start
         # One name per local slot, '' where none; string eval reads them.
         self.local_names = local_names if local_names is not None else []
         # A nested ISeq reaches these locals, so the frame heaps them.

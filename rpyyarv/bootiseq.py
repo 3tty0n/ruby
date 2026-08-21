@@ -111,6 +111,7 @@ def _read_iseq(program, pending, owners, ary, parent):
     raw.kw_defaults = defaults
     raw.kw_bits = _int_or(boot.hash_aref(params, 'kwbits'), -1)
     raw.kwrest = _int_or(boot.hash_aref(params, 'kwrest'), -1)
+    raw.block_start = _int_or(boot.hash_aref(params, 'block_start'), -1)
     raw.local_names = _local_names(boot.ary_entry(ary, I_LOCALS))
     if raw.rest_start < 0:
         for _i in range(len(raw.local_names)):

@@ -157,7 +157,8 @@ def _defined(frame, kind, obj, recv):
     if kind == DEFINED_CONST:
         return _defined_const(_cref_of(frame), rid)
     if kind == DEFINED_CONST_FROM:
-        return recv != value.Q_NIL and boot.const_defined(recv, rid, 1)
+        # rb_public_const_defined_from: Object is not searched for a cbase.
+        return recv != value.Q_NIL and boot.const_defined(recv, rid, 2)
     if kind == DEFINED_FUNC:
         return boot.method_defined(recv, rid, 1)
     if kind == DEFINED_METHOD:

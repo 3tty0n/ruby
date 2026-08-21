@@ -275,7 +275,8 @@ class Loader(object):
                         raw.kw_bits, raw.kwrest, self.program.path,
                         [t for t in pool.case_tables],
                         [p for p in line_pcs], [n for n in line_nums],
-                        shares, [n for n in raw.local_names])
+                        shares, [n for n in raw.local_names],
+                        raw.block_start)
         if raw.forwardable:
             # The `...` rest carries keywords the ruby2_keywords way.
             w_iseq.r2k = True
