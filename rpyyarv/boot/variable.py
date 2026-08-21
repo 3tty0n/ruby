@@ -10,6 +10,10 @@ from rpyyarv.boot._core import (_ext, _v, VALUE, INTP, _enter_status,
 rb_const_get_ = _ext('rpyyarv_const_get', [VALUE, VALUE, INTP], VALUE, reenters=True)
 
 
+rb_const_get_from_ = _ext('rpyyarv_const_get_from', [VALUE, VALUE, INTP],
+                          VALUE, reenters=True)
+
+
 rb_const_at_ = _ext('rpyyarv_const_at', [VALUE, VALUE, INTP], VALUE,
                     reenters=True)
 
@@ -107,6 +111,17 @@ def cvar_defined(klass, rid):
 def const_get(klass, rid):
     state = _enter_status()
     v = rb_const_get_(_v(klass), _v(rid), state)
+    failed = _leave_status(state)
+    ret = rffi.cast(lltype.Signed, v)
+    if failed:
+        _failed('const_get')
+    return ret
+
+
+def const_get_from(klass, rid):
+    """Qualified A::B: a hit on Object does not count (variable.c:3470)."""
+    state = _enter_status()
+    v = rb_const_get_from_(_v(klass), _v(rid), state)
     failed = _leave_status(state)
     ret = rffi.cast(lltype.Signed, v)
     if failed:

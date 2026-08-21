@@ -65,7 +65,7 @@ def _const_walk(cref, path):
         base = _const_lexical(cref, path[0])
     i = 1
     while i < len(path):
-        base = dispatch.const_get(base, path[i])
+        base = dispatch.const_get_from(base, path[i])
         i += 1
     return base
 

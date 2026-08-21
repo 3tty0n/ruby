@@ -450,7 +450,7 @@ def _execute(iseq, frame, pc):
             if allow_nil == value.Q_TRUE and cbase == value.Q_NIL:
                 frame.push(_const_lexical(_cref_of(frame), mid))
             else:
-                frame.push(dispatch.const_get(cbase, mid))
+                frame.push(dispatch.const_get_from(cbase, mid))
         elif opcode == insns.PUTSPECIALOBJECT:
             kind = code[pc]
             pc += 1

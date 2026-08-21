@@ -1100,6 +1100,30 @@ rpyyarv_const_get(uintptr_t klass, uintptr_t id, int *state)
 }
 
 static VALUE
+const_get_from_body(VALUE argp)
+{
+    struct obj_args *p = (struct obj_args *)argp;
+    /* vm_get_ev_const with a cbase: a hit on Object does not count. */
+    if (!RB_TYPE_P(p->a, T_CLASS) && !RB_TYPE_P(p->a, T_MODULE)) {
+        rb_raise(rb_eTypeError, "%+"PRIsVALUE" is not a class/module", p->a);
+    }
+    /* rb_public_const_get_from is not exported; visibility stays as before. */
+    return rb_const_get_from(p->a, p->id);
+}
+
+uintptr_t
+rpyyarv_const_get_from(uintptr_t klass, uintptr_t id, int *state)
+{
+    struct obj_args a;
+    a.a = (VALUE)klass;
+    a.id = (ID)id;
+    *state = 0;
+    VALUE r = rb_protect(const_get_from_body, (VALUE)&a, state);
+    if (*state) return (uintptr_t)Qnil;
+    return (uintptr_t)r;
+}
+
+static VALUE
 const_at_body(VALUE argp)
 {
     struct obj_args *p = (struct obj_args *)argp;

@@ -17,7 +17,8 @@ from rpyyarv.dispatch.trampoline import (_Trampoline, _install_trampoline,
     _tc_entries, _bmethod_idents)
 from rpyyarv.dispatch.classes import _reopened
 from rpyyarv.dispatch.consts import (_Consts, _const_cached,
-    _const_at_cached, _const_at_fill, _const_fill)
+    _const_at_cached, _const_at_fill, _const_fill,
+    _const_from_cached, _const_from_fill)
 from rpyyarv.dispatch.caches import (_Owners, _owner_of, _fill_owner,
     _responds, _fill_responds, _SymNames, _sym_name, _fill_sym_name,
     _kind_of, _fill_kind_of, _StructSlots, _struct_index, _fill_struct_index,

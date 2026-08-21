@@ -43,6 +43,8 @@ class _Consts(object):
         self.tab = {}       # (cbase VALUE, mid) -> ConstEntry
         # The same, for a cbase's own table alone; Qundef records a miss.
         self.attab = {}
+        # Qualified A::B: rb_public_const_get_from, so Object is not a hit.
+        self.ftab = {}
         self.rooted = {}    # cbase VALUEs already handed to gcroots
         self.sites = []     # every ConstSite the loader built
         self.version = Version()
@@ -61,6 +63,7 @@ def invalidate_consts():
     """CRuby's rb_clear_constant_cache_for_id, via the shim's const hook."""
     consts.tab = {}
     consts.attab = {}
+    consts.ftab = {}
     sites = consts.sites
     i = 0
     while i < len(sites):
@@ -105,6 +108,30 @@ def const_get(klass, mid):
     if entry is None:
         entry = _const_fill(klass, mid)
     return entry.value
+
+
+@elidable
+def _const_from_cached(klass, mid, version):
+    return consts.ftab.get((klass, mid), None)
+
+
+def const_get_from(klass, mid):
+    """A::B: CRuby stops at Object, so a toplevel name is not found here."""
+    entry = _const_from_cached(klass, mid, consts.version)
+    if entry is None:
+        entry = _const_from_fill(klass, mid)
+    return entry.value
+
+
+@dont_look_inside
+def _const_from_fill(klass, mid):
+    entry = consts.ftab.get((klass, mid), None)
+    if entry is not None:
+        return entry
+    entry = ConstEntry(boot.const_get_from(klass, rubycall.const_rid(mid)))
+    root_base(klass)
+    consts.ftab[(klass, mid)] = entry
+    return entry
 
 
 @elidable
