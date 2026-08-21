@@ -11,7 +11,7 @@ from rpyyarv import value
 from rpyyarv.error import UnsupportedOperation
 from rpyyarv.rlib import dont_look_inside, raw_word, unroll_safe
 
-from rpyyarv.interp.consts_ids import ALIAS_METHOD, ATTR_READER, ATTR_WRITER, CORE_ALIAS, CORE_UNDEF, INSTANCE_EXEC, MODULE_FUNCTION, PRIVATE, PRIVATE_CLASS_METHOD, UNDEF_METHOD
+from rpyyarv.interp.consts_ids import ALIAS_METHOD, NEW, ATTR_READER, ATTR_WRITER, CORE_ALIAS, CORE_UNDEF, INSTANCE_EXEC, MODULE_FUNCTION, PRIVATE, PRIVATE_CLASS_METHOD, UNDEF_METHOD
 from rpyyarv.interp.cref import _cref_of, _push_cref
 from rpyyarv.interp.args import NO_KEYWORDS
 
@@ -175,6 +175,21 @@ def _module_eval_block(frame, recv, recv_at, w_block):
     cref = _push_cref(_cref_of(w_block.frame), recv, True)
     _drop(frame, recv_at)
     return call_block(w_block, args, NO_KEYWORDS, False, recv, cref)
+
+
+def _class_new_block(frame, recv, recv_at, argc, w_block):
+    """Class.new/Module.new with a block: rb_mod_initialize module_execs it."""
+    if argc == 1:
+        made = rubycall.call1(recv, NEW, frame.stack[recv_at + 1])
+    else:
+        made = rubycall.call0(recv, NEW)
+    _drop(frame, recv_at)
+    # On the marked stack: no constant names the class yet.
+    frame.push(made)
+    dispatch.adopt(made)
+    cref = _push_cref(_cref_of(w_block.frame), made, True)
+    call_block(w_block, [made], NO_KEYWORDS, False, made, cref)
+    return frame.pop()
 
 
 def _in_body_of(frame, recv):
