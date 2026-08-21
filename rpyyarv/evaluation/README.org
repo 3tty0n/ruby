@@ -1,0 +1,84 @@
+#+TITLE: RPyYARV PLDI Evaluation Harness
+
+* Choice of harness
+
+The experiment controller is Ruby because the existing AWFY and ruby-bench
+adapters are Ruby programs.  It adds no gem dependency.  ReBench remains useful
+for a conventional AWFY steady-state replication, but it is not the primary
+controller: =scripts/bench.rb= rejects silently delegated runs and handles the
+RPyYARV-specific gem protocol.
+
+The controller never builds or modifies the VM.  Every run gets a new results
+directory containing the exact command, environment, git commit, dirty paths,
+host description, logs, and machine-readable data.  This makes it safe to stage
+experiments while implementation work is happening in the same checkout.
+
+* Commands
+
+#+begin_src sh
+ruby evaluation/run.rb doctor
+ruby evaluation/run.rb performance --suite all --procs 3
+ruby evaluation/run.rb boundary --suite all
+ruby evaluation/run.rb mechanisms --suite all --performance RESULTS/raw.json
+ruby evaluation/run.rb gc 16384 4096 1024
+ruby evaluation/run.rb loc
+ruby evaluation/run.rb plot evaluation/results/RUN/raw.json
+#+end_src
+
+=performance= produces =measurements.csv=, =ratios.csv=, =comparisons.csv=,
+and =summary.csv= from the raw output.  CRuby, YJIT, and ZJIT are always
+requested.  TruffleRuby and
+JRuby are added when they are found in =PATH=, or through =TRUFFLERUBY_BIN= /
+=GRAALVM_HOME= and =JRUBY_BIN= / =JRUBY_HOME=.  Installed rbenv and asdf
+versions are also searched, and each executable must pass a startup probe.
+AWFY and ruby-bench remain separate rows in =summary.csv= before the overall
+result.
+
+The raw file retains every process's complete iteration sequence and the
+harness warm-up boundary.  =warmup.csv= reports the first five-iteration window
+within 10% of the steady median and its cumulative time.
+
+VALUE-direct ablations use the existing extra-engine protocol.  A variant
+binary passed as =--engine NAME=PATH= is added to =comparisons.csv= and gets
+its own ratio and scatter plots; the VM under active development needs no
+evaluation-only switch.
+
+Successful performance runs produce publication-ready SVG files:
+
+- =ratio-to-ENGINE.svg=: benchmark on the x axis and RPyYARV/reference time on
+  a log-scaled y axis.  The 1x reference line separates wins from losses.
+- =scatter-ENGINE.svg=: reference time versus RPyYARV JIT time on equal log
+  scales.  Points below the diagonal are RPyYARV wins.
+
+* Evaluation matrix
+
+| Claim | Experiment | Current collector | Required extension |
+|-------+------------+-------------------+--------------------|
+| End-to-end performance | Detected engines, 82 benchmarks | =performance= | Freeze machine and repetitions |
+| VALUE-direct causality | Fast path versus residual call | binary variants | Build named variants |
+| Delegation boundary | sends and dominant callees | =boundary= | time in CRuby and trampolines |
+| Compatibility | native/delegated/failure census | =bench.rb --inventory= | exit and exception comparison |
+| Implementation effort | categorized physical LoC | =loc= | reviewed line-level taxonomy |
+| GC integration | three malloc limits | =gc= | collections/sec and negative ablations |
+| Fiber integration | micro plus optcarrot | artifact schema only | stack-window switch |
+| Warm-up | iteration curves and JIT events | raw samples and stable window | case-study curves |
+| Memory | peak RSS and code size | artifact schema only | per-engine sampler |
+| Mechanism | four representative cases | trace, VM stats, boundary census | live code size |
+
+The =mechanisms= command now collects the trace/guard, boundary, YJIT, and ZJIT
+statistics.  It emits =mechanisms.json=, =mechanisms.csv=, one raw RPython JIT
+diagnostic log per benchmark, and three causal-diagnostic plots when a
+performance raw file is provided.  These instrumented runs are never used as
+performance numbers.
+
+* Rules for causal experiments
+
+Each ablation must change one named mechanism, use the same source commit where
+possible, and store its build identity in the manifest.  Instrumented boundary
+or JIT-log runs are never mixed with timing runs.  A result is excluded only by
+a recorded rule; delegation and failure remain explicit outcomes rather than
+silently disappearing from a geometric mean.
+
+The LoC report is deliberately conservative.  It counts tracked physical lines
+and assigns whole files by first match.  It is reproducible but not the final
+paper number until mixed-purpose files have a reviewed line-level classification.

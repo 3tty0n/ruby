@@ -164,6 +164,8 @@ end
 def time_engine(argv, script, env, warm, procs, timeout)
   pooled = []
   per_proc = []
+  raw_iterations = []
+  warmed_at = []
   procs.times do
     times, err, info = run_once(argv, script, env, timeout)
     if err
@@ -171,12 +173,15 @@ def time_engine(argv, script, env, warm, procs, timeout)
     end
     # The harness says where warmup ended when WARMUP_TIME stretched it.
     w = info["warmed"] || warm
+    raw_iterations << times
+    warmed_at << w
     pooled.concat(times[w..] || [])
     per_proc << median(times[w..] || times)
   end
   spread = per_proc.compact.empty? ? nil : per_proc.compact.max / per_proc.compact.min
   { median: median(pooled), min: pooled.min, n: pooled.size,
-    per_proc: per_proc, spread: spread }
+    per_proc: per_proc, spread: spread, raw_iterations: raw_iterations,
+    warmed_at: warmed_at }
 end
 
 def render_table(headers, table)

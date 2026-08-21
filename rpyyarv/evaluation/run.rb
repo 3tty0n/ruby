@@ -2,6 +2,7 @@
 # frozen_string_literal: true
 
 require "fileutils"
+require "digest"
 require "json"
 require "open3"
 require "optparse"
@@ -139,9 +140,14 @@ module RPyYARVEvaluation
       write_measurements(File.join(out_dir, "measurements.csv"), rows)
       ratios = ratio_rows(rows)
       write_ratios(File.join(out_dir, "ratios.csv"), ratios)
+      comparisons = comparison_rows(rows)
+      write_comparisons(File.join(out_dir, "comparisons.csv"), comparisons)
+      warmup = warmup_rows(raw)
+      write_warmup(File.join(out_dir, "warmup.csv"), warmup)
       summary = summarize(ratios)
       write_summary(File.join(out_dir, "summary.csv"), summary)
       { "measurements" => rows.size, "ratios" => ratios.size,
+        "comparisons" => comparisons.size, "warmup_processes" => warmup.size,
         "summary" => summary }
     end
 
@@ -176,6 +182,69 @@ module RPyYARVEvaluation
 
     def numeric(value)
       value.is_a?(Numeric) && value.positive? ? value.to_f : nil
+    end
+
+    def comparison_rows(rows)
+      grouped = rows.group_by { |r| [r["suite"], r["benchmark"]] }
+      grouped.each_with_object([]) do |((suite, benchmark), group), result|
+        by_engine = group.to_h { |row| [row["engine"], row] }
+        baseline = numeric(by_engine.dig("rpyyarv-jit", "median_ms"))
+        next unless baseline
+
+        by_engine.each do |engine, row|
+          next if engine == "rpyyarv-jit"
+
+          time = numeric(row["median_ms"])
+          next unless time
+
+          result << {
+            "suite" => suite, "benchmark" => benchmark,
+            "engine" => engine,
+            "engine_over_rpyyarv_jit" => time / baseline
+          }
+        end
+      end
+    end
+
+    def warmup_rows(raw)
+      raw.each_with_object([]) do |(key, value), rows|
+        suite, benchmark, engine = key.split("/", 3)
+        iterations = value["raw_iterations"] || []
+        warmed = value["warmed_at"] || []
+        iterations.each_with_index do |samples, process|
+          steady = samples[(warmed[process] || 0)..] || []
+          center = median_value(steady)
+          stable = stable_iteration(samples, center)
+          rows << {
+            "suite" => suite, "benchmark" => benchmark,
+            "engine" => engine, "process" => process,
+            "harness_warmed_at" => warmed[process],
+            "stable_iteration" => stable,
+            "time_to_stable_ms" =>
+              stable && samples[0..stable].sum,
+            "steady_median_ms" => center
+          }
+        end
+      end
+    end
+
+    def median_value(values)
+      sorted = values.compact.sort
+      return nil if sorted.empty?
+
+      middle = sorted.size / 2
+      sorted.size.odd? ? sorted[middle] :
+        (sorted[middle - 1] + sorted[middle]) / 2.0
+    end
+
+    def stable_iteration(samples, center, tolerance = 0.10, window = 5)
+      return nil unless center && center.positive?
+      return nil if samples.size < window
+
+      limit = center * tolerance
+      (0..samples.size - window).find do |index|
+        samples[index, window].all? { |value| (value - center).abs <= limit }
+      end
     end
 
     def geomean(values)
@@ -220,6 +289,17 @@ module RPyYARVEvaluation
         headers << "n_#{label}"
         headers << "geomean_jit_over_#{label}"
       end
+      write_csv(path, headers, rows)
+    end
+
+    def write_comparisons(path, rows)
+      headers = %w[suite benchmark engine engine_over_rpyyarv_jit]
+      write_csv(path, headers, rows)
+    end
+
+    def write_warmup(path, rows)
+      headers = %w[suite benchmark engine process harness_warmed_at
+                   stable_iteration time_to_stable_ms steady_median_ms]
       write_csv(path, headers, rows)
     end
 
@@ -350,12 +430,46 @@ module RPyYARVEvaluation
     end
   end
 
+  def engine_paths(args)
+    paths = {
+      "cruby" => File.join(TOP, "build", "ruby"),
+      "cruby+yjit" => File.join(TOP, "build", "ruby"),
+      "cruby+zjit" => File.join(TOP, "build", "ruby"),
+      "rpyyarv" => File.join(ROOT, "rpyyarv"),
+      "rpyyarv-jit" => File.join(ROOT, "rpyyarv-jit")
+    }.merge(optional_engines)
+    args.each_with_index do |arg, index|
+      spec = if arg.start_with?("--engine=")
+               arg.delete_prefix("--engine=")
+             elsif arg == "--engine"
+               args[index + 1]
+             end
+      next unless spec
+
+      name, path = spec.split("=", 2)
+      paths[name] = File.expand_path(path) if name && path
+    end
+    paths
+  end
+
+  def binary_metadata(paths)
+    paths.transform_values do |path|
+      next { "path" => path, "missing" => true } unless File.file?(path)
+
+      stat = File.stat(path)
+      { "path" => path, "bytes" => stat.size,
+        "mtime" => stat.mtime.utc.iso8601,
+        "sha256" => Digest::SHA256.file(path).hexdigest }
+    end
+  end
+
   def performance(args, results_root)
     run = Run.new("performance", results_root)
     raw = File.join(run.dir, "raw.json")
     argv = [RbConfig.ruby, File.join(ROOT, "scripts", "bench.rb"),
             "--raw", raw] + optional_engine_args + args
     run.manifest["optional_engines"] = optional_engines
+    run.manifest["engine_binaries"] = binary_metadata(engine_paths(args))
     ok = run.execute("performance", base_env, argv)
     if File.exist?(raw)
       begin
@@ -404,6 +518,27 @@ module RPyYARVEvaluation
     ok ? 0 : 1
   end
 
+  def mechanisms(args, results_root)
+    run = Run.new("mechanisms", results_root)
+    raw = File.join(run.dir, "mechanisms.json")
+    argv = [RbConfig.ruby, File.join(__dir__, "mechanisms.rb"),
+            "--raw", raw] + args
+    ok = run.execute("mechanisms", base_env, argv)
+    if File.exist?(raw)
+      begin
+        Plotter.plot_mechanisms(raw, run.dir)
+      rescue StandardError => error
+        run.manifest["postprocess_error"] =
+          "#{error.class}: #{error.message}"
+        warn "mechanism plotting failed: #{error.message}"
+        ok = false
+      end
+    end
+    run.finish(ok)
+    puts "artifacts: #{run.dir}"
+    ok ? 0 : 1
+  end
+
   def doctor
     rows = {
       "repository" => TOP,
@@ -444,6 +579,7 @@ module RPyYARVEvaluation
         doctor                   check binaries without running benchmarks
         performance [BENCH-ARGS] run the five-engine steady-state experiment
         boundary [BENCH-ARGS]    run the non-timing delegation census
+        mechanisms [MECH-ARGS]  collect tracing, boundary, YJIT, and ZJIT stats
         gc [LIMIT ...]           run gccheck at each malloc limit
         analyze RAW [OUT-DIR]    convert bench.rb JSON to tidy CSV
         plot RAW [OUT-DIR]       render ratio and log-log scatter SVGs
@@ -465,6 +601,7 @@ module RPyYARVEvaluation
     when "doctor" then doctor
     when "performance" then performance(argv, results_root)
     when "boundary" then boundary(argv, results_root)
+    when "mechanisms" then mechanisms(argv, results_root)
     when "gc" then gc_sweep(argv, results_root)
     when "analyze"
       raw = argv.shift or abort usage
