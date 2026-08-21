@@ -258,6 +258,7 @@ int rpyyarv_shape_add_ivar_fits(unsigned int before, unsigned int after,
 /* Likewise RArray, for the opt_aref/opt_aset/opt_length fast paths. */
 #define RPYYARV_ARRAY_LAYOUT_N 10
 void rpyyarv_array_layout(int *out);
+void rpyyarv_struct_layout(int *out);
 
 /* rb_str_equal's String-argument half, which neither allocates nor raises. */
 uintptr_t rpyyarv_str_eq(uintptr_t a, uintptr_t b);
@@ -393,6 +394,8 @@ uintptr_t rpyyarv_range_part(uintptr_t range, int which);
 int rpyyarv_struct_member_index(uintptr_t klass, uintptr_t id);
 uintptr_t rpyyarv_struct_get(uintptr_t obj, int index);
 void rpyyarv_struct_set(uintptr_t obj, int index, uintptr_t value);
+long rpyyarv_struct_arity(uintptr_t klass);
+uintptr_t rpyyarv_struct_alloc(uintptr_t klass);
 uintptr_t rpyyarv_class_ivar_get(uintptr_t obj, uintptr_t id);
 int rpyyarv_ivar_defined(uintptr_t obj, uintptr_t id);
 int rpyyarv_const_defined(uintptr_t klass, uintptr_t id, int inherit);

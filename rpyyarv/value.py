@@ -62,6 +62,30 @@ ARY_EMBED_WORD = 2
 ARY_SHARED_FLAG = 1 << 12        # RUBY_ELTS_SHARED: elements owned by a root
 ARY_SHARED_ROOT_FLAG = 1 << 24   # RUBY_FL_USER12: other arrays read these
 
+# RStruct layout, checked against rpyyarv_struct_layout.
+STRUCT_EMBED_LEN_SHIFT = 13      # RUBY_FL_USHIFT + 1
+STRUCT_EMBED_LEN_MASK = 0x7f << STRUCT_EMBED_LEN_SHIFT
+STRUCT_HEAP_LEN_WORD = 2
+STRUCT_HEAP_PTR_WORD = 3
+STRUCT_EMBED_WORD = 2
+
+
+def struct_len(v):
+    flags = raw_word(v, FLAGS_WORD)
+    n = (flags & STRUCT_EMBED_LEN_MASK) >> STRUCT_EMBED_LEN_SHIFT
+    if n != 0:
+        return n
+    return raw_word(v, STRUCT_HEAP_LEN_WORD)
+
+
+def struct_at(v, i):
+    """Caller has checked 0 <= i < struct_len(v)."""
+    flags = raw_word(v, FLAGS_WORD)
+    if flags & STRUCT_EMBED_LEN_MASK:
+        return raw_word(v, STRUCT_EMBED_WORD + i)
+    return raw_word(raw_word(v, STRUCT_HEAP_PTR_WORD), i)
+
+
 # Slots of the table rpyyarv_core_classes fills, in its order.
 C_OBJECT = 0
 C_INTEGER = 1

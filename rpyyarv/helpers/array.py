@@ -119,6 +119,15 @@ def check_array_layout():
     return got == want
 
 
+def check_struct_layout():
+    """The Struct fast paths read RStruct by hand; refuse a bad CRuby."""
+    got = boot.struct_layout()
+    want = [value.STRUCT_EMBED_LEN_MASK, value.STRUCT_EMBED_LEN_SHIFT,
+            value.STRUCT_HEAP_LEN_WORD, value.STRUCT_HEAP_PTR_WORD,
+            value.STRUCT_EMBED_WORD, value.T_STRUCT]
+    return got == want
+
+
 def _ary_reverse(recv, lo, hi):
     """Permutes what the array already holds, so no write barrier is due."""
     hi -= 1

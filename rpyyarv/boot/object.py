@@ -79,6 +79,16 @@ rb_struct_member_index = _ext('rpyyarv_struct_member_index',
                               [VALUE, VALUE], rffi.INT, reenters=True)
 
 
+rb_struct_layout = _ext('rpyyarv_struct_layout', [INTP], lltype.Void)
+
+
+rb_struct_arity = _ext('rpyyarv_struct_arity', [VALUE], rffi.LONG,
+                       reenters=True)
+
+
+rb_struct_alloc_ = _ext('rpyyarv_struct_alloc', [VALUE], VALUE, reenters=True)
+
+
 rb_struct_get = _ext('rpyyarv_struct_get', [VALUE, rffi.INT], VALUE)
 
 
@@ -179,6 +189,16 @@ def struct_set(obj, index, v):
     rb_struct_set(_v(obj), rffi.cast(rffi.INT, index), _v(v))
 
 
+def struct_arity(klass):
+    """Members of a positional Struct class, -1 otherwise; asked once."""
+    return rffi.cast(lltype.Signed, rb_struct_arity(_v(klass)))
+
+
+def struct_alloc(klass):
+    """Unprotected: only for a class struct_arity has already blessed."""
+    return rffi.cast(lltype.Signed, rb_struct_alloc_(_v(klass)))
+
+
 def obj_alloc_fast(klass):
     return rffi.cast(lltype.Signed, rb_obj_alloc_fast(_v(klass)))
 
@@ -196,6 +216,18 @@ def obj_alloc(klass):
     if failed:
         _failed('allocate')
     return ret
+
+
+STRUCT_LAYOUT_N = 6
+
+
+def struct_layout():
+    out = [0] * STRUCT_LAYOUT_N
+    with lltype.scoped_alloc(INTP.TO, STRUCT_LAYOUT_N) as buf:
+        rb_struct_layout(buf)
+        for i in range(STRUCT_LAYOUT_N):
+            out[i] = rffi.cast(lltype.Signed, buf[i])
+    return out
 
 
 LAYOUT_N = 14

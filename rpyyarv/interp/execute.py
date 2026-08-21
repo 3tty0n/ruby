@@ -62,6 +62,8 @@ def install():
         value.core_class(value.C_ARRAY), EACH_WITH_INDEX)
     send_owners.integer_step = dispatch.owner_of(
         value.core_class(value.C_INTEGER), STEP)
+    send_owners.struct_class = dispatch.const_get(
+        value.core_class(value.C_OBJECT), symbols.intern('Struct'))
     send_owners.class_allocate = dispatch.owner_of(
         value.core_class(value.C_CLASS), ALLOCATE)
     send_owners.string_force_encoding = dispatch.owner_of(

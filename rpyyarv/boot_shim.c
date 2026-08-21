@@ -19,6 +19,7 @@
 #include "internal/range.h"
 /* rb_str_eql_internal, which YJIT relies on to neither allocate nor raise. */
 #include "internal/string.h"
+#include "internal/struct.h"
 /* rb_hrtime_t, for a Regexp's onigmo timelimit and the global one. */
 #include "hrtime.h"
 #include "rpyyarv.h"
@@ -1306,6 +1307,17 @@ rpyyarv_array_layout(int *out)
     out[7] = (int)RARRAY_SHARED_ROOT_FLAG;
     out[8] = (int)(offsetof(struct RArray, as.heap.aux.capa) / SIZEOF_VALUE);
     out[9] = (int)T_ARRAY;
+}
+
+void
+rpyyarv_struct_layout(int *out)
+{
+    out[0] = (int)RSTRUCT_EMBED_LEN_MASK;
+    out[1] = (int)RSTRUCT_EMBED_LEN_SHIFT;
+    out[2] = (int)(offsetof(struct RStruct, as.heap.len) / SIZEOF_VALUE);
+    out[3] = (int)(offsetof(struct RStruct, as.heap.ptr) / SIZEOF_VALUE);
+    out[4] = (int)(offsetof(struct RStruct, as.ary) / SIZEOF_VALUE);
+    out[5] = (int)T_STRUCT;
 }
 
 /* vm_opt_str_eq (vm_insnhelper.c:2540); rb_str_eql_internal cannot raise. */
@@ -2784,6 +2796,47 @@ void
 rpyyarv_struct_set(uintptr_t obj, int index, uintptr_t val)
 {
     RSTRUCT_SET((VALUE)obj, index, (VALUE)val);
+}
+
+static VALUE
+struct_arity_body(VALUE k)
+{
+    VALUE members = rb_struct_s_members(k);
+    /* keyword_init: new takes a Hash, so the positional path is not it. */
+    if (RTEST(rb_funcall(k, rb_intern("keyword_init?"), 0))) return Qnil;
+    if (!RB_TYPE_P(members, T_ARRAY)) return Qnil;
+    return LONG2NUM(RARRAY_LEN(members));
+}
+
+/* Members of a positional Struct class, -1 for anything else. Asked once. */
+long
+rpyyarv_struct_arity(uintptr_t klass)
+{
+    VALUE k = (VALUE)klass;
+    int state = 0;
+    VALUE n;
+    if (SPECIAL_CONST_P(k) || !RB_TYPE_P(k, T_CLASS)
+        || RCLASS_SINGLETON_P(k) || !RCLASS_INITIALIZED_P(k)
+        || rb_get_alloc_func(k) == 0)
+        return -1;
+    n = rb_protect(struct_arity_body, k, &state);
+    if (state) {
+        rb_set_errinfo(Qnil);
+        return -1;
+    }
+    if (!RB_INTEGER_TYPE_P(n)) return -1;
+    return NUM2LONG(n);
+}
+
+/* Unprotected: only for a class rpyyarv_struct_arity has already blessed. */
+uintptr_t
+rpyyarv_struct_alloc(uintptr_t klass)
+{
+    VALUE k = (VALUE)klass;
+    if (SPECIAL_CONST_P(k) || !RB_TYPE_P(k, T_CLASS)
+        || RCLASS_SINGLETON_P(k) || !RCLASS_INITIALIZED_P(k))
+        return (uintptr_t)Qundef;
+    return (uintptr_t)rb_obj_alloc(k);
 }
 
 uintptr_t

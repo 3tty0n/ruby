@@ -75,6 +75,11 @@ def entry_point(argv):
                    'assumes; the Array fast paths would misread it')
         return 1
 
+    if not helpers.check_struct_layout():
+        debug.note('libruby lays out RStruct differently than value.py '
+                   'assumes; the Struct fast paths would misread it')
+        return 1
+
     debug.configure_coverage()
     dispatch.install()
 

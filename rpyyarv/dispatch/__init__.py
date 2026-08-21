@@ -22,7 +22,8 @@ from rpyyarv.dispatch.consts import (_Consts, _const_cached,
 from rpyyarv.dispatch.caches import (_Owners, _owner_of, _fill_owner,
     _responds, _fill_responds, _SymNames, _sym_name, _fill_sym_name,
     _kind_of, _fill_kind_of, _StructSlots, _struct_index, _fill_struct_index,
-    _super_owner, _fill_super_owner, _Slots)
+    _super_owner, _fill_super_owner, _Slots,
+    _StructArity, _struct_arity, _fill_struct_arity)
 from rpyyarv.dispatch.layout import (_data_fields, _class_fields,
     _ivar_get_slow, _Barrier, _Trans, _iv_transition, _ivar_add_slow,
     _ivar_set_slow)

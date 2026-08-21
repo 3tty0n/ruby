@@ -369,6 +369,19 @@ def invoke(frame, w_ci, w_block=None):
                 if e.w_block is not w_block:
                     raise
                 return e.value
+    # Struct#initialize is a C method, so a send would leave for CRuby.
+    # Only reached for a simple call: keywords route through _kw_invoke, and
+    # a positional Struct takes those as members (struct.c:315).
+    if mid == NEW and entry is None and w_block is None \
+            and send_owners.struct_class != 0 \
+            and dispatch.owner_of(klass, NEW) == \
+            value.core_class(value.C_CLASS) \
+            and dispatch.owner_of(promote(recv), INITIALIZE) == \
+            send_owners.struct_class:
+        v = _struct_new(frame, recv, recv_at, argc)
+        if v != value.Q_UNDEF:
+            debug.count_native()
+            return v
     if w_block is not None and mid == STEP and entry is None \
             and (argc == 1 or argc == 2) and value.is_fixnum(recv) \
             and send_owners.integer_step != 0 \
@@ -402,11 +415,9 @@ def invoke(frame, w_ci, w_block=None):
         if (argc == 1 and writer) or (argc == 0 and not writer):
             index = dispatch.struct_member_index(klass, mid)
             if index >= 0:
-                if argc == 0:
-                    out = boot.struct_get(recv, index)
-                    if out != value.Q_UNDEF:
-                        _drop(frame, recv_at)
-                        return out
+                if argc == 0 and index < value.struct_len(recv):
+                    _drop(frame, recv_at)
+                    return value.struct_at(recv, index)
                 elif (raw_word(recv, value.FLAGS_WORD) & value.FL_FREEZE) == 0:
                     out = frame.stack[recv_at + 1]
                     boot.struct_set(recv, index, out)
@@ -547,7 +558,7 @@ class _SendOwners(object):
     # Quasi-immutable: install() writes it once, before any Ruby code runs.
     _immutable_fields_ = ['kernel?', 'basic?', 'string_getbyte?',
                           'string_setbyte?', 'array_each_slice?',
-                          'array_each_with_index?', 'integer_step?',
+                          'array_each_with_index?', 'integer_step?', 'struct_class?',
                           'comparable?', 'class_allocate?',
                           'string_force_encoding?', 'string_unpack1?',
                           'array_pack?']
@@ -561,6 +572,7 @@ class _SendOwners(object):
         self.array_each_slice = 0
         self.array_each_with_index = 0
         self.integer_step = 0
+        self.struct_class = 0
         self.comparable = 0
         self.class_allocate = 0
         self.string_force_encoding = 0
@@ -732,6 +744,24 @@ def _attr_send(frame, entry, recv, recv_at, argc, w_block=None):
     _drop(frame, recv_at)
     debug.count_native()
     return v
+
+
+def _struct_new(frame, recv, recv_at, argc):
+    """Allocate and fill the slots; rb_struct_initialize does only that."""
+    n = dispatch.struct_arity(promote(recv))
+    if n < 0 or argc > n:
+        return value.Q_UNDEF
+    obj = boot.struct_alloc(recv)
+    if obj == value.Q_UNDEF:
+        return value.Q_UNDEF
+    # Into the marked slot the class held: a constant still names the class.
+    frame.stack[recv_at] = obj
+    i = 0
+    while i < argc:
+        boot.struct_set(obj, i, frame.stack[recv_at + 1 + i])
+        i += 1
+    _drop(frame, recv_at)
+    return obj
 
 
 def _new_with_block(frame, entry, klass, recv_at, argc, w_block):

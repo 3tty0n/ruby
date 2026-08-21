@@ -210,6 +210,40 @@ def super_owner(klass, owner, mid):
     return got
 
 
+class _StructArity(object):
+    def __init__(self):
+        self.tab = {}       # class VALUE -> member count, -1 when not a Struct
+
+
+struct_arities = _StructArity()
+
+STRUCT_UNKNOWN = -2
+
+
+@elidable
+def _struct_arity(klass, version):
+    return struct_arities.tab.get(klass, STRUCT_UNKNOWN)
+
+
+@dont_look_inside
+def _fill_struct_arity(klass):
+    got = struct_arities.tab.get(klass, STRUCT_UNKNOWN)
+    if got != STRUCT_UNKNOWN:
+        return got
+    got = boot.struct_arity(klass)
+    gcroots.register_class(klass)
+    struct_arities.tab[klass] = got
+    return got
+
+
+def struct_arity(klass):
+    """Members of a positional Struct class; -1 for anything else."""
+    got = _struct_arity(klass, registry.version)
+    if got == STRUCT_UNKNOWN:
+        got = _fill_struct_arity(klass)
+    return got
+
+
 class _Slots(object):
     def __init__(self):
         self.tab = {}       # (shape_id, CRuby ID) -> slot, -1 absent, -2 bail
