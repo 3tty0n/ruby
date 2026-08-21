@@ -473,6 +473,21 @@ def invoke(frame, w_ci, w_block=None):
             and dispatch.owner_of(klass, mid) == \
             value.core_class(value.C_MODULE):
         return _alias_method(frame, recv, recv_at)
+    # core_hash_merge: one aset per pair, so a big literal never hits MAX_ARGC.
+    if vm_core.value != 0 and recv == vm_core.value and mid == HASH_MERGE_PTR \
+            and argc >= 1 and (argc & 1) == 1 \
+            and not value.is_immediate(frame.stack[recv_at + 1]) \
+            and raw_word(frame.stack[recv_at + 1], value.KLASS_WORD) == \
+            value.core_class(value.C_HASH):
+        h = frame.stack[recv_at + 1]
+        i = 0
+        while i < argc - 1:
+            rubycall.hash_aset(h, frame.stack[recv_at + 2 + i],
+                               frame.stack[recv_at + 3 + i])
+            i += 2
+        _drop(frame, recv_at)
+        debug.count_native()
+        return h
     if vm_core.value != 0 and recv == vm_core.value \
             and mid != HASH_MERGE_PTR and mid != HASH_MERGE_KWD:
         if mid == CORE_GVAR_ALIAS and argc == 2:
