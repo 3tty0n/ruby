@@ -12,6 +12,7 @@ class Registry(object):
         self.consts = []        # every loaded ISeq's constant pool
         self.pinned = []        # VALUEs built during load, before their pool
         self.classes = []       # classes RPyYARV defined, keys of the registry
+        self.class_seen = {}    # the same, as a set: a root is never dropped
         self.held = []          # exception VALUEs parked outside any frame
         self.blocks = None      # interp's handle table, once it exists
         self.fibers = None      # fibers.mark_suspended, once installed
@@ -38,13 +39,27 @@ def register_bmethod(w_block):
 
 
 def register_class(v):
-    if not value.is_immediate(v):
-        state.classes.append(v)
+    """Deduplicated: a cache fill asks per (klass, mid), not per class."""
+    if value.is_immediate(v) or v in state.class_seen:
+        return
+    state.class_seen[v] = None
+    state.classes.append(v)
 
 
 def register_consts(consts):
     if len(consts) > 0:
         state.consts.append(consts)
+
+
+def consts_mark():
+    """Where a file's pools start, so a delegated file can drop its own."""
+    return len(state.consts)
+
+
+def consts_rollback(n):
+    """A delegated file leaves no live ISeq: its pools are dead weight."""
+    while len(state.consts) > n:
+        state.consts.pop()
 
 
 def keepalive(v):
@@ -211,6 +226,19 @@ def _mark_all():
     # A suspended fiber's frames are on no chain of ours.
     if state.fibers is not None:
         state.fibers()
+
+
+def root_census():
+    """Sizes of every root set the mark hook walks, for the coverage report."""
+    pools = 0
+    i = 0
+    while i < len(state.consts):
+        pools += len(state.consts[i])
+        i += 1
+    return ('classes %d, const pools %d (%d values), pinned %d, held %d, '
+            'bmethods %d' % (len(state.classes), len(state.consts), pools,
+                             len(state.pinned), len(state.held),
+                             len(state.bmethods)))
 
 
 def install():

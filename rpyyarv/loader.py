@@ -77,9 +77,12 @@ class Loader(object):
         self.reasons = []           # one per ISeq the loader gave up on
 
     def load(self):
-        w_iseq = self.load_iseq(0, [])
-        self.account_for_the_rest()
-        gcroots.release_load_temporaries()
+        try:
+            w_iseq = self.load_iseq(0, [])
+            self.account_for_the_rest()
+        finally:
+            # Even on a LoadError: else the to_a tree stays pinned forever.
+            gcroots.release_load_temporaries()
         supported = 0
         for index in self.w_iseqs:
             if self.w_iseqs[index].unsupported == '':

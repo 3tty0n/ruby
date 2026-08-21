@@ -7,7 +7,7 @@ from rpyyarv import rubycall
 from rpyyarv.rlib import (elidable, dont_look_inside, intmask, promote,
                           r_uint, raw_word, set_raw_word)
 from rpyyarv.dispatch.core import Version
-from rpyyarv.dispatch.caches import iv_slot, invalidate_owners
+from rpyyarv.dispatch.caches import iv_slot, method_state_changed
 from rpyyarv.dispatch.consts import invalidate_consts
 
 
@@ -188,4 +188,4 @@ def install():
     value.install_classes(boot.core_classes())
     barrier.direct = boot.wb_direct()
     boot.set_const_hook(invalidate_consts)
-    boot.set_method_hook(invalidate_owners)
+    boot.set_method_hook(method_state_changed)

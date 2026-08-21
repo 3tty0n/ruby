@@ -27,7 +27,13 @@ def _install_trampoline(klass, mid, visibility, entry):
     """A CRuby entry beside the registry one; it resolves through lookup."""
     if not trampoline.enabled:
         return
-    key = boot.define_method_entry(klass, rubycall.rid(mid), visibility)
+    # CRuby clears its method cache for this def and calls our hook back;
+    # define() already dropped exactly the entries that name mid.
+    own_hook.depth += 1
+    try:
+        key = boot.define_method_entry(klass, rubycall.rid(mid), visibility)
+    finally:
+        own_hook.depth -= 1
     # Copies of the entry (alias, define_method(Method)) share this def.
     if key != 0:
         registry.defs[key] = entry
@@ -121,4 +127,4 @@ def lookup_from_trampoline(rid, klass):
 
 # Imported at the bottom: caches imports trampoline, so this edge can only
 # be bound once caches has already defined owner_of.
-from rpyyarv.dispatch.caches import owner_of
+from rpyyarv.dispatch.caches import owner_of, own_hook

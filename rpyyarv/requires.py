@@ -124,16 +124,21 @@ def _load_rb(fname, path):
                          'RPYYARV_DELEGATE_FILES names it')
         i += 1
 
+    # A delegated file's ISeqs are dropped; its pools must not stay rooted.
+    mark = gcroots.consts_mark()
     try:
         result = _compile(path)
     except RubyException:
         # A syntax error reads better out of CRuby's own require.
+        gcroots.consts_rollback(mark)
         return _delegate_file(fname, name, 0, 0,
                      'the embedded CRuby would not compile it')
     if len(result.reasons) > 0:
+        gcroots.consts_rollback(mark)
         return _delegate_file(fname, name, result.total, result.supported,
                      result.reasons[0])
 
+    debug.note_load(name, 'start')
     files.loading[name] = True
     files.stack.append(name)
     # Before the body, as load.c:939 does; else NameError (variable.c:3088).
@@ -150,6 +155,7 @@ def _load_rb(fname, path):
             _unprovide(path)
     debug.count_native()
     debug.record_file(name, result.total, result.supported, '')
+    debug.note_load(name, 'done')
     return value.Q_TRUE
 
 
@@ -176,6 +182,7 @@ def _compile(path):
 def _delegate_file(fname, name, total, supported, reason):
     """This one file to CRuby; the file that required it stays on RPyYARV."""
     debug.record_file(name, total, supported, reason)
+    debug.note_load(name, 'cruby')
     return _delegate(fname)
 
 

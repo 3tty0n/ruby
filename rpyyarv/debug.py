@@ -15,11 +15,12 @@ STACK = 2
 CALL = 4
 ISEQ = 8
 SUMMARY = 16
-ALL = INSN | STACK | CALL | ISEQ | SUMMARY
+LOAD = 32
+ALL = INSN | STACK | CALL | ISEQ | SUMMARY | LOAD
 
-_NAMES = ['insn', 'stack', 'call', 'iseq', 'summary']
-_BITS = [INSN, STACK, CALL, ISEQ, SUMMARY]
-CHANNELS = 'insn, stack, call, iseq, summary, all'
+_NAMES = ['insn', 'stack', 'call', 'iseq', 'summary', 'load']
+_BITS = [INSN, STACK, CALL, ISEQ, SUMMARY, LOAD]
+CHANNELS = 'insn, stack, call, iseq, summary, load, all'
 
 
 class _State(object):
@@ -103,7 +104,10 @@ def report():
         return
     note('sends: rpyyarv %d, cruby %d' % (coverage.native, coverage.foreign))
     from rpyyarv import dispatch
-    note('method-cache invalidations: %d' % dispatch.owners.invalidations)
+    from rpyyarv import gcroots
+    note('method-cache invalidations: %d (skipped %d)'
+         % (dispatch.owners.invalidations, dispatch.owners.skipped))
+    note('gc roots: %s' % gcroots.root_census())
     note('files: rpyyarv %d, delegated to cruby %d'
          % (coverage.files_native, coverage.files_cruby))
     percent = (100 * coverage.iseqs_native // coverage.iseqs_total
@@ -171,6 +175,23 @@ def write(s):
 def note(msg):
     """Unconditional one-liner, for a print dropped in while hunting a bug."""
     write('[rpyyarv] %s\n' % msg)
+
+
+class _Loads(object):
+    def __init__(self):
+        self.n = 0
+
+
+loads = _Loads()
+
+
+def note_load(path, kind):
+    """One line per file the require path touched, to watch load progress.
+    A `start` with no `done` after it names the file the load is stuck in."""
+    if state.channels & LOAD == 0:
+        return
+    loads.n += 1
+    note('load #%d %-6s %s' % (loads.n, kind, path))
 
 
 def note_invalidation(n):

@@ -90,7 +90,7 @@ def define(klass, mid, w_iseq, private, cref=0, lexical=None,
     _table_for(klass)[mid] = entry
     registry.version = Version()
     flush_trampoline_cache()
-    invalidate_owners()
+    invalidate_for(mid)
     _install_trampoline(klass, mid, 2 if prot else (1 if private else 0),
                         entry)
 
@@ -101,7 +101,7 @@ def define_attr(klass, mid, ivar, kind, private=False, prot=False):
                                          ivar, None, None, prot)
     registry.version = Version()
     flush_trampoline_cache()
-    invalidate_owners()
+    invalidate_for(mid)
 
 
 def define_bmethod(klass, mid, w_block, private, prot=False):
@@ -110,7 +110,7 @@ def define_bmethod(klass, mid, w_block, private, prot=False):
                                          KIND_BMETHOD, 0, None, w_block, prot)
     registry.version = Version()
     flush_trampoline_cache()
-    invalidate_owners()
+    invalidate_for(mid)
     gcroots.register_bmethod(w_block)
 
 
@@ -146,7 +146,7 @@ def undefine(klass, mid):
     del table[mid]
     registry.version = Version()
     flush_trampoline_cache()
-    invalidate_owners()
+    invalidate_for(mid)
     return True
 
 
@@ -155,7 +155,7 @@ def undef_method(klass, mid):
     _table_for(klass)[mid] = MethodEntry(None, False, klass, mid, 0, KIND_UNDEF)
     registry.version = Version()
     flush_trampoline_cache()
-    invalidate_owners()
+    invalidate_for(mid)
 
 
 def own_lookup(klass, mid):
@@ -304,7 +304,7 @@ def owns_identity(klass, mid):
 
 # Imported at the bottom: caches imports core, so this edge can only be
 # bound once core's own definitions exist.
-from rpyyarv.dispatch.caches import (invalidate_owners, owner_of, owners,
+from rpyyarv.dispatch.caches import (invalidate_for, invalidate_owners, owner_of, owners,
                                      _fill_owner, OWNER_UNKNOWN)
 from rpyyarv.dispatch.trampoline import (flush_trampoline_cache,
                                          _install_trampoline, _record_ancestry)

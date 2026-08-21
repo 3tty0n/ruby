@@ -69,6 +69,8 @@ def _module_eval_rpy(frame, recv, source, file_v, line_v):
         # eval_string_with_cref runs in the caller's scope: declare its locals.
         text = _declare_locals(names) + text
         line -= 1
+    # An eval RPyYARV gives up on drops its ISeqs; unroot their pools too.
+    mark = gcroots.consts_mark()
     try:
         iseqw = _compile_eval(text, file_v, line)
         gcroots.hold(iseqw)
@@ -77,10 +79,13 @@ def _module_eval_rpy(frame, recv, source, file_v, line_v):
         finally:
             gcroots.release(iseqw)
     except RubyException:
+        gcroots.consts_rollback(mark)
         return value.Q_UNDEF
     except RPyYarvError:
+        gcroots.consts_rollback(mark)
         return value.Q_UNDEF
     if len(result.reasons) > 0:
+        gcroots.consts_rollback(mark)
         return value.Q_UNDEF
     # Not by_eval: eval_under pushes the receiver's cref (vm_eval.c:2269).
     cref = _push_cref(_cref_of(frame), recv)

@@ -17,12 +17,74 @@ class _Owners(object):
         self.stab = {}      # the same, for the module above that one
         self.rtab = {}  # (klass VALUE, Symbol VALUE) -> respond_to? per inst
         self.ktab = {}  # (klass VALUE, module VALUE) -> kind_of? per instance
+        # Which cached answers name each mid, so a def drops those and
+        # leaves every other name's answers standing.
+        self.by_mid = {}    # mid -> [klass, ...] keys held in tab
+        self.by_sup = {}    # mid -> [(klass, owner), ...] keys held in stab
+        self.by_sym = {}    # respond_to? Symbol -> [klass, ...] keys in rtab
         self.invalidations = 0
+        self.skipped = 0
 
 
 owners = _Owners()
 
+
+class _OwnHook(object):
+    """Depth of our own trampoline installs, which CRuby reports back to us."""
+    def __init__(self):
+        self.depth = 0
+
+
+own_hook = _OwnHook()
+
+
+def method_state_changed():
+    """CRuby cleared its method cache. If our own def caused it, the precise
+    invalidate_for has already run; anything else is someone else's change."""
+    if own_hook.depth > 0:
+        owners.skipped += 1
+        return
+    invalidate_owners()
+
+
 OWNER_UNKNOWN = -1
+
+
+def _note_key(index, name, klass):
+    """Which classes hold a cached answer for this name."""
+    if name in index:
+        index[name].append(klass)
+    else:
+        index[name] = [klass]
+
+
+def invalidate_for(mid):
+    """A def of mid stales only answers naming mid; drop exactly those.
+    kind_of? does not depend on methods, so ktab is never touched here."""
+    owners.skipped += 1
+    klasses = owners.by_mid.get(mid, None)
+    if klasses is not None:
+        for klass in klasses:
+            if (klass, mid) in owners.tab:
+                del owners.tab[(klass, mid)]
+            if (klass, mid) in struct_slots.tab:
+                del struct_slots.tab[(klass, mid)]
+        del owners.by_mid[mid]
+    pairs = owners.by_sup.get(mid, None)
+    if pairs is not None:
+        for klass, owner in pairs:
+            if (klass, owner, mid) in owners.stab:
+                del owners.stab[(klass, owner, mid)]
+        del owners.by_sup[mid]
+    sym = rubycall.sym_value(mid)
+    syms = owners.by_sym.get(sym, None)
+    if syms is not None:
+        for klass in syms:
+            if (klass, sym) in owners.rtab:
+                del owners.rtab[(klass, sym)]
+        del owners.by_sym[sym]
+    registry.version = Version()
+    flush_trampoline_cache()
 
 
 def invalidate_owners():
@@ -36,6 +98,9 @@ def invalidate_owners():
     owners.stab = {}
     owners.rtab = {}
     owners.ktab = {}
+    owners.by_mid = {}
+    owners.by_sup = {}
+    owners.by_sym = {}
     registry.version = Version()
     flush_trampoline_cache()
 
@@ -55,6 +120,7 @@ def _fill_owner(klass, mid):
     # Kept alive: a recycled class VALUE would otherwise read as a hit.
     gcroots.register_class(klass)
     owners.tab[(klass, mid)] = owner
+    _note_key(owners.by_mid, mid, klass)
     return owner
 
 
@@ -83,6 +149,7 @@ def _fill_responds(klass, sym):
     got = boot.responds(klass, sym)
     gcroots.register_class(klass)
     owners.rtab[(klass, sym)] = got
+    _note_key(owners.by_sym, sym, klass)
     return got
 
 
@@ -175,6 +242,7 @@ def _fill_struct_index(klass, mid):
         name = name[:-1]
     got = boot.struct_member_index(klass, boot.intern(name))
     struct_slots.tab[(klass, mid)] = got
+    _note_key(owners.by_mid, mid, klass)
     return got
 
 
@@ -199,6 +267,10 @@ def _fill_super_owner(klass, owner, mid):
     found = boot.super_owner(klass, owner, rubycall.rid(mid))
     gcroots.register_class(klass)
     owners.stab[(klass, owner, mid)] = found
+    if mid in owners.by_sup:
+        owners.by_sup[mid].append((klass, owner))
+    else:
+        owners.by_sup[mid] = [(klass, owner)]
     return found
 
 
