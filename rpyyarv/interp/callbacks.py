@@ -131,12 +131,19 @@ def trampoline_callback(self_v, rid, owner_v, def_v, argc, argv, blockv, kw,
     w_block = None
     proc_v = boot.as_signed(blockv)
     if proc_v != value.Q_NIL:
-        w_block = block_mod.from_proc(proc_v)
+        # The depth here names this frame: a yield at the same depth is still
+        # inside it, so it can reach CRuby's own block instead of the copy.
+        w_block = block_mod.from_proc(proc_v, boot.nesting_depth())
     foreign = _enter_foreign_stack()
     try:
         return boot.as_value(_from_cruby(recv, mid, entry, argv,
                                          boot.as_int(argc), w_block,
                                          boot.as_int(kw) != 0))
+    except block_mod.BlockBreak, e:
+        # rb_iter_break from CRuby's own block: this call is what it ends.
+        if e.w_block is not w_block:
+            raise
+        return boot.as_value(e.value)
     except RubyException, e:
         boot.rethrow_if_fiber_kill(e.value)
         boot.store_int(statusp, TRAMP_RAISE)

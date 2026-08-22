@@ -20,13 +20,14 @@
 /* rb_str_eql_internal, which YJIT relies on to neither allocate nor raise. */
 #include "internal/string.h"
 #include "internal/struct.h"
+#include "vm_core.h"
 /* rb_hrtime_t, for a Regexp's onigmo timelimit and the global one. */
 #include "hrtime.h"
 #include "rpyyarv.h"
 
 #include "boot_shim.h"
 
-/* From the internal iseq.h, redeclared to avoid pulling in vm_core.h. */
+/* From the internal iseq.h, redeclared rather than including iseq.h. */
 struct rb_iseq_struct;
 VALUE rb_iseqw_new(const struct rb_iseq_struct *iseq);
 
@@ -1847,6 +1848,47 @@ rpyyarv_set_trampoline_callback(rpyyarv_tramp_fn fn)
 {
     tramp_callback = fn;
     rpyyarv_thread = pthread_self();
+}
+
+struct yield_args {
+    int argc;
+    const VALUE *argv;
+    int kw;
+};
+
+static VALUE
+yield_body(VALUE argp)
+{
+    struct yield_args *p = (struct yield_args *)argp;
+    if (p->kw) return rb_yield_values_kw(p->argc, p->argv, RB_PASS_KEYWORDS);
+    return rb_yield_values2(p->argc, p->argv);
+}
+
+/* Yield to the block of the trampoline frame we are still inside, so that a
+   CRuby block's rb_iter_break finds its own frame as the target. Calling a
+   proc-ized copy instead leaves vm_throw with no matching frame.
+   state: 0 value, 1 the block broke, 2 it raised. */
+uintptr_t
+rpyyarv_yield_values(int argc, const uintptr_t *argv, int kw, int *state)
+{
+    struct yield_args a;
+    int st = 0;
+    VALUE r;
+    a.argc = argc;
+    a.argv = (const VALUE *)argv;
+    a.kw = kw;
+    *state = 0;
+    r = rb_protect(yield_body, (VALUE)&a, &st);
+    if (st == 0) return (uintptr_t)r;
+    if (st == RUBY_TAG_RAISE) {
+        *state = 2;
+        return (uintptr_t)Qnil;
+    }
+    /* A break carries its value in the tag, which rb_protect does not hand
+       back; every CRuby iterator that breaks ignores what `each` returned. */
+    *state = 1;
+    rb_set_errinfo(Qnil);
+    return (uintptr_t)Qnil;
 }
 
 static VALUE

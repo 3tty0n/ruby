@@ -7,10 +7,10 @@ KIND_SYM = 2
 
 class W_Block(object):
     _immutable_fields_ = ['kind', 'w_iseq', 'frame', 'outer', 'mid',
-                          'is_lambda']
+                          'is_lambda', 'at_depth']
 
     def __init__(self, w_iseq, frame, outer, kind=KIND_ISEQ, proc_value=0,
-                 mid=0, is_lambda=False):
+                 mid=0, is_lambda=False, at_depth=-1):
         self.kind = kind
         self.w_iseq = w_iseq
         self.frame = frame
@@ -21,10 +21,13 @@ class W_Block(object):
         self.mid = mid
         # A lambda checks arity and owns its `return` (VM_FRAME_FLAG_LAMBDA).
         self.is_lambda = is_lambda
+        # Protected-call depth the trampoline saw: at the same depth the block
+        # is still the current CRuby frame's, so a yield can reach it in place.
+        self.at_depth = at_depth
 
 
-def from_proc(v):
-    return W_Block(None, None, None, KIND_PROC, v)
+def from_proc(v, at_depth=-1):
+    return W_Block(None, None, None, KIND_PROC, v, 0, False, at_depth)
 
 
 def from_symbol(mid):

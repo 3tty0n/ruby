@@ -225,6 +225,19 @@ def _run_bmethod(entry, recv, args, kw_names=NO_KEYWORDS, kw_splat=False):
 
 
 @dont_look_inside
+def _yield_in_frame(w_block, args, kw):
+    """Still inside the trampoline frame this block came from: yield to it in
+    place, so a CRuby block's rb_iter_break unwinds its own iteration.
+    Q_UNDEF when the frame moved on and the Proc copy has to serve."""
+    if w_block.at_depth < 0 or w_block.at_depth != boot.nesting_depth():
+        return value.Q_UNDEF
+    v, state = boot.yield_values(args, kw)
+    if state == boot.YIELD_BREAK:
+        raise block_mod.BlockBreak(w_block, v)
+    return v
+
+
+@dont_look_inside
 def _call_foreign_block_kw(w_block, args, kw_names, kw_splat):
     """Keywords as the one trailing Hash RB_PASS_KEYWORDS names."""
     if w_block.kind != block_mod.KIND_PROC:
@@ -242,6 +255,9 @@ def _call_foreign_block_kw(w_block, args, kw_names, kw_splat):
 def _call_foreign_block(w_block, args):
     """A foreign block: a CRuby Proc, or &:sym (vm_insnhelper.c:552)."""
     if w_block.kind == block_mod.KIND_PROC:
+        v = _yield_in_frame(w_block, args, False)
+        if v != value.Q_UNDEF:
+            return v
         return rubycall.call(w_block.proc_value, CALL, args)
     if len(args) == 0:
         raise UnsupportedOperation('a &:symbol block needs a receiver')

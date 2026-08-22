@@ -141,6 +141,11 @@ class _Nesting(object):
 _nesting = _Nesting()
 
 
+def nesting_depth():
+    """Protected calls in flight; equal depth means the same CRuby frame."""
+    return _nesting.status
+
+
 def _enter_status():
     """Status cell for one shim call; past SHIM_DEPTH, a fresh raw cell."""
     d = _nesting.status

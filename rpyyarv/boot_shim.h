@@ -396,6 +396,8 @@ uintptr_t rpyyarv_struct_get(uintptr_t obj, int index);
 void rpyyarv_struct_set(uintptr_t obj, int index, uintptr_t value);
 long rpyyarv_struct_arity(uintptr_t klass);
 uintptr_t rpyyarv_struct_alloc(uintptr_t klass);
+uintptr_t rpyyarv_yield_values(int argc, const uintptr_t *argv, int kw,
+                               int *state);
 uintptr_t rpyyarv_class_ivar_get(uintptr_t obj, uintptr_t id);
 int rpyyarv_ivar_defined(uintptr_t obj, uintptr_t id);
 int rpyyarv_const_defined(uintptr_t klass, uintptr_t id, int inherit);

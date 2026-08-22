@@ -65,6 +65,37 @@ rb_block_sentinel = _ext('rpyyarv_block_sentinel', [], VALUE, reenters=True)
 rb_proc_handle = _ext('rpyyarv_proc_handle', [VALUE], rffi.LONG)
 
 
+rb_yield_values = _ext('rpyyarv_yield_values',
+                       [rffi.INT, VALUEP, rffi.INT, INTP], VALUE,
+                       reenters=True)
+
+
+YIELD_OK = 0
+YIELD_BREAK = 1
+YIELD_RAISE = 2
+
+
+def yield_values(args, kw):
+    """Yield to the block of the trampoline frame; (value, state)."""
+    argc = len(args)
+    if argc > MAX_ARGC:
+        raise RubyError('yield')
+    argv = _enter_argv(argc)
+    i = 0
+    while i < argc:
+        argv[i] = rffi.cast(VALUE, args[i])
+        i += 1
+    with lltype.scoped_alloc(INTP.TO, 1) as st:
+        st[0] = rffi.cast(rffi.INT, 0)
+        v = rb_yield_values(rffi.cast(rffi.INT, argc), argv,
+                            rffi.cast(rffi.INT, 1 if kw else 0), st)
+        state = rffi.cast(lltype.Signed, st[0])
+    _leave_argv(argv)
+    if state == YIELD_RAISE:
+        _failed('yield')
+    return rffi.cast(lltype.Signed, v), state
+
+
 rb_kw_hash_p = _ext('rpyyarv_kw_hash_p', [VALUE], rffi.INT)
 
 
