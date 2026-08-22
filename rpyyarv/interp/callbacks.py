@@ -39,6 +39,12 @@ def block_callback(handle, argc, argv, cruby_self, bowner, bmid):
                                  boot.as_signed(bmid), w_block)
     foreign = _enter_foreign_stack()
     try:
+        # A registered bmethod runs as its own method, exactly as the native
+        # dispatch runs it; the handle's block is not the lambda-flagged body.
+        if override is not None and override.w_block is not None \
+                and override.w_block.is_lambda:
+            return boot.as_value(_run_bmethod(
+                override, _sub_self(handle, cruby_self), args))
         # CRuby owns the frame, so the block keeps its written cref.
         return boot.as_value(call_block(w_block, args, NO_KEYWORDS, False,
                                         _sub_self(handle, cruby_self),
@@ -87,6 +93,10 @@ TRAMP_UNSUPPORTED = 2
 
 
 TRAMP_UNWIND = 3
+
+
+# A tag a yield caught for a frame past ours; the shim re-issues it.
+TRAMP_JUMPTAG = 4
 
 
 def trampoline_callback(self_v, rid, owner_v, def_v, argc, argv, blockv, kw,
@@ -144,6 +154,9 @@ def trampoline_callback(self_v, rid, owner_v, def_v, argc, argv, blockv, kw,
         if e.w_block is not w_block:
             raise
         return boot.as_value(e.value)
+    except block_mod.ForeignTag:
+        # A return/throw aimed past us; the shim finishes the jump.
+        boot.store_int(statusp, TRAMP_JUMPTAG)
     except RubyException, e:
         boot.rethrow_if_fiber_kill(e.value)
         boot.store_int(statusp, TRAMP_RAISE)

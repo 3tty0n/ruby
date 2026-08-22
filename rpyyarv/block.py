@@ -53,6 +53,10 @@ class BlockReturn(BlockJump):
         self.frame = frame
 
 
+class ForeignTag(Exception):
+    """A tag a yield caught for a frame past ours; the shim re-issues it."""
+
+
 class BlockBreak(BlockJump):
     """`break`: the block is the tag, unwinding to the send that passed it."""
     def __init__(self, w_block, value):

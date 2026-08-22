@@ -303,6 +303,7 @@ void rpyyarv_set_block_unwind(void);
 #define RPYYARV_TRAMP_RAISE       1   /* *errval is the exception to re-raise */
 #define RPYYARV_TRAMP_UNSUPPORTED 2   /* *errval is the message String */
 #define RPYYARV_TRAMP_UNWIND      3   /* an unwind parked on the RPython side */
+#define RPYYARV_TRAMP_JUMPTAG     4   /* a tag caught in a yield, to re-issue */
 
 typedef uintptr_t (*rpyyarv_tramp_fn)(uintptr_t self, uintptr_t mid,
                                       uintptr_t owner, uintptr_t defkey,

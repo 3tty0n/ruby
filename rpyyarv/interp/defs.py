@@ -405,6 +405,14 @@ def _bmethod_identity(owner, rid, w_block):
         mid = rubycall.intern_rid(rid)
     if mid == rubycall.NO_MID:
         return None
+    # define_method registered a lambda-flagged copy of the block: that copy
+    # is the method body, and only it owns a `return`. CRuby's bmethod holds
+    # the original proc, so resolve to the registered entry when there is one.
+    entry = dispatch.lookup_owned(owner, mid)
+    if entry is not None and entry.kind == dispatch.KIND_BMETHOD \
+            and entry.w_block is not None and entry.w_block.is_lambda \
+            and entry.w_block.w_iseq is w_block.w_iseq:
+        return entry
     return dispatch.bmethod_identity(owner, mid, w_block)
 
 

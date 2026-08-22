@@ -169,7 +169,9 @@ def call_block(w_block, args, kw_names=NO_KEYWORDS, kw_splat=False,
     callee.defining_frame = outer
     callee.block = w_block.outer
     callee.own_block = w_block
-    if w_block.is_lambda:
+    # entry_override names a bmethod invocation: define_method's block IS the
+    # method body, so it owns its `return` and takes method-style arity.
+    if w_block.is_lambda or entry_override is not None:
         return _run_lambda(w_block, b_iseq, callee, args, kw_names, kw_splat)
     if b_iseq.autosplat and len(args) == 1 and not keyed:
         args = _autosplat(args)
@@ -234,6 +236,8 @@ def _yield_in_frame(w_block, args, kw):
     v, state = boot.yield_values(args, kw)
     if state == boot.YIELD_BREAK:
         raise block_mod.BlockBreak(w_block, v)
+    if state == boot.YIELD_TAG:
+        raise block_mod.ForeignTag()
     return v
 
 

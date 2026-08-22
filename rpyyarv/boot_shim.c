@@ -32,6 +32,8 @@ struct rb_iseq_struct;
 VALUE rb_iseqw_new(const struct rb_iseq_struct *iseq);
 
 static int block_unwind;
+/* A tag rb_protect caught inside a yield, re-issued past the trampoline. */
+static int pending_tag;
 
 /* Unwind crosses libruby's C frames; under Exception so `rescue` misses it. */
 static VALUE
@@ -1884,10 +1886,17 @@ rpyyarv_yield_values(int argc, const uintptr_t *argv, int kw, int *state)
         *state = 2;
         return (uintptr_t)Qnil;
     }
-    /* A break carries its value in the tag, which rb_protect does not hand
-       back; every CRuby iterator that breaks ignores what `each` returned. */
-    *state = 1;
-    rb_set_errinfo(Qnil);
+    if (st == RUBY_TAG_BREAK) {
+        /* The value rides in the tag, which rb_protect does not hand back;
+           every CRuby iterator that breaks ignores what `each` returned. */
+        *state = 1;
+        rb_set_errinfo(Qnil);
+        return (uintptr_t)Qnil;
+    }
+    /* return/next/redo/retry/throw belong to a frame further out. Park the
+       tag and re-issue it once the RPython frames have unwound. */
+    pending_tag = st;
+    *state = 3;
     return (uintptr_t)Qnil;
 }
 
@@ -1919,6 +1928,12 @@ rpyyarv_trampoline(int argc, VALUE *argv, VALUE self)
     if (status == RPYYARV_TRAMP_RAISE) rb_exc_raise(err);
     if (status == RPYYARV_TRAMP_UNWIND) {
         rb_raise(unwind_class(), "rpyyarv: non-local exit from a method");
+    }
+    if (status == RPYYARV_TRAMP_JUMPTAG) {
+        int tag = pending_tag;
+        pending_tag = 0;
+        /* Our frames are gone; the tag can finish the jump it started. */
+        if (tag) rb_jump_tag(tag);
     }
     if (status != RPYYARV_TRAMP_OK) {
         rb_exc_raise(rb_exc_new_str(rb_eNotImpError, err));

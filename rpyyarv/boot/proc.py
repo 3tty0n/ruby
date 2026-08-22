@@ -73,6 +73,7 @@ rb_yield_values = _ext('rpyyarv_yield_values',
 YIELD_OK = 0
 YIELD_BREAK = 1
 YIELD_RAISE = 2
+YIELD_TAG = 3
 
 
 def yield_values(args, kw):
