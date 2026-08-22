@@ -2798,6 +2798,7 @@ rpyyarv_bop_mask(int *count)
     BOP(rb_cSet, "include?");
     BOP(rb_cString, "===");
     BOP(rb_cString, "start_with?");
+    BOP(rb_mKernel, "public_send");
 #undef BOP
 
     /* The count is an out-parameter, so every bit stays free for the mask. */
@@ -3378,6 +3379,14 @@ rpyyarv_ary_unshift1(uintptr_t v, uintptr_t elt)
 }
 
 /* Array/Hash#freeze: OBJ_FREEZE_RAW cannot re-enter Ruby for either. */
+uintptr_t
+rpyyarv_obj_freeze(uintptr_t v)
+{
+    VALUE o = (VALUE)v;
+    if (SPECIAL_CONST_P(o)) return (uintptr_t)o;
+    return (uintptr_t)rb_obj_freeze(o);
+}
+
 uintptr_t
 rpyyarv_ary_hash_freeze(uintptr_t v)
 {

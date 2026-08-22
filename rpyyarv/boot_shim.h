@@ -119,6 +119,7 @@ uintptr_t rpyyarv_ary_pop_fast(uintptr_t v);
 uintptr_t rpyyarv_ary_push1(uintptr_t v, uintptr_t elt);
 uintptr_t rpyyarv_ary_shift_fast(uintptr_t v);
 uintptr_t rpyyarv_ary_unshift1(uintptr_t v, uintptr_t elt);
+uintptr_t rpyyarv_obj_freeze(uintptr_t v);
 uintptr_t rpyyarv_ary_hash_freeze(uintptr_t v);
 uintptr_t rpyyarv_hash_keys_fast(uintptr_t hash, int *state);
 uintptr_t rpyyarv_ary_flatten_bang1(uintptr_t v);

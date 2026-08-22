@@ -168,7 +168,8 @@ B_HASH_HAS_KEY = 59
 B_SET_INCLUDE = 60
 B_STR_EQQ = 61
 B_STR_START_WITH = 62
-B_COUNT = 63
+B_KERNEL_PUBLIC_SEND = 63
+B_COUNT = 64
 
 
 _INT_MID = [PLUS, MINUS, MULT, DIV, MOD, EQ, LT, LE, GT, GE, AND, OR, XOR,
@@ -225,6 +226,11 @@ def kernel_send_pristine():
 
 def basic_send_pristine():
     return _cruby_owns(B_BASIC_SEND)
+
+
+def kernel_public_send_pristine():
+    """Kernel#public_send is still rb_f_public_send, so it resolves here."""
+    return _cruby_owns(B_KERNEL_PUBLIC_SEND)
 
 
 def _int_op(bit):

@@ -13,7 +13,7 @@ from rpyyarv.error import UnsupportedOperation
 from rpyyarv.frame import Frame
 from rpyyarv.rlib import dont_look_inside, promote, raw_word, unroll_safe
 
-from rpyyarv.interp.consts_ids import ALIAS_METHOD, ALLOCATE, ARITY, ATTR_ACCESSOR, ATTR_READER, ATTR_WRITER, BACKTRACE_PRIM, BLOCK_GIVEN, BUFFER, CALLEE_UNDERSCORE, CGI_CONST, CLASS_EVAL, CORE_ALIAS, CORE_GVAR_ALIAS, CORE_LAMBDA, CORE_UNDEF, DEFINE, DEFINE_METHOD, DIR_UNDERSCORE, EACH_SLICE, EACH_WITH_INDEX, ENC_FIND, EVAL, FORCE_ENCODING, GETBYTE, HASH_MERGE_KWD, HASH_MERGE_PTR, HASH_PAIRS_PRIM, INDEX, INITIALIZE, INSTANCE_EVAL, INSTANCE_EXEC, ITSELF, KERNEL_PROC, LAMBDA_P, MATCH, METHOD_UNDERSCORE, MODULE_EVAL, MODULE_FUNCTION, NEW, OFFSET, OWNER, PARAMETERS, PRIVATE, PRIVATE_CLASS_METHOD, PROTECTED, PUBLIC, REMOVE_METHOD, REQUIRE_PRIM, REVERSE_EACH, RUBY2_KEYWORDS, SEND, SEND2, SETBYTE, SLICE, STEP, UNDEF_METHOD, UNPACK1
+from rpyyarv.interp.consts_ids import ALIAS_METHOD, ALLOCATE, ARITY, ATTR_ACCESSOR, ATTR_READER, ATTR_WRITER, BACKTRACE_PRIM, BLOCK_GIVEN, BUFFER, CALLEE_UNDERSCORE, CGI_CONST, CLASS_EVAL, CORE_ALIAS, CORE_GVAR_ALIAS, CORE_LAMBDA, CORE_UNDEF, DEFINE, DEFINE_METHOD, DIR_UNDERSCORE, EACH_SLICE, EACH_WITH_INDEX, ENC_FIND, EVAL, FORCE_ENCODING, FREEZE, GETBYTE, HASH_MERGE_KWD, HASH_MERGE_PTR, HASH_PAIRS_PRIM, INDEX, INITIALIZE, INSTANCE_EVAL, INSTANCE_EXEC, ITSELF, KERNEL_PROC, LAMBDA_P, MATCH, METHOD_UNDERSCORE, MODULE_EVAL, MODULE_FUNCTION, NEGATIVE_P, NEW, OFFSET, OWNER, PARAMETERS, PRIVATE, PRIVATE_CLASS_METHOD, PROTECTED, PUBLIC, PUBLIC_SEND, REMOVE_METHOD, REQUIRE_PRIM, REVERSE_EACH, RUBY2_KEYWORDS, SEND, SEND2, SETBYTE, SLICE, STEP, TO_A, TO_SYM, UNDEF_METHOD, UNPACK1
 from rpyyarv.interp.args import NO_KEYWORDS, _arity_error, _kw_to_positional, _refuse_iseq, setup_params
 
 @unroll_safe
@@ -50,14 +50,16 @@ def invoke(frame, w_ci, w_block=None):
     recv = frame.stack[recv_at]
     # Promoted: the class-word guard is the inline cache; lookup folds away.
     klass = promote(value.class_of(recv))
-    while mid == SEND or mid == SEND2:
+    while mid == SEND or mid == SEND2 or mid == PUBLIC_SEND:
+        # public_send resolves the same way, but the callee stays public.
+        public = mid == PUBLIC_SEND
         target = _send_target(frame, klass, mid, argc, recv_at)
         if target == rubycall.NO_MID:
             break
         _shift_off(frame, recv_at)
         argc -= 1
         mid = target
-        fcall = True
+        fcall = not public
     entry = dispatch.lookup(klass, mid)
     callee_iseq = None
     if _protected_ok(frame, entry, fcall):
@@ -84,6 +86,32 @@ def invoke(frame, w_ci, w_block=None):
         _drop(frame, recv_at)
         debug.count_native()
         return recv
+    if argc == 0 and entry is None and w_block is None:
+        # Kernel#freeze is rb_obj_freeze: a C call, not a send back through it.
+        if mid == FREEZE and dispatch.owner_of(klass, FREEZE) == \
+                send_owners.kernel:
+            v = boot.obj_freeze(recv)
+            _drop(frame, recv_at)
+            debug.count_native()
+            return v
+        # Symbol#to_sym and Array#to_a answer with the receiver itself.
+        if mid == TO_SYM and klass == value.core_class(value.C_SYMBOL) \
+                and dispatch.owner_of(klass, TO_SYM) == klass:
+            _drop(frame, recv_at)
+            debug.count_native()
+            return recv
+        if mid == TO_A and value.is_plain_array(recv) \
+                and dispatch.owner_of(klass, TO_A) == \
+                value.core_class(value.C_ARRAY):
+            _drop(frame, recv_at)
+            debug.count_native()
+            return recv
+        if mid == NEGATIVE_P and value.is_fixnum(recv) \
+                and dispatch.owner_of(klass, NEGATIVE_P) == \
+                value.core_class(value.C_INTEGER):
+            _drop(frame, recv_at)
+            debug.count_native()
+            return value.newbool(value.fix2int(recv) < 0)
     if mid == GETBYTE and argc == 1 and \
             dispatch.owner_of(klass, GETBYTE) == send_owners.string_getbyte:
         v = boot.str_getbyte(recv, frame.stack[recv_at + 1])
@@ -637,6 +665,10 @@ def _send_target_of(klass, mid, name):
         if not helpers.kernel_send_pristine():
             return rubycall.NO_MID
         owner = send_owners.kernel
+    elif mid == PUBLIC_SEND:
+        if not helpers.kernel_public_send_pristine():
+            return rubycall.NO_MID
+        owner = send_owners.kernel
     else:
         if not helpers.basic_send_pristine():
             return rubycall.NO_MID
@@ -880,7 +912,8 @@ def _kw_invoke(frame, w_ci, recv_at, argc, w_block, mid, fcall):
     recv = frame.stack[recv_at]
     klass = promote(value.class_of(recv))
     # Keywords stay topmost, so only the name below them is shifted off.
-    while mid == SEND or mid == SEND2:
+    while mid == SEND or mid == SEND2 or mid == PUBLIC_SEND:
+        public = mid == PUBLIC_SEND
         target = _send_target(frame, klass, mid, argc - len(w_ci.kw_names),
                               recv_at)
         if target == rubycall.NO_MID:
@@ -888,7 +921,7 @@ def _kw_invoke(frame, w_ci, recv_at, argc, w_block, mid, fcall):
         _shift_off(frame, recv_at)
         argc -= 1
         mid = target
-        fcall = True
+        fcall = not public
     entry = dispatch.lookup(klass, mid)
     if _protected_ok(frame, entry, fcall):
         fcall = True
@@ -1082,7 +1115,8 @@ def _splat_invoke(frame, w_ci, recv_at, argc, w_block, mid, fcall):
     rubycall.gc_stress_point()
     recv = frame.stack[recv_at]
     klass = promote(value.class_of(recv))
-    while mid == SEND or mid == SEND2:
+    while mid == SEND or mid == SEND2 or mid == PUBLIC_SEND:
+        public = mid == PUBLIC_SEND
         if len(args) - trailing < 1:
             break
         target = _send_target_of(klass, mid, args[0])
@@ -1090,7 +1124,7 @@ def _splat_invoke(frame, w_ci, recv_at, argc, w_block, mid, fcall):
             break
         args = args[1:]
         mid = target
-        fcall = True
+        fcall = not public
     entry = dispatch.lookup(klass, mid)
     if _protected_ok(frame, entry, fcall):
         fcall = True

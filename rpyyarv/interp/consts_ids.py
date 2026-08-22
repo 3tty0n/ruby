@@ -129,6 +129,21 @@ SEND = symbols.intern('send')
 SEND2 = symbols.intern('__send__')
 
 
+PUBLIC_SEND = symbols.intern('public_send')
+
+
+FREEZE = symbols.intern('freeze')
+
+
+TO_SYM = symbols.intern('to_sym')
+
+
+TO_A = symbols.intern('to_a')
+
+
+NEGATIVE_P = symbols.intern('negative?')
+
+
 # opt_regexpmatch2 falls through to this send; CRuby sets $~ there.
 MATCH = symbols.intern('=~')
 

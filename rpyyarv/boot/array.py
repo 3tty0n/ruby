@@ -67,6 +67,8 @@ rb_ary_unshift1 = _ext('rpyyarv_ary_unshift1', [VALUE, VALUE], VALUE)
 
 rb_ary_hash_freeze = _ext('rpyyarv_ary_hash_freeze', [VALUE], VALUE)
 
+rb_obj_freeze = _ext('rpyyarv_obj_freeze', [VALUE], VALUE)
+
 
 rb_ary_flatten_bang1 = _ext('rpyyarv_ary_flatten_bang1', [VALUE], VALUE)
 
@@ -233,6 +235,10 @@ def ary_unshift1(v, elt):
 
 def ary_hash_freeze(v):
     return rffi.cast(lltype.Signed, rb_ary_hash_freeze(_v(v)))
+
+
+def obj_freeze(v):
+    return rffi.cast(lltype.Signed, rb_obj_freeze(_v(v)))
 
 
 def ary_flatten_bang1(v):
