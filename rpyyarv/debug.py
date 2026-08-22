@@ -191,7 +191,7 @@ def note_load(path, kind):
     if state.channels & LOAD == 0:
         return
     loads.n += 1
-    note('load #%d %-6s %s' % (loads.n, kind, path))
+    note('load #%d %s %s' % (loads.n, kind, path))
 
 
 def note_invalidation(n):
