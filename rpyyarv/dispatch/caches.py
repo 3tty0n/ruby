@@ -25,6 +25,9 @@ class _Owners(object):
         # lookup's own answer, so a repeat send skips the ancestor walk.
         self.res = {}       # klass VALUE -> {mid: MethodEntry}
         self.res_by_mid = {}   # mid -> [klass, ...] keys held in res
+        # The same for lookup_core, which every core operator asks first.
+        self.cres = {}
+        self.cres_by_mid = {}
         self.invalidations = 0
         self.skipped = 0
 
@@ -92,6 +95,25 @@ def keep_resolved(klass, mid, entry):
     _note_key(owners.res_by_mid, mid, klass)
 
 
+@elidable
+def core_resolved(klass, mid, version):
+    table = owners.cres.get(klass, None)
+    if table is None:
+        return LOOKUP_PENDING
+    return table.get(mid, LOOKUP_PENDING)
+
+
+@dont_look_inside
+def keep_core(klass, mid, entry):
+    table = owners.cres.get(klass, None)
+    if table is None:
+        table = {}
+        owners.cres[klass] = table
+        gcroots.register_class(klass)
+    table[mid] = LOOKUP_MISS if entry is None else entry
+    _note_key(owners.cres_by_mid, mid, klass)
+
+
 def site_lookup(site, klass, mid):
     """lookup(), but a repeat send from the same site is two compares.
     Off-trace only: inside one the lookup folds into the class guard."""
@@ -117,6 +139,13 @@ def invalidate_for(mid):
             if table is not None and mid in table:
                 del table[mid]
         del owners.res_by_mid[mid]
+    cres = owners.cres_by_mid.get(mid, None)
+    if cres is not None:
+        for klass in cres:
+            table = owners.cres.get(klass, None)
+            if table is not None and mid in table:
+                del table[mid]
+        del owners.cres_by_mid[mid]
     klasses = owners.by_mid.get(mid, None)
     if klasses is not None:
         for klass in klasses:
@@ -155,6 +184,8 @@ def invalidate_owners():
     owners.ktab = {}
     owners.res = {}
     owners.res_by_mid = {}
+    owners.cres = {}
+    owners.cres_by_mid = {}
     owners.by_mid = {}
     owners.by_sup = {}
     owners.by_sym = {}

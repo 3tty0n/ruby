@@ -305,7 +305,16 @@ def _lookup_core(klass, mid, version):
 
 
 def lookup_core(klass, mid):
-    return _lookup_core(klass, mid, registry.version)
+    """Every core operator asks this first, so off-trace it answers from a
+    cache: the walk it replaces is a dozen table reads per arithmetic op."""
+    if we_are_jitted():
+        return _lookup_core(klass, mid, registry.version)
+    got = core_resolved(klass, mid, registry.version)
+    if got is not LOOKUP_PENDING:
+        return None if got is LOOKUP_MISS else got
+    entry = _lookup_core(klass, mid, registry.version)
+    keep_core(klass, mid, entry)
+    return entry
 
 
 def owns_identity(klass, mid):
@@ -316,7 +325,7 @@ def owns_identity(klass, mid):
 # Imported at the bottom: caches imports core, so this edge can only be
 # bound once core's own definitions exist.
 from rpyyarv.dispatch.caches import (LOOKUP_MISS, LOOKUP_PENDING, keep_resolved,
-                                     resolved,
+                                     resolved, core_resolved, keep_core,
                                      invalidate_for, invalidate_owners, owner_of, owners,
                                      _fill_owner, OWNER_UNKNOWN)
 from rpyyarv.dispatch.trampoline import (flush_trampoline_cache,
