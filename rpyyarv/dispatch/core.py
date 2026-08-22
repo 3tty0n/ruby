@@ -255,20 +255,18 @@ def _lookup_filled(klass, mid):
 
 def lookup(klass, mid):
     """supers skips iclasses, so CRuby is asked who owns mid."""
-    # Only off-trace: a trace folds _lookup away, and a fill recorded into
-    # one would stay in it as a dict store on every later run.
-    jitted = we_are_jitted()
-    if not jitted:
-        got = resolved(klass, mid, registry.version)
-        if got is not LOOKUP_PENDING:
-            return None if got is LOOKUP_MISS else got
+    got = resolved(klass, mid, registry.version)
+    if got is not LOOKUP_PENDING:
+        return None if got is LOOKUP_MISS else got
     entry = _lookup(klass, mid, registry.version)
     if entry is OWNER_PENDING:
         _fill_owner(klass, mid)
         entry = _lookup_filled(klass, mid)
         if entry is OWNER_PENDING:
             return None
-    if not jitted:
+    # Only the fill is off-trace: a trace folds the walk away already, and a
+    # fill recorded into one would stay in it as a dict store on every run.
+    if not we_are_jitted():
         keep_resolved(klass, mid, entry)
     return entry
 
@@ -307,13 +305,13 @@ def _lookup_core(klass, mid, version):
 def lookup_core(klass, mid):
     """Every core operator asks this first, so off-trace it answers from a
     cache: the walk it replaces is a dozen table reads per arithmetic op."""
-    if we_are_jitted():
-        return _lookup_core(klass, mid, registry.version)
     got = core_resolved(klass, mid, registry.version)
     if got is not LOOKUP_PENDING:
         return None if got is LOOKUP_MISS else got
     entry = _lookup_core(klass, mid, registry.version)
-    keep_core(klass, mid, entry)
+    # Only the fill is off-trace: recorded into one it would stay a store.
+    if not we_are_jitted():
+        keep_core(klass, mid, entry)
     return entry
 
 
