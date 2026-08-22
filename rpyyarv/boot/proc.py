@@ -6,8 +6,10 @@ from rpython.rtyper.lltypesystem import lltype, rffi
 from rpyyarv import symbols
 from rpyyarv.boot._core import (_ext, _v, VALUE, VALUEP, INTP, MAX_ARGC,
                                 BLOCK_HOOK, TRAMP_HOOK, _enter_status,
-                                _leave_status, _enter_argv, _leave_argv,
-                                _failed, _failed_mid, RubyError)
+                                _leave_status, _leave_status_code,
+                                _enter_argv, _leave_argv,
+                                _failed, _failed_mid, RubyError,
+                                ForeignJump, FOREIGN_TAG)
 
 
 rb_call0 = _ext('rpyyarv_call0', [VALUE, rffi.CCHARP, INTP], VALUE, reenters=True)
@@ -184,10 +186,12 @@ def call_with_proc(recv, rid, args, proc, mid, kw=False):
     v = rb_call_with_proc(_v(recv), _v(rid),
                           rffi.cast(rffi.INT, argc), argv, _v(proc),
                           rffi.cast(rffi.INT, 1 if kw else 0), state)
-    failed = _leave_status(state)
+    code = _leave_status_code(state)
     ret = rffi.cast(lltype.Signed, v)
     _leave_argv(argv)
-    if failed:
+    if code == FOREIGN_TAG:
+        raise ForeignJump()
+    if code != 0:
         _failed_mid(mid)
     return ret
 

@@ -158,6 +158,22 @@ def _enter_status():
     return p
 
 
+FOREIGN_TAG = -2
+
+
+class ForeignJump(Exception):
+    """A tag CRuby aimed past our frames; boot_shim re-issues it."""
+
+
+def _leave_status_code(p):
+    d = _nesting.status - 1
+    _nesting.status = d
+    code = rffi.cast(lltype.Signed, p[0])
+    if d >= SHIM_DEPTH:
+        lltype.free(p, flavor='raw')
+    return code
+
+
 def _leave_status(p):
     d = _nesting.status - 1
     _nesting.status = d

@@ -7,7 +7,7 @@ from rpyyarv import optable
 from rpyyarv import rubycall
 from rpyyarv import value
 from rpyyarv.error import RubyException, UnsupportedOperation
-from rpyyarv.frame import Frame, PENDING_BREAK, PENDING_NEXT, PENDING_NONE, PENDING_RAISE, PENDING_RETRY, PENDING_RETURN
+from rpyyarv.frame import Frame, PENDING_BREAK, PENDING_FOREIGN, PENDING_NEXT, PENDING_NONE, PENDING_RAISE, PENDING_RETRY, PENDING_RETURN
 from rpyyarv.iseq import CATCH_ENSURE, CATCH_RESCUE, CATCH_RETRY
 from rpyyarv.rlib import dont_look_inside
 
@@ -32,6 +32,8 @@ def _rethrow(throw):
         raise block_mod.BlockReturn(throw.target, throw.value)
     if throw.kind == PENDING_RETRY:
         raise block_mod.BlockRetry()
+    if throw.kind == PENDING_FOREIGN:
+        raise block_mod.ForeignTag()
     raise block_mod.BlockNext(throw.value)
 
 
@@ -128,6 +130,9 @@ def _run_catch(frame, entry, throw):
     callee.pending_value = throw.value
     callee.pending_block = throw.w_block
     callee.pending_frame = throw.target
+    if throw.kind == PENDING_FOREIGN:
+        # errinfo carries the parked tag's target, not an exception object.
+        return execute(w_iseq, callee)
     return _run_with_errinfo(w_iseq, callee, callee.local_get(0)
                              if w_iseq.nlocals > 0 else value.Q_NIL)
 
@@ -164,6 +169,8 @@ def _unwind(iseq, frame, throw, epc):
             throw = Throw(PENDING_NEXT, e.value)
         except block_mod.BlockRetry:
             throw = Throw(PENDING_RETRY, value.Q_NIL)
+        except block_mod.ForeignTag:
+            throw = Throw(PENDING_FOREIGN, value.Q_NIL)
         else:
             frame.reset_sp(entry.sp)
             frame.push(result)

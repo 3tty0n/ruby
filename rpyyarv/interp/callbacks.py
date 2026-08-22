@@ -270,7 +270,11 @@ def _attr_from_cruby(entry, recv, args, w_block=None):
 def _call_with_block(recv, mid, args, w_block, kw=False):
     if w_block.kind == block_mod.KIND_PROC:
         # Already a Proc: handed over as itself, it keeps module_eval's cref.
-        return rubycall.call_with_proc(recv, mid, args, w_block.proc_value, kw)
+        try:
+            return rubycall.call_with_proc(recv, mid, args,
+                                           w_block.proc_value, kw)
+        except boot.ForeignJump:
+            raise block_mod.ForeignTag()
     handle = _alloc_handle(w_block)
     # No release: the handle's owner dies with the ifunc, freeing the slot.
     try:

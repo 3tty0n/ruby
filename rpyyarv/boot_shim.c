@@ -35,6 +35,9 @@ static int block_unwind;
 /* A tag rb_protect caught inside a yield, re-issued past the trampoline. */
 static int pending_tag;
 
+/* rpyyarv_call_with_proc: the tag rides in pending_tag, not errinfo. */
+#define RPYYARV_PARKED_TAG (-2)
+
 /* Unwind crosses libruby's C frames; under Exception so `rescue` misses it. */
 static VALUE
 unwind_class(void)
@@ -1797,6 +1800,14 @@ rpyyarv_call_with_proc(uintptr_t recv, uintptr_t mid, int argc,
 
     *state = 0;
     VALUE r = rb_protect(call_with_proc_body, (VALUE)&a, state);
+    /* A foreign Proc's break/return names a frame outside ours. Park the tag
+       for the trampoline to re-issue; errinfo holds the throw's target, so it
+       is left alone and never read as an exception. */
+    if (*state && *state != RUBY_TAG_RAISE) {
+        pending_tag = *state;
+        *state = RPYYARV_PARKED_TAG;
+        return (uintptr_t)Qnil;
+    }
     absorb_unwind(state);
     if (*state) return (uintptr_t)Qnil;
     return (uintptr_t)r;

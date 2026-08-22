@@ -8,6 +8,8 @@ PENDING_BREAK = 2
 PENDING_NEXT = 3
 PENDING_RETURN = 4
 PENDING_RETRY = 5
+# A tag CRuby aimed past us: ensures run, then the shim re-issues it.
+PENDING_FOREIGN = 6
 
 
 class SharedLocals(object):

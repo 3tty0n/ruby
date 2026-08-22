@@ -14,7 +14,7 @@ from rpyyarv import rubycall
 from rpyyarv import symbols
 from rpyyarv import value
 from rpyyarv.error import RubyException, UnsupportedOperation
-from rpyyarv.frame import Frame, PENDING_BREAK, PENDING_NEXT, PENDING_RAISE, PENDING_RETURN
+from rpyyarv.frame import Frame, PENDING_BREAK, PENDING_FOREIGN, PENDING_NEXT, PENDING_RAISE, PENDING_RETURN
 from rpyyarv.iseq import NO_BLOCK_ISEQ
 from rpyyarv.rlib import JitDriver, set_user_param
 
@@ -198,6 +198,8 @@ def _execute_guarded(iseq, frame, pc):
             throw = Throw(PENDING_RETURN, e.value, None, 'return', e.frame)
         except block_mod.BlockNext, e:
             throw = Throw(PENDING_NEXT, e.value)
+        except block_mod.ForeignTag:
+            throw = Throw(PENDING_FOREIGN, value.Q_NIL)
         return _execute_unwinding(iseq, frame, throw)
     finally:
         gcroots.pop_frame(frame)
@@ -216,6 +218,8 @@ def _execute_unwinding(iseq, frame, throw):
             throw = Throw(PENDING_RETURN, e.value, None, 'return', e.frame)
         except block_mod.BlockNext, e:
             throw = Throw(PENDING_NEXT, e.value)
+        except block_mod.ForeignTag:
+            throw = Throw(PENDING_FOREIGN, value.Q_NIL)
 
 
 def _execute(iseq, frame, pc):
