@@ -1,0 +1,36 @@
+diff --git a/benchmarks/Ruby/havlak.rb b/benchmarks/Ruby/havlak.rb
+index d538292..fcb6dfd 100644
+--- a/benchmarks/Ruby/havlak.rb
++++ b/benchmarks/Ruby/havlak.rb
+@@ -413,7 +413,7 @@ class HavlakLoopFinder
+     end
+ 
+     (0...size).each do |i|
+-      @non_back_preds.append(Set.new)
++      @non_back_preds.append(SomSet.new)
+       @back_preds.append(Vector.new)
+       @nodes[i] = UnionFindNode.new
+     end
+diff --git a/benchmarks/Ruby/som.rb b/benchmarks/Ruby/som.rb
+index 583fed4..2b0dadf 100644
+--- a/benchmarks/Ruby/som.rb
++++ b/benchmarks/Ruby/som.rb
+@@ -234,7 +234,8 @@ class Vector
+   end
+ end
+ 
+-class Set
++# SomSet, not Set: Ruby 4.0 has a core Set this would reopen instead.
++class SomSet
+   def initialize(size = INITIAL_SIZE)
+     @items = Vector.new(size)
+   end
+@@ -270,7 +271,7 @@ class Set
+   end
+ end
+ 
+-class IdentitySet < Set
++class IdentitySet < SomSet
+   def contains(obj)
+     has_some { |it| it.equal? obj }
+   end
