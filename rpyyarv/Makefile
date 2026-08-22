@@ -168,6 +168,7 @@ gccheck:
 	          test/protected.rb \
 	          test/rangeeach.rb \
 	          test/foreignbreak.rb \
+	          test/symblock.rb \
 	          test/bmethodreturn.rb \
 	          $(TOP)/benchmark/app_*.rb $(TOP)/benchmark/so_*.rb; do \
 	   n=`basename $$s`; \

@@ -3,6 +3,8 @@ from __future__ import absolute_import
 
 from rpyyarv import block as block_mod
 from rpyyarv import boot
+from rpyyarv import debug
+from rpyyarv import dispatch
 from rpyyarv import rubycall
 from rpyyarv import symbols
 from rpyyarv import value
@@ -270,7 +272,27 @@ def _call_foreign_block(w_block, args):
     while i < len(args):
         rest.append(args[i])
         i += 1
-    return rubycall.call(args[0], w_block.mid, rest)
+    return _sym_send(args[0], w_block.mid, rest)
+
+
+@dont_look_inside
+def _sym_send(recv, mid, args):
+    """&:sym is a public send; one RPyYARV owns need not cross to CRuby."""
+    entry = dispatch.lookup(value.class_of(recv), mid)
+    if entry is not None and not (entry.private or entry.prot):
+        if entry.kind == dispatch.KIND_ATTR_READER and len(args) == 0:
+            debug.count_native()
+            return dispatch.ivar_get(recv, entry.ivar)
+        if entry.kind == dispatch.KIND_ISEQ and entry.w_iseq.simple_params \
+                and len(args) == entry.w_iseq.nparams:
+            callee = Frame(entry.w_iseq, recv, None, entry)
+            i = 0
+            while i < len(args):
+                callee.local_set(i, args[i])
+                i += 1
+            debug.count_native()
+            return execute(entry.w_iseq, callee, 0)
+    return rubycall.call(recv, mid, args, True)
 
 
 @dont_look_inside
