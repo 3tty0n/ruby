@@ -64,6 +64,8 @@ def install():
         value.core_class(value.C_INTEGER), STEP)
     send_owners.struct_class = dispatch.const_get(
         value.core_class(value.C_OBJECT), symbols.intern('Struct'))
+    send_owners.data_class = dispatch.const_get(
+        value.core_class(value.C_OBJECT), symbols.intern('Data'))
     method_classes.method = dispatch.const_get(
         value.core_class(value.C_OBJECT), symbols.intern('Method'))
     method_classes.unbound = dispatch.const_get(

@@ -58,3 +58,28 @@ puts I.new.made
 # No block: unchanged.
 puts Class.new(Base).new.who
 puts Module.new.instance_methods.inspect
+
+# Struct.new and Data.define module_exec their block on the class they make,
+# exactly as Class.new does (struct.c).
+S2 = Struct.new(:a, :b) do
+  def sum; a + b; end
+  def self.build(x) = new(x, x)
+end
+puts [S2.new(1, 2).sum, S2.build(3).sum].inspect
+puts S2.instance_methods(false).sort.inspect
+puts Object.private_instance_methods.include?(:sum)
+puts Struct.new(:x) { def dbl = x * 2 }.new(4).dbl
+puts Struct.new(:q).new(9).q
+D3 = Data.define(:m) do
+  def shout = "#{m}!"
+end
+puts D3.new(m: "hi").shout
+puts Data.define(:n).new(n: 1).n
+K2 = Struct.new(:a, keyword_init: true) do
+  def twice = a * 2
+end
+puts K2.new(a: 5).twice
+class SubS < Struct.new(:v)
+  def plus1 = v + 1
+end
+puts SubS.new(1).plus1

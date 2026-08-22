@@ -13,7 +13,7 @@ from rpyyarv.error import UnsupportedOperation
 from rpyyarv.frame import Frame
 from rpyyarv.rlib import dont_look_inside, promote, raw_word, unroll_safe
 
-from rpyyarv.interp.consts_ids import ALIAS_METHOD, ALLOCATE, ARITY, ATTR_ACCESSOR, ATTR_READER, ATTR_WRITER, BACKTRACE_PRIM, BLOCK_GIVEN, BUFFER, CALLEE_UNDERSCORE, CGI_CONST, CLASS_EVAL, CORE_ALIAS, CORE_GVAR_ALIAS, CORE_LAMBDA, CORE_UNDEF, DEFINE_METHOD, DIR_UNDERSCORE, EACH_SLICE, EACH_WITH_INDEX, ENC_FIND, EVAL, FORCE_ENCODING, GETBYTE, HASH_MERGE_KWD, HASH_MERGE_PTR, HASH_PAIRS_PRIM, INDEX, INITIALIZE, INSTANCE_EVAL, INSTANCE_EXEC, ITSELF, KERNEL_PROC, LAMBDA_P, MATCH, METHOD_UNDERSCORE, MODULE_EVAL, MODULE_FUNCTION, NEW, OFFSET, OWNER, PARAMETERS, PRIVATE, PRIVATE_CLASS_METHOD, PROTECTED, PUBLIC, REMOVE_METHOD, REQUIRE_PRIM, REVERSE_EACH, RUBY2_KEYWORDS, SEND, SEND2, SETBYTE, SLICE, STEP, UNDEF_METHOD, UNPACK1
+from rpyyarv.interp.consts_ids import ALIAS_METHOD, ALLOCATE, ARITY, ATTR_ACCESSOR, ATTR_READER, ATTR_WRITER, BACKTRACE_PRIM, BLOCK_GIVEN, BUFFER, CALLEE_UNDERSCORE, CGI_CONST, CLASS_EVAL, CORE_ALIAS, CORE_GVAR_ALIAS, CORE_LAMBDA, CORE_UNDEF, DEFINE, DEFINE_METHOD, DIR_UNDERSCORE, EACH_SLICE, EACH_WITH_INDEX, ENC_FIND, EVAL, FORCE_ENCODING, GETBYTE, HASH_MERGE_KWD, HASH_MERGE_PTR, HASH_PAIRS_PRIM, INDEX, INITIALIZE, INSTANCE_EVAL, INSTANCE_EXEC, ITSELF, KERNEL_PROC, LAMBDA_P, MATCH, METHOD_UNDERSCORE, MODULE_EVAL, MODULE_FUNCTION, NEW, OFFSET, OWNER, PARAMETERS, PRIVATE, PRIVATE_CLASS_METHOD, PROTECTED, PUBLIC, REMOVE_METHOD, REQUIRE_PRIM, REVERSE_EACH, RUBY2_KEYWORDS, SEND, SEND2, SETBYTE, SLICE, STEP, UNDEF_METHOD, UNPACK1
 from rpyyarv.interp.args import NO_KEYWORDS, _arity_error, _kw_to_positional, _refuse_iseq, setup_params
 
 @unroll_safe
@@ -273,6 +273,18 @@ def invoke(frame, w_ci, w_block=None):
             and dispatch.owner_of(klass, NEW) == \
             value.core_class(value.C_CLASS):
         return _class_new_block(frame, recv, recv_at, argc, w_block)
+    # rb_struct_s_def module_execs its block the same way, on the new Struct.
+    if mid == NEW and w_block is not None and entry is None \
+            and w_block.kind == block_mod.KIND_ISEQ \
+            and send_owners.struct_class != 0 \
+            and recv == send_owners.struct_class:
+        return _class_new_block(frame, recv, recv_at, argc, w_block)
+    # Data.define does the same for the Data class it makes (struct.c).
+    if mid == DEFINE and w_block is not None and entry is None \
+            and w_block.kind == block_mod.KIND_ISEQ \
+            and send_owners.data_class != 0 \
+            and recv == send_owners.data_class:
+        return _class_new_block(frame, recv, recv_at, argc, w_block, DEFINE)
     # &proc too: out through CRuby the def would land on the proc's cref.
     if w_block is not None and entry is None and argc == 0 \
             and (mid == CLASS_EVAL or mid == MODULE_EVAL) \
@@ -586,6 +598,7 @@ class _SendOwners(object):
     _immutable_fields_ = ['kernel?', 'basic?', 'string_getbyte?',
                           'string_setbyte?', 'array_each_slice?',
                           'array_each_with_index?', 'integer_step?', 'struct_class?',
+                          'data_class?',
                           'comparable?', 'class_allocate?',
                           'string_force_encoding?', 'string_unpack1?',
                           'array_pack?']
@@ -600,6 +613,7 @@ class _SendOwners(object):
         self.array_each_with_index = 0
         self.integer_step = 0
         self.struct_class = 0
+        self.data_class = 0
         self.comparable = 0
         self.class_allocate = 0
         self.string_force_encoding = 0
@@ -846,6 +860,15 @@ def _is_hash(v):
     return boot.is_hash(v)
 
 
+def _makes_class(recv, mid):
+    if mid == NEW:
+        return send_owners.struct_class != 0 \
+            and recv == send_owners.struct_class
+    if mid == DEFINE:
+        return send_owners.data_class != 0 and recv == send_owners.data_class
+    return False
+
+
 @unroll_safe
 def _kw_invoke(frame, w_ci, recv_at, argc, w_block, mid, fcall):
     """A send with VM_CALL_KWARG keywords or a VM_CALL_KW_SPLAT Hash on top."""
@@ -951,6 +974,15 @@ def _kw_invoke(frame, w_ci, recv_at, argc, w_block, mid, fcall):
             i += 1
         args.append(h)
     _drop(frame, recv_at)
+    # Struct.new(..., keyword_init: true) still module_execs its block.
+    if w_block is not None and entry is None and not w_ci.blockarg \
+            and w_block.kind == block_mod.KIND_ISEQ \
+            and _makes_class(recv, mid):
+        if pass_kw:
+            made = rubycall.call_kw(recv, mid, args)
+        else:
+            made = rubycall.call(recv, mid, args)
+        return _exec_on_made(frame, made, w_block)
     if w_block is not None:
         if w_ci.blockarg:
             return _call_with_block(recv, mid, args, w_block, pass_kw)
@@ -1251,7 +1283,7 @@ def _opt_send(frame, mid, argc):
 # above is already bound.
 from rpyyarv.interp.builtins import _iseq_parameters, _array_each_slice, _array_each_with_index, _integer_step, _array_new, _array_new_block, _backtrace, _comparable_op, _dir_of, _encoding_find, _running_method, encodings, proxy, regexp_class, vm_core
 from rpyyarv.interp.supers import _ruby2_keywords
-from rpyyarv.interp.defs import _class_new_block, _alias_method, _attr_name, _core_method, _define_attrs, _define_bmethod, _define_bmethod_modfunc, _in_body_of, _instance_eval, _module_eval_block, _module_function, _private_class_method, _remove_or_undef, _visibility_names, _visibility_pragma
+from rpyyarv.interp.defs import _class_new_block, _exec_on_made, _alias_method, _attr_name, _core_method, _define_attrs, _define_bmethod, _define_bmethod_modfunc, _in_body_of, _instance_eval, _module_eval_block, _module_function, _private_class_method, _remove_or_undef, _visibility_names, _visibility_pragma
 from rpyyarv.interp.evalsrc import _eval_receiver, _eval_rpy, _module_eval_rpy
 from rpyyarv.interp.blocks import _block_from_value, _block_send, _block_send_args, _is_proxy_call, _proc_block_of, _run_bmethod, _to_proc
 from rpyyarv.interp.callbacks import _call_with_block, _check_block_error

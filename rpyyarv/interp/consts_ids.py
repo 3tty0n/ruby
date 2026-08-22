@@ -174,6 +174,9 @@ PUBLIC = symbols.intern('public')
 PROTECTED = symbols.intern('protected')
 
 
+DEFINE = symbols.intern('define')
+
+
 REMOVE_METHOD = symbols.intern('remove_method')
 
 
