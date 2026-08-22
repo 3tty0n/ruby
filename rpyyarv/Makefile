@@ -170,6 +170,7 @@ gccheck:
 	          test/foreignbreak.rb \
 	          test/symblock.rb \
 	          test/pubsend.rb \
+	          test/aliasinherit.rb \
 	          test/bmethodreturn.rb \
 	          $(TOP)/benchmark/app_*.rb $(TOP)/benchmark/so_*.rb; do \
 	   n=`basename $$s`; \

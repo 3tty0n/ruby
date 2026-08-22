@@ -353,12 +353,15 @@ def _core_method(frame, mid, recv, recv_at, argc):
         helpers.refresh()
         return ret
     old = _sym_mid(frame.stack[recv_at + 3])
-    entry = dispatch.own_lookup(cbase, old)
+    # Not own_lookup: `alias` copies whatever the name resolves to, ancestors
+    # included, so an inherited method has to stay an RPyYARV entry too.
+    entry = dispatch.lookup(cbase, old)
     dispatch.undefine(cbase, name)
     if entry is not None and entry.kind == dispatch.KIND_ISEQ:
         # An RPyYARV method: define installs CRuby's resolving trampoline.
         dispatch.define(cbase, name, entry.w_iseq, entry.private,
-                        entry.cref, entry.lexical, entry.mid, entry.owner)
+                        entry.cref, entry.lexical, entry.mid, entry.owner,
+                        entry.prot)
         _drop(frame, recv_at)
         return value.Q_NIL
     if entry is not None:
@@ -384,7 +387,7 @@ def _alias_method(frame, recv, recv_at):
             if entry.kind == dispatch.KIND_ISEQ:
                 dispatch.define(recv, name, entry.w_iseq, entry.private,
                                 entry.cref, entry.lexical,
-                                entry.mid, entry.owner)
+                                entry.mid, entry.owner, entry.prot)
                 _drop(frame, recv_at)
                 return new_v
             dispatch.define_attr(recv, name, entry.ivar, entry.kind)
