@@ -430,9 +430,12 @@ def run_suite(suite, names, engines, procs, raw)
         r[:info] = pinfo
         result[ename] = r
         raw["#{suite.name}/#{bench}/#{ename}"] = r
+        # The reason, not just the verdict: a bare FAIL cannot be diagnosed.
+        verdict = r[:status] && [r[:status], r[:why]].compact.reject(&:empty?).join(": ")
         puts format("  %-16s %-12s %s", bench, ename,
-                    r[:status] || format("median %.2f ms  min %.2f  spread %.2fx  (n=%d)",
-                                         r[:median], r[:min], r[:spread] || 1.0, r[:n]))
+                    verdict || format("median %.2f ms  min %.2f  spread %.2fx  (n=%d)",
+                                      r[:median], r[:min], r[:spread] || 1.0, r[:n]))
+        puts r[:err_tail].to_s.lines.last(8).map { |l| "      | #{l.chomp}" } if r[:status] && r[:err_tail]
       end
     end
     rows << [bench, suite.label(bench), result, nil]
