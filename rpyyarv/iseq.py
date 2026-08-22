@@ -146,6 +146,11 @@ class W_CallInfo(object):
         self.simple = simple
         # A receiverless call, or an explicit `self.`: may reach a private one.
         self.fcall = fcall
+        # A monomorphic inline cache the interpreter reads instead of the
+        # method tables; the JIT folds the lookup away and never sees it.
+        self.ic_klass = 0
+        self.ic_version = None
+        self.ic_entry = None
 
     def repr(self):
         return '<W_CallInfo %s argc=%d>' % (symbols.name_of(self.mid),

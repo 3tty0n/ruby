@@ -11,7 +11,7 @@ from rpyyarv import symbols
 from rpyyarv import value
 from rpyyarv.error import UnsupportedOperation
 from rpyyarv.frame import Frame
-from rpyyarv.rlib import dont_look_inside, promote, raw_word, unroll_safe
+from rpyyarv.rlib import dont_look_inside, promote, raw_word, unroll_safe, we_are_jitted
 
 from rpyyarv.interp.consts_ids import ALIAS_METHOD, ALLOCATE, ARITY, ATTR_ACCESSOR, ATTR_READER, ATTR_WRITER, BACKTRACE_PRIM, BLOCK_GIVEN, BUFFER, CALLEE_UNDERSCORE, CGI_CONST, CLASS_EVAL, CORE_ALIAS, CORE_GVAR_ALIAS, CORE_LAMBDA, CORE_UNDEF, DEFINE, DEFINE_METHOD, DIR_UNDERSCORE, EACH_SLICE, EACH_WITH_INDEX, ENC_FIND, EVAL, FORCE_ENCODING, FREEZE, GETBYTE, HASH_MERGE_KWD, HASH_MERGE_PTR, HASH_PAIRS_PRIM, INDEX, INITIALIZE, INSTANCE_EVAL, INSTANCE_EXEC, ITSELF, KERNEL_PROC, LAMBDA_P, MATCH, METHOD_UNDERSCORE, MODULE_EVAL, MODULE_FUNCTION, NEGATIVE_P, NEW, OFFSET, OWNER, PARAMETERS, PRIVATE, PRIVATE_CLASS_METHOD, PROTECTED, PUBLIC, PUBLIC_SEND, REMOVE_METHOD, REQUIRE_PRIM, REVERSE_EACH, RUBY2_KEYWORDS, SEND, SEND2, SETBYTE, SLICE, STEP, TO_A, TO_SYM, UNDEF_METHOD, UNPACK1
 from rpyyarv.interp.args import NO_KEYWORDS, _arity_error, _kw_to_positional, _refuse_iseq, setup_params
@@ -60,7 +60,10 @@ def invoke(frame, w_ci, w_block=None):
         argc -= 1
         mid = target
         fcall = not public
-    entry = dispatch.lookup(klass, mid)
+    if mid == w_ci.mid and not we_are_jitted():
+        entry = dispatch.site_lookup(w_ci, klass, mid)
+    else:
+        entry = dispatch.lookup(klass, mid)
     callee_iseq = None
     if _protected_ok(frame, entry, fcall):
         fcall = True

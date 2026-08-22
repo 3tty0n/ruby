@@ -29,11 +29,15 @@ def _install_trampoline(klass, mid, visibility, entry):
         return
     # CRuby clears its method cache for this def and calls our hook back;
     # define() already dropped exactly the entries that name mid.
+    rid = rubycall.rid(mid)
+    prev = own_hook.rid
+    own_hook.rid = rid
     own_hook.depth += 1
     try:
-        key = boot.define_method_entry(klass, rubycall.rid(mid), visibility)
+        key = boot.define_method_entry(klass, rid, visibility)
     finally:
         own_hook.depth -= 1
+        own_hook.rid = prev
     # Copies of the entry (alias, define_method(Method)) share this def.
     if key != 0:
         registry.defs[key] = entry

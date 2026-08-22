@@ -7,7 +7,7 @@ from rpyyarv import gcroots
 from rpyyarv import symbols
 from rpyyarv import rubycall
 from rpyyarv.rlib import elidable, dont_look_inside
-from rpyyarv.dispatch.core import registry, MethodEntry, Version
+from rpyyarv.dispatch.core import lookup, registry, MethodEntry, Version
 
 
 class _Owners(object):
@@ -36,6 +36,8 @@ class _OwnHook(object):
     """Depth of our own trampoline installs, which CRuby reports back to us."""
     def __init__(self):
         self.depth = 0
+        # The name being installed; only a report for it is ours to skip.
+        self.rid = 0
 
 
 own_hook = _OwnHook()
@@ -43,11 +45,14 @@ own_hook = _OwnHook()
 
 def method_state_changed(klass, rid):
     """CRuby cleared its method cache. If our own def caused it, the precise
-    invalidate_for has already run; anything else is someone else's change."""
-    if own_hook.depth > 0:
+    invalidate_for has already run; anything else is someone else's change.
+    A method_added hook can define or include under us, so only a report that
+    names what we are installing may be skipped."""
+    own_rid = boot.as_signed(rid)
+    if own_hook.depth > 0 and own_rid != 0 and own_rid == own_hook.rid:
         owners.skipped += 1
         return
-    debug.count_invalidation(boot.as_signed(klass), boot.as_signed(rid))
+    debug.count_invalidation(boot.as_signed(klass), own_rid)
     invalidate_owners()
 
 
@@ -85,6 +90,20 @@ def keep_resolved(klass, mid, entry):
         gcroots.register_class(klass)
     table[mid] = LOOKUP_MISS if entry is None else entry
     _note_key(owners.res_by_mid, mid, klass)
+
+
+def site_lookup(site, klass, mid):
+    """lookup(), but a repeat send from the same site is two compares.
+    Off-trace only: inside one the lookup folds into the class guard."""
+    if site.ic_klass == klass and site.ic_version is registry.version:
+        got = site.ic_entry
+        return None if got is LOOKUP_MISS else got
+    entry = lookup(klass, mid)
+    # Registered by keep_resolved, so the class cannot die under the cache.
+    site.ic_entry = LOOKUP_MISS if entry is None else entry
+    site.ic_klass = klass
+    site.ic_version = registry.version
+    return entry
 
 
 def invalidate_for(mid):
