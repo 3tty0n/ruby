@@ -1810,7 +1810,7 @@ do_include_modules_at(const VALUE klass, VALUE c, VALUE module, int search_super
         RB_DEBUG_COUNTER_INC(cvar_include_invalidate);
         ruby_vm_global_cvar_state++;
         // The chain moved even when the module has no method to clear a cache for.
-        rb_rpyyarv_method_state_changed();
+        rb_rpyyarv_method_state_changed(module, 0);
         tbl = RCLASS_M_TBL(module);
         if (tbl && rb_id_table_size(tbl)) {
             if (search_super) { // include

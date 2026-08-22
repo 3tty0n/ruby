@@ -7,7 +7,7 @@ from rpyyarv import gcroots
 from rpyyarv import symbols
 from rpyyarv import rubycall
 from rpyyarv.rlib import elidable, dont_look_inside
-from rpyyarv.dispatch.core import registry, Version
+from rpyyarv.dispatch.core import registry, MethodEntry, Version
 
 
 class _Owners(object):
@@ -22,6 +22,9 @@ class _Owners(object):
         self.by_mid = {}    # mid -> [klass, ...] keys held in tab
         self.by_sup = {}    # mid -> [(klass, owner), ...] keys held in stab
         self.by_sym = {}    # respond_to? Symbol -> [klass, ...] keys in rtab
+        # lookup's own answer, so a repeat send skips the ancestor walk.
+        self.res = {}       # klass VALUE -> {mid: MethodEntry}
+        self.res_by_mid = {}   # mid -> [klass, ...] keys held in res
         self.invalidations = 0
         self.skipped = 0
 
@@ -38,12 +41,13 @@ class _OwnHook(object):
 own_hook = _OwnHook()
 
 
-def method_state_changed():
+def method_state_changed(klass, rid):
     """CRuby cleared its method cache. If our own def caused it, the precise
     invalidate_for has already run; anything else is someone else's change."""
     if own_hook.depth > 0:
         owners.skipped += 1
         return
+    debug.count_invalidation(boot.as_signed(klass), boot.as_signed(rid))
     invalidate_owners()
 
 
@@ -58,10 +62,42 @@ def _note_key(index, name, klass):
         index[name] = [klass]
 
 
+# A walk that has not run yet, and one that ran and found nothing.
+LOOKUP_PENDING = MethodEntry(None, False)
+LOOKUP_MISS = MethodEntry(None, False)
+
+
+@elidable
+def resolved(klass, mid, version):
+    """The cached answer, LOOKUP_PENDING when the walk still owes one."""
+    table = owners.res.get(klass, None)
+    if table is None:
+        return LOOKUP_PENDING
+    return table.get(mid, LOOKUP_PENDING)
+
+
+@dont_look_inside
+def keep_resolved(klass, mid, entry):
+    table = owners.res.get(klass, None)
+    if table is None:
+        table = {}
+        owners.res[klass] = table
+        gcroots.register_class(klass)
+    table[mid] = LOOKUP_MISS if entry is None else entry
+    _note_key(owners.res_by_mid, mid, klass)
+
+
 def invalidate_for(mid):
     """A def of mid stales only answers naming mid; drop exactly those.
     kind_of? does not depend on methods, so ktab is never touched here."""
     owners.skipped += 1
+    res = owners.res_by_mid.get(mid, None)
+    if res is not None:
+        for klass in res:
+            table = owners.res.get(klass, None)
+            if table is not None and mid in table:
+                del table[mid]
+        del owners.res_by_mid[mid]
     klasses = owners.by_mid.get(mid, None)
     if klasses is not None:
         for klass in klasses:
@@ -98,6 +134,8 @@ def invalidate_owners():
     owners.stab = {}
     owners.rtab = {}
     owners.ktab = {}
+    owners.res = {}
+    owners.res_by_mid = {}
     owners.by_mid = {}
     owners.by_sup = {}
     owners.by_sym = {}

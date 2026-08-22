@@ -643,9 +643,9 @@ rpyyarv_set_const_hook(void (*fn)(void))
 }
 
 void
-rpyyarv_set_method_hook(void (*fn)(void))
+rpyyarv_set_method_hook(void (*fn)(uintptr_t, uintptr_t))
 {
-    rb_rpyyarv_set_method_hook(fn);
+    rb_rpyyarv_set_method_hook((void (*)(VALUE, VALUE))fn);
 }
 
 void

@@ -168,7 +168,7 @@ void rpyyarv_set_handle_mark_callback(rpyyarv_handle_mark_fn fn);
 void rpyyarv_set_const_hook(void (*fn)(void));
 
 /* From rb_clear_method_cache: CRuby's funnel for def/undef/alias/include. */
-void rpyyarv_set_method_hook(void (*fn)(void));
+void rpyyarv_set_method_hook(void (*fn)(uintptr_t, uintptr_t));
 
 void rpyyarv_gc_start(void);
 

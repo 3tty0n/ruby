@@ -343,18 +343,19 @@ rb_rpyyarv_constant_state_changed(ID id)
     if (rpyyarv_constant_hook) rpyyarv_constant_hook(id);
 }
 
-static void (*rpyyarv_method_hook)(void);
+static void (*rpyyarv_method_hook)(VALUE, VALUE);
 
 void
-rb_rpyyarv_set_method_hook(void (*fn)(void))
+rb_rpyyarv_set_method_hook(void (*fn)(VALUE, VALUE))
 {
     rpyyarv_method_hook = fn;
 }
 
+/* mid 0 when the change is a chain move with no single name behind it. */
 void
-rb_rpyyarv_method_state_changed(void)
+rb_rpyyarv_method_state_changed(VALUE klass, ID mid)
 {
-    if (rpyyarv_method_hook) rpyyarv_method_hook();
+    if (rpyyarv_method_hook) rpyyarv_method_hook(klass, (VALUE)mid);
 }
 
 // The owner CRuby's dispatch chose, so a trampoline can honor super/bind_call.
@@ -671,7 +672,7 @@ clear_iclass_method_cache_by_id_for_refinements(VALUE klass, VALUE d)
 void
 rb_clear_method_cache(VALUE klass_or_module, ID mid)
 {
-    rb_rpyyarv_method_state_changed();
+    rb_rpyyarv_method_state_changed(klass_or_module, mid);
 
     if (RB_TYPE_P(klass_or_module, T_MODULE)) {
         VALUE module = klass_or_module; // alias

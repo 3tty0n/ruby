@@ -3,7 +3,7 @@ import os
 try:
     from rpython.rlib.jit import (
         JitDriver, elidable, promote, unroll_safe, dont_look_inside, hint,
-        set_user_param, gc_mark_state)
+        set_user_param, gc_mark_state, we_are_jitted)
     from rpython.rlib.objectmodel import always_inline
     from rpython.rlib.longlong2float import float2longlong, longlong2float
     from rpython.rlib.rarithmetic import LONG_BIT, intmask, ovfcheck, r_uint
@@ -118,6 +118,9 @@ except ImportError:
 
     def dont_look_inside(func):
         return func
+
+    def we_are_jitted():
+        return False
 
     def hint(x, **kwds):
         return x

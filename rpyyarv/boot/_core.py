@@ -76,6 +76,8 @@ MARK_HOOK = lltype.Ptr(lltype.FuncType([], lltype.Void))
 
 CONST_HOOK = lltype.Ptr(lltype.FuncType([], lltype.Void))
 
+METHOD_HOOK = lltype.Ptr(lltype.FuncType([VALUE, VALUE], lltype.Void))
+
 
 BLOCK_HOOK = lltype.Ptr(lltype.FuncType([lltype.Signed, rffi.INT, VALUEP,
                                          VALUE, VALUE, VALUE], VALUE))

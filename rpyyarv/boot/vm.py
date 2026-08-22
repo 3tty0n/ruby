@@ -5,7 +5,7 @@ import os
 from rpython.rtyper.lltypesystem import lltype, rffi
 
 from rpyyarv.boot._core import (_ext, _v, VALUE, VOIDP, INTP, _ARCH,
-                                CONST_HOOK, FIBER_SAVE_HOOK,
+                                CONST_HOOK, METHOD_HOOK, FIBER_SAVE_HOOK,
                                 FIBER_ARRIVE_HOOK, FIBER_BORN_HOOK,
                                 FIBER_KEY_HOOK)
 
@@ -40,7 +40,7 @@ rb_set_fiber_hooks = _ext('rpyyarv_set_fiber_hooks',
                            FIBER_KEY_HOOK, VOIDP, VOIDP], lltype.Void)
 
 
-rb_set_method_hook = _ext('rpyyarv_set_method_hook', [CONST_HOOK], lltype.Void)
+rb_set_method_hook = _ext('rpyyarv_set_method_hook', [METHOD_HOOK], lltype.Void)
 
 
 rb_vm_core = _ext('rpyyarv_vm_core', [], VALUE, reenters=True)

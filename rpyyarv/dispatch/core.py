@@ -5,7 +5,7 @@ from rpyyarv import boot
 from rpyyarv import gcroots
 from rpyyarv import value
 from rpyyarv.error import UnsupportedOperation
-from rpyyarv.rlib import elidable, dont_look_inside
+from rpyyarv.rlib import elidable, dont_look_inside, we_are_jitted
 
 
 # Cycle guard: a superclass chain longer than this is a corrupt map.
@@ -255,10 +255,21 @@ def _lookup_filled(klass, mid):
 
 def lookup(klass, mid):
     """supers skips iclasses, so CRuby is asked who owns mid."""
+    # Only off-trace: a trace folds _lookup away, and a fill recorded into
+    # one would stay in it as a dict store on every later run.
+    jitted = we_are_jitted()
+    if not jitted:
+        got = resolved(klass, mid, registry.version)
+        if got is not LOOKUP_PENDING:
+            return None if got is LOOKUP_MISS else got
     entry = _lookup(klass, mid, registry.version)
     if entry is OWNER_PENDING:
         _fill_owner(klass, mid)
         entry = _lookup_filled(klass, mid)
+        if entry is OWNER_PENDING:
+            return None
+    if not jitted:
+        keep_resolved(klass, mid, entry)
     return entry
 
 
@@ -304,7 +315,9 @@ def owns_identity(klass, mid):
 
 # Imported at the bottom: caches imports core, so this edge can only be
 # bound once core's own definitions exist.
-from rpyyarv.dispatch.caches import (invalidate_for, invalidate_owners, owner_of, owners,
+from rpyyarv.dispatch.caches import (LOOKUP_MISS, LOOKUP_PENDING, keep_resolved,
+                                     resolved,
+                                     invalidate_for, invalidate_owners, owner_of, owners,
                                      _fill_owner, OWNER_UNKNOWN)
 from rpyyarv.dispatch.trampoline import (flush_trampoline_cache,
                                          _install_trampoline, _record_ancestry)

@@ -51,6 +51,7 @@ class _Coverage(object):
         self.delegated = []     # 'path: why RPyYARV would not run it'
         self.by_name = {}       # method name -> foreign sends of it
         self.by_site = {}       # (mid, receiver class, arg class) -> the same
+        self.by_inval = {}      # (klass, rid) -> method-cache flushes it caused
 
 
 coverage = _Coverage()
@@ -78,6 +79,14 @@ def count_foreign_site(mid, recv, arg):
         key = (mid, value.class_of(recv),
                0 if arg == value.Q_UNDEF else value.class_of(arg))
         coverage.by_site[key] = coverage.by_site.get(key, 0) + 1
+
+
+@dont_look_inside
+def count_invalidation(klass, rid):
+    """Who keeps flushing the method cache; named at report, not here."""
+    if coverage.enabled:
+        key = (klass, rid)
+        coverage.by_inval[key] = coverage.by_inval.get(key, 0) + 1
 
 
 def configure_coverage():
@@ -123,6 +132,33 @@ def report():
         note('  cruby site: %s(%s, %s) %d'
              % (symbols.name_of(key[0]), _class_name(key[1]),
                 _class_name(key[2]), n))
+    for key, n in _top_invalidations():
+        note('  invalidated by: %s#%s %d'
+             % (_class_name(key[0]), _rid_name(key[1]), n))
+
+
+def _rid_name(rid):
+    if rid == 0:
+        return '(chain move)'
+    return boot.id_name(rid)
+
+
+def _top_invalidations():
+    counts = []
+    keys = []
+    for key, n in coverage.by_inval.items():
+        at = len(counts)
+        while at > 0 and counts[at - 1] < n:
+            at -= 1
+        assert at >= 0
+        counts.insert(at, n)
+        keys.insert(at, key)
+    out = []
+    for i in range(len(keys)):
+        if i == 25:
+            break
+        out.append((keys[i], counts[i]))
+    return out
 
 
 def _class_name(klass):
