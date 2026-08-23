@@ -46,7 +46,7 @@ def _array_new_block(frame, recv_at, argc, w_block):
     # argc 0 and argc 2 are rb_warning cases in rb_ary_initialize.
     if argc != 1:
         return value.Q_UNDEF
-    size = frame.stack[recv_at + 1]
+    size = frame.slots[recv_at + 1]
     if not value.is_fixnum(size):
         return value.Q_UNDEF
     n = value.fix2int(size)
@@ -54,7 +54,7 @@ def _array_new_block(frame, recv_at, argc, w_block):
         return value.Q_UNDEF
     ary = rubycall.ary_new_capa(n)
     # Into the receiver's slot: the frame marks it, nothing else holds it.
-    frame.stack[recv_at] = ary
+    frame.slots[recv_at] = ary
     i = 0
     while i < n:
         v = call_block(w_block, [value.int2fix(i)])
@@ -275,8 +275,8 @@ SPACESHIP_CI = W_CallInfo(helpers.SPACESHIP, 1)
 @unroll_safe
 def _comparable_op(frame, mid, recv_at):
     """Comparable#< and friends: <=> natively, not out through compar.c."""
-    recv = frame.stack[recv_at]
-    arg = frame.stack[recv_at + 1]
+    recv = frame.slots[recv_at]
+    arg = frame.slots[recv_at + 1]
     cmp = invoke(frame, SPACESHIP_CI)
     if value.is_fixnum(cmp):
         c = value.fix2int(cmp)
@@ -298,7 +298,7 @@ def _comparable_op(frame, mid, recv_at):
 
 
 def _encoding_find(frame, recv, recv_at):
-    name_v = frame.stack[recv_at + 1]
+    name_v = frame.slots[recv_at + 1]
     if value.is_immediate(name_v) or not boot.is_string(name_v):
         return value.Q_UNDEF
     name = boot.str_of(name_v)

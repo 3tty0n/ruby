@@ -20,8 +20,10 @@ class SharedLocals(object):
 
 class Frame(object):
     # One per ISeq invocation, so Ruby call depth is RPython recursion depth.
-    _virtualizable_ = ['sp', 'pc', 'stack[*]', 'locals[*]']
-    _immutable_fields_ = ['shared']
+    # One array, not two: a call allocated a Frame plus a stack plus a locals.
+    # The stack occupies [0, stack_max); the locals follow it.
+    _virtualizable_ = ['sp', 'pc', 'slots[*]']
+    _immutable_fields_ = ['shared', 'locals_at']
 
     # VM_FRAME_FLAG_MODIFIED_BLOCK_PARAM (insns.def:111); zero-init, no store.
     block_param_set = False
@@ -53,16 +55,20 @@ class Frame(object):
     def __init__(self, iseq, self_val, cref=None, entry=None):
         self = hint(self, access_directly=True, fresh_virtualizable=True)
         self.w_iseq = iseq
-        self.stack = [0] * iseq.stack_max
+        top = iseq.stack_max
+        self.locals_at = top
+        # One alloc-and-set, not a fill loop: a loop here is recorded into
+        # every trace that makes a frame. The stack half starting nil rather
+        # than zero costs nothing; both are immediates the mark hook skips.
+        if iseq.shares_locals:
+            self.slots = [value.Q_NIL] * top
+            self.shared = SharedLocals(iseq.nlocals)
+        else:
+            self.slots = [value.Q_NIL] * (top + iseq.nlocals)
+            self.shared = None
         self.sp = 0
         # The pc of the running instruction, for finding a catch-table entry.
         self.pc = 0
-        if iseq.shares_locals:
-            self.locals = [value.Q_NIL] * 0
-            self.shared = SharedLocals(iseq.nlocals)
-        else:
-            self.locals = [value.Q_NIL] * iseq.nlocals
-            self.shared = None
         self.self_val = self_val
         # The Cref a class body pushed; its klass is where a def lands.
         self.cref = cref
@@ -73,27 +79,31 @@ class Frame(object):
         s = self.shared
         if s is not None:
             return s.values[idx]
-        return self.locals[idx]
+        at = self.locals_at + idx
+        assert at >= 0
+        return self.slots[at]
 
     def local_set(self, idx, v):
         s = self.shared
         if s is not None:
             s.values[idx] = v
         else:
-            self.locals[idx] = v
+            at = self.locals_at + idx
+            assert at >= 0
+            self.slots[at] = v
 
     def push(self, v):
         sp = self.sp
         assert sp >= 0
-        self.stack[sp] = v
+        self.slots[sp] = v
         self.sp = sp + 1
 
     def pop(self):
         sp = self.sp - 1
         assert sp >= 0
-        v = self.stack[sp]
+        v = self.slots[sp]
         # Cleared so the mark hook never revives a dead VALUE.
-        self.stack[sp] = 0
+        self.slots[sp] = 0
         self.sp = sp
         return v
 

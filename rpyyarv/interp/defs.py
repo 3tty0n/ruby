@@ -34,7 +34,7 @@ def _define_attrs(frame, mid, klass, recv_at, argc):
     args = []
     i = 0
     while i < argc:
-        args.append(frame.stack[recv_at + 1 + i])
+        args.append(frame.slots[recv_at + 1 + i])
         i += 1
     _drop(frame, recv_at)
     # First, so a name CRuby rejects raises before anything is registered.
@@ -96,7 +96,7 @@ def _is_class_or_module(v):
 @unroll_safe
 def _define_bmethod(frame, mid, recv, recv_at, w_block, private_pragma=False):
     """define_method: CRuby installs the real bmethod, plus a fast entry."""
-    name_v = frame.stack[recv_at + 1]
+    name_v = frame.slots[recv_at + 1]
     _drop(frame, recv_at)
     # First, so a name or block CRuby rejects raises before registering.
     ret = _call_with_block(recv, mid, [name_v], w_block)
@@ -125,7 +125,7 @@ def _define_bmethod(frame, mid, recv, recv_at, w_block, private_pragma=False):
 @unroll_safe
 def _define_bmethod_modfunc(frame, mid, recv, recv_at, w_block):
     """define_method under module_function: private plus a singleton copy."""
-    name_v = frame.stack[recv_at + 1]
+    name_v = frame.slots[recv_at + 1]
     _drop(frame, recv_at)
     ret = _call_with_block(recv, mid, [name_v], w_block)
     if not boot.is_symbol(ret):
@@ -154,7 +154,7 @@ def _instance_eval(frame, mid, recv, recv_at, argc, w_block):
     if mid == INSTANCE_EXEC:
         i = 0
         while i < argc:
-            args.append(frame.stack[recv_at + 1 + i])
+            args.append(frame.slots[recv_at + 1 + i])
             i += 1
     else:
         args.append(recv)
@@ -183,7 +183,7 @@ def _class_new_block(frame, recv, recv_at, argc, w_block, mid=NEW):
     args = []
     i = 0
     while i < argc:
-        args.append(frame.stack[recv_at + 1 + i])
+        args.append(frame.slots[recv_at + 1 + i])
         i += 1
     made = rubycall.call(recv, mid, args)
     _drop(frame, recv_at)
@@ -214,7 +214,7 @@ def _module_function(frame, recv, recv_at, argc):
     args = []
     i = 0
     while i < argc:
-        args.append(frame.stack[recv_at + 1 + i])
+        args.append(frame.slots[recv_at + 1 + i])
         i += 1
     _drop(frame, recv_at)
     # CRuby first, so a name it rejects raises before the registry is touched.
@@ -228,7 +228,7 @@ def _private_class_method(frame, recv, recv_at, argc):
     args = []
     i = 0
     while i < argc:
-        args.append(frame.stack[recv_at + 1 + i])
+        args.append(frame.slots[recv_at + 1 + i])
         i += 1
     _drop(frame, recv_at)
     # CRuby first, so a name it rejects raises before the registry is touched.
@@ -252,7 +252,7 @@ def _visibility_names(frame, mid, recv, recv_at, argc):
     args = []
     i = 0
     while i < argc:
-        args.append(frame.stack[recv_at + 1 + i])
+        args.append(frame.slots[recv_at + 1 + i])
         i += 1
     _drop(frame, recv_at)
     entries = _lookup_all(recv, args)
@@ -296,7 +296,7 @@ def _remove_or_undef(frame, mid, recv, recv_at, argc):
     args = []
     i = 0
     while i < argc:
-        args.append(frame.stack[recv_at + 1 + i])
+        args.append(frame.slots[recv_at + 1 + i])
         i += 1
     _drop(frame, recv_at)
     ret = rubycall.call(recv, mid, args)
@@ -341,18 +341,18 @@ def _core_method(frame, mid, recv, recv_at, argc):
         raise UnsupportedOperation('core#set_method_alias needs 3 arguments')
     if argc != 2 and mid == CORE_UNDEF:
         raise UnsupportedOperation('core#undef_method needs 2 arguments')
-    cbase = frame.stack[recv_at + 1]
+    cbase = frame.slots[recv_at + 1]
     if value.is_immediate(cbase) or not boot.is_class(cbase):
         raise UnsupportedOperation('alias or undef outside a class body')
-    name = _sym_mid(frame.stack[recv_at + 2])
+    name = _sym_mid(frame.slots[recv_at + 2])
     if mid == CORE_UNDEF:
         dispatch.undefine(cbase, name)
-        args = [cbase, frame.stack[recv_at + 2]]
+        args = [cbase, frame.slots[recv_at + 2]]
         _drop(frame, recv_at)
         ret = rubycall.call(recv, mid, args)
         helpers.refresh()
         return ret
-    old = _sym_mid(frame.stack[recv_at + 3])
+    old = _sym_mid(frame.slots[recv_at + 3])
     # Not own_lookup: `alias` copies whatever the name resolves to, ancestors
     # included, so an inherited method has to stay an RPyYARV entry too.
     entry = dispatch.lookup(cbase, old)
@@ -367,7 +367,7 @@ def _core_method(frame, mid, recv, recv_at, argc):
     if entry is not None:
         # An attr entry: without this the new name lives only in the registry.
         dispatch.define_attr(cbase, name, entry.ivar, entry.kind)
-    args = [cbase, frame.stack[recv_at + 2], frame.stack[recv_at + 3]]
+    args = [cbase, frame.slots[recv_at + 2], frame.slots[recv_at + 3]]
     _drop(frame, recv_at)
     ret = rubycall.call(recv, mid, args)
     helpers.refresh()
@@ -376,8 +376,8 @@ def _core_method(frame, mid, recv, recv_at, argc):
 
 def _alias_method(frame, recv, recv_at):
     """alias_method: an ISEQ alias stays here, not following the old name."""
-    new_v = frame.stack[recv_at + 1]
-    old_v = frame.stack[recv_at + 2]
+    new_v = frame.slots[recv_at + 1]
+    old_v = frame.slots[recv_at + 2]
     if boot.is_symbol(new_v) and boot.is_symbol(old_v):
         name = symbols.intern(boot.sym_of(new_v))
         old = symbols.intern(boot.sym_of(old_v))
@@ -391,7 +391,7 @@ def _alias_method(frame, recv, recv_at):
                 _drop(frame, recv_at)
                 return new_v
             dispatch.define_attr(recv, name, entry.ivar, entry.kind)
-    args = [frame.stack[recv_at + 1], frame.stack[recv_at + 2]]
+    args = [frame.slots[recv_at + 1], frame.slots[recv_at + 2]]
     _drop(frame, recv_at)
     ret = rubycall.call(recv, ALIAS_METHOD, args)
     helpers.refresh()

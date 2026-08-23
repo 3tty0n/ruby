@@ -381,7 +381,7 @@ def _operand(w_iseq, op, pos, val):
 def _stack_repr(frame):
     parts = []
     for i in range(frame.sp):
-        parts.append(value.repr_of(frame.stack[i]))
+        parts.append(value.repr_of(frame.slots[i]))
     return '[%s]' % ', '.join(parts)
 
 

@@ -111,8 +111,7 @@ def _mark_frame(f):
 
 
 def _mark_frame_now(f):
-    _mark_array(f.stack)
-    _mark_array(f.locals)
+    _mark_array(f.slots)
     s = f.shared
     if s is not None:
         _mark_array(s.values)

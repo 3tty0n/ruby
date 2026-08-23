@@ -392,7 +392,7 @@ def _execute(iseq, frame, pc):
             parts = [0] * n
             i = 0
             while i < n:
-                parts[i] = frame.stack[at + i]
+                parts[i] = frame.slots[at + i]
                 i += 1
             regexp = boot.toregexp(opt, parts)
             _drop(frame, at)
@@ -510,13 +510,13 @@ def _execute(iseq, frame, pc):
                     % w_ci.argc)
             assert at >= 1
             assert below >= 0
-            obj = _opt_new_alloc(frame.stack[at])
+            obj = _opt_new_alloc(frame.slots[at])
             if obj == 0:
                 pc = target
             else:
                 # Receiver of the initialize send; below it, that send's result.
-                frame.stack[at] = obj
-                frame.stack[below] = obj
+                frame.slots[at] = obj
+                frame.slots[below] = obj
         elif opcode == insns.DEFINEMETHOD:
             mid = code[pc]
             w_body = iseq.iseqs[code[pc + 1]]
@@ -633,14 +633,14 @@ def _execute(iseq, frame, pc):
             if at < 0:
                 raise UnsupportedOperation('setn %d underflows the stack' % n)
             assert top >= 0
-            frame.stack[at] = frame.stack[top]
+            frame.slots[at] = frame.slots[top]
         elif opcode == insns.TOPN:
             n = code[pc]
             pc += 1
             at = frame.sp - 1 - n
             if at < 0:
                 raise UnsupportedOperation('topn %d underflows the stack' % n)
-            frame.push(frame.stack[at])
+            frame.push(frame.slots[at])
         elif opcode == insns.DUPN:
             n = code[pc]
             pc += 1

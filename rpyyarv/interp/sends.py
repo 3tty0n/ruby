@@ -25,7 +25,7 @@ def invoke(frame, w_ci, w_block=None):
             raise UnsupportedOperation(
                 "call to '%s' passes a &block the stack does not hold"
                 % symbols.name_of(w_ci.mid))
-        w_block = _block_from_value(frame.block, frame.stack[top])
+        w_block = _block_from_value(frame.block, frame.slots[top])
         frame.pop()
     # A `send` rewrites these three; the callinfo keeps the rest of the site.
     mid = w_ci.mid
@@ -47,7 +47,7 @@ def invoke(frame, w_ci, w_block=None):
         return _kw_invoke(frame, w_ci, recv_at, argc, w_block, mid, fcall)
 
     rubycall.gc_stress_point()
-    recv = frame.stack[recv_at]
+    recv = frame.slots[recv_at]
     # Promoted: the class-word guard is the inline cache; lookup folds away.
     klass = promote(value.class_of(recv))
     while mid == SEND or mid == SEND2 or mid == PUBLIC_SEND:
@@ -117,15 +117,15 @@ def invoke(frame, w_ci, w_block=None):
             return value.newbool(value.fix2int(recv) < 0)
     if mid == GETBYTE and argc == 1 and \
             dispatch.owner_of(klass, GETBYTE) == send_owners.string_getbyte:
-        v = boot.str_getbyte(recv, frame.stack[recv_at + 1])
+        v = boot.str_getbyte(recv, frame.slots[recv_at + 1])
         if v != value.Q_UNDEF:
             _drop(frame, recv_at)
             debug.count_native()
             return v
     if mid == SETBYTE and argc == 2 and \
             dispatch.owner_of(klass, SETBYTE) == send_owners.string_setbyte:
-        v = boot.str_setbyte(recv, frame.stack[recv_at + 1],
-                             frame.stack[recv_at + 2])
+        v = boot.str_setbyte(recv, frame.slots[recv_at + 1],
+                             frame.slots[recv_at + 2])
         if v != value.Q_UNDEF:
             _drop(frame, recv_at)
             debug.count_native()
@@ -133,8 +133,8 @@ def invoke(frame, w_ci, w_block=None):
     if mid == SLICE and argc == 2 and entry is None and \
             value.is_plain_array(recv) and \
             dispatch.owner_of(klass, SLICE) == value.core_class(value.C_ARRAY):
-        beg = frame.stack[recv_at + 1]
-        length = frame.stack[recv_at + 2]
+        beg = frame.slots[recv_at + 1]
+        length = frame.slots[recv_at + 2]
         if value.is_fixnum(beg) and value.is_fixnum(length):
             ibeg = value.fix2int(beg)
             if ibeg < 0:
@@ -159,7 +159,7 @@ def invoke(frame, w_ci, w_block=None):
             and send_owners.string_force_encoding != 0 \
             and dispatch.owner_of(klass, FORCE_ENCODING) == \
             send_owners.string_force_encoding:
-        v = boot.str_force_encoding_fast(recv, frame.stack[recv_at + 1])
+        v = boot.str_force_encoding_fast(recv, frame.slots[recv_at + 1])
         if v != value.Q_UNDEF:
             _drop(frame, recv_at)
             debug.count_native()
@@ -168,7 +168,7 @@ def invoke(frame, w_ci, w_block=None):
             and send_owners.string_unpack1 != 0 \
             and dispatch.owner_of(klass, UNPACK1) == \
             send_owners.string_unpack1:
-        v = boot.unpack1_double(recv, frame.stack[recv_at + 1],
+        v = boot.unpack1_double(recv, frame.slots[recv_at + 1],
                                 value.int2fix(0))
         if v != value.Q_UNDEF:
             _drop(frame, recv_at)
@@ -177,7 +177,7 @@ def invoke(frame, w_ci, w_block=None):
     if entry is None and argc <= 1:
         # A send an opt_* instruction would have caught if YARV had one for it.
         if argc == 1:
-            v = _native_binop(recv, frame.stack[recv_at + 1], mid)
+            v = _native_binop(recv, frame.slots[recv_at + 1], mid)
         else:
             v = helpers.zero_arg(recv, mid)
         if v != value.Q_UNDEF:
@@ -203,7 +203,7 @@ def invoke(frame, w_ci, w_block=None):
         return v
     if entry is None and argc == 1 and mid == helpers.LAST_MATCH \
             and regexp_class.value != 0 and recv == regexp_class.value:
-        v = helpers.last_match1(frame.stack[recv_at + 1])
+        v = helpers.last_match1(frame.slots[recv_at + 1])
         if v != value.Q_UNDEF:
             _drop(frame, recv_at)
             debug.count_native()
@@ -212,21 +212,21 @@ def invoke(frame, w_ci, w_block=None):
             and recv == dispatch.const_at(value.core_class(value.C_OBJECT),
                                           CGI_CONST):
         # const_at is Qundef until cgi/escape defines CGI: an elidable miss.
-        v = helpers.cgi_escape_html(frame.stack[recv_at + 1])
+        v = helpers.cgi_escape_html(frame.slots[recv_at + 1])
         if v != value.Q_UNDEF:
             _drop(frame, recv_at)
             debug.count_native()
             return v
     if entry is None and argc == 2 and mid == helpers.BYTESLICE:
-        v = helpers.str_byteslice(recv, frame.stack[recv_at + 1],
-                                  frame.stack[recv_at + 2])
+        v = helpers.str_byteslice(recv, frame.slots[recv_at + 1],
+                                  frame.slots[recv_at + 2])
         if v != value.Q_UNDEF:
             _drop(frame, recv_at)
             debug.count_native()
             return v
     if entry is None and argc == 2 and mid == helpers.TR:
-        v = helpers.str_tr(recv, frame.stack[recv_at + 1],
-                           frame.stack[recv_at + 2])
+        v = helpers.str_tr(recv, frame.slots[recv_at + 1],
+                           frame.slots[recv_at + 2])
         if v != value.Q_UNDEF:
             _drop(frame, recv_at)
             debug.count_native()
@@ -234,8 +234,8 @@ def invoke(frame, w_ci, w_block=None):
     if entry is None and argc == 2 and w_block is None \
             and (mid == helpers.GSUB or mid == helpers.GSUB_BANG
                  or mid == helpers.SUB or mid == helpers.SUB_BANG):
-        v = helpers.str_gsub2(recv, frame.stack[recv_at + 1],
-                              frame.stack[recv_at + 2], mid)
+        v = helpers.str_gsub2(recv, frame.slots[recv_at + 1],
+                              frame.slots[recv_at + 2], mid)
         if v != value.Q_UNDEF:
             _drop(frame, recv_at)
             debug.count_native()
@@ -243,11 +243,11 @@ def invoke(frame, w_ci, w_block=None):
     if entry is None and fcall and w_block is None and argc >= 2 \
             and argc - 1 <= boot.MAX_ARGC \
             and (mid == helpers.FORMAT_MID or mid == helpers.SPRINTF_MID):
-        fmt = frame.stack[recv_at + 1]
+        fmt = frame.slots[recv_at + 1]
         args = []
         i = 0
         while i < argc - 1:
-            args.append(frame.stack[recv_at + 2 + i])
+            args.append(frame.slots[recv_at + 2 + i])
             i += 1
         v = helpers.kernel_format(recv, fmt, args, mid)
         if v != value.Q_UNDEF:
@@ -256,30 +256,30 @@ def invoke(frame, w_ci, w_block=None):
             return v
     if entry is None and argc == 1 and w_block is None \
             and mid == helpers.MATCH_MID:
-        v = helpers.str_match(recv, frame.stack[recv_at + 1])
+        v = helpers.str_match(recv, frame.slots[recv_at + 1])
         if v != value.Q_UNDEF:
             _drop(frame, recv_at)
             debug.count_native()
             return v
     if entry is None and argc == 2 and mid == helpers.ASET:
-        v = helpers.hash_aset(recv, frame.stack[recv_at + 1],
-                              frame.stack[recv_at + 2])
+        v = helpers.hash_aset(recv, frame.slots[recv_at + 1],
+                              frame.slots[recv_at + 2])
         if v != value.Q_UNDEF:
             _drop(frame, recv_at)
             debug.count_native()
             return v
     if entry is None and argc == 3 and mid == helpers.ASET:
-        v = helpers.ary_splice_set(recv, frame.stack[recv_at + 1],
-                                   frame.stack[recv_at + 2],
-                                   frame.stack[recv_at + 3])
+        v = helpers.ary_splice_set(recv, frame.slots[recv_at + 1],
+                                   frame.slots[recv_at + 2],
+                                   frame.slots[recv_at + 3])
         if v != value.Q_UNDEF:
             _drop(frame, recv_at)
             debug.count_native()
             return v
     if entry is None and mid == EVAL and fcall \
             and (argc == 1 or (argc == 3 \
-                              and frame.stack[recv_at + 2] == value.Q_NIL)):
-        v = _eval_rpy(frame, klass, recv, frame.stack[recv_at + 1])
+                              and frame.slots[recv_at + 2] == value.Q_NIL)):
+        v = _eval_rpy(frame, klass, recv, frame.slots[recv_at + 1])
         if v != value.Q_UNDEF:
             _drop(frame, recv_at)
             debug.count_native()
@@ -287,10 +287,10 @@ def invoke(frame, w_ci, w_block=None):
     if entry is None and (mid == CLASS_EVAL or mid == MODULE_EVAL) and \
             w_block is None and argc >= 1 and argc <= 3 and \
             _eval_receiver(recv):
-        v = _module_eval_rpy(frame, recv, frame.stack[recv_at + 1],
-                             frame.stack[recv_at + 2] if argc >= 2
+        v = _module_eval_rpy(frame, recv, frame.slots[recv_at + 1],
+                             frame.slots[recv_at + 2] if argc >= 2
                              else value.Q_NIL,
-                             frame.stack[recv_at + 3] if argc >= 3 else 0)
+                             frame.slots[recv_at + 3] if argc >= 3 else 0)
         if v != value.Q_UNDEF:
             _drop(frame, recv_at)
             debug.count_native()
@@ -331,11 +331,11 @@ def invoke(frame, w_ci, w_block=None):
     if mid == DEFINE_METHOD and argc == 1 and not w_ci.blockarg \
             and w_block is not None and w_block.kind == block_mod.KIND_ISEQ \
             and w_block.w_iseq.simple_params and not frame.module_func \
-            and _attr_name(frame.stack[recv_at + 1]) != '':
+            and _attr_name(frame.slots[recv_at + 1]) != '':
         return _define_bmethod(frame, mid, recv, recv_at, w_block,
                                frame.private_pragma)
     if mid == DEFINE_METHOD and argc == 1 and frame.module_func \
-            and _attr_name(frame.stack[recv_at + 1]) != '':
+            and _attr_name(frame.slots[recv_at + 1]) != '':
         # CRuby's send never learns RPyYARV's module_function pragma.
         return _define_bmethod_modfunc(frame, mid, recv, recv_at, w_block)
     if mid == INITIALIZE and argc == 0 and entry is None and w_block is None \
@@ -360,12 +360,12 @@ def invoke(frame, w_ci, w_block=None):
         return _backtrace()
     if mid == REQUIRE_PRIM and fcall and argc == 1:
         # A require CRuby dispatched (autoload) reaches RPyYARV only here.
-        v = rubycall.hooks.require.from_cruby(frame.stack[recv_at + 1])
+        v = rubycall.hooks.require.from_cruby(frame.slots[recv_at + 1])
         _drop(frame, recv_at)
         return v
     if mid == HASH_PAIRS_PRIM and fcall and argc == 1 \
-            and boot.is_hash(frame.stack[recv_at + 1]):
-        v = boot.hash_pairs(frame.stack[recv_at + 1])
+            and boot.is_hash(frame.slots[recv_at + 1]):
+        v = boot.hash_pairs(frame.slots[recv_at + 1])
         _drop(frame, recv_at)
         debug.count_native()
         return v
@@ -377,8 +377,8 @@ def invoke(frame, w_ci, w_block=None):
             return v
     if mid == NEW and helpers.ary_new_pristine(promote(recv)):
         if w_block is None:
-            size = frame.stack[recv_at + 1] if argc >= 1 else value.Q_NIL
-            fill = frame.stack[recv_at + 2] if argc == 2 else value.Q_NIL
+            size = frame.slots[recv_at + 1] if argc >= 1 else value.Q_NIL
+            fill = frame.slots[recv_at + 2] if argc == 2 else value.Q_NIL
             v = _array_new(size, fill, argc)
             if v != value.Q_UNDEF:
                 _drop(frame, recv_at)
@@ -405,7 +405,7 @@ def invoke(frame, w_ci, w_block=None):
             entry is None and value.is_plain_array(recv) and \
             dispatch.owner_of(klass, EACH_SLICE) == \
             send_owners.array_each_slice:
-        size = frame.stack[recv_at + 1]
+        size = frame.slots[recv_at + 1]
         if value.is_fixnum(size) and value.fix2int(size) > 0:
             _drop(frame, recv_at)
             try:
@@ -435,8 +435,8 @@ def invoke(frame, w_ci, w_block=None):
             and (argc == 1 or argc == 2) and value.is_fixnum(recv) \
             and send_owners.integer_step != 0 \
             and dispatch.owner_of(klass, STEP) == send_owners.integer_step:
-        limit = frame.stack[recv_at + 1]
-        step = frame.stack[recv_at + 2] if argc == 2 else value.int2fix(1)
+        limit = frame.slots[recv_at + 1]
+        step = frame.slots[recv_at + 2] if argc == 2 else value.int2fix(1)
         if value.is_fixnum(limit) and value.is_fixnum(step) \
                 and value.fix2int(step) != 0:
             _drop(frame, recv_at)
@@ -468,7 +468,7 @@ def invoke(frame, w_ci, w_block=None):
                     _drop(frame, recv_at)
                     return value.struct_at(recv, index)
                 elif (raw_word(recv, value.FLAGS_WORD) & value.FL_FREEZE) == 0:
-                    out = frame.stack[recv_at + 1]
+                    out = frame.slots[recv_at + 1]
                     boot.struct_set(recv, index, out)
                     _drop(frame, recv_at)
                     return out
@@ -537,14 +537,14 @@ def invoke(frame, w_ci, w_block=None):
     # core_hash_merge: one aset per pair, so a big literal never hits MAX_ARGC.
     if vm_core.value != 0 and recv == vm_core.value and mid == HASH_MERGE_PTR \
             and argc >= 1 and (argc & 1) == 1 \
-            and not value.is_immediate(frame.stack[recv_at + 1]) \
-            and raw_word(frame.stack[recv_at + 1], value.KLASS_WORD) == \
+            and not value.is_immediate(frame.slots[recv_at + 1]) \
+            and raw_word(frame.slots[recv_at + 1], value.KLASS_WORD) == \
             value.core_class(value.C_HASH):
-        h = frame.stack[recv_at + 1]
+        h = frame.slots[recv_at + 1]
         i = 0
         while i < argc - 1:
-            rubycall.hash_aset(h, frame.stack[recv_at + 2 + i],
-                               frame.stack[recv_at + 3 + i])
+            rubycall.hash_aset(h, frame.slots[recv_at + 2 + i],
+                               frame.slots[recv_at + 3 + i])
             i += 2
         _drop(frame, recv_at)
         debug.count_native()
@@ -552,8 +552,8 @@ def invoke(frame, w_ci, w_block=None):
     if vm_core.value != 0 and recv == vm_core.value \
             and mid != HASH_MERGE_PTR and mid != HASH_MERGE_KWD:
         if mid == CORE_GVAR_ALIAS and argc == 2:
-            boot.alias_variable(frame.stack[recv_at + 1],
-                                frame.stack[recv_at + 2])
+            boot.alias_variable(frame.slots[recv_at + 1],
+                                frame.slots[recv_at + 2])
             _drop(frame, recv_at)
             debug.count_native()
             return value.Q_NIL
@@ -572,7 +572,7 @@ def invoke(frame, w_ci, w_block=None):
     args = []
     i = 0
     while i < argc:
-        args.append(frame.stack[recv_at + 1 + i])
+        args.append(frame.slots[recv_at + 1 + i])
         i += 1
     _drop(frame, recv_at)
     if w_block is not None:
@@ -659,7 +659,7 @@ send_owners = _SendOwners()
 def _send_target(frame, klass, mid, argc, recv_at):
     if argc < 1:
         return rubycall.NO_MID
-    return _send_target_of(klass, mid, frame.stack[recv_at + 1])
+    return _send_target_of(klass, mid, frame.slots[recv_at + 1])
 
 
 def _send_target_of(klass, mid, name):
@@ -699,7 +699,7 @@ def _shift_off(frame, recv_at):
     i = recv_at + 1
     assert i >= 0
     while i < frame.sp - 1:
-        frame.stack[i] = frame.stack[i + 1]
+        frame.slots[i] = frame.slots[i + 1]
         i += 1
     frame.pop()
 
@@ -798,7 +798,7 @@ def _attr_send(frame, entry, recv, recv_at, argc, w_block=None):
         args = [0] * argc
         i = 0
         while i < argc:
-            args[i] = frame.stack[recv_at + 1 + i]
+            args[i] = frame.slots[recv_at + 1 + i]
             i += 1
         _drop(frame, recv_at)
         # A block here must reach a yield in the body: left to CRuby's bmethod.
@@ -815,7 +815,7 @@ def _attr_send(frame, entry, recv, recv_at, argc, w_block=None):
     if argc != 1:
         _arity_error(argc, 1, 1)
     # Stored before the drop: ivar_set may allocate, and the frame marks it.
-    v = frame.stack[recv_at + 1]
+    v = frame.slots[recv_at + 1]
     dispatch.ivar_set(recv, entry.ivar, v)
     _drop(frame, recv_at)
     debug.count_native()
@@ -861,10 +861,10 @@ def _struct_new(frame, recv, recv_at, argc):
     if obj == value.Q_UNDEF:
         return value.Q_UNDEF
     # Into the marked slot the class held: a constant still names the class.
-    frame.stack[recv_at] = obj
+    frame.slots[recv_at] = obj
     i = 0
     while i < argc:
-        boot.struct_set(obj, i, frame.stack[recv_at + 1 + i])
+        boot.struct_set(obj, i, frame.slots[recv_at + 1 + i])
         i += 1
     _drop(frame, recv_at)
     return obj
@@ -874,7 +874,7 @@ def _new_with_block(frame, entry, klass, recv_at, argc, w_block):
     """Klass.new { }: CRuby's Class#new gives initialize a dying handle."""
     obj = dispatch.alloc(klass)
     # Into the caller's marked slot; _enter drops it after placing args.
-    frame.stack[recv_at] = obj
+    frame.slots[recv_at] = obj
     _enter(frame, entry, obj, recv_at, argc, INITIALIZE, w_block)
     return obj
 
@@ -884,10 +884,10 @@ def _kw_splat_hash(frame, at):
     """vm_caller_setup_keyword_hash: to_hash first; nil means no keywords."""
     # Restated so the codewriter sees the stack index as non-negative.
     assert at >= 0
-    v = frame.stack[at]
+    v = frame.slots[at]
     if v == value.Q_NIL or (not value.is_immediate(v) and _is_hash(v)):
         return
-    frame.stack[at] = rubycall.to_hash_type(v)
+    frame.slots[at] = rubycall.to_hash_type(v)
 
 
 @dont_look_inside
@@ -912,7 +912,7 @@ def _kw_invoke(frame, w_ci, recv_at, argc, w_block, mid, fcall):
     if w_ci.splat:
         return _splat_invoke(frame, w_ci, recv_at, argc, w_block, mid, fcall)
     rubycall.gc_stress_point()
-    recv = frame.stack[recv_at]
+    recv = frame.slots[recv_at]
     klass = promote(value.class_of(recv))
     # Keywords stay topmost, so only the name below them is shifted off.
     while mid == SEND or mid == SEND2 or mid == PUBLIC_SEND:
@@ -948,8 +948,8 @@ def _kw_invoke(frame, w_ci, recv_at, argc, w_block, mid, fcall):
             and send_owners.string_unpack1 != 0 \
             and dispatch.owner_of(klass, UNPACK1) == \
             send_owners.string_unpack1:
-        v = boot.unpack1_double(recv, frame.stack[recv_at + 1],
-                                frame.stack[recv_at + 2])
+        v = boot.unpack1_double(recv, frame.slots[recv_at + 1],
+                                frame.slots[recv_at + 2])
         if v != value.Q_UNDEF:
             _drop(frame, recv_at)
             debug.count_native()
@@ -961,8 +961,8 @@ def _kw_invoke(frame, w_ci, recv_at, argc, w_block, mid, fcall):
             and send_owners.array_pack != 0 \
             and dispatch.owner_of(klass, helpers.PACK) == \
             send_owners.array_pack:
-        v = boot.pack_double_into(recv, frame.stack[recv_at + 1],
-                                  frame.stack[recv_at + 2])
+        v = boot.pack_double_into(recv, frame.slots[recv_at + 1],
+                                  frame.slots[recv_at + 2])
         if v != value.Q_UNDEF:
             _drop(frame, recv_at)
             debug.count_native()
@@ -987,7 +987,7 @@ def _kw_invoke(frame, w_ci, recv_at, argc, w_block, mid, fcall):
     args = []
     i = 0
     while i < n:
-        args.append(frame.stack[base + i])
+        args.append(frame.slots[base + i])
         i += 1
     pass_kw = True
     if w_ci.kw_splat:
@@ -1006,7 +1006,7 @@ def _kw_invoke(frame, w_ci, recv_at, argc, w_block, mid, fcall):
         i = 0
         while i < nkw:
             rubycall.hash_aset(h, rubycall.sym_value(kw_names[i]),
-                               frame.stack[base + n + i])
+                               frame.slots[base + n + i])
             i += 1
         args.append(h)
     _drop(frame, recv_at)
@@ -1056,7 +1056,7 @@ def _splat_trailing(frame, args, at, npos, trailing):
     while i < trailing:
         j = at + npos + i
         assert j >= 0
-        args.append(frame.stack[j])
+        args.append(frame.slots[j])
         i += 1
     return args
 
@@ -1071,11 +1071,11 @@ def _splat_args(frame, at, npos, trailing):
     while i < npos - 1:
         j = at + i
         assert j >= 0
-        args.append(frame.stack[j])
+        args.append(frame.slots[j])
         i += 1
     splat_at = at + npos - 1
     assert splat_at >= 0
-    ary = frame.stack[splat_at]
+    ary = frame.slots[splat_at]
     if value.is_plain_array(ary):
         # Read in place: a call per element would force the virtualizable.
         n = promote(value.ary_len(ary))
@@ -1094,7 +1094,7 @@ def _splat_args(frame, at, npos, trailing):
     while i < trailing:
         j = at + npos + i
         assert j >= 0
-        args.append(frame.stack[j])
+        args.append(frame.slots[j])
         i += 1
     return args
 
@@ -1116,7 +1116,7 @@ def _splat_invoke(frame, w_ci, recv_at, argc, w_block, mid, fcall):
     args = _splat_args(frame, recv_at + 1, argc - trailing, trailing)
     kw_splat = _splat_kw(args, w_ci.kw_splat, trailing)
     rubycall.gc_stress_point()
-    recv = frame.stack[recv_at]
+    recv = frame.slots[recv_at]
     klass = promote(value.class_of(recv))
     while mid == SEND or mid == SEND2 or mid == PUBLIC_SEND:
         public = mid == PUBLIC_SEND
@@ -1249,7 +1249,7 @@ def _enter(frame, entry, recv, recv_at, argc, mid, w_block=None,
             _arity_error(argc, callee_iseq.nparams, callee_iseq.nparams)
         i = 0
         while i < argc:
-            callee.local_set(i, frame.stack[recv_at + 1 + i])
+            callee.local_set(i, frame.slots[recv_at + 1 + i])
             i += 1
     else:
         _refuse_iseq(callee_iseq, mid)
@@ -1257,7 +1257,7 @@ def _enter(frame, entry, recv, recv_at, argc, mid, w_block=None,
         given = [0] * argc
         i = 0
         while i < argc:
-            given[i] = frame.stack[recv_at + 1 + i]
+            given[i] = frame.slots[recv_at + 1 + i]
             i += 1
         pc = setup_params(callee_iseq, callee, given, False, kw_names,
                           kw_splat)
@@ -1282,7 +1282,7 @@ def _opt_send(frame, mid, argc):
     recv_at = frame.sp - argc - 1
     assert recv_at >= 0
     rubycall.gc_stress_point()
-    recv = frame.stack[recv_at]
+    recv = frame.slots[recv_at]
     klass = promote(value.class_of(recv))
     entry = dispatch.lookup(klass, mid)
     if entry is not None and not entry.private:
@@ -1292,7 +1292,7 @@ def _opt_send(frame, mid, argc):
     if entry is None and argc <= 1:
         # The same natives invoke gives a named send; opt_* falls through here.
         if argc == 1:
-            v = _native_binop(recv, frame.stack[recv_at + 1], mid)
+            v = _native_binop(recv, frame.slots[recv_at + 1], mid)
         else:
             v = helpers.zero_arg(recv, mid)
         if v != value.Q_UNDEF:
@@ -1309,7 +1309,7 @@ def _opt_send(frame, mid, argc):
     args = []
     i = 0
     while i < argc:
-        args.append(frame.stack[recv_at + 1 + i])
+        args.append(frame.slots[recv_at + 1 + i])
         i += 1
     _drop(frame, recv_at)
     return rubycall.call(recv, mid, args)

@@ -35,13 +35,13 @@ def _pushtoarray(frame, n):
     # Restated so the codewriter sees every stack index as non-negative.
     below = at - 1
     assert below >= 0
-    ary = frame.stack[below]
+    ary = frame.slots[below]
     base = _ary_len(ary)
     i = 0
     while i < n:
         j = at + i
         assert j >= 0
-        rubycall.ary_store(ary, base + i, frame.stack[j])
+        rubycall.ary_store(ary, base + i, frame.slots[j])
         i += 1
     _drop(frame, at)
 
@@ -67,7 +67,7 @@ def _newarray(frame, n):
     values = [0] * n
     i = 0
     while i < n:
-        values[i] = frame.stack[at + i]
+        values[i] = frame.slots[at + i]
         i += 1
     v = rubycall.ary_new(values)
     _drop(frame, at)
@@ -94,7 +94,7 @@ def _newarray_send(frame, n, meth):
         values = [0] * count
         i = 0
         while i < count:
-            values[i] = frame.stack[at + i]
+            values[i] = frame.slots[at + i]
             i += 1
         v_ary = rubycall.ary_new(values)
         _drop(frame, at)
@@ -117,13 +117,13 @@ def _newarray_send(frame, n, meth):
     values = [0] * m
     i = 0
     while i < m:
-        values[i] = frame.stack[at + i]
+        values[i] = frame.slots[at + i]
         i += 1
     arg = 0
     if argc == 1:
         top = frame.sp - 1
         assert top >= 0
-        arg = frame.stack[top]
+        arg = frame.slots[top]
     v_ary = rubycall.ary_new(values)
     _drop(frame, at)
     frame.push(v_ary)
@@ -141,7 +141,7 @@ def _newhash(frame, n):
     h = rubycall.hash_new(n // 2)
     i = 0
     while i < n:
-        rubycall.hash_aset(h, frame.stack[at + i], frame.stack[at + i + 1])
+        rubycall.hash_aset(h, frame.slots[at + i], frame.slots[at + i + 1])
         i += 2
     _drop(frame, at)
     return h
@@ -154,7 +154,7 @@ def _dupn(frame, n):
         raise UnsupportedOperation('dupn %d underflows the stack' % n)
     i = 0
     while i < n:
-        frame.push(frame.stack[at + i])
+        frame.push(frame.slots[at + i])
         i += 1
 
 
@@ -179,9 +179,9 @@ def _reverse(frame, n):
         hi = frame.sp - 1 - i
         assert lo >= 0
         assert hi >= 0
-        v = frame.stack[lo]
-        frame.stack[lo] = frame.stack[hi]
-        frame.stack[hi] = v
+        v = frame.slots[lo]
+        frame.slots[lo] = frame.slots[hi]
+        frame.slots[hi] = v
         i += 1
 
 

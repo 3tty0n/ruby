@@ -123,7 +123,7 @@ def _block_send(frame, mid, recv_at, argc, w_block,
     args = [0] * argc
     i = 0
     while i < argc:
-        args[i] = frame.stack[recv_at + 1 + i]
+        args[i] = frame.slots[recv_at + 1 + i]
         i += 1
     _drop(frame, recv_at)
     return _block_send_args(mid, w_block, args, kw_names, kw_splat)
@@ -355,7 +355,7 @@ def invoke_block(frame, w_ci):
         args = [0] * argc
         i = 0
         while i < argc:
-            args[i] = frame.stack[at + i]
+            args[i] = frame.slots[at + i]
             i += 1
     _drop(frame, at)
     return call_block(w_block, args, w_ci.kw_names, w_ci.kw_splat)
