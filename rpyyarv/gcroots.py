@@ -156,6 +156,7 @@ def mark_handle(h):
     w_block = b.table[h]
     if w_block is None:
         return
+    prev = gc_mark_state.marking
     gc_mark_state.generation += 1
     gc_mark_state.marking = True
     try:
@@ -164,7 +165,7 @@ def mark_handle(h):
             boot.gc_mark_value(v)
         _mark_block_deep(w_block)
     finally:
-        gc_mark_state.marking = False
+        gc_mark_state.marking = prev
 
 
 def _mark_word(w):
@@ -178,12 +179,14 @@ gc_mark_state.mark_word = _mark_word
 @dont_look_inside
 def mark_roots():
     # Reading a frame mid-trace is not an escape; else every GC aborts it.
+    # Restored, not cleared: a handle's dmark re-enters us from this walk.
+    prev = gc_mark_state.marking
     gc_mark_state.generation += 1
     gc_mark_state.marking = True
     try:
         _mark_all()
     finally:
-        gc_mark_state.marking = False
+        gc_mark_state.marking = prev
 
 
 def _mark_all():

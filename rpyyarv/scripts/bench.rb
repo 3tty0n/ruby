@@ -112,8 +112,10 @@ def run_once(argv, script, env, timeout)
     return [nil, "DELEGATED", info.merge("delegated" => first_delegation(text))]
   end
   unless status.success?
+    # The head too: an RPython traceback prints before the memory map.
     return [nil, status.exitstatus == 142 ? "TIMEOUT" : "FAIL",
             info.merge("why" => why(err, status),
+                       "err_head" => err[0, 1500],
                        "err_tail" => err[-1500..-1] || err)]
   end
   times = []
@@ -169,7 +171,8 @@ def time_engine(argv, script, env, warm, procs, timeout)
   procs.times do
     times, err, info = run_once(argv, script, env, timeout)
     if err
-      return { status: err, why: info["why"], err_tail: info["err_tail"] }
+      return { status: err, why: info["why"], err_head: info["err_head"],
+               err_tail: info["err_tail"] }
     end
     # The harness says where warmup ended when WARMUP_TIME stretched it.
     w = info["warmed"] || warm
@@ -435,7 +438,7 @@ def run_suite(suite, names, engines, procs, raw)
         puts format("  %-16s %-12s %s", bench, ename,
                     verdict || format("median %.2f ms  min %.2f  spread %.2fx  (n=%d)",
                                       r[:median], r[:min], r[:spread] || 1.0, r[:n]))
-        puts r[:err_tail].to_s.lines.last(8).map { |l| "      | #{l.chomp}" } if r[:status] && r[:err_tail]
+        puts r[:err_head].to_s.lines.first(20).map { |l| "      | #{l.chomp}" } if r[:status] && r[:err_head]
       end
     end
     rows << [bench, suite.label(bench), result, nil]

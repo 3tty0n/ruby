@@ -67,7 +67,8 @@ rb_ary_unshift1 = _ext('rpyyarv_ary_unshift1', [VALUE, VALUE], VALUE)
 
 rb_ary_hash_freeze = _ext('rpyyarv_ary_hash_freeze', [VALUE], VALUE)
 
-rb_obj_freeze = _ext('rpyyarv_obj_freeze', [VALUE], VALUE)
+# reenters: freezing a plain object can evict its ivars, so it allocates.
+rb_obj_freeze = _ext('rpyyarv_obj_freeze', [VALUE], VALUE, reenters=True)
 
 
 rb_ary_flatten_bang1 = _ext('rpyyarv_ary_flatten_bang1', [VALUE], VALUE)
