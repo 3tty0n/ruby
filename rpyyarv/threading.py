@@ -8,15 +8,23 @@ from rpyyarv.rlib import dont_look_inside, unchecked_stack_start
 @dont_look_inside
 def enter_callback():
     """Take RPython GIL only when C called us on a foreign thread."""
-    if rgil.am_I_holding_the_GIL():
-        return False
-    rgil.acquire_maybe_in_new_thread()
-    return True
+    acquired = not rgil.am_I_holding_the_GIL()
+    if acquired:
+        rgil.acquire_maybe_in_new_thread()
+    from rpyyarv import boot
+    if not boot.ractor_callback_p():
+        return 1 if acquired else 0
+    from rpyyarv import interp
+    interp.disable_jit_for_ractor()
+    return (1 if acquired else 0) | 2
 
 
 @dont_look_inside
-def leave_callback(acquired):
-    if acquired:
+def leave_callback(state):
+    if state & 2:
+        from rpyyarv import interp
+        interp.configure_jitparams()
+    if state & 1:
         rgil.release()
 
 
@@ -25,16 +33,12 @@ def _enter():
     rgil.acquire_maybe_in_new_thread()
     unchecked_stack_start()
     from rpyyarv import boot
-    from rpyyarv import interp
     if boot.foreign_depth() == 0:
         boot.enter_foreign_depth()
-    interp.disable_jit_for_ractor()
 
 
 @dont_look_inside
 def _leave():
-    from rpyyarv import interp
-    interp.configure_jitparams()
     rgil.release()
 
 

@@ -36,6 +36,7 @@ VALUE rb_iseqw_new(const struct rb_iseq_struct *iseq);
 static _Thread_local int block_unwind;
 /* A tag rb_protect caught inside a yield, re-issued past the trampoline. */
 static _Thread_local int pending_tag;
+static _Thread_local int rpyyarv_ractor_callback_depth;
 
 static void (*rpyyarv_thread_enter)(void);
 static void (*rpyyarv_thread_leave)(void);
@@ -45,9 +46,14 @@ static pthread_t rpyyarv_main_thread;
 static VALUE rpyyarv_main_ractor;
 static rb_ractor_local_key_t rpyyarv_callback_depth_key;
 static pthread_mutex_t rpyyarv_foreign_lock = PTHREAD_MUTEX_INITIALIZER;
-static int rpyyarv_foreign_callbacks;
+struct rpyyarv_pending_handle {
+    long handle;
+    unsigned int unstarted;
+    struct rpyyarv_pending_handle *next;
+};
+static struct rpyyarv_pending_handle *rpyyarv_pending_handles;
+static int rpyyarv_pending_ractor_blocks;
 static int rpyyarv_gc_pending;
-static int rpyyarv_gc_held;
 static int rpyyarv_ractors_used;
 
 static int
@@ -73,7 +79,31 @@ enter_rpython_without_gvl(void *unused)
 }
 
 static int
-enter_rpython(void)
+reserve_ractor_block(long handle)
+{
+    struct rpyyarv_pending_handle **link = &rpyyarv_pending_handles;
+    struct rpyyarv_pending_handle *entry;
+    int reserved = 0;
+
+    pthread_mutex_lock(&rpyyarv_foreign_lock);
+    while ((entry = *link) != NULL) {
+        if (entry->handle == handle) {
+            entry->unstarted--;
+            reserved = 1;
+            if (entry->unstarted == 0) {
+                *link = entry->next;
+                free(entry);
+            }
+            break;
+        }
+        link = &entry->next;
+    }
+    pthread_mutex_unlock(&rpyyarv_foreign_lock);
+    return reserved;
+}
+
+static int
+enter_rpython(long handle)
 {
     int depth = callback_depth();
     int flags = 0;
@@ -81,6 +111,7 @@ enter_rpython(void)
             rb_funcallv(rb_cRactor, rb_intern("current"), 0, NULL) !=
             rpyyarv_main_ractor) {
         flags |= 2;
+        if (reserve_ractor_block(handle)) flags |= 4;
     }
     if (depth == 0 &&
             !pthread_equal(pthread_self(), rpyyarv_main_thread)) {
@@ -89,17 +120,19 @@ enter_rpython(void)
         flags |= 1;
     }
     set_callback_depth(depth + 1);
+    if (flags & 2) rpyyarv_ractor_callback_depth++;
     return flags;
 }
 
 static void
 leave_rpython(int flags)
 {
+    if (flags & 2) rpyyarv_ractor_callback_depth--;
     set_callback_depth(callback_depth() - 1);
     if (flags & 1) rpyyarv_thread_leave();
-    if (!(flags & 2)) return;
+    if (!(flags & 4)) return;
     pthread_mutex_lock(&rpyyarv_foreign_lock);
-    if (--rpyyarv_foreign_callbacks == 0) {
+    if (--rpyyarv_pending_ractor_blocks == 0) {
         rpyyarv_gc_pending = 1;
     }
     pthread_mutex_unlock(&rpyyarv_foreign_lock);
@@ -124,7 +157,7 @@ collect_after_ractors(void)
 {
     int collect = 0;
     pthread_mutex_lock(&rpyyarv_foreign_lock);
-    if (rpyyarv_gc_pending && rpyyarv_foreign_callbacks == 0) {
+    if (rpyyarv_gc_pending && rpyyarv_pending_ractor_blocks == 0) {
         rpyyarv_gc_pending = 0;
         collect = 1;
     }
@@ -151,27 +184,69 @@ rpyyarv_set_thread_callbacks(void (*enter)(void), void (*leave)(void),
 }
 
 int
-rpyyarv_ractor_class_p(uintptr_t value)
-{
-    return (VALUE)value == rb_cRactor;
-}
-
-int
 rpyyarv_ractor_p(uintptr_t value)
 {
     return rb_obj_is_kind_of((VALUE)value, rb_cRactor) ? 1 : 0;
 }
 
-void
-rpyyarv_prepare_ractors(void)
+int
+rpyyarv_ractor_callback_p(void)
 {
+    return rpyyarv_ractor_callback_depth > 0;
+}
+
+static void
+prepare_ractor_block(long handle)
+{
+    struct rpyyarv_pending_handle *entry;
+
+    collect_after_ractors();
+    entry = malloc(sizeof(*entry));
+    if (entry == NULL) rb_memerror();
     pthread_mutex_lock(&rpyyarv_foreign_lock);
+    for (struct rpyyarv_pending_handle *it = rpyyarv_pending_handles;
+            it != NULL; it = it->next) {
+        if (it->handle == handle) {
+            it->unstarted++;
+            free(entry);
+            entry = NULL;
+            break;
+        }
+    }
+    if (entry != NULL) {
+        entry->handle = handle;
+        entry->unstarted = 1;
+        entry->next = rpyyarv_pending_handles;
+        rpyyarv_pending_handles = entry;
+    }
+    rpyyarv_ractors_used = 1;
+    rpyyarv_pending_ractor_blocks++;
+    pthread_mutex_unlock(&rpyyarv_foreign_lock);
     rpyyarv_gil_release();
     rb_gc_disable();
     reacquire_rpython_gil();
-    rpyyarv_gc_held = 1;
-    rpyyarv_ractors_used = 1;
-    rpyyarv_foreign_callbacks++;
+}
+
+static void
+cancel_ractor_block(long handle)
+{
+    struct rpyyarv_pending_handle **link = &rpyyarv_pending_handles;
+    struct rpyyarv_pending_handle *entry;
+
+    pthread_mutex_lock(&rpyyarv_foreign_lock);
+    while ((entry = *link) != NULL) {
+        if (entry->handle == handle) {
+            entry->unstarted--;
+            rpyyarv_pending_ractor_blocks--;
+            if (entry->unstarted == 0) {
+                *link = entry->next;
+                free(entry);
+            }
+            if (rpyyarv_pending_ractor_blocks == 0) rpyyarv_gc_pending = 1;
+            break;
+        }
+        link = &entry->next;
+    }
     pthread_mutex_unlock(&rpyyarv_foreign_lock);
 }
 
@@ -1870,7 +1945,9 @@ block_yielder(RB_BLOCK_CALL_FUNC_ARGLIST(yielded, callback_arg))
     (void)yielded;
     (void)blockarg;
     if (!block_callback) return Qnil;
-    acquired = enter_rpython();
+    acquired = enter_rpython(
+        FIXNUM_P(callback_arg) ? (long)FIX2LONG(callback_arg) :
+        (long)(uintptr_t)RTYPEDDATA_DATA(callback_arg) - 1);
     if (n < 0) n = 0;
     if (n > RPYYARV_MAX_ARGC) n = RPYYARV_MAX_ARGC;
     for (i = 0; i < n; i++) buf[i] = argv[i];
@@ -2002,8 +2079,12 @@ rpyyarv_call_with_block(uintptr_t recv, uintptr_t mid, int argc,
     a.handle = handle;
     a.kw_splat = kw ? RB_PASS_KEYWORDS : RB_NO_KEYWORDS;
 
+    int ractor_new = (VALUE)recv == rb_cRactor &&
+                     (ID)mid == rb_intern("new");
+    if (ractor_new) prepare_ractor_block(handle);
     *state = 0;
     VALUE r = rb_protect(call_with_block_body, (VALUE)&a, state);
+    if (ractor_new && *state) cancel_ractor_block(handle);
     absorb_unwind(state);
     if (*state) return (uintptr_t)Qnil;
     return (uintptr_t)r;
@@ -2085,7 +2166,7 @@ rpyyarv_trampoline(int argc, VALUE *argv, VALUE self)
     if (!tramp_callback) {
         rb_raise(rb_eRuntimeError, "rpyyarv: no trampoline callback");
     }
-    acquired = enter_rpython();
+    acquired = enter_rpython(-1);
     r = (VALUE)tramp_callback((uintptr_t)self, (uintptr_t)mid,
                               (uintptr_t)owner, defkey, argc,
                               (uintptr_t *)argv, (uintptr_t)blockproc, kw,

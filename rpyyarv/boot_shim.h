@@ -17,9 +17,8 @@ int rpyyarv_cleanup(int status);
 void rpyyarv_set_thread_callbacks(void (*enter)(void), void (*leave)(void),
                                   void (*acquire)(void),
                                   void (*release)(void));
-int rpyyarv_ractor_class_p(uintptr_t value);
 int rpyyarv_ractor_p(uintptr_t value);
-void rpyyarv_prepare_ractors(void);
+int rpyyarv_ractor_callback_p(void);
 
 /* ruby_run_node on the boot node: runs under CRuby, cleans up, exit status. */
 int rpyyarv_run_node(void *n);

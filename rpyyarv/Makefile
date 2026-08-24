@@ -153,6 +153,7 @@ gccheck:
 	          test/defaultgems.rb test/modevalproc.rb \
 	          test/strevallocals.rb test/refinements.rb test/superblock.rb \
 	          test/bmethod.rb test/visibility.rb test/fiberblock.rb \
+	          test/ractors.rb \
 	          test/allocfast.rb test/strwire.rb test/evalcref.rb \
 	          test/superchain.rb test/blockself.rb test/fcallproc.rb \
 	          test/splatkw.rb test/r2kwargs.rb test/fwdargs.rb \

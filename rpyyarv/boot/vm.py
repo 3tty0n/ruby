@@ -15,14 +15,10 @@ rb_set_thread_callbacks = _ext('rpyyarv_set_thread_callbacks',
                                 THREAD_HOOK, THREAD_HOOK], lltype.Void)
 
 
-rb_ractor_class_p = _ext('rpyyarv_ractor_class_p', [VALUE], rffi.INT)
-
-
 rb_ractor_p = _ext('rpyyarv_ractor_p', [VALUE], rffi.INT)
 
 
-rb_prepare_ractors = _ext('rpyyarv_prepare_ractors', [], lltype.Void,
-                          reenters=True)
+rb_ractor_callback_p = _ext('rpyyarv_ractor_callback_p', [], rffi.INT)
 
 
 rb_boot = _ext('rpyyarv_boot', [rffi.INT, rffi.CCHARPP, INTP], VOIDP)
@@ -92,16 +88,12 @@ def set_thread_callbacks(enter, leave, acquire, release):
     rb_set_thread_callbacks(enter, leave, acquire, release)
 
 
-def ractor_class_p(v):
-    return rffi.cast(lltype.Signed, rb_ractor_class_p(_v(v))) != 0
-
-
 def ractor_p(v):
     return rffi.cast(lltype.Signed, rb_ractor_p(_v(v))) != 0
 
 
-def prepare_ractors():
-    rb_prepare_ractors()
+def ractor_callback_p():
+    return rffi.cast(lltype.Signed, rb_ractor_callback_p()) != 0
 
 
 def bop_mask():
