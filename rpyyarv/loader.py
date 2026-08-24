@@ -184,7 +184,7 @@ class Loader(object):
         self.reasons.append("'%s': %s" % (raw.name, reason))
         return W_ISeq(raw.name, [insns.LEAVE], [], [], [], raw.nlocals,
                       raw.stack_max, simple_params=False, unsupported=reason,
-                      path=self.program.path)
+                      path=self.program.path, native=raw.native)
 
     def build_iseq(self, raw, parents):
         for entry in raw.catches:
@@ -279,7 +279,7 @@ class Loader(object):
                         [t for t in pool.case_tables],
                         [p for p in line_pcs], [n for n in line_nums],
                         shares, [n for n in raw.local_names],
-                        raw.block_start)
+                        raw.block_start, raw.native)
         if raw.forwardable:
             # The `...` rest carries keywords the ruby2_keywords way.
             w_iseq.r2k = True

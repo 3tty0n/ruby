@@ -45,6 +45,7 @@
 #include "vm_exec.h"
 #include "vm_insnhelper.h"
 #include "ractor_core.h"
+#include "rpyyarv.h"
 #include "vm_sync.h"
 #include "shape.h"
 
@@ -1564,6 +1565,61 @@ rb_proc_isolate(VALUE self)
     VALUE dst = rb_proc_dup(self);
     rb_proc_isolate_bang(dst, Qundef);
     return dst;
+}
+
+VALUE
+rb_rpyyarv_proc_from_iseq(const void *iseq_ptr, const void *cref_ptr)
+{
+    const rb_iseq_t *iseq = iseq_ptr;
+    const rb_iseq_t *parent = ISEQ_BODY(iseq)->parent_iseq;
+    unsigned int locals = parent ? ISEQ_BODY(parent)->local_table_size : 0;
+    unsigned int env_size = locals + VM_ENV_DATA_SIZE + 1;
+    VALUE *env_body = ZALLOC_N(VALUE, env_size);
+    VALUE *ep = &env_body[locals + VM_ENV_DATA_SIZE - 1];
+    const rb_env_t *env = vm_env_new(ep, env_body, env_size, parent);
+    struct rb_captured_block captured;
+
+    rb_cref_t *cref = (rb_cref_t *)cref_ptr;
+    if (!cref) cref = rb_vm_cref_new_toplevel();
+    RB_OBJ_WRITE((VALUE)env, &ep[VM_ENV_DATA_INDEX_ME_CREF], (VALUE)cref);
+    ep[VM_ENV_DATA_INDEX_SPECVAL] = VM_BLOCK_HANDLER_NONE;
+    ep[VM_ENV_DATA_INDEX_FLAGS] = VM_ENV_FLAG_LOCAL | VM_ENV_FLAG_ESCAPED |
+                                  VM_ENV_FLAG_WB_REQUIRED;
+    captured.self = Qnil;
+    captured.ep = ep;
+    captured.code.iseq = iseq;
+    return rb_proc_isolate_bang(
+        rb_vm_make_proc(GET_EC(), &captured, rb_cProc), Qundef);
+}
+
+void *
+rb_rpyyarv_cref_new(const void *outer_ptr, VALUE klass, int by_eval)
+{
+    rb_cref_t *outer = (rb_cref_t *)outer_ptr;
+    if (!outer) outer = rb_vm_cref_new_toplevel();
+    if (klass) {
+        outer = vm_cref_new(klass, METHOD_VISI_PUBLIC, FALSE, outer,
+                            by_eval != 0, FALSE);
+    }
+    rb_gc_register_mark_object((VALUE)outer);
+    return outer;
+}
+
+VALUE
+rb_rpyyarv_call_method_iseq(VALUE self, const void *me_ptr, int argc,
+                            const VALUE *argv, VALUE block, int kw)
+{
+    rb_execution_context_t *ec = GET_EC();
+    const rb_callable_method_entry_t *me = me_ptr;
+    VALUE previous = vm_passed_block_handler(ec);
+    VALUE handler = NIL_P(block) ? VM_BLOCK_HANDLER_NONE :
+                    vm_proc_to_block_handler(block);
+    VALUE result;
+
+    vm_passed_block_handler_set(ec, handler);
+    result = rb_vm_call0(ec, self, me->called_id, argc, argv, me, kw);
+    vm_passed_block_handler_set(ec, previous);
+    return result;
 }
 
 VALUE

@@ -46,7 +46,8 @@ rb_set_block_callback = _ext('rpyyarv_set_block_callback', [BLOCK_HOOK],
 
 rb_call_with_block = _ext('rpyyarv_call_with_block',
                           [VALUE, VALUE, rffi.INT, VALUEP, rffi.LONG,
-                           rffi.INT, INTP], VALUE, reenters=True)
+                           rffi.VOIDP, rffi.VOIDP, rffi.INT, INTP], VALUE,
+                          reenters=True)
 
 
 rb_call_with_proc = _ext('rpyyarv_call_with_proc',
@@ -59,8 +60,8 @@ rb_set_trampoline_callback = _ext('rpyyarv_set_trampoline_callback',
 
 
 rb_define_method_id = _ext('rpyyarv_define_method',
-                           [VALUE, VALUE, rffi.INT, INTP], VALUE,
-                           reenters=True)
+                           [VALUE, VALUE, rffi.INT, rffi.VOIDP, rffi.VOIDP,
+                            INTP], VALUE, reenters=True)
 
 
 rb_proc_new = _ext('rpyyarv_proc_new', [rffi.LONG, INTP], VALUE, reenters=True)
@@ -210,7 +211,8 @@ def call_with_proc(recv, rid, args, proc, mid, kw=False):
     return ret
 
 
-def call_with_block(recv, rid, args, handle, mid, kw=False):
+def call_with_block(recv, rid, args, handle, native, native_cref, mid,
+                    kw=False):
     """kw: args[-1] is a Hash the callee should see as keywords."""
     argc = len(args)
     if argc > MAX_ARGC:
@@ -224,6 +226,8 @@ def call_with_block(recv, rid, args, handle, mid, kw=False):
     v = rb_call_with_block(_v(recv), _v(rid),
                            rffi.cast(rffi.INT, argc), argv,
                            rffi.cast(rffi.LONG, handle),
+                           rffi.cast(rffi.VOIDP, native),
+                           rffi.cast(rffi.VOIDP, native_cref),
                            rffi.cast(rffi.INT, 1 if kw else 0), state)
     failed = _leave_status(state)
     ret = rffi.cast(lltype.Signed, v)
@@ -242,12 +246,14 @@ def install_trampoline_callback(fn):
     rb_set_trampoline_callback(fn)
 
 
-def define_method_entry(klass, rid, visibility):
+def define_method_entry(klass, rid, visibility, native, native_cref):
     """A CRuby method entry over the generic trampoline; returns its def key.
     visibility is 0 public, 1 private, 2 protected, as the shim spells it."""
     state = _enter_status()
     key = rb_define_method_id(_v(klass), _v(rid),
-                              rffi.cast(rffi.INT, visibility), state)
+                              rffi.cast(rffi.INT, visibility),
+                              rffi.cast(rffi.VOIDP, native),
+                              rffi.cast(rffi.VOIDP, native_cref), state)
     failed = _leave_status(state)
     if failed:
         _failed('define_method')

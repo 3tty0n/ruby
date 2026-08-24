@@ -66,15 +66,19 @@ def check(ary):
 
 def load(iseqw):
     """A RawProgram whose iseq 0 is iseqw."""
+    # RawISeqs retain native child pointers, so retain their owning ISeq tree.
+    boot.gc_register(iseqw)
     program = rawiseq.RawProgram('', _path(iseqw))
     root = boot.call0(iseqw, 'to_a')
     # An RPython list is no GC root: pinned until the pools register.
     gcroots.keepalive(root)
     pending = [root]
+    native_pending = [iseqw]
     owners = [-1]
     i = 0
     while i < len(pending):
-        _read_iseq(program, pending, owners, pending[i], owners[i])
+        _read_iseq(program, pending, native_pending, owners, pending[i],
+                   native_pending[i], owners[i])
         i += 1
     return program
 
@@ -86,10 +90,13 @@ def _path(iseqw):
     return ''
 
 
-def _read_iseq(program, pending, owners, ary, parent):
+def _read_iseq(program, pending, native_pending, owners, ary, iseqw, parent):
     check(ary)
     misc = boot.ary_entry(ary, I_MISC)
     params = boot.ary_entry(ary, I_PARAMS)
+    children = boot.iseqw_children(iseqw)
+    gcroots.keepalive(children)
+    child_at = [0]
     raw = rawiseq.RawISeq(
         boot.str_of(boot.ary_entry(ary, I_LABEL)),
         boot.sym_of(boot.ary_entry(ary, I_TYPE)),
@@ -97,15 +104,17 @@ def _read_iseq(program, pending, owners, ary, parent):
         _int_or(boot.hash_aref(misc, 'stack_max'), 0),
         _lead_num(misc, params),
         _extra_params(params),
-        _catches(pending, owners, boot.ary_entry(ary, I_CATCH),
-                 len(program.iseqs)),
+        _catches(pending, native_pending, owners,
+                 boot.ary_entry(ary, I_CATCH), len(program.iseqs), children,
+                 child_at),
         _opt_labels(params),
         _int_or(boot.hash_aref(params, 'rest_start'), -1),
         _int_or(boot.hash_aref(params, 'post_start'), -1),
         _int_or(boot.hash_aref(params, 'post_num'), 0),
         not boot.is_nil(boot.hash_aref(params, 'ambiguous_param0')))
     me = len(program.iseqs)
-    names, required, defaults = _keywords(pending, owners, params, me)
+    names, required, defaults = _keywords(
+        pending, native_pending, owners, params, me, children, child_at)
     raw.kw_names = names
     raw.kw_required = required
     raw.kw_defaults = defaults
@@ -125,6 +134,7 @@ def _read_iseq(program, pending, owners, ary, parent):
         raise LoadError("'%s' has keyword parameters but no kwbits slot: %s"
                         % (raw.name, _MOVED))
     raw.parent = parent
+    raw.native = boot.iseqw_ptr(iseqw)
     program.add_iseq(raw)
 
     me = len(program.iseqs) - 1
@@ -135,7 +145,8 @@ def _read_iseq(program, pending, owners, ary, parent):
         e = boot.ary_entry(body, i)
         i += 1
         if boot.is_array(e):
-            raw.add_insn(_insn(pending, owners, e, me))
+            raw.add_insn(_insn(pending, native_pending, owners, e, me,
+                               children, child_at))
         elif boot.is_symbol(e):
             name = boot.sym_of(e)
             if not name.startswith(EVENT_PREFIX):
@@ -145,18 +156,19 @@ def _read_iseq(program, pending, owners, ary, parent):
             raw.set_line(boot.num2long(e))
 
 
-def _insn(pending, owners, e, me):
+def _insn(pending, native_pending, owners, e, me, children, child_at):
     operands = []
     n = boot.ary_len(e)
     i = 1
     while i < n:
-        operands.append(_operand(pending, owners,
-                                 boot.ary_entry(e, i), me))
+        operands.append(_operand(pending, native_pending, owners,
+                                 boot.ary_entry(e, i), me, children,
+                                 child_at))
         i += 1
     return rawiseq.RawInsn(boot.sym_of(boot.ary_entry(e, 0)), operands)
 
 
-def _operand(pending, owners, v, me):
+def _operand(pending, native_pending, owners, v, me, children, child_at):
     if boot.is_fixnum(v):
         return rawiseq.int_operand(boot.num2long(v))
     if boot.is_nil(v):
@@ -174,13 +186,17 @@ def _operand(pending, owners, v, me):
         if is_iseq(v):
             pending.append(v)
             owners.append(me)
+            native = boot.iseqw_child_for_array(children, v)
+            gcroots.keepalive(native)
+            native_pending.append(native)
             return rawiseq.RawOperand(rawiseq.OP_ISEQ, len(pending) - 1)
         items = []
         n = boot.ary_len(v)
         i = 0
         while i < n:
-            items.append(_operand(pending, owners,
-                                  boot.ary_entry(v, i), me))
+            items.append(_operand(pending, native_pending, owners,
+                                  boot.ary_entry(v, i), me, children,
+                                  child_at))
             i += 1
         return rawiseq.RawOperand(rawiseq.OP_ARRAY, 0, '', 0, False, items)
     if boot.is_hash(v):
@@ -200,7 +216,7 @@ def _operand(pending, owners, v, me):
     return rawiseq.RawOperand(rawiseq.OP_VALUE, v, boot.inspect(v))
 
 
-def _catches(pending, owners, catch, me):
+def _catches(pending, native_pending, owners, catch, me, children, child_at):
     """An entry's ISeq joins the same pending queue as nested ISeqs."""
     out = []
     n = boot.ary_len(catch)
@@ -219,6 +235,9 @@ def _catches(pending, owners, catch, me):
         if not boot.is_nil(body):
             pending.append(body)
             owners.append(me)
+            native = boot.iseqw_child_for_array(children, body)
+            gcroots.keepalive(native)
+            native_pending.append(native)
             index = len(pending) - 1
         out.append(rawiseq.RawCatch(kind, index,
                                     _label(boot.ary_entry(e, 2)),
@@ -259,7 +278,8 @@ def _opt_labels(params):
     return out
 
 
-def _keywords(pending, owners, params, me):
+def _keywords(pending, native_pending, owners, params, me, children,
+              child_at):
     """iseq.c:3442: bare Symbol required, [name] computed, [n, v] static."""
     v = boot.hash_aref(params, 'keyword')
     if boot.is_nil(v):
@@ -291,8 +311,9 @@ def _keywords(pending, owners, params, me):
         optional_seen = True
         names.append(boot.sym_of(boot.ary_entry(e, 0)))
         if boot.ary_len(e) == 2:
-            defaults.append(_operand(pending, owners, boot.ary_entry(e, 1),
-                                     me))
+            defaults.append(_operand(pending, native_pending, owners,
+                                     boot.ary_entry(e, 1), me, children,
+                                     child_at))
         else:
             defaults.append(None)
     return names, required, defaults

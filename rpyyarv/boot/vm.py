@@ -28,6 +28,13 @@ rb_ractor_p = _ext('rpyyarv_ractor_p', [VALUE], rffi.INT)
 rb_ractor_callback_p = _ext('rpyyarv_ractor_callback_p', [], rffi.INT)
 
 
+rb_native_ractors_p = _ext('rpyyarv_native_ractors_p', [], rffi.INT)
+
+
+rb_native_ractors_poll = _ext('rpyyarv_native_ractors_poll', [VALUE],
+                              lltype.Void, reenters=True)
+
+
 rb_boot = _ext('rpyyarv_boot', [rffi.INT, rffi.CCHARPP, INTP], VOIDP)
 
 
@@ -38,6 +45,28 @@ rb_run_node = _ext('rpyyarv_run_node', [VOIDP], rffi.INT, reenters=True)
 
 
 rb_iseqw_new = _ext('rpyyarv_iseqw_new', [VOIDP], VALUE)
+
+
+rb_iseqw_ptr = _ext('rpyyarv_iseqw_ptr', [VALUE], VOIDP)
+
+
+rb_iseqw_children = _ext('rpyyarv_iseqw_children', [VALUE], VALUE,
+                         reenters=True)
+
+
+rb_iseqw_child_for_array = _ext('rpyyarv_iseqw_child_for_array',
+                                [VALUE, VALUE], VALUE, reenters=True)
+
+
+rb_cref_new = _ext('rb_rpyyarv_cref_new', [VOIDP, VALUE, rffi.INT], VOIDP)
+
+
+class _NativeCrefState(object):
+    def __init__(self):
+        self.top = 0
+
+
+native_cref_state = _NativeCrefState()
 
 
 rb_top_self = _ext('rpyyarv_top_self', [], VALUE)
@@ -78,6 +107,36 @@ def top_self():
     return rffi.cast(lltype.Signed, rb_top_self())
 
 
+def iseqw_ptr(iseqw):
+    return rffi.cast(lltype.Signed, rb_iseqw_ptr(_v(iseqw)))
+
+
+def iseqw_children(iseqw):
+    return rffi.cast(lltype.Signed, rb_iseqw_children(_v(iseqw)))
+
+
+def iseqw_child_for_array(children, ary):
+    return rffi.cast(lltype.Signed,
+                     rb_iseqw_child_for_array(_v(children), _v(ary)))
+
+
+def native_cref(cref):
+    if cref is None:
+        if native_cref_state.top == 0:
+            native_cref_state.top = rffi.cast(
+                lltype.Signed,
+                rb_cref_new(lltype.nullptr(rffi.VOIDP.TO), _v(0),
+                            rffi.cast(rffi.INT, 0)))
+        return native_cref_state.top
+    if cref.native != 0:
+        return cref.native
+    outer = native_cref(cref.outer)
+    cref.native = rffi.cast(lltype.Signed, rb_cref_new(
+        rffi.cast(rffi.VOIDP, outer), _v(cref.klass),
+        rffi.cast(rffi.INT, 1 if cref.by_eval else 0)))
+    return cref.native
+
+
 def current_receiver():
     return rffi.cast(lltype.Signed, rb_current_receiver())
 
@@ -109,6 +168,14 @@ def ractor_p(v):
 
 def ractor_callback_p():
     return rffi.cast(lltype.Signed, rb_ractor_callback_p()) != 0
+
+
+def native_ractors_p():
+    return rffi.cast(lltype.Signed, rb_native_ractors_p()) != 0
+
+
+def native_ractors_poll(waited):
+    rb_native_ractors_poll(_v(waited))
 
 
 def bop_mask():

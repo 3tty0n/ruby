@@ -37,7 +37,7 @@ class W_ISeq(object):
                           'kw_table[*]', 'kw_defaults[*]', 'kw_required',
                           'kw_start', 'kw_bits', 'kwrest', 'path',
                           'line_pcs[*]', 'line_nums[*]', 'shares_locals',
-                          'local_names[*]', 'block_start', 'r2k?']
+                          'local_names[*]', 'block_start', 'native', 'r2k?']
     # once_cache is written once per body and is deliberately not immutable.
 
     # Module#ruby2_keywords marks the method after the def; quasi-immutable.
@@ -52,7 +52,8 @@ class W_ISeq(object):
                  kw_required=0, kw_start=-1, kw_bits=-1, kwrest=-1, path='',
                  case_tables=None, line_pcs=None, line_nums=None,
                  shares_locals=False, local_names=None,
-                 block_start=-1):
+                 block_start=-1, native=0):
+        self.native = native
         # Local slot of the &block parameter; -1 when the def names none.
         self.block_start = block_start
         # One name per local slot, '' where none; string eval reads them.

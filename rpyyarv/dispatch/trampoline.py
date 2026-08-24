@@ -34,7 +34,9 @@ def _install_trampoline(klass, mid, visibility, entry):
     own_hook.rid = rid
     own_hook.depth += 1
     try:
-        key = boot.define_method_entry(klass, rid, visibility)
+        key = boot.define_method_entry(klass, rid, visibility,
+                                       entry.w_iseq.native,
+                                       boot.native_cref(entry.lexical))
     finally:
         own_hook.depth -= 1
         own_hook.rid = prev

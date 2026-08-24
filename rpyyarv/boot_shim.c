@@ -1,3 +1,5 @@
+#define RUBY_VM_INSNS_INFO 1
+
 #include <stdlib.h>
 #include <stddef.h>
 #include <string.h>
@@ -22,12 +24,17 @@
 /* rb_str_eql_internal, which YJIT relies on to neither allocate nor raise. */
 #include "internal/string.h"
 #include "internal/struct.h"
+#include "iseq.h"
 #include "vm_core.h"
+#include "vm_callinfo.h"
 /* rb_hrtime_t, for a Regexp's onigmo timelimit and the global one. */
 #include "hrtime.h"
 #include "rpyyarv.h"
 
 #include "boot_shim.h"
+#include "builtin.h"
+#include "insns.inc"
+#include "insns_info.inc"
 
 /* From the internal iseq.h, redeclared rather than including iseq.h. */
 struct rb_iseq_struct;
@@ -45,6 +52,7 @@ static void (*rpyyarv_gil_release)(void);
 static pthread_t rpyyarv_main_thread;
 static VALUE rpyyarv_main_ractor;
 static rb_ractor_local_key_t rpyyarv_callback_depth_key;
+static rb_ractor_local_key_t rpyyarv_main_marker_key;
 static pthread_mutex_t rpyyarv_foreign_lock = PTHREAD_MUTEX_INITIALIZER;
 struct rpyyarv_pending_handle {
     long handle;
@@ -56,6 +64,63 @@ static int rpyyarv_pending_ractor_blocks;
 static int rpyyarv_gc_pending;
 static int rpyyarv_ractors_used;
 static int rpyyarv_threaded;
+static int rpyyarv_native_gc_disabled;
+struct rpyyarv_native_method {
+    const void *def;
+    VALUE klass;
+    ID mid;
+    const void *iseq;
+    const void *cref;
+    const void *me;
+    struct rpyyarv_native_method *next;
+};
+static struct rpyyarv_native_method *rpyyarv_native_methods;
+static pthread_mutex_t rpyyarv_native_lock = PTHREAD_MUTEX_INITIALIZER;
+struct rpyyarv_native_proc {
+    const void *iseq;
+    const void *cref;
+    VALUE proc;
+    struct rpyyarv_native_proc *next;
+};
+static struct rpyyarv_native_proc *rpyyarv_native_procs;
+struct rpyyarv_native_ractor {
+    VALUE value;
+    int waited;
+    struct rpyyarv_native_ractor *next;
+};
+static struct rpyyarv_native_ractor *rpyyarv_native_ractors;
+
+static void
+remember_native_ractor(VALUE value)
+{
+    struct rpyyarv_native_ractor *entry = malloc(sizeof(*entry));
+    if (!entry) rb_memerror();
+    entry->value = value;
+    entry->waited = 0;
+    rb_gc_register_mark_object(value);
+    pthread_mutex_lock(&rpyyarv_native_lock);
+    entry->next = rpyyarv_native_ractors;
+    rpyyarv_native_ractors = entry;
+    pthread_mutex_unlock(&rpyyarv_native_lock);
+}
+
+static VALUE
+native_proc_for(const void *iseq, const void *cref)
+{
+    struct rpyyarv_native_proc *entry;
+    for (entry = rpyyarv_native_procs; entry != NULL; entry = entry->next) {
+        if (entry->iseq == iseq && entry->cref == cref) return entry->proc;
+    }
+    entry = malloc(sizeof(*entry));
+    if (!entry) rb_memerror();
+    entry->iseq = iseq;
+    entry->cref = cref;
+    entry->proc = rb_rpyyarv_proc_from_iseq(iseq, cref);
+    rb_gc_register_mark_object(entry->proc);
+    entry->next = rpyyarv_native_procs;
+    rpyyarv_native_procs = entry;
+    return entry->proc;
+}
 
 static int
 callback_depth(void)
@@ -188,6 +253,8 @@ rpyyarv_activate_threads(void)
     if (rpyyarv_threaded) return;
     rpyyarv_main_thread = pthread_self();
     rpyyarv_callback_depth_key = rb_ractor_local_storage_value_newkey();
+    rpyyarv_main_marker_key = rb_ractor_local_storage_value_newkey();
+    rb_ractor_local_storage_value_set(rpyyarv_main_marker_key, Qtrue);
     rpyyarv_main_ractor = rb_funcallv(rb_cRactor, rb_intern("current"),
                                       0, NULL);
     rpyyarv_threaded = 1;
@@ -209,6 +276,32 @@ int
 rpyyarv_ractor_callback_p(void)
 {
     return rpyyarv_ractor_callback_depth > 0;
+}
+
+int
+rpyyarv_native_ractors_p(void)
+{
+    return rpyyarv_native_gc_disabled;
+}
+
+void
+rpyyarv_native_ractors_poll(uintptr_t waited)
+{
+    int active = 0;
+    if (!rpyyarv_native_gc_disabled) return;
+    struct rpyyarv_native_ractor *entry;
+    pthread_mutex_lock(&rpyyarv_native_lock);
+    for (entry = rpyyarv_native_ractors; entry; entry = entry->next) {
+        if (entry->value == (VALUE)waited) entry->waited = 1;
+        if (!entry->waited) active++;
+    }
+    pthread_mutex_unlock(&rpyyarv_native_lock);
+    if (active) return;
+    rpyyarv_native_gc_disabled = 0;
+    rpyyarv_gil_release();
+    rb_gc_enable();
+    rb_gc_start();
+    reacquire_rpython_gil();
 }
 
 static void
@@ -238,6 +331,26 @@ prepare_ractor_block(long handle)
     rpyyarv_ractors_used = 1;
     rpyyarv_pending_ractor_blocks++;
     pthread_mutex_unlock(&rpyyarv_foreign_lock);
+    rpyyarv_gil_release();
+    rb_gc_disable();
+    reacquire_rpython_gil();
+}
+
+static void
+prepare_native_ractors(void)
+{
+    if (rpyyarv_native_gc_disabled) return;
+    pthread_mutex_lock(&rpyyarv_native_lock);
+    for (struct rpyyarv_native_method *entry = rpyyarv_native_methods;
+            entry; entry = entry->next) {
+        if (!entry->me) {
+            entry->me = rb_rpyyarv_method_iseq(
+                entry->klass, entry->mid, entry->iseq, entry->cref);
+        }
+    }
+    pthread_mutex_unlock(&rpyyarv_native_lock);
+    rpyyarv_native_gc_disabled = 1;
+    rpyyarv_ractors_used = 1;
     rpyyarv_gil_release();
     rb_gc_disable();
     reacquire_rpython_gil();
@@ -687,6 +800,58 @@ rpyyarv_iseqw_new(void *iseq)
     /* Held only where the GC never scans; pinning marks the iseq too. */
     rb_gc_register_mark_object(v);
     return (uintptr_t)v;
+}
+
+void *
+rpyyarv_iseqw_ptr(uintptr_t iseqw)
+{
+    return *(rb_iseq_t **)RTYPEDDATA_DATA((VALUE)iseqw);
+}
+
+uintptr_t
+rpyyarv_iseqw_children(uintptr_t iseqw)
+{
+    const rb_iseq_t *iseq = rpyyarv_iseqw_ptr(iseqw);
+    const struct rb_iseq_constant_body *body = ISEQ_BODY(iseq);
+    VALUE *code = rb_iseq_original_iseq((rb_iseq_t *)iseq);
+    VALUE children = rb_ary_new();
+    unsigned int i;
+
+    if (body->catch_table) {
+        for (i = 0; i < body->catch_table->size; i++) {
+            const struct iseq_catch_table_entry *entry =
+                UNALIGNED_MEMBER_PTR(body->catch_table, entries[i]);
+            if (entry->iseq) rb_ary_push(children, rb_iseqw_new(entry->iseq));
+        }
+    }
+    for (i = 0; i < body->iseq_size;) {
+        VALUE insn = code[i];
+        int len = insn_len(insn);
+        const char *types = insn_op_types(insn);
+        int j;
+        for (j = 0; types[j]; j++) {
+            if (types[j] == TS_ISEQ && code[i + j + 1]) {
+                rb_ary_push(children, rb_iseqw_new(
+                    (const rb_iseq_t *)code[i + j + 1]));
+            }
+        }
+        i += len;
+    }
+    return (uintptr_t)children;
+}
+
+uintptr_t
+rpyyarv_iseqw_child_for_array(uintptr_t children, uintptr_t ary)
+{
+    VALUE list = (VALUE)children;
+    long i;
+    for (i = 0; i < RARRAY_LEN(list); i++) {
+        VALUE child = RARRAY_AREF(list, i);
+        VALUE child_ary = rb_funcall(child, rb_intern("to_a"), 0);
+        if (rb_equal(child_ary, (VALUE)ary)) return (uintptr_t)child;
+    }
+    rb_raise(rb_eRuntimeError, "rpyyarv: native child ISeq not found");
+    return (uintptr_t)Qnil;
 }
 
 long
@@ -2002,6 +2167,8 @@ struct blockcall_args {
     int   argc;
     const VALUE *argv;
     long  handle;
+    void *native_iseq;
+    void *native_cref;
     /* RB_PASS_KEYWORDS when the last argument is a keyword Hash. */
     int   kw_splat;
 };
@@ -2010,6 +2177,12 @@ static VALUE
 call_with_block_body(VALUE argp)
 {
     struct blockcall_args *a = (struct blockcall_args *)argp;
+    if (a->recv == rb_cRactor && a->mid == rb_intern("new") &&
+            a->native_iseq) {
+        VALUE proc = native_proc_for(a->native_iseq, a->native_cref);
+        return rb_rpyyarv_call_with_proc_kw(a->recv, a->mid, a->argc,
+                                            a->argv, proc, a->kw_splat);
+    }
     VALUE owner = TypedData_Wrap_Struct(0, &handle_owner_type,
                                         (void *)(uintptr_t)(a->handle + 1));
     /* FCALL like rb_block_call, but the block self is the rebind sentinel. */
@@ -2076,7 +2249,8 @@ rpyyarv_call_with_proc(uintptr_t recv, uintptr_t mid, int argc,
 
 uintptr_t
 rpyyarv_call_with_block(uintptr_t recv, uintptr_t mid, int argc,
-                        const uintptr_t *argv, long handle, int kw, int *state)
+                        const uintptr_t *argv, long handle, void *native_iseq,
+                        void *native_cref, int kw, int *state)
 {
     VALUE buf[RPYYARV_MAX_ARGC];
     struct blockcall_args a;
@@ -2093,14 +2267,18 @@ rpyyarv_call_with_block(uintptr_t recv, uintptr_t mid, int argc,
     a.argc = argc;
     a.argv = buf;
     a.handle = handle;
+    a.native_iseq = native_iseq;
+    a.native_cref = native_cref;
     a.kw_splat = kw ? RB_PASS_KEYWORDS : RB_NO_KEYWORDS;
 
     int ractor_new = (VALUE)recv == rb_cRactor &&
                      (ID)mid == rb_intern("new");
-    if (ractor_new) prepare_ractor_block(handle);
+    if (ractor_new && native_iseq) prepare_native_ractors();
+    if (ractor_new && !native_iseq) prepare_ractor_block(handle);
     *state = 0;
     VALUE r = rb_protect(call_with_block_body, (VALUE)&a, state);
-    if (ractor_new && *state) cancel_ractor_block(handle);
+    if (ractor_new && native_iseq && !*state) remember_native_ractor(r);
+    if (ractor_new && !native_iseq && *state) cancel_ractor_block(handle);
     absorb_unwind(state);
     if (*state) return (uintptr_t)Qnil;
     return (uintptr_t)r;
@@ -2179,6 +2357,25 @@ rpyyarv_trampoline(int argc, VALUE *argv, VALUE self)
     VALUE r;
     int acquired;
 
+    if (rpyyarv_threaded &&
+            rb_ractor_local_storage_value(rpyyarv_main_marker_key) != Qtrue) {
+        const void *native_me = NULL;
+        pthread_mutex_lock(&rpyyarv_native_lock);
+        for (struct rpyyarv_native_method *it = rpyyarv_native_methods;
+                it != NULL; it = it->next) {
+            if (it->def == (const void *)defkey) {
+                native_me = it->me;
+                break;
+            }
+        }
+        pthread_mutex_unlock(&rpyyarv_native_lock);
+        if (native_me) {
+            return rb_rpyyarv_call_method_iseq(
+                self, native_me, argc, argv, blockproc,
+                kw ? RB_PASS_KEYWORDS : RB_NO_KEYWORDS);
+        }
+    }
+
     if (!tramp_callback) {
         rb_raise(rb_eRuntimeError, "rpyyarv: no trampoline callback");
     }
@@ -2209,6 +2406,9 @@ struct defmeth_args {
     VALUE klass;
     ID    mid;
     int   visibility;   /* 0 public, 1 private, 2 protected */
+    const rb_iseq_t *native_iseq;
+    const void *native_cref;
+    const void *def;
 };
 
 static VALUE
@@ -2223,22 +2423,40 @@ define_method_body(VALUE argp)
                    rb_intern(p->visibility == 2 ? "protected" : "private"),
                    1, ID2SYM(p->mid));
     }
+    p->def = rb_rpyyarv_method_def(p->klass, p->mid);
+    if (p->native_iseq) {
+        struct rpyyarv_native_method *entry = malloc(sizeof(*entry));
+        if (!entry) rb_memerror();
+        entry->def = p->def;
+        entry->klass = p->klass;
+        entry->mid = p->mid;
+        entry->iseq = p->native_iseq;
+        entry->cref = p->native_cref;
+        entry->me = NULL;
+        pthread_mutex_lock(&rpyyarv_native_lock);
+        entry->next = rpyyarv_native_methods;
+        rpyyarv_native_methods = entry;
+        pthread_mutex_unlock(&rpyyarv_native_lock);
+    }
     return Qnil;
 }
 
 uintptr_t
 rpyyarv_define_method(uintptr_t klass, uintptr_t mid, int visibility,
-                      int *state)
+                      void *native_iseq, void *native_cref, int *state)
 {
     struct defmeth_args a;
     a.klass = (VALUE)klass;
     a.mid = (ID)mid;
     a.visibility = visibility;
+    a.native_iseq = native_iseq;
+    a.native_cref = native_cref;
+    a.def = NULL;
     *state = 0;
     rb_protect(define_method_body, (VALUE)&a, state);
     if (*state) return 0;
     /* The def identity aliases and define_method(Method) copies share. */
-    return (uintptr_t)rb_rpyyarv_method_def(a.klass, a.mid);
+    return (uintptr_t)a.def;
 }
 
 static VALUE
