@@ -38,11 +38,13 @@ rb_hash_pairs = _ext('rpyyarv_hash_pairs', [VALUE, INTP], VALUE,
                      reenters=True)
 
 
-rb_hash_lookup_fast = _ext('rpyyarv_hash_lookup_fast', [VALUE, VALUE], VALUE)
+# reenters: rb_hash_lookup2/rb_hash_aset call the key's #hash and #eql?.
+rb_hash_lookup_fast = _ext('rpyyarv_hash_lookup_fast', [VALUE, VALUE], VALUE,
+                           reenters=True)
 
 
 rb_hash_aset_fast = _ext('rpyyarv_hash_aset_fast', [VALUE, VALUE, VALUE],
-                         VALUE)
+                         VALUE, reenters=True)
 
 
 rb_hash_empty_p = _ext('rpyyarv_hash_empty_p', [VALUE], VALUE)
