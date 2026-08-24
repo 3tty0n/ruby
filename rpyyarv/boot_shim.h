@@ -21,6 +21,8 @@ void rpyyarv_activate_threads(void);
 int rpyyarv_ractor_class_p(uintptr_t value);
 int rpyyarv_ractor_p(uintptr_t value);
 int rpyyarv_ractor_callback_p(void);
+int rpyyarv_native_ractors_p(void);
+void rpyyarv_native_ractors_poll(uintptr_t waited);
 
 /* ruby_run_node on the boot node: runs under CRuby, cleans up, exit status. */
 int rpyyarv_run_node(void *n);
@@ -73,6 +75,10 @@ void rpyyarv_special_consts(uintptr_t *qfalse, uintptr_t *qnil,
 
 /* rb_iseq_t is incomplete here, so the ISeq crosses the FFI as void *. */
 uintptr_t rpyyarv_iseqw_new(void *iseq);
+void *rpyyarv_iseqw_ptr(uintptr_t iseqw);
+uintptr_t rpyyarv_iseqw_children(uintptr_t iseqw);
+uintptr_t rpyyarv_iseqw_child_for_array(uintptr_t children, uintptr_t ary);
+void *rb_rpyyarv_cref_new(const void *outer, uintptr_t klass, int by_eval);
 
 long      rpyyarv_str_len(uintptr_t str);
 const char *rpyyarv_str_ptr(uintptr_t str);
@@ -304,8 +310,9 @@ typedef uintptr_t (*rpyyarv_block_fn)(long handle, int argc,
 void rpyyarv_set_block_callback(rpyyarv_block_fn fn);
 /* kw != 0 means the last argument is a Hash the callee takes as keywords. */
 uintptr_t rpyyarv_call_with_block(uintptr_t recv, uintptr_t mid, int argc,
-                                  const uintptr_t *argv, long handle, int kw,
-                                  int *state);
+                                  const uintptr_t *argv, long handle,
+                                  void *native_iseq, void *native_cref,
+                                  int kw, int *state);
 /* Same, for a block that is already a CRuby Proc: it goes through as itself. */
 uintptr_t rpyyarv_call_with_proc(uintptr_t recv, uintptr_t mid, int argc,
                                  const uintptr_t *argv, uintptr_t proc, int kw,
@@ -328,6 +335,7 @@ typedef uintptr_t (*rpyyarv_tramp_fn)(uintptr_t self, uintptr_t mid,
                                       int kw, int *status, uintptr_t *errval);
 void rpyyarv_set_trampoline_callback(rpyyarv_tramp_fn fn);
 uintptr_t rpyyarv_define_method(uintptr_t klass, uintptr_t mid, int visibility,
+                                void *native_iseq, void *native_cref,
                                 int *state);
 
 /* The handle must outlive the Proc, so the handle table never releases it. */

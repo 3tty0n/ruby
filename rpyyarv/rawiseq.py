@@ -106,6 +106,8 @@ class RawISeq(object):
         self.labels = {}
         # Enclosing ISeq, -1 for the outermost: getlocal level 1's scope.
         self.parent = -1
+        # Native CRuby ISeq pointer, available from the embedded front end.
+        self.native = 0
 
     def add_insn(self, insn):
         self.insns.append(insn)

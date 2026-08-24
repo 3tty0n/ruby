@@ -1747,6 +1747,28 @@ rb_add_method_iseq(VALUE klass, ID mid, const rb_iseq_t *iseq, rb_cref_t *cref, 
     rb_add_method(klass, mid, VM_METHOD_TYPE_ISEQ, &iseq_body, visi);
 }
 
+const void *
+rb_rpyyarv_method_iseq(VALUE klass, ID mid, const void *iseq,
+                        const void *cref)
+{
+    rb_method_entry_t *me;
+    struct {
+        const rb_iseq_t *iseqptr;
+        rb_cref_t *cref;
+    } iseq_body;
+
+    iseq_body.iseqptr = iseq;
+    iseq_body.cref = cref ? (rb_cref_t *)cref : rb_vm_cref_new_toplevel();
+    me = rb_method_entry_alloc(mid, klass, filter_defined_class(klass),
+                               NULL, false);
+    METHOD_ENTRY_FLAGS_SET(me, METHOD_VISI_PRIVATE, FALSE);
+    rb_method_definition_t *def = rb_method_definition_create(
+        VM_METHOD_TYPE_ISEQ, mid);
+    rb_method_definition_set(me, def, &iseq_body);
+    rb_gc_register_mark_object((VALUE)me);
+    return me;
+}
+
 static rb_method_entry_t *
 method_entry_set(VALUE klass, ID mid, const rb_method_entry_t *me,
                  rb_method_visibility_t visi, VALUE defined_class)

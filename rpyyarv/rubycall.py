@@ -130,9 +130,15 @@ def call(recv, mid, args, public_only=False):
             return v
     debug.count_foreign_site(mid, recv,
                              args[0] if len(args) == 1 else value.Q_UNDEF)
-    blocking = ((mid == RACTOR_VALUE or mid == RACTOR_TAKE)
-                and boot.ractor_p(recv))
-    return boot.funcallv(recv, rid(mid), args, mid, public_only, blocking)
+    ractor_wait = ((mid == RACTOR_VALUE or mid == RACTOR_TAKE)
+                   and boot.ractor_p(recv))
+    native_wait = ractor_wait and boot.native_ractors_p()
+    try:
+        return boot.funcallv(recv, rid(mid), args, mid, public_only,
+                             ractor_wait and not native_wait)
+    finally:
+        if native_wait:
+            boot.native_ractors_poll(recv)
 
 
 @dont_look_inside
@@ -173,11 +179,12 @@ def call_with_proc(recv, mid, args, proc, kw=False):
 
 
 @dont_look_inside
-def call_with_block(recv, mid, args, handle, kw=False):
+def call_with_block(recv, mid, args, handle, native, native_cref, kw=False):
     debug.count_foreign(mid)
     if mid == NEW and boot.ractor_class_p(recv):
         threading.activate()
-    return boot.call_with_block(recv, rid(mid), args, handle, mid, kw)
+    return boot.call_with_block(recv, rid(mid), args, handle, native,
+                                native_cref, mid, kw)
 
 
 @dont_look_inside

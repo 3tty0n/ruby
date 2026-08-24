@@ -13,6 +13,7 @@ class Cref(object):
         self.outer = outer
         # CREF_PUSHED_BY_EVAL: a def lands here, but const lookup steps over it.
         self.by_eval = by_eval
+        self.native = 0
         # Resolved once: _const_base is on every constant read's hot path.
         if by_eval and outer is not None:
             self.const_base = outer.const_base

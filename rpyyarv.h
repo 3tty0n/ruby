@@ -37,6 +37,12 @@ VALUE rb_rpyyarv_block_call_kw(VALUE obj, ID mid, int argc, const VALUE *argv,
 VALUE rb_rpyyarv_call_with_proc_kw(VALUE obj, ID mid, int argc,
                                    const VALUE *argv, VALUE proc,
                                    int kw_splat);
+VALUE rb_rpyyarv_proc_from_iseq(const void *iseq, const void *cref);
+const void *rb_rpyyarv_method_iseq(VALUE klass, ID mid, const void *iseq,
+                                    const void *cref);
+VALUE rb_rpyyarv_call_method_iseq(VALUE self, const void *me, int argc,
+                                  const VALUE *argv, VALUE block, int kw);
+void *rb_rpyyarv_cref_new(const void *outer, VALUE klass, int by_eval);
 RBIMPL_SYMBOL_EXPORT_END()
 
 #endif // #ifndef RPYYARV_H
