@@ -1,8 +1,9 @@
 """Lazy promotion to serialized RPython state for CRuby Ractors."""
 
-from rpython.rlib import rgil
+from rpython.rlib import rgil, rthread
 
-from rpyyarv.rlib import dont_look_inside, unchecked_stack_start
+from rpyyarv.rlib import (dont_look_inside, unchecked_stack_start,
+                          unchecked_stack_stop)
 
 
 @dont_look_inside
@@ -39,6 +40,11 @@ def _enter():
 
 @dont_look_inside
 def _leave():
+    from rpyyarv import boot
+    if boot.leave_foreign_depth() == 0:
+        unchecked_stack_stop()
+    boot.release_thread_state()
+    rthread.gc_thread_die()
     rgil.release()
 
 
