@@ -93,11 +93,13 @@ TRAMP_HOOK = lltype.Ptr(lltype.FuncType(
 MAX_ARGC = 256
 
 
-def _ext(name, args, result, reenters=False):
+def _ext(name, args, result, reenters=False, marks=False):
     # releasegil=False: all hold the GVL; reenters=True if a GC can move locals.
+    # marks=True: the only re-entry is the GC mark hook, which reads and marks.
     return rffi.llexternal(name, args, result, compilation_info=eci,
                            releasegil=False,
-                           random_effects_on_gcobjs=reenters)
+                           random_effects_on_gcobjs=reenters,
+                           forces_virtualizable=marks)
 
 
 HANDLE_MARK_HOOK = lltype.Ptr(lltype.FuncType([lltype.Signed], lltype.Void))

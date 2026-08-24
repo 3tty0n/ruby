@@ -44,13 +44,14 @@ rb_special_consts = _ext('rpyyarv_special_consts',
 rb_core_classes = _ext('rpyyarv_core_classes', [VALUEP], lltype.Void)
 
 
-rb_obj_alloc = _ext('rpyyarv_obj_alloc', [VALUE, INTP], VALUE, reenters=True)
+# marks: rb_obj_alloc runs no Ruby code; only a GC can re-enter us.
+rb_obj_alloc = _ext('rpyyarv_obj_alloc', [VALUE, INTP], VALUE, marks=True)
 
 
-rb_obj_alloc_fast = _ext('rpyyarv_obj_alloc_fast', [VALUE], VALUE, reenters=True)
+rb_obj_alloc_fast = _ext('rpyyarv_obj_alloc_fast', [VALUE], VALUE, marks=True)
 
 
-rb_alloc_default = _ext('rpyyarv_alloc_default', [VALUE], VALUE, reenters=True)
+rb_alloc_default = _ext('rpyyarv_alloc_default', [VALUE], VALUE, marks=True)
 
 
 rb_shape_iv_index = _ext('rpyyarv_shape_iv_index', # no reenters: see rb_intern_

@@ -1,0 +1,74 @@
+diff --git a/rpython/jit/codewriter/effectinfo.py b/rpython/jit/codewriter/effectinfo.py
+index 71b1571..cdc2442 100644
+--- a/rpython/jit/codewriter/effectinfo.py
++++ b/rpython/jit/codewriter/effectinfo.py
+@@ -399,6 +399,13 @@ def consider_array(ARRAY):
+ # ____________________________________________________________
+ 
+ class VirtualizableAnalyzer(BoolGraphAnalyzer):
++    def analyze_external_call(self, funcobj, seen=None):
++        # An external that re-enters RPython only to read a virtualizable.
++        if getattr(funcobj, 'forces_virtualizable', False):
++            return True
++        return super(VirtualizableAnalyzer, self).analyze_external_call(
++            funcobj, seen)
++
+     def analyze_simple_operation(self, op, graphinfo):
+         return op.opname in ('jit_force_virtualizable',
+                              'jit_force_virtual')
+diff --git a/rpython/rtyper/lltypesystem/rffi.py b/rpython/rtyper/lltypesystem/rffi.py
+index a6661ab..c0645d5 100644
+--- a/rpython/rtyper/lltypesystem/rffi.py
++++ b/rpython/rtyper/lltypesystem/rffi.py
+@@ -77,6 +77,7 @@ def llexternal(name, args, result, _callable=None,
+                _nowrapper=False, calling_conv=None,
+                elidable_function=False, macro=None,
+                random_effects_on_gcobjs='auto',
++               forces_virtualizable=False,
+                save_err=RFFI_ERR_NONE,
+                natural_arity=-1):
+     """Build an external function that will invoke the C function 'name'
+@@ -105,6 +106,12 @@ def llexternal(name, args, result, _callable=None,
+ 
+     natural_arity: on platforms where it matters, you have to provide the natural
+                    arity for variadic calls. Important examples are OS X on M1
++
++    forces_virtualizable: the C function re-enters RPython only to read a
++                   virtualizable (e.g. an embedder's GC mark hook).  The call
++                   becomes CALL_MAY_FORCE, which sets vable_token and saves
++                   every register, but unlike random_effects_on_gcobjs it does
++                   not invalidate the JIT's heap cache.
+     """
+     if calling_conv is None:
+         if sys.platform == 'win32' and not _nowrapper:
+@@ -158,6 +165,7 @@ def llexternal(name, args, result, _callable=None,
+             invoke_around_handlers or   # because it can release the GIL
+             has_callback)               # because the callback can do it
+     assert not (elidable_function and random_effects_on_gcobjs)
++    assert not (elidable_function and forces_virtualizable)
+ 
+     funcptr = lltype.functionptr(ext_type, name, external='C',
+                                  compilation_info=compilation_info,
+@@ -167,6 +175,7 @@ def llexternal(name, args, result, _callable=None,
+                                  canraise=False,
+                                  random_effects_on_gcobjs=
+                                      random_effects_on_gcobjs,
++                                 forces_virtualizable=forces_virtualizable,
+                                  calling_conv=calling_conv,
+                                  natural_arity=natural_arity,
+                                  **kwds)
+diff --git a/rpython/translator/backendopt/collectanalyze.py b/rpython/translator/backendopt/collectanalyze.py
+index 65b05f4..cf2af18 100644
+--- a/rpython/translator/backendopt/collectanalyze.py
++++ b/rpython/translator/backendopt/collectanalyze.py
+@@ -19,7 +19,9 @@ class CollectAnalyzer(graphanalyze.BoolGraphAnalyzer):
+         return graphanalyze.BoolGraphAnalyzer.analyze_direct_call(self, graph,
+                                                                   seen)
+     def analyze_external_call(self, funcobj, seen=None):
+-        if funcobj.random_effects_on_gcobjs:
++        # forces_virtualizable implies a re-entry that may reach the GC too.
++        if (funcobj.random_effects_on_gcobjs or
++                getattr(funcobj, 'forces_virtualizable', False)):
+             return True
+         return graphanalyze.BoolGraphAnalyzer.analyze_external_call(
+             self, funcobj, seen)
