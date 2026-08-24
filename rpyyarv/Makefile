@@ -57,7 +57,9 @@ CRUBY_JIT_CONFIGURE_ARGS ?= --enable-yjit --enable-zjit
 GCLIMIT   ?= 16384
 GCTIMEOUT ?= 60
 
-.PHONY: all test microbench awfy bench bench-bootstrap bench-setup setup gccheck build build-cruby build-interp build-jit link clean
+.PHONY: all test microbench awfy bench bench-bootstrap bench-setup setup
+.PHONY: gccheck ractorcheck build build-cruby build-interp build-jit link clean
+.PHONY: build-ractor-interp build-ractor-jit
 
 build: build-cruby
 
@@ -153,7 +155,6 @@ gccheck:
 	          test/defaultgems.rb test/modevalproc.rb \
 	          test/strevallocals.rb test/refinements.rb test/superblock.rb \
 	          test/bmethod.rb test/visibility.rb test/fiberblock.rb \
-	          test/ractors.rb \
 	          test/allocfast.rb test/strwire.rb test/evalcref.rb \
 	          test/superchain.rb test/blockself.rb test/fcallproc.rb \
 	          test/splatkw.rb test/r2kwargs.rb test/fwdargs.rb \
@@ -211,6 +212,14 @@ gccheck:
 	 echo; echo "gccheck: $$ok ok, $$skipped skipped, $$failed failed (RUBY_GC_MALLOC_LIMIT=$(GCLIMIT))"; \
 	 [ $$failed -eq 0 ] || { echo "GCCHECK FAILED"; exit 1; }
 
+ractorcheck:
+	@export $(LIBPATH); \
+	 export RPYYARV_BUILD=$(BUILD) RUBYLIB=$(UNINSTALLED_RUBYLIB); \
+	 co=`$(RUBY) --disable-gems test/ractors.rb`; \
+	 io=`./rpyyarv-ractor test/ractors.rb`; \
+	 jo=`./rpyyarv-ractor-jit test/ractors.rb`; \
+	 [ "$$io" = "$$co" ] && [ "$$jo" = "$$co" ] && echo "ok ractors"
+
 build-interp: | $(PYPY)
 	RPYYARV_BUILD=$(BUILD) PYTHONPATH=$(PYTHONPATH) $(RPYTHON) --output=rpyyarv targetrpyyarv.py
 	$(call fix_install_name,rpyyarv)
@@ -218,6 +227,14 @@ build-interp: | $(PYPY)
 build-jit: | $(PYPY)
 	RPYYARV_BUILD=$(BUILD) PYTHONPATH=$(PYTHONPATH) $(RPYTHON) -Ojit --output=rpyyarv-jit targetrpyyarv.py
 	$(call fix_install_name,rpyyarv-jit)
+
+build-ractor-interp: | $(PYPY)
+	RPYYARV_RACTOR_BUILD=1 RPYYARV_BUILD=$(BUILD) PYTHONPATH=$(PYTHONPATH) $(RPYTHON) --output=rpyyarv-ractor targetrpyyarv.py
+	$(call fix_install_name,rpyyarv-ractor)
+
+build-ractor-jit: | $(PYPY)
+	RPYYARV_RACTOR_BUILD=1 RPYYARV_BUILD=$(BUILD) PYTHONPATH=$(PYTHONPATH) $(RPYTHON) -Ojit --output=rpyyarv-ractor-jit targetrpyyarv.py
+	$(call fix_install_name,rpyyarv-ractor-jit)
 
 $(PYPY):
 	git clone --depth=1 https://github.com/pypy/pypy $@

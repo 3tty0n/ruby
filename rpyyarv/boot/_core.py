@@ -8,6 +8,7 @@ from rpython.rlib.rthread import ThreadLocalReference
 from rpython.translator.tool.cbuild import ExternalCompilationInfo
 
 from rpyyarv import symbols
+from rpyyarv import threading
 from rpyyarv.error import RubyException
 
 
@@ -62,6 +63,8 @@ eci = ExternalCompilationInfo(
     libraries=[_libruby_name()],
     library_dirs=[_BUILD],
     link_extra=_link_extra(),
+    compile_extra=(['-DRPYYARV_RACTOR_BUILD']
+                   if threading.ENABLED else []),
 )
 
 
@@ -164,6 +167,8 @@ def release_thread_state():
 
 
 def _current_nesting():
+    if not threading.ENABLED:
+        return _nesting
     nesting = _nesting_tls.get()
     if nesting is None:
         nesting = _Nesting()

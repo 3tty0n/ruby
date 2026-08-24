@@ -6,6 +6,8 @@ test/probe
 docs/
 rpyyarv
 rpyyarv-jit
+rpyyarv-ractor
+rpyyarv-ractor-jit
 rpyyarv-dump
 rpyyarv-dump-jit
 !scripts/rpyyarv

@@ -55,7 +55,9 @@ static struct rpyyarv_pending_handle *rpyyarv_pending_handles;
 static int rpyyarv_pending_ractor_blocks;
 static int rpyyarv_gc_pending;
 static int rpyyarv_ractors_used;
+static int rpyyarv_threaded;
 
+#ifdef RPYYARV_RACTOR_BUILD
 static int
 callback_depth(void)
 {
@@ -105,6 +107,7 @@ reserve_ractor_block(long handle)
 static int
 enter_rpython(long handle)
 {
+    if (!rpyyarv_threaded) return 0;
     int depth = callback_depth();
     int flags = 0;
     if (depth == 0 &&
@@ -127,6 +130,7 @@ enter_rpython(long handle)
 static void
 leave_rpython(int flags)
 {
+    if (!rpyyarv_threaded) return;
     if (flags & 2) rpyyarv_ractor_callback_depth--;
     set_callback_depth(callback_depth() - 1);
     if (flags & 1) rpyyarv_thread_leave();
@@ -137,6 +141,7 @@ leave_rpython(int flags)
     }
     pthread_mutex_unlock(&rpyyarv_foreign_lock);
 }
+#endif
 
 static void *
 acquire_rpython_gil(void *unused)
@@ -181,6 +186,13 @@ rpyyarv_set_thread_callbacks(void (*enter)(void), void (*leave)(void),
     rpyyarv_callback_depth_key = rb_ractor_local_storage_value_newkey();
     rpyyarv_main_ractor = rb_funcallv(rb_cRactor, rb_intern("current"),
                                       0, NULL);
+    rpyyarv_threaded = 1;
+}
+
+int
+rpyyarv_ractor_class_p(uintptr_t value)
+{
+    return (VALUE)value == rb_cRactor;
 }
 
 int
@@ -1940,14 +1952,18 @@ block_yielder(RB_BLOCK_CALL_FUNC_ARGLIST(yielded, callback_arg))
     VALUE buf[RPYYARV_MAX_ARGC];
     int i, n = argc;
     VALUE r, here;
+#ifdef RPYYARV_RACTOR_BUILD
     int acquired;
+#endif
 
     (void)yielded;
     (void)blockarg;
     if (!block_callback) return Qnil;
+#ifdef RPYYARV_RACTOR_BUILD
     acquired = enter_rpython(
         FIXNUM_P(callback_arg) ? (long)FIX2LONG(callback_arg) :
         (long)(uintptr_t)RTYPEDDATA_DATA(callback_arg) - 1);
+#endif
     if (n < 0) n = 0;
     if (n > RPYYARV_MAX_ARGC) n = RPYYARV_MAX_ARGC;
     for (i = 0; i < n; i++) buf[i] = argv[i];
@@ -1973,10 +1989,14 @@ block_yielder(RB_BLOCK_CALL_FUNC_ARGLIST(yielded, callback_arg))
     /* The block left early and parked why; abort the CRuby method. */
     if (block_unwind) {
         block_unwind = 0;
+#ifdef RPYYARV_RACTOR_BUILD
         leave_rpython(acquired);
+#endif
         rb_raise(unwind_class(), "rpyyarv: non-local exit from a block");
     }
+#ifdef RPYYARV_RACTOR_BUILD
     leave_rpython(acquired);
+#endif
     return r;
 }
 
@@ -2161,17 +2181,23 @@ rpyyarv_trampoline(int argc, VALUE *argv, VALUE self)
     int status = RPYYARV_TRAMP_OK;
     VALUE err = Qnil;
     VALUE r;
+#ifdef RPYYARV_RACTOR_BUILD
     int acquired;
+#endif
 
     if (!tramp_callback) {
         rb_raise(rb_eRuntimeError, "rpyyarv: no trampoline callback");
     }
+#ifdef RPYYARV_RACTOR_BUILD
     acquired = enter_rpython(-1);
+#endif
     r = (VALUE)tramp_callback((uintptr_t)self, (uintptr_t)mid,
                               (uintptr_t)owner, defkey, argc,
                               (uintptr_t *)argv, (uintptr_t)blockproc, kw,
                               &status, (uintptr_t *)&err);
+#ifdef RPYYARV_RACTOR_BUILD
     leave_rpython(acquired);
+#endif
     /* Raised here: an RPython exception must not unwind through this frame. */
     if (status == RPYYARV_TRAMP_RAISE) rb_exc_raise(err);
     if (status == RPYYARV_TRAMP_UNWIND) {

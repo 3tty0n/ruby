@@ -50,8 +50,9 @@ def _check_special_consts():
 
 
 def entry_point(argv):
-    rgil.allocate()
-    boot.init_thread_state()
+    if threading.ENABLED:
+        rgil.allocate()
+        boot.init_thread_state()
     if len(argv) < 2:
         print 'usage: %s SCRIPT.rb' % argv[0]
         return 1
@@ -69,7 +70,8 @@ def entry_point(argv):
     if not _check_special_consts():
         return 1
 
-    threading.install()
+    if threading.ENABLED:
+        threading.install()
 
     if not dispatch.check_object_layout():
         debug.note('libruby lays out RObject/shape ids differently than '
@@ -151,7 +153,7 @@ def target(driver, args):
     driver.exe_name = 'rpyyarv'
     # The shadowstack copy a fiber switch saves is generated only under this.
     driver.config.translation.continuation = True
-    driver.config.translation.thread = True
+    driver.config.translation.thread = threading.ENABLED
     return entry_point, None
 
 
