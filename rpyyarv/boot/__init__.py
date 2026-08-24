@@ -18,8 +18,8 @@ from rpyyarv.boot.load import *
 from rpyyarv.boot.vm import *
 
 from rpyyarv.boot._core import (_HERE, _TOP, _BUILD, _ARCH,
-    _arch_include_dir, _libruby_name, _link_extra, _ext, _v, _status_pool,
-    _argv_pool, _Nesting, _nesting, _enter_status, _leave_status,
+    _arch_include_dir, _libruby_name, _link_extra, _ext, _v, _Nesting,
+    _nesting, _enter_status, _leave_status,
     _enter_argv, _leave_argv, _failed, _failed_mid)
 from rpyyarv.boot.symbol import _intern_memo
 from rpyyarv.boot.array import _ary_new_chunked

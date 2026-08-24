@@ -3,6 +3,7 @@
 from rpyyarv import boot
 from rpyyarv import debug
 from rpyyarv import symbols
+from rpyyarv import threading
 from rpyyarv import value
 from rpyyarv.rlib import dont_look_inside, elidable
 
@@ -31,6 +32,9 @@ stress = _Stress()
 
 REQUIRE = symbols.intern('require')
 REQUIRE_RELATIVE = symbols.intern('require_relative')
+NEW = symbols.intern('new')
+RACTOR_VALUE = symbols.intern('value')
+RACTOR_TAKE = symbols.intern('take')
 
 # No VALUE is negative, so this cannot collide with a Ruby answer.
 NOT_HANDLED = -1
@@ -126,7 +130,9 @@ def call(recv, mid, args, public_only=False):
             return v
     debug.count_foreign_site(mid, recv,
                              args[0] if len(args) == 1 else value.Q_UNDEF)
-    return boot.funcallv(recv, rid(mid), args, mid, public_only)
+    blocking = ((mid == RACTOR_VALUE or mid == RACTOR_TAKE)
+                and boot.ractor_p(recv))
+    return boot.funcallv(recv, rid(mid), args, mid, public_only, blocking)
 
 
 @dont_look_inside
@@ -169,6 +175,8 @@ def call_with_proc(recv, mid, args, proc, kw=False):
 @dont_look_inside
 def call_with_block(recv, mid, args, handle, kw=False):
     debug.count_foreign(mid)
+    if mid == NEW and boot.ractor_class_p(recv):
+        threading.activate()
     return boot.call_with_block(recv, rid(mid), args, handle, mid, kw)
 
 

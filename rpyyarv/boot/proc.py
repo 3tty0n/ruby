@@ -19,9 +19,20 @@ rb_funcallv_id = _ext('rpyyarv_funcallv_id',
                       [VALUE, VALUE, rffi.INT, VALUEP, INTP], VALUE, reenters=True)
 
 
+rb_funcallv_id_blocking = _ext(
+    'rpyyarv_funcallv_id_blocking',
+    [VALUE, VALUE, rffi.INT, VALUEP, INTP], VALUE, reenters=True)
+
+
 rb_funcallv_public_id = _ext('rpyyarv_funcallv_public_id',
                              [VALUE, VALUE, rffi.INT, VALUEP, INTP], VALUE,
                              reenters=True)
+
+
+rb_funcallv_public_id_blocking = _ext(
+    'rpyyarv_funcallv_public_id_blocking',
+    [VALUE, VALUE, rffi.INT, VALUEP, INTP], VALUE, reenters=True,
+    releasegil=False)
 
 
 rb_funcallv_kw_id = _ext('rpyyarv_funcallv_kw_id',
@@ -122,7 +133,7 @@ def call0(recv, mid):
         return rffi.cast(lltype.Signed, v)
 
 
-def funcallv(recv, rid, args, mid, public_only=False):
+def funcallv(recv, rid, args, mid, public_only=False, blocking=False):
     """public_only picks rb_funcallv_public, which honours visibility."""
     argc = len(args)
     if argc > MAX_ARGC:
@@ -134,11 +145,14 @@ def funcallv(recv, rid, args, mid, public_only=False):
         i += 1
     state = _enter_status()
     if public_only:
-        v = rb_funcallv_public_id(
+        fn = (rb_funcallv_public_id_blocking if blocking
+              else rb_funcallv_public_id)
+        v = fn(
             rffi.cast(VALUE, recv), rffi.cast(VALUE, rid),
             rffi.cast(rffi.INT, argc), argv, state)
     else:
-        v = rb_funcallv_id(
+        fn = rb_funcallv_id_blocking if blocking else rb_funcallv_id
+        v = fn(
             rffi.cast(VALUE, recv), rffi.cast(VALUE, rid),
             rffi.cast(rffi.INT, argc), argv, state)
     failed = _leave_status(state)

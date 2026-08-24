@@ -205,6 +205,14 @@ def test_trace_build_rejected():
            "TracePoint-enabled build, which RPyYARV does not support")
 
 
+def test_ractor_requires_native_build():
+    text = patched(fixture('fib_rec.iseq'), 'insn\tputself',
+                   'insn\topt_getconstant_path\ta:y:Ractor')
+    expect(UnsupportedOperation, text,
+           "'<main>': constant Ractor in '<main>' requires the native "
+           "Ractor build")
+
+
 def test_instruction_from_another_ruby():
     text = patched(fixture('fib_rec.iseq'), 'insn\tputself',
                    'insn\topt_getinlinecache')

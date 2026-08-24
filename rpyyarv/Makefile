@@ -57,7 +57,8 @@ CRUBY_JIT_CONFIGURE_ARGS ?= --enable-yjit --enable-zjit
 GCLIMIT   ?= 16384
 GCTIMEOUT ?= 60
 
-.PHONY: all test microbench awfy bench bench-bootstrap bench-setup setup gccheck build build-cruby build-interp build-jit link clean
+.PHONY: all test microbench awfy bench bench-bootstrap bench-setup setup
+.PHONY: gccheck ractorcheck build build-cruby build-interp build-jit link clean
 
 build: build-cruby
 
@@ -209,6 +210,14 @@ gccheck:
 	 done; \
 	 echo; echo "gccheck: $$ok ok, $$skipped skipped, $$failed failed (RUBY_GC_MALLOC_LIMIT=$(GCLIMIT))"; \
 	 [ $$failed -eq 0 ] || { echo "GCCHECK FAILED"; exit 1; }
+
+ractorcheck:
+	@export $(LIBPATH); \
+	 export RPYYARV_BUILD=$(BUILD) RUBYLIB=$(UNINSTALLED_RUBYLIB); \
+	 co=`$(RUBY) --disable-gems test/ractors.rb`; \
+	 io=`./rpyyarv test/ractors.rb`; \
+	 jo=`./rpyyarv-jit test/ractors.rb`; \
+	 [ "$$io" = "$$co" ] && [ "$$jo" = "$$co" ] && echo "ok ractors"
 
 build-interp: | $(PYPY)
 	RPYYARV_BUILD=$(BUILD) PYTHONPATH=$(PYTHONPATH) $(RPYTHON) --output=rpyyarv targetrpyyarv.py

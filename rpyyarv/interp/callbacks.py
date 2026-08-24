@@ -8,10 +8,13 @@ from rpyyarv import dispatch
 from rpyyarv import gcroots
 from rpyyarv import rubycall
 from rpyyarv import symbols
+from rpyyarv import threading
 from rpyyarv import value
 from rpyyarv.error import RPyYarvError, RubyException, UnsupportedOperation
 from rpyyarv.frame import Frame
-from rpyyarv.rlib import StackOverflow, check_stack_overflow, dont_look_inside, on_foreign_stack, unchecked_stack_start, unchecked_stack_stop
+from rpyyarv.rlib import (StackOverflow, check_stack_overflow,
+                          dont_look_inside, unchecked_stack_start,
+                          unchecked_stack_stop)
 
 from rpyyarv.interp.args import NO_KEYWORDS, _arity_error, _refuse_iseq, setup_params
 
@@ -24,6 +27,14 @@ def _sub_self(handle, cruby_self):
 
 
 def block_callback(handle, argc, argv, cruby_self, bowner, bmid):
+    acquired = threading.enter_callback()
+    try:
+        return _block_callback(handle, argc, argv, cruby_self, bowner, bmid)
+    finally:
+        threading.leave_callback(acquired)
+
+
+def _block_callback(handle, argc, argv, cruby_self, bowner, bmid):
     """Called from C; no RPython exception may escape into libruby."""
     if blocks.error is not None or blocks.exc is not None \
             or blocks.jump is not None:
@@ -50,6 +61,8 @@ def block_callback(handle, argc, argv, cruby_self, bowner, bmid):
                                         _sub_self(handle, cruby_self),
                                         None, override))
     except RubyException, e:
+        if debug.state.channels & debug.SUMMARY:
+            debug.note('Ractor block raised RubyException')
         # A kill goes back to CRuby as the fatal it was; ensures have run.
         boot.rethrow_if_fiber_kill(e.value)
         # Held: the RPython field it waits in is not something CRuby scans.
@@ -57,13 +70,19 @@ def block_callback(handle, argc, argv, cruby_self, bowner, bmid):
         blocks.exc = e
         return _park_unwind()
     except block_mod.BlockJump, e:
+        if debug.state.channels & debug.SUMMARY:
+            debug.note('Ractor block raised BlockJump')
         gcroots.hold(e.value)
         blocks.jump = e
         return _park_unwind()
     except RPyYarvError, e:
+        if debug.state.channels & debug.SUMMARY:
+            debug.note('Ractor block failed: %s' % e.msg)
         blocks.error = e
         return _park_unwind()
     except StackOverflow:
+        if debug.state.channels & debug.SUMMARY:
+            debug.note('Ractor block hit StackOverflow')
         # Returning normally would let CRuby re-call on an exhausted stack.
         check_stack_overflow()
         blocks.error = UnsupportedOperation(STACK_TOO_DEEP)
@@ -101,6 +120,16 @@ TRAMP_JUMPTAG = 4
 
 def trampoline_callback(self_v, rid, owner_v, def_v, argc, argv, blockv, kw,
                         statusp, errp):
+    acquired = threading.enter_callback()
+    try:
+        return _trampoline_callback(self_v, rid, owner_v, def_v, argc, argv,
+                                    blockv, kw, statusp, errp)
+    finally:
+        threading.leave_callback(acquired)
+
+
+def _trampoline_callback(self_v, rid, owner_v, def_v, argc, argv, blockv, kw,
+                         statusp, errp):
     """Called from C; failures leave via statusp/errp, never into libruby."""
     boot.store_int(statusp, TRAMP_OK)
     boot.store_value(errp, value.Q_NIL)
@@ -194,18 +223,17 @@ foreign_stack = _Foreign()
 @dont_look_inside
 def _enter_foreign_stack():
     """A Fiber's stack is unmeasured, so the depth check is off here."""
-    # ponytail: off, not re-based: runaway recursion segfaults; needs rstack.
-    if not on_foreign_stack():
-        return False
-    foreign_stack.depth += 1
-    unchecked_stack_start()
+    # Every C callback is outside the standalone entry stack. Nested entries
+    # share one critical section; runaway recursion still needs rstack support.
+    if boot.foreign_depth() == 0:
+        unchecked_stack_start()
+    boot.enter_foreign_depth()
     return True
 
 
 @dont_look_inside
 def _leave_foreign_stack():
-    foreign_stack.depth -= 1
-    if foreign_stack.depth == 0:
+    if boot.leave_foreign_depth() == 0:
         unchecked_stack_stop()
 
 
