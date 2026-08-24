@@ -86,7 +86,9 @@ def math_cos(recv, arg):
 
 def int_pow(a, b):
     """Integer ** a non-negative Integer, while it stays exact in a word."""
-    if not _fix2(a, b, B_INT_POW):
+    # not _fix2: B_INT_POW is past _INT_MID, so pass the mid explicitly
+    if not (value.is_fixnum(a) and value.is_fixnum(b)
+            and _core_op(value.C_INTEGER, B_INT_POW, POW)):
         return value.Q_UNDEF
     e = value.fix2int(b)
     if e < 0:
