@@ -1,0 +1,75 @@
+diff --git a/rpython/jit/backend/aarch64/assembler.py b/rpython/jit/backend/aarch64/assembler.py
+index 417d719..810d055 100644
+--- a/rpython/jit/backend/aarch64/assembler.py
++++ b/rpython/jit/backend/aarch64/assembler.py
+@@ -585,7 +585,7 @@ class AssemblerARM64(ResOpAssembler):
+         """
+         mc = InstrBuilder()
+         #
+-        self._push_all_regs_to_jitframe(mc, [], self.cpu.supports_floats, callee_only)
++        self._push_all_regs_to_jitframe(mc, [], supports_floats, callee_only)
+         ## args are in their respective positions
+         mc.SUB_ri(r.sp.value, r.sp.value, 2 * WORD)
+         mc.STR_ri(r.ip0.value, r.sp.value, WORD)
+@@ -1089,6 +1089,13 @@ class AssemblerARM64(ResOpAssembler):
+             targettoken._ll_loop_code += rawstart
+         self.target_tokens_currently_compiling = None
+ 
++    def _get_stack_size(self):
++        # 2 (lr, fp) + 8 reserved/callee-saved gpr words, then the vfp ones
++        size = (len(r.callee_saved_registers) + 8) * WORD
++        if self.cpu.supports_floats:
++            size += len(r.callee_saved_vfp_registers) * WORD
++        return size
++
+     def _call_header_with_stack_check(self):
+         self._call_header()
+         if self.stack_check_slowpath == 0:
+@@ -1114,13 +1121,18 @@ class AssemblerARM64(ResOpAssembler):
+             pmc.B_ofs_cond(self.mc.currpos() - pos, c.LS)
+ 
+     def _call_header(self):
+-        stack_size = (len(r.callee_saved_registers) + 8) * WORD
++        stack_size = self._get_stack_size()
+         self.mc.STP_rr_preindex(r.lr.value, r.fp.value, r.sp.value, -stack_size)
+         for i in range(0, len(r.callee_saved_registers), 2):
+             self.mc.STP_rri(r.callee_saved_registers[i].value,
+                             r.callee_saved_registers[i + 1].value,
+                             r.sp.value,
+                             (i + 8) * WORD)
++        # v8-v15 are callee-saved in AAPCS64 and we use d8/d15 as scratch
++        if self.cpu.supports_floats:
++            for i in range(len(r.callee_saved_vfp_registers)):
++                self.mc.STR_di(r.callee_saved_vfp_registers[i].value,
++                               r.sp.value, (i + 10) * WORD)
+ 
+         if self.cpu.translate_support_code:
+             self._call_header_vmprof()
+@@ -1397,8 +1409,12 @@ class AssemblerARM64(ResOpAssembler):
+             self._call_footer_vmprof(mc)
+         # pop all callee saved registers
+ 
+-        stack_size = (len(r.callee_saved_registers) + 8) * WORD
++        stack_size = self._get_stack_size()
+ 
++        if self.cpu.supports_floats:
++            for i in range(len(r.callee_saved_vfp_registers)):
++                mc.LDR_di(r.callee_saved_vfp_registers[i].value,
++                          r.sp.value, (i + 10) * WORD)
+         for i in range(0, len(r.callee_saved_registers), 2):
+             mc.LDP_rri(r.callee_saved_registers[i].value,
+                             r.callee_saved_registers[i + 1].value,
+diff --git a/rpython/jit/backend/aarch64/registers.py b/rpython/jit/backend/aarch64/registers.py
+index 64431f2..64b1c93 100644
+--- a/rpython/jit/backend/aarch64/registers.py
++++ b/rpython/jit/backend/aarch64/registers.py
+@@ -31,6 +31,9 @@ vfp_argument_regs = caller_vfp_resp = all_vfp_regs[:8]
+ 
+ vfp_ip = d15
+ 
++# v8-v15 must be preserved across a call by AAPCS64 (low 64 bits only)
++callee_saved_vfp_registers = [d8, d9, d10, d11, d12, d13, d14, d15]
++
+ argument_regs = [x0, x1, x2, x3, x4, x5, x6, x7]
+ callee_resp = [x19, x20] # ,x21, x22]
+ caller_resp = argument_regs + [x8, x9, x10, x11, x12, x13]
