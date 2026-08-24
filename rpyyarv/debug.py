@@ -24,6 +24,9 @@ CHANNELS = 'insn, stack, call, iseq, summary, load, all'
 
 
 class _State(object):
+    # Quasi-immutable: written at startup only, read per insn and per send.
+    _immutable_fields_ = ['enabled?']
+
     def __init__(self):
         # Kept apart from `channels`: the dispatch loop reads it per insn.
         self.enabled = False
