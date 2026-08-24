@@ -100,9 +100,8 @@ def _state_for(key):
 
 def _save(st):
     st.top = gcroots.state.top
-    st.status_depth = boot._nesting.status
-    st.argv_depth = boot._nesting.argv
-    st.foreign_depth = interp.foreign_stack.depth
+    st.status_depth, st.argv_depth = boot.nesting_depths()
+    st.foreign_depth = boot.foreign_depth()
     st.files = requires.files.stack
     st.relative = rubycall.relative.path
 
@@ -110,9 +109,8 @@ def _save(st):
 def _restore(st):
     gcroots.state.top = st.top
     st.top = None
-    boot._nesting.status = st.status_depth
-    boot._nesting.argv = st.argv_depth
-    interp.foreign_stack.depth = st.foreign_depth
+    boot.set_nesting_depths(st.status_depth, st.argv_depth)
+    boot.set_foreign_depth(st.foreign_depth)
     requires.files.stack = st.files
     rubycall.relative.path = st.relative
     # The stack-depth check is one process-wide flag; it follows the fiber.

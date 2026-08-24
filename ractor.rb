@@ -234,7 +234,7 @@ class Ractor
                   uplevel: 0, category: :experimental)
     end
     loc = caller_locations(1, 1).first
-    loc = "#{loc.path}:#{loc.lineno}"
+    loc = loc ? "#{loc.path}:#{loc.lineno}" : '<unknown>:0'
     __builtin_ractor_create(loc, name, args, b)
   end
 

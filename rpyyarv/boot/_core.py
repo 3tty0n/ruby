@@ -4,6 +4,7 @@ import os
 import sys
 
 from rpython.rtyper.lltypesystem import lltype, rffi
+from rpython.rlib.rthread import ThreadLocalReference
 from rpython.translator.tool.cbuild import ExternalCompilationInfo
 
 from rpyyarv import symbols
@@ -74,6 +75,9 @@ VOIDP = rffi.VOIDP
 MARK_HOOK = lltype.Ptr(lltype.FuncType([], lltype.Void))
 
 
+THREAD_HOOK = lltype.Ptr(lltype.FuncType([], lltype.Void))
+
+
 CONST_HOOK = lltype.Ptr(lltype.FuncType([], lltype.Void))
 
 METHOD_HOOK = lltype.Ptr(lltype.FuncType([VALUE, VALUE], lltype.Void))
@@ -93,11 +97,10 @@ TRAMP_HOOK = lltype.Ptr(lltype.FuncType(
 MAX_ARGC = 256
 
 
-def _ext(name, args, result, reenters=False, marks=False):
-    # releasegil=False: all hold the GVL; reenters=True if a GC can move locals.
-    # marks=True: the only re-entry is the GC mark hook, which reads and marks.
+def _ext(name, args, result, reenters=False, marks=False, releasegil=False):
+    # Most shim calls keep GIL to preserve CRuby/RPython lock ordering.
     return rffi.llexternal(name, args, result, compilation_info=eci,
-                           releasegil=False,
+                           releasegil=releasegil,
                            random_effects_on_gcobjs=reenters,
                            forces_virtualizable=marks)
 
@@ -128,36 +131,90 @@ def _v(n):
 SHIM_DEPTH = 64
 
 
-_status_pool = lltype.malloc(INTP.TO, SHIM_DEPTH, flavor='raw',
-                             immortal=True, zero=True)
-
-
-_argv_pool = lltype.malloc(rffi.CArray(VALUE), SHIM_DEPTH * (MAX_ARGC + 1),
-                           flavor='raw', immortal=True, zero=True)
-
-
 class _Nesting(object):
     def __init__(self):
         self.status = 0
         self.argv = 0
+        self.foreign = 0
+        self.status_pool = lltype.malloc(INTP.TO, SHIM_DEPTH, flavor='raw',
+                                         zero=True)
+        self.argv_pool = lltype.malloc(
+            rffi.CArray(VALUE), SHIM_DEPTH * (MAX_ARGC + 1),
+            flavor='raw', zero=True)
 
 
 _nesting = _Nesting()
+_nesting_tls = ThreadLocalReference(_Nesting)
+
+
+def init_thread_state():
+    if _nesting_tls.get() is None:
+        _nesting_tls.set(_nesting)
+
+
+def release_thread_state():
+    nesting = _nesting_tls.get()
+    if nesting is None or nesting is _nesting:
+        return
+    assert (nesting.status == 0 and nesting.argv == 0
+            and nesting.foreign == 0)
+    lltype.free(nesting.status_pool, flavor='raw')
+    lltype.free(nesting.argv_pool, flavor='raw')
+    _nesting_tls.set(None)
+
+
+def _current_nesting():
+    nesting = _nesting_tls.get()
+    if nesting is None:
+        nesting = _Nesting()
+        _nesting_tls.set(nesting)
+    return nesting
 
 
 def nesting_depth():
     """Protected calls in flight; equal depth means the same CRuby frame."""
-    return _nesting.status
+    return _current_nesting().status
+
+
+def set_nesting_depths(status, argv):
+    nesting = _current_nesting()
+    nesting.status = status
+    nesting.argv = argv
+
+
+def nesting_depths():
+    nesting = _current_nesting()
+    return nesting.status, nesting.argv
+
+
+def foreign_depth():
+    return _current_nesting().foreign
+
+
+def set_foreign_depth(depth):
+    _current_nesting().foreign = depth
+
+
+def enter_foreign_depth():
+    nesting = _current_nesting()
+    nesting.foreign += 1
+
+
+def leave_foreign_depth():
+    nesting = _current_nesting()
+    nesting.foreign -= 1
+    return nesting.foreign
 
 
 def _enter_status():
     """Status cell for one shim call; past SHIM_DEPTH, a fresh raw cell."""
-    d = _nesting.status
-    _nesting.status = d + 1
+    nesting = _current_nesting()
+    d = nesting.status
+    nesting.status = d + 1
     if d >= SHIM_DEPTH:
         p = lltype.malloc(INTP.TO, 1, flavor='raw')
     else:
-        p = rffi.ptradd(_status_pool, d)
+        p = rffi.ptradd(nesting.status_pool, d)
     p[0] = rffi.cast(rffi.INT, 0)
     return p
 
@@ -170,8 +227,9 @@ class ForeignJump(Exception):
 
 
 def _leave_status_code(p):
-    d = _nesting.status - 1
-    _nesting.status = d
+    nesting = _current_nesting()
+    d = nesting.status - 1
+    nesting.status = d
     code = rffi.cast(lltype.Signed, p[0])
     if d >= SHIM_DEPTH:
         lltype.free(p, flavor='raw')
@@ -179,8 +237,9 @@ def _leave_status_code(p):
 
 
 def _leave_status(p):
-    d = _nesting.status - 1
-    _nesting.status = d
+    nesting = _current_nesting()
+    d = nesting.status - 1
+    nesting.status = d
     failed = rffi.cast(lltype.Signed, p[0]) != 0
     if d >= SHIM_DEPTH:
         lltype.free(p, flavor='raw')
@@ -190,16 +249,18 @@ def _leave_status(p):
 def _enter_argv(n):
     """Copied to the machine stack before anything allocates, so unscanned."""
     assert n <= MAX_ARGC
-    d = _nesting.argv
-    _nesting.argv = d + 1
+    nesting = _current_nesting()
+    d = nesting.argv
+    nesting.argv = d + 1
     if d >= SHIM_DEPTH:
         return lltype.malloc(rffi.CArray(VALUE), n + 1, flavor='raw')
-    return rffi.ptradd(_argv_pool, d * (MAX_ARGC + 1))
+    return rffi.ptradd(nesting.argv_pool, d * (MAX_ARGC + 1))
 
 
 def _leave_argv(p):
-    d = _nesting.argv - 1
-    _nesting.argv = d
+    nesting = _current_nesting()
+    d = nesting.argv - 1
+    nesting.argv = d
     if d >= SHIM_DEPTH:
         lltype.free(p, flavor='raw')
 

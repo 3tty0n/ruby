@@ -2,6 +2,7 @@
 
 from rpyyarv import block as block_mod
 from rpyyarv import boot
+from rpyyarv import threading
 from rpyyarv import value
 from rpyyarv.rlib import dont_look_inside, gc_mark_state
 
@@ -149,6 +150,14 @@ def _mark_block_deep(w_block):
 @dont_look_inside
 def mark_handle(h):
     """One handle's env, alive exactly as long as its owner Proc."""
+    acquired = threading.enter_callback()
+    try:
+        _mark_handle(h)
+    finally:
+        threading.leave_callback(acquired)
+
+
+def _mark_handle(h):
     b = state.blocks
     if b is None or h < 0 or h >= len(b.table):
         return
@@ -177,6 +186,14 @@ gc_mark_state.mark_word = _mark_word
 
 @dont_look_inside
 def mark_roots():
+    acquired = threading.enter_callback()
+    try:
+        _mark_roots()
+    finally:
+        threading.leave_callback(acquired)
+
+
+def _mark_roots():
     # Reading a frame mid-trace is not an escape; else every GC aborts it.
     # Restored, not cleared: a handle's dmark re-enters us from this walk.
     prev = gc_mark_state.marking

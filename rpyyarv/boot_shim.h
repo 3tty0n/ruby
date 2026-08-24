@@ -13,6 +13,14 @@ void *rpyyarv_boot(int argc, char **argv, int *status_out);
 
 int rpyyarv_cleanup(int status);
 
+/* Serialize foreign Ractor entries without waiting under CRuby's VM lock. */
+void rpyyarv_set_thread_callbacks(void (*enter)(void), void (*leave)(void),
+                                  void (*acquire)(void),
+                                  void (*release)(void));
+int rpyyarv_ractor_class_p(uintptr_t value);
+int rpyyarv_ractor_p(uintptr_t value);
+void rpyyarv_prepare_ractors(void);
+
 /* ruby_run_node on the boot node: runs under CRuby, cleans up, exit status. */
 int rpyyarv_run_node(void *n);
 
@@ -37,11 +45,17 @@ uintptr_t rpyyarv_toregexp(int opt, int n, const uintptr_t *parts,
 /* rb_funcallv under rb_protect; argv is copied to the machine stack first. */
 uintptr_t rpyyarv_funcallv_id(uintptr_t recv, uintptr_t mid, int argc,
                               const uintptr_t *argv, int *state);
+uintptr_t rpyyarv_funcallv_id_blocking(uintptr_t recv, uintptr_t mid, int argc,
+                                       const uintptr_t *argv, int *state);
 uintptr_t rpyyarv_funcallv(uintptr_t recv, const char *mid, int argc,
                            const uintptr_t *argv, int *state);
 
 uintptr_t rpyyarv_funcallv_public_id(uintptr_t recv, uintptr_t mid, int argc,
                                      const uintptr_t *argv, int *state);
+uintptr_t rpyyarv_funcallv_public_id_blocking(uintptr_t recv, uintptr_t mid,
+                                              int argc,
+                                              const uintptr_t *argv,
+                                              int *state);
 
 /* The last argument must be a Hash; it reaches the callee as keywords. */
 uintptr_t rpyyarv_funcallv_kw_id(uintptr_t recv, uintptr_t mid, int argc,

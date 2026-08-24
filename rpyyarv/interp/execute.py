@@ -34,6 +34,11 @@ def configure_jitparams():
                    'function_threshold=100,trace_eagerness=50')
 
 
+def disable_jit_for_ractor():
+    """Foreign OS stacks cannot safely share compiled portal frames yet."""
+    set_user_param(jitdriver, 'off')
+
+
 def install():
     configure_reselection()
     configure_jitparams()

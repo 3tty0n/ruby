@@ -7,7 +7,22 @@ from rpython.rtyper.lltypesystem import lltype, rffi
 from rpyyarv.boot._core import (_ext, _v, VALUE, VOIDP, INTP, _ARCH,
                                 CONST_HOOK, METHOD_HOOK, FIBER_SAVE_HOOK,
                                 FIBER_ARRIVE_HOOK, FIBER_BORN_HOOK,
-                                FIBER_KEY_HOOK)
+                                FIBER_KEY_HOOK, THREAD_HOOK)
+
+
+rb_set_thread_callbacks = _ext('rpyyarv_set_thread_callbacks',
+                               [THREAD_HOOK, THREAD_HOOK,
+                                THREAD_HOOK, THREAD_HOOK], lltype.Void)
+
+
+rb_ractor_class_p = _ext('rpyyarv_ractor_class_p', [VALUE], rffi.INT)
+
+
+rb_ractor_p = _ext('rpyyarv_ractor_p', [VALUE], rffi.INT)
+
+
+rb_prepare_ractors = _ext('rpyyarv_prepare_ractors', [], lltype.Void,
+                          reenters=True)
 
 
 rb_boot = _ext('rpyyarv_boot', [rffi.INT, rffi.CCHARPP, INTP], VOIDP)
@@ -71,6 +86,22 @@ def vm_core():
 def set_block_unwind():
     """Tell the shim the block it is running left early; see boot_shim.h."""
     rb_set_block_unwind()
+
+
+def set_thread_callbacks(enter, leave, acquire, release):
+    rb_set_thread_callbacks(enter, leave, acquire, release)
+
+
+def ractor_class_p(v):
+    return rffi.cast(lltype.Signed, rb_ractor_class_p(_v(v))) != 0
+
+
+def ractor_p(v):
+    return rffi.cast(lltype.Signed, rb_ractor_p(_v(v))) != 0
+
+
+def prepare_ractors():
+    rb_prepare_ractors()
 
 
 def bop_mask():

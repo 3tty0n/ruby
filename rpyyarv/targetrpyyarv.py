@@ -14,9 +14,11 @@ from rpyyarv import loader
 from rpyyarv import prelude
 from rpyyarv import requires
 from rpyyarv import rubycall
+from rpyyarv import threading
 from rpyyarv import value
 from rpyyarv.error import RPyYarvError, RubyException
 from rpyyarv.rlib import StackOverflow, check_stack_overflow, set_stack_length
+from rpython.rlib import rgil
 
 # libruby shares the 8 MB main stack and checks itself, so take half.
 STACK_LIMIT = 4 * 1024 * 1024
@@ -48,6 +50,8 @@ def _check_special_consts():
 
 
 def entry_point(argv):
+    rgil.allocate()
+    boot.init_thread_state()
     if len(argv) < 2:
         print 'usage: %s SCRIPT.rb' % argv[0]
         return 1
@@ -64,6 +68,8 @@ def entry_point(argv):
 
     if not _check_special_consts():
         return 1
+
+    threading.install()
 
     if not dispatch.check_object_layout():
         debug.note('libruby lays out RObject/shape ids differently than '
@@ -145,6 +151,7 @@ def target(driver, args):
     driver.exe_name = 'rpyyarv'
     # The shadowstack copy a fiber switch saves is generated only under this.
     driver.config.translation.continuation = True
+    driver.config.translation.thread = True
     return entry_point, None
 
 
