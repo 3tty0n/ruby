@@ -4,11 +4,10 @@ import os
 import sys
 
 from rpython.rtyper.lltypesystem import lltype, rffi
-from rpython.rlib.rthread import ThreadLocalReference
+from rpython.rlib.rthread import ActivatableThreadLocalReference
 from rpython.translator.tool.cbuild import ExternalCompilationInfo
 
 from rpyyarv import symbols
-from rpyyarv import threading
 from rpyyarv.error import RubyException
 
 
@@ -63,8 +62,6 @@ eci = ExternalCompilationInfo(
     libraries=[_libruby_name()],
     library_dirs=[_BUILD],
     link_extra=_link_extra(),
-    compile_extra=(['-DRPYYARV_RACTOR_BUILD']
-                   if threading.ENABLED else []),
 )
 
 
@@ -147,12 +144,11 @@ class _Nesting(object):
 
 
 _nesting = _Nesting()
-_nesting_tls = ThreadLocalReference(_Nesting)
+_nesting_tls = ActivatableThreadLocalReference(_Nesting, _nesting)
 
 
-def init_thread_state():
-    if _nesting_tls.get() is None:
-        _nesting_tls.set(_nesting)
+def activate_thread_state():
+    _nesting_tls.activate()
 
 
 def release_thread_state():
@@ -167,8 +163,6 @@ def release_thread_state():
 
 
 def _current_nesting():
-    if not threading.ENABLED:
-        return _nesting
     nesting = _nesting_tls.get()
     if nesting is None:
         nesting = _Nesting()

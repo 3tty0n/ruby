@@ -9,7 +9,6 @@ from rpyyarv import optable
 from rpyyarv import rawiseq
 from rpyyarv import rubycall
 from rpyyarv import symbols
-from rpyyarv import threading
 from rpyyarv import value
 from rpyyarv.error import LoadError, UnsupportedOperation
 from rpyyarv.iseq import (CATCH_ENSURE, CATCH_RESCUE, CATCH_RETRY,
@@ -188,8 +187,6 @@ class Loader(object):
                       path=self.program.path)
 
     def build_iseq(self, raw, parents):
-        if not threading.ENABLED:
-            self.check_ractor(raw)
         for entry in raw.catches:
             if entry.kind not in CATCH_KINDS and \
                     entry.kind not in IGNORED_CATCH_TYPES:
@@ -290,21 +287,6 @@ class Loader(object):
         # The `once` cache lives here; the mark hook walks the list.
         gcroots.register_consts(w_iseq.once_cache)
         return w_iseq
-
-    def check_ractor(self, raw):
-        """Keep single-thread builds out of CRuby's Ractor scheduler."""
-        for insn in raw.insns:
-            if insn.name != 'opt_getconstant_path':
-                continue
-            for operand in insn.operands:
-                if operand.kind != rawiseq.OP_ARRAY:
-                    continue
-                for item in operand.items:
-                    if item.kind == rawiseq.OP_SYM and \
-                            item.strval == 'Ractor':
-                        raise UnsupportedOperation(
-                            "constant Ractor in '%s' requires the native "
-                            "Ractor build" % raw.name)
 
     # ISeq types a non-local return may name (vm_insnhelper.c:1893).
     RETURN_TARGETS = ['method', 'top', 'main']

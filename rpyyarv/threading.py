@@ -1,21 +1,13 @@
-"""Safe entry to serialized RPython state from CRuby Ractor threads."""
-
-import os
+"""Lazy promotion to serialized RPython state for CRuby Ractors."""
 
 from rpython.rlib import rgil
 
 from rpyyarv.rlib import dont_look_inside, unchecked_stack_start
 
 
-# A translation-time switch: ordinary binaries retain the single-thread GC.
-ENABLED = os.environ.get('RPYYARV_RACTOR_BUILD') == '1'
-
-
 @dont_look_inside
 def enter_callback():
     """Take RPython GIL only when C called us on a foreign thread."""
-    if not ENABLED:
-        return 0
     acquired = not rgil.am_I_holding_the_GIL()
     if acquired:
         rgil.acquire_maybe_in_new_thread()
@@ -29,8 +21,6 @@ def enter_callback():
 
 @dont_look_inside
 def leave_callback(state):
-    if not ENABLED:
-        return
     if state & 2:
         from rpyyarv import interp
         interp.configure_jitparams()
@@ -65,3 +55,11 @@ def _release_gil():
 def install():
     from rpyyarv import boot
     boot.set_thread_callbacks(_enter, _leave, _acquire_gil, _release_gil)
+
+
+@dont_look_inside
+def activate():
+    """Permanently promote the runtime before the first Ractor starts."""
+    from rpyyarv import boot
+    boot.activate_thread_state()
+    boot.activate_threads()

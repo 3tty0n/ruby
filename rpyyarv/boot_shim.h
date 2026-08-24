@@ -17,6 +17,7 @@ int rpyyarv_cleanup(int status);
 void rpyyarv_set_thread_callbacks(void (*enter)(void), void (*leave)(void),
                                   void (*acquire)(void),
                                   void (*release)(void));
+void rpyyarv_activate_threads(void);
 int rpyyarv_ractor_class_p(uintptr_t value);
 int rpyyarv_ractor_p(uintptr_t value);
 int rpyyarv_ractor_callback_p(void);

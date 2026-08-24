@@ -15,6 +15,10 @@ rb_set_thread_callbacks = _ext('rpyyarv_set_thread_callbacks',
                                 THREAD_HOOK, THREAD_HOOK], lltype.Void)
 
 
+rb_activate_threads = _ext('rpyyarv_activate_threads', [], lltype.Void,
+                           reenters=True)
+
+
 rb_ractor_class_p = _ext('rpyyarv_ractor_class_p', [VALUE], rffi.INT)
 
 
@@ -89,6 +93,10 @@ def set_block_unwind():
 
 def set_thread_callbacks(enter, leave, acquire, release):
     rb_set_thread_callbacks(enter, leave, acquire, release)
+
+
+def activate_threads():
+    rb_activate_threads()
 
 
 def ractor_class_p(v):

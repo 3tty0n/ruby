@@ -59,7 +59,6 @@ GCTIMEOUT ?= 60
 
 .PHONY: all test microbench awfy bench bench-bootstrap bench-setup setup
 .PHONY: gccheck ractorcheck build build-cruby build-interp build-jit link clean
-.PHONY: build-ractor-interp build-ractor-jit
 
 build: build-cruby
 
@@ -216,8 +215,8 @@ ractorcheck:
 	@export $(LIBPATH); \
 	 export RPYYARV_BUILD=$(BUILD) RUBYLIB=$(UNINSTALLED_RUBYLIB); \
 	 co=`$(RUBY) --disable-gems test/ractors.rb`; \
-	 io=`./rpyyarv-ractor test/ractors.rb`; \
-	 jo=`./rpyyarv-ractor-jit test/ractors.rb`; \
+	 io=`./rpyyarv test/ractors.rb`; \
+	 jo=`./rpyyarv-jit test/ractors.rb`; \
 	 [ "$$io" = "$$co" ] && [ "$$jo" = "$$co" ] && echo "ok ractors"
 
 build-interp: | $(PYPY)
@@ -227,14 +226,6 @@ build-interp: | $(PYPY)
 build-jit: | $(PYPY)
 	RPYYARV_BUILD=$(BUILD) PYTHONPATH=$(PYTHONPATH) $(RPYTHON) -Ojit --output=rpyyarv-jit targetrpyyarv.py
 	$(call fix_install_name,rpyyarv-jit)
-
-build-ractor-interp: | $(PYPY)
-	RPYYARV_RACTOR_BUILD=1 RPYYARV_BUILD=$(BUILD) PYTHONPATH=$(PYTHONPATH) $(RPYTHON) --output=rpyyarv-ractor targetrpyyarv.py
-	$(call fix_install_name,rpyyarv-ractor)
-
-build-ractor-jit: | $(PYPY)
-	RPYYARV_RACTOR_BUILD=1 RPYYARV_BUILD=$(BUILD) PYTHONPATH=$(PYTHONPATH) $(RPYTHON) -Ojit --output=rpyyarv-ractor-jit targetrpyyarv.py
-	$(call fix_install_name,rpyyarv-ractor-jit)
 
 $(PYPY):
 	git clone --depth=1 https://github.com/pypy/pypy $@

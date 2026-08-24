@@ -5,7 +5,6 @@ from rpyyarv import debug
 from rpyyarv import symbols
 from rpyyarv import threading
 from rpyyarv import value
-from rpyyarv.error import UnsupportedOperation
 from rpyyarv.rlib import dont_look_inside, elidable
 
 
@@ -176,9 +175,8 @@ def call_with_proc(recv, mid, args, proc, kw=False):
 @dont_look_inside
 def call_with_block(recv, mid, args, handle, kw=False):
     debug.count_foreign(mid)
-    if mid == NEW and boot.ractor_class_p(recv) and not threading.ENABLED:
-        raise UnsupportedOperation(
-            'Ractor.new requires an RPYYARV_RACTOR_BUILD binary')
+    if mid == NEW and boot.ractor_class_p(recv):
+        threading.activate()
     return boot.call_with_block(recv, rid(mid), args, handle, mid, kw)
 
 

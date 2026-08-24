@@ -408,16 +408,6 @@ def resolve_engines(extra, env)
   end
 end
 
-def ractor_engine(name, argv, bench)
-  return argv unless bench.end_with?("-ractor")
-  replacement = case name
-                when "rpyyarv" then File.join(ROOT, "rpyyarv-ractor")
-                when "rpyyarv-jit"
-                  File.join(ROOT, "rpyyarv-ractor-jit")
-                end
-  replacement && File.executable?(replacement) ? [replacement] : argv
-end
-
 def run_suite(suite, names, engines, procs, raw)
   rows = []
   names.each do |bench|
@@ -432,14 +422,12 @@ def run_suite(suite, names, engines, procs, raw)
     probes = {}
     suite.with_script(bench, probe: true) do |script, env, _warm|
       engines.each do |ename, eargv|
-        eargv = ractor_engine(ename, eargv, bench)
         _t, err, info = run_once(eargv, script, env.merge(COVERAGE_ENV), suite.timeout)
         probes[ename] = [err, info]
       end
     end
     suite.with_script(bench) do |script, env, warm|
       engines.each do |ename, eargv|
-        eargv = ractor_engine(ename, eargv, bench)
         perr, pinfo = probes[ename]
         r = perr ? { status: perr, info: pinfo } : time_engine(eargv, script, env, warm, procs, suite.timeout)
         r[:info] = pinfo
