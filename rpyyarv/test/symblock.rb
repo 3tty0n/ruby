@@ -50,3 +50,18 @@ p rs.map(&:n).map(&:to_s)
 p [[1, 2], [3, 4]].flat_map(&:first)
 p({ :a => 1 }.any?(&:frozen?))
 p rs.min_by(&:n).n
+# The core fast paths a written-out send takes, reached through &:sym.
+p [[1, 2], [], [3]].map(&:first)
+p [[1, 2], [], [3]].map(&:last)
+p [1, -2].map(&:to_i)
+p [1.5, -1.5, 0.0].map(&:abs)
+p %w[ab cd].map(&:to_sym)
+p %w[ab cd].map(&:ord)
+p [:x, :y].map(&:to_sym)
+p [[1], [2]].map(&:to_a)
+p [1, -1].map(&:negative?)
+p ["☃"].map(&:ord)
+class Array
+  def first = :first_redefined
+end
+p [[1, 2]].map(&:first)

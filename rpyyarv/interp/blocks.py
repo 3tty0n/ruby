@@ -282,7 +282,14 @@ def _call_foreign_block(w_block, args):
 @dont_look_inside
 def _sym_send(recv, mid, args):
     """&:sym is a public send; one RPyYARV owns need not cross to CRuby."""
-    entry = dispatch.lookup(value.class_of(recv), mid)
+    klass = value.class_of(recv)
+    entry = dispatch.lookup(klass, mid)
+    if entry is None and len(args) == 0:
+        # The same core fast paths a written-out send takes.
+        v = zero_arg_native(recv, klass, mid)
+        if v != value.Q_UNDEF:
+            debug.count_native()
+            return v
     if entry is not None and not (entry.private or entry.prot):
         if entry.kind == dispatch.KIND_ATTR_READER and len(args) == 0:
             debug.count_native()
@@ -369,6 +376,6 @@ def invoke_block(frame, w_ci):
 # own bottom import asks this module for a name, everything
 # above is already bound.
 from rpyyarv.interp.builtins import proxy
-from rpyyarv.interp.sends import _kw_splat_hash, _splat_args
+from rpyyarv.interp.sends import _kw_splat_hash, _splat_args, zero_arg_native
 from rpyyarv.interp.stackops import _drop
 from rpyyarv.interp.execute import execute
