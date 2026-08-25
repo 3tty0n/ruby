@@ -42,6 +42,8 @@ endif
 SHIM    := librpyyarv_boot.$(SOEXT)
 PYPY    ?= ./pypy
 RUBY_BENCH ?= $(CURDIR)/ruby-bench
+# AWFY needs set/subclass_compatible.rb from the source tree, or deltablue dies.
+AWFY_RUBYLIB ?= $(TOP)/lib
 PYTHON  ?= python3
 PYTHONPATH ?= $(TOP)
 RPYTHON ?= python2 $(PYPY)/rpython/bin/rpython
@@ -57,7 +59,7 @@ CRUBY_JIT_CONFIGURE_ARGS ?= --enable-yjit --enable-zjit
 GCLIMIT   ?= 16384
 GCTIMEOUT ?= 60
 
-.PHONY: all test microbench awfy bench bench-viz setup setup-gems
+.PHONY: all test microbench awfy bench bench-viz eval setup setup-gems
 .PHONY: bench-bootstrap bench-setup
 .PHONY: gccheck ractorcheck build build-cruby build-interp build-jit link clean
 
@@ -100,6 +102,13 @@ bench:
 	RPYYARV_BUILD=$(BUILD) AWFY_RUBYLIB=$(AWFY_RUBYLIB) RUBY_BENCH=$(RUBY_BENCH) \
 	  BENCH_GEMS=$(BENCH_GEMS) RUBYLIB=$(UNINSTALLED_RUBYLIB) \
 	  $(LIBPATH) $(RUBY_CMD) scripts/bench.rb $(BENCHFLAGS)
+
+# One entry point for every paper measurement; EVAL names the sub-experiment.
+EVAL ?= doctor
+eval:
+	RPYYARV_BUILD=$(BUILD) AWFY_RUBYLIB=$(AWFY_RUBYLIB) RUBY_BENCH=$(RUBY_BENCH) \
+	  BENCH_GEMS=$(BENCH_GEMS) RUBYLIB=$(UNINSTALLED_RUBYLIB) \
+	  $(LIBPATH) $(RUBY_CMD) evaluation/run.rb $(EVAL) $(EVALFLAGS)
 
 # JSONL history from bench.rb, plotted separately from the worker.
 bench-viz:
