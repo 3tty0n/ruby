@@ -46,3 +46,7 @@ class S2 < R
 end
 p [S2.new(9)].select(&:big?)
 p rs.map(&:n).map(&:to_s)
+# A &:sym block handed to a method CRuby owns: it has no ISeq and no frame.
+p [[1, 2], [3, 4]].flat_map(&:first)
+p({ :a => 1 }.any?(&:frozen?))
+p rs.min_by(&:n).n

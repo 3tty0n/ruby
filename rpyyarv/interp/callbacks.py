@@ -306,11 +306,17 @@ def _call_with_block(recv, mid, args, w_block, kw=False):
     handle = _alloc_handle(w_block)
     # No release: the handle's owner dies with the ifunc, freeing the slot.
     try:
-        written = w_block.frame.cref
-        if written is None and w_block.frame.entry is not None:
-            written = w_block.frame.entry.lexical
+        # A &:sym block has neither ISeq nor frame; the shim takes a null one.
+        written = None
+        native = 0
+        if w_block.frame is not None:
+            written = w_block.frame.cref
+            if written is None and w_block.frame.entry is not None:
+                written = w_block.frame.entry.lexical
+        if w_block.w_iseq is not None:
+            native = w_block.w_iseq.native
         ret = rubycall.call_with_block(
-            recv, mid, args, handle, w_block.w_iseq.native,
+            recv, mid, args, handle, native,
             boot.native_cref(written), kw)
     except RubyException:
         # Whatever the block parked is the reason, and takes precedence.
