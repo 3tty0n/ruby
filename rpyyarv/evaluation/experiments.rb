@@ -10,6 +10,31 @@ module EvaluationConfig
     "jruby" => "jruby"
   }.freeze
   GC_LIMITS = [16_384, 4096, 1024].freeze
+  # Three decades of nursery, the dose-response range of hexapdf-jit-gc.org.
+  GC_NURSERIES = [1 << 30, 4 << 20, 128 << 10].freeze
+
+  # Runtime ablations: no rebuild, one named mechanism each.
+  ABLATIONS = {
+    "baseline" => {},
+    "gc-no-hook" => { "RPYYARV_GC_NO_HOOK" => "1" },
+    "gc-stress" => { "RPYYARV_GC_STRESS" => "1" }
+  }.freeze
+
+  # Ablations that need their own translation; run.rb only reports the recipe.
+  BUILD_ABLATIONS = {
+    "no-patch-0002" => "drop pypy-patches/0002 (gc mark forces vables)",
+    "no-patch-0004" => "drop pypy-patches/0004 (extern forces virtualizable)",
+    "no-quasiimmut" => "debug build with quasi-immutable fields disabled"
+  }.freeze
+
+  # First match wins; the hand taxonomy stays in docs, this is only a hint.
+  DELEGATION_CLASSES = [
+    [/refine|using/i, "A-structural/refinements"],
+    [/C ext|\.bundle|\.so\b/i, "A-structural/c-extension"],
+    [/Thread|Ractor/i, "A-structural/threads"],
+    [/is not implemented/i, "B-engineering/loader"],
+    [//, "B-engineering/runtime"]
+  ].freeze
 
   # Categories are disjoint by first match and intentionally file based.
   LOC_CATEGORIES = {

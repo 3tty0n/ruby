@@ -19,11 +19,22 @@ experiments while implementation work is happening in the same checkout.
 ruby evaluation/run.rb doctor
 ruby evaluation/run.rb performance --suite all --procs 3
 ruby evaluation/run.rb boundary --suite all
+ruby evaluation/run.rb census --suite all
+ruby evaluation/run.rb crossing
+ruby evaluation/run.rb delegation --filter sequel --filter mail --filter rack
+ruby evaluation/run.rb memory --suite all
 ruby evaluation/run.rb mechanisms --suite all --performance RESULTS/raw.json
 ruby evaluation/run.rb gc 16384 4096 1024
+ruby evaluation/run.rb nursery SCRIPT 1073741824 131072
+ruby evaluation/run.rb ablate baseline gc-no-hook --suite awfy
 ruby evaluation/run.rb loc
 ruby evaluation/run.rb plot evaluation/results/RUN/raw.json
+ruby evaluation/run.rb report evaluation/results/RUN
 #+end_src
+
+=make eval EVAL=<command> EVALFLAGS="..."= runs any of these with the
+build tree's Ruby and the benchmark environment already set.  The paper-side
+plan for each item is =docs/evaluation-plan.org=.
 
 =performance= produces =measurements.csv=, =ratios.csv=, =comparisons.csv=,
 and =summary.csv= from the raw output.  CRuby, YJIT, and ZJIT are always
@@ -55,15 +66,16 @@ Successful performance runs produce publication-ready SVG files:
 | Claim | Experiment | Current collector | Required extension |
 |-------+------------+-------------------+--------------------|
 | End-to-end performance | Detected engines, 82 benchmarks | =performance= | Freeze machine and repetitions |
-| VALUE-direct causality | Fast path versus residual call | binary variants | Build named variants |
-| Delegation boundary | sends and dominant callees | =boundary= | time in CRuby and trampolines |
-| Compatibility | native/delegated/failure census | =bench.rb --inventory= | exit and exception comparison |
+| VALUE-direct causality | Fast path versus residual call | =ablate= plus binary variants | A fast-path env switch |
+| Delegation boundary | sends and dominant callees | =boundary=, =crossing= | time in CRuby and trampolines |
+| Compatibility | native/delegated/failure census | =census= | reviewed A/B classification |
+| Native versus delegated | one binary, RPYYARV_NO_REQUIRE | =delegation= | — |
 | Implementation effort | categorized physical LoC | =loc= | reviewed line-level taxonomy |
-| GC integration | three malloc limits | =gc= | collections/sec and negative ablations |
+| GC integration | malloc limits and nursery sizes | =gc=, =nursery= | root-marking time needs a VM counter |
 | Fiber integration | micro plus optcarrot | artifact schema only | stack-window switch |
-| Warm-up | iteration curves and JIT events | raw samples and stable window | case-study curves |
-| Memory | peak RSS and code size | artifact schema only | per-engine sampler |
-| Mechanism | four representative cases | trace, VM stats, boundary census | live code size |
+| Warm-up | iteration curves and JIT events | =performance= raw samples | case-study curves |
+| Memory | peak RSS and code size | =memory= | RPython heap size needs a VM hook |
+| Mechanism | four representative cases | =mechanisms= | live code size |
 
 The =mechanisms= command now collects the trace/guard, boundary, YJIT, and ZJIT
 statistics.  It emits =mechanisms.json=, =mechanisms.csv=, one raw RPython JIT

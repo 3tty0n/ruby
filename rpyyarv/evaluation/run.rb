@@ -145,6 +145,7 @@ module RPyYARVEvaluation
       warmup = warmup_rows(raw)
       write_warmup(File.join(out_dir, "warmup.csv"), warmup)
       summary = summarize(ratios)
+      summary = attach_status_counts(summary, rows)
       write_summary(File.join(out_dir, "summary.csv"), summary)
       { "measurements" => rows.size, "ratios" => ratios.size,
         "comparisons" => comparisons.size, "warmup_processes" => warmup.size,
@@ -270,6 +271,23 @@ module RPyYARVEvaluation
       end
     end
 
+    # A geomean over survivors only is a lie without the excluded counts.
+    def attach_status_counts(summary, rows)
+      jit = rows.select { |row| row["engine"] == "rpyyarv-jit" }
+      summary.map do |entry|
+        group = entry["suite"] == "all" ? jit :
+                  jit.select { |row| row["suite"] == entry["suite"] }
+        entry.merge(
+          "n_benchmarks" => group.size,
+          "n_ok" => group.count { |row| row["status"].nil? || row["status"] == "" },
+          "n_delegated" => group.count { |row| row["status"].to_s == "DELEGATED" },
+          "n_failed" => group.count do |row|
+            !row["status"].to_s.empty? && row["status"].to_s != "DELEGATED"
+          end
+        )
+      end
+    end
+
     def write_measurements(path, rows)
       headers = %w[suite benchmark engine status median_ms min_ms samples
                    spread iseqs files_native files_delegated]
@@ -289,6 +307,7 @@ module RPyYARVEvaluation
         headers << "n_#{label}"
         headers << "geomean_jit_over_#{label}"
       end
+      headers += %w[n_benchmarks n_ok n_delegated n_failed]
       write_csv(path, headers, rows)
     end
 
@@ -326,6 +345,81 @@ module RPyYARVEvaluation
       headers = %w[benchmark rpyyarv_sends cruby_sends total_sends cruby_share]
       Csv.write(csv_path, headers, rows)
       rows.size
+    end
+
+    # The --foreign probe runs one iteration, so its counts are per-iteration.
+    def reasons(log_path)
+      benchmark = nil
+      File.readlines(log_path, chomp: true).each_with_object([]) do |line, all|
+        if (head = line.match(/\A(\S+)\s+sends: rpyyarv (\d+), cruby (\d+)/))
+          benchmark = head[1]
+          next
+        end
+        tail = line.match(/\A\s+(\d+) file\(s\): (.*)\z/)
+        all << [benchmark, tail[1].to_i, tail[2]] if benchmark && tail
+      end
+    end
+
+    def classify(reason)
+      return nil if reason.to_s.empty?
+
+      EvaluationConfig::DELEGATION_CLASSES.each do |pattern, label|
+        return label if pattern.match?(reason.to_s)
+      end
+      nil
+    end
+
+    def census(log_path, inventory, csv_path)
+      sends = File.readlines(log_path, chomp: true).each_with_object({}) do |line, all|
+        match = line.match(/\A(\S+)\s+sends: rpyyarv (\d+), cruby (\d+)/)
+        all[match[1]] = [match[2].to_i, match[3].to_i] if match
+      end
+      grouped = reasons(log_path).group_by(&:first)
+      rows = (sends.keys | inventory.keys).sort.map do |bench|
+        native, cruby = sends[bench] || [nil, nil]
+        entry = inventory[bench] || {}
+        top = (grouped[bench] || []).max_by { |row| row[1] }
+        total = native.to_i + cruby.to_i
+        { "benchmark" => bench, "status" => entry["status"],
+          "iseqs" => entry["iseqs"], "why" => entry["why"],
+          "rpyyarv_sends" => native, "cruby_sends_per_iteration" => cruby,
+          "cruby_send_share" => total.zero? ? nil : cruby.to_f / total,
+          "delegated_files" => top && top[1], "top_reason" => top && top[2],
+          "class_hint" => classify(top ? top[2] : entry["why"]) }
+      end
+      headers = %w[benchmark status iseqs why rpyyarv_sends
+                   cruby_sends_per_iteration cruby_send_share delegated_files
+                   top_reason class_hint]
+      Csv.write(csv_path, headers, rows)
+      rows
+    end
+  end
+
+  # Turns any CSV this harness writes into an org table for the paper draft.
+  module Org
+    module_function
+
+    def render(csv_path)
+      rows = File.readlines(csv_path, chomp: true).reject(&:empty?)
+      return "" if rows.empty?
+
+      cells = rows.map { |line| split(line) }
+      body = cells.map { |row| "| #{row.join(' | ')} |" }
+      ([body.first, "|---"] + body[1..]).join("\n")
+    end
+
+    def split(line)
+      line.scan(/(?:\A|,)(?:"((?:[^"]|"")*)"|([^,]*))/).map do |quoted, plain|
+        (quoted ? quoted.gsub('""', '"') : plain).to_s
+      end
+    end
+
+    def write(out_dir, org_path)
+      sections = Dir[File.join(out_dir, "*.csv")].sort.map do |csv|
+        "** #{File.basename(csv, '.csv')}\n\n#{render(csv)}\n"
+      end
+      File.write(org_path, "* #{File.basename(out_dir)}\n\n#{sections.join("\n")}")
+      org_path
     end
   end
 
@@ -365,6 +459,13 @@ module RPyYARVEvaluation
   def base_env
     { "RPYYARV_BUILD" => ENV.fetch("RPYYARV_BUILD",
                                     File.join(TOP, "build")) }
+  end
+
+  # RbConfig.ruby names the install prefix, which an uninstalled build lacks.
+  def driver_ruby
+    built = File.join(ENV.fetch("RPYYARV_BUILD", File.join(TOP, "build")),
+                      "ruby")
+    File.executable?(built) ? built : RbConfig.ruby
   end
 
   def find_command(name)
@@ -466,7 +567,7 @@ module RPyYARVEvaluation
   def performance(args, results_root)
     run = Run.new("performance", results_root)
     raw = File.join(run.dir, "raw.json")
-    argv = [RbConfig.ruby, File.join(ROOT, "scripts", "bench.rb"),
+    argv = [driver_ruby, File.join(ROOT, "scripts", "bench.rb"),
             "--raw", raw] + optional_engine_args + args
     run.manifest["optional_engines"] = optional_engines
     run.manifest["engine_binaries"] = binary_metadata(engine_paths(args))
@@ -489,12 +590,126 @@ module RPyYARVEvaluation
 
   def boundary(args, results_root)
     run = Run.new("boundary", results_root)
-    argv = [RbConfig.ruby, File.join(ROOT, "scripts", "bench.rb"),
+    argv = [driver_ruby, File.join(ROOT, "scripts", "bench.rb"),
             "--foreign=20"] + args
     ok = run.execute("boundary", base_env, argv)
     log = File.join(run.dir, "boundary.log")
     count = Boundary.extract(log, File.join(run.dir, "boundary.csv"))
     run.manifest["boundary_rows"] = count
+    run.finish(ok)
+    puts "artifacts: #{run.dir}"
+    ok ? 0 : 1
+  end
+
+  def census(args, results_root)
+    run = Run.new("census", results_root)
+    bench = [driver_ruby, File.join(ROOT, "scripts", "bench.rb")]
+    ok = run.execute("inventory", base_env, bench + ["--inventory"] + args)
+    ok &= run.execute("foreign", base_env, bench + ["--foreign=20"] + args)
+    inventory = begin
+      JSON.parse(File.read(File.join(ROOT, ".bench-inventory.json")))
+    rescue StandardError
+      {}
+    end
+    rows = Boundary.census(File.join(run.dir, "foreign.log"), inventory,
+                           File.join(run.dir, "census.csv"))
+    run.manifest["census_rows"] = rows.size
+    run.finish(ok)
+    puts "artifacts: #{run.dir}"
+    ok ? 0 : 1
+  end
+
+  # Item 8: one binary, RPYYARV_NO_REQUIRE forced off and left to the probe.
+  def delegation(args, results_root)
+    run = Run.new("delegation", results_root)
+    bench = [driver_ruby, File.join(ROOT, "scripts", "bench.rb")]
+    raws = {}
+    ok = %w[gem-require no-gem-require].all? do |mode|
+      raw = File.join(run.dir, "#{mode}.json")
+      raws[mode] = raw
+      run.execute(mode, base_env,
+                  bench + ["--raw", raw, "--#{mode}", "--no-jsonl"] + args)
+    end
+    write_delegation(raws, File.join(run.dir, "delegation.csv"))
+    run.finish(ok)
+    puts "artifacts: #{run.dir}"
+    ok ? 0 : 1
+  end
+
+  def write_delegation(raws, csv_path)
+    medians = raws.transform_values do |path|
+      next {} unless File.exist?(path)
+
+      JSON.parse(File.read(path)).to_h { |key, value| [key, value["median"]] }
+    end
+    keys = medians.values.flat_map(&:keys).uniq.sort
+    rows = keys.filter_map do |key|
+      suite, benchmark, engine = key.split("/", 3)
+      native = medians["gem-require"][key]
+      delegated = medians["no-gem-require"][key]
+      next unless native && delegated&.positive?
+
+      { "suite" => suite, "benchmark" => benchmark, "engine" => engine,
+        "native_ms" => native, "delegated_ms" => delegated,
+        "native_penalty" => native / delegated - 1.0 }
+    end
+    Csv.write(csv_path, %w[suite benchmark engine native_ms delegated_ms
+                           native_penalty], rows)
+  end
+
+  # Item 5: crash rate versus nursery size, the hexapdf dose-response.
+  def nursery(args, results_root)
+    trials = Integer(ENV.fetch("EVAL_TRIALS", "5"))
+    script = args.shift or abort "usage: nursery SCRIPT [SIZE ...]"
+    sizes = args.empty? ? EvaluationConfig::GC_NURSERIES : args.map { |v| Integer(v) }
+    run = Run.new("nursery", results_root)
+    rows = sizes.map do |size|
+      failures = (1..trials).count do |trial|
+        env = base_env.merge("PYPY_GC_NURSERY" => size.to_s)
+        !run.execute("nursery-#{size}-#{trial}", env,
+                     [File.join(ROOT, "rpyyarv-jit"), script])
+      end
+      { "nursery_bytes" => size, "trials" => trials, "failures" => failures,
+        "failure_rate" => failures.to_f / trials }
+    end
+    Csv.write(File.join(run.dir, "nursery.csv"),
+              %w[nursery_bytes trials failures failure_rate], rows)
+    run.finish(true)
+    puts "artifacts: #{run.dir}"
+    0
+  end
+
+  # Item 6: runtime ablations only; build variants are reported, not run.
+  def ablate(args, results_root)
+    names = args.take_while { |arg| EvaluationConfig::ABLATIONS.key?(arg) }
+    names = EvaluationConfig::ABLATIONS.keys if names.empty?
+    rest = args.drop(names.size)
+    run = Run.new("ablation", results_root)
+    run.manifest["build_ablations"] = EvaluationConfig::BUILD_ABLATIONS
+    rows = names.map do |name|
+      raw = File.join(run.dir, "#{name}.json")
+      argv = [driver_ruby, File.join(ROOT, "scripts", "bench.rb"),
+              "--raw", raw, "--no-jsonl"] + rest
+      ok = run.execute(name, base_env.merge(EvaluationConfig::ABLATIONS[name]),
+                       argv)
+      { "ablation" => name,
+        "env" => EvaluationConfig::ABLATIONS[name].map { |k, v| "#{k}=#{v}" }.join(" "),
+        "status" => ok ? "ok" : "FAIL", "raw" => File.basename(raw) }
+    end
+    Csv.write(File.join(run.dir, "ablation.csv"),
+              %w[ablation env status raw], rows)
+    run.finish(rows.all? { |row| row["status"] == "ok" })
+    puts "artifacts: #{run.dir}"
+    puts "build-only ablations (need a translation, not run here):"
+    EvaluationConfig::BUILD_ABLATIONS.each { |k, v| puts format("  %-16s %s", k, v) }
+    0
+  end
+
+  def child_script(kind, script, args, results_root)
+    run = Run.new(kind, results_root)
+    raw = File.join(run.dir, "#{kind}.json")
+    argv = [driver_ruby, File.join(__dir__, script), "--raw", raw] + args
+    ok = run.execute(kind, base_env, argv)
     run.finish(ok)
     puts "artifacts: #{run.dir}"
     ok ? 0 : 1
@@ -521,7 +736,7 @@ module RPyYARVEvaluation
   def mechanisms(args, results_root)
     run = Run.new("mechanisms", results_root)
     raw = File.join(run.dir, "mechanisms.json")
-    argv = [RbConfig.ruby, File.join(__dir__, "mechanisms.rb"),
+    argv = [driver_ruby, File.join(__dir__, "mechanisms.rb"),
             "--raw", raw] + args
     ok = run.execute("mechanisms", base_env, argv)
     if File.exist?(raw)
@@ -542,7 +757,7 @@ module RPyYARVEvaluation
   def doctor
     rows = {
       "repository" => TOP,
-      "ruby" => RbConfig.ruby,
+      "ruby" => driver_ruby,
       "bench driver" => File.join(ROOT, "scripts", "bench.rb"),
       "cruby" => File.join(TOP, "build", "ruby"),
       "rpyyarv" => File.join(ROOT, "rpyyarv"),
@@ -579,10 +794,17 @@ module RPyYARVEvaluation
         doctor                   check binaries without running benchmarks
         performance [BENCH-ARGS] run the five-engine steady-state experiment
         boundary [BENCH-ARGS]    run the non-timing delegation census
+        census [BENCH-ARGS]      inventory plus delegation reasons and classes
+        crossing [ARGS]          nanoseconds per boundary send versus CRuby
+        delegation [BENCH-ARGS]  native versus delegated gems, same binary
+        memory [MECH-ARGS]       peak RSS per engine and benchmark
         mechanisms [MECH-ARGS]  collect tracing, boundary, YJIT, and ZJIT stats
         gc [LIMIT ...]           run gccheck at each malloc limit
+        nursery SCRIPT [SIZE...] crash rate versus PYPY_GC_NURSERY
+        ablate [NAME ...] [ARGS] runtime ablations; lists the build-only ones
         analyze RAW [OUT-DIR]    convert bench.rb JSON to tidy CSV
         plot RAW [OUT-DIR]       render ratio and log-log scatter SVGs
+        report DIR [OUT.org]     turn a results directory's CSVs into org tables
         loc [OUT.csv]            count the categorized implementation surface
 
       BENCH-ARGS are passed unchanged to scripts/bench.rb. Examples include
@@ -601,8 +823,18 @@ module RPyYARVEvaluation
     when "doctor" then doctor
     when "performance" then performance(argv, results_root)
     when "boundary" then boundary(argv, results_root)
+    when "census" then census(argv, results_root)
+    when "crossing" then child_script("crossing", "crossing.rb", argv, results_root)
+    when "memory" then child_script("memory", "memory.rb", argv, results_root)
+    when "delegation" then delegation(argv, results_root)
+    when "nursery" then nursery(argv, results_root)
+    when "ablate" then ablate(argv, results_root)
     when "mechanisms" then mechanisms(argv, results_root)
     when "gc" then gc_sweep(argv, results_root)
+    when "report"
+      dir = argv.shift or abort usage
+      puts Org.write(dir, argv.shift || File.join(dir, "tables.org"))
+      0
     when "analyze"
       raw = argv.shift or abort usage
       out = argv.shift || File.dirname(File.expand_path(raw))
