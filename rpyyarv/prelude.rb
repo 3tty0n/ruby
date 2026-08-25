@@ -192,18 +192,6 @@ end
 class Array
   def empty? = length == 0
 
-  def first(*args)
-    return self[0] if args.length == 0
-    self[0, args[0]]
-  end
-
-  def last(*args)
-    return self[length - 1] if args.length == 0
-    n = args[0]
-    n = length if n > length
-    self[length - n, n]
-  end
-
   def include?(obj)
     i = 0
     while i < self.length

@@ -86,3 +86,11 @@ class String
   end
 end
 puts s[0]
+
+# first/last with an argument, and on a subclass, still answer correctly
+p [1, 2, 3].first(2)
+p [1, 2, 3].last(2)
+p [1, 2, 3].first(0)
+p [1, 2, 3].last(9)
+p [].first(2)
+p MyArray.new([1, 2, 3]).last(2)
