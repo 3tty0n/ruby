@@ -7,7 +7,9 @@ from rpyyarv import symbols
 from rpyyarv.boot._core import (_ext, _v, VALUE, VALUEP, INTP, MAX_ARGC,
                                 BLOCK_HOOK, TRAMP_HOOK, _enter_status,
                                 _leave_status, _leave_status_code,
-                                _enter_argv, _leave_argv,
+                                _enter_argv, _leave_argv, _current_nesting,
+                                _enter_status_at, _leave_status_at,
+                                _enter_argv_at, _leave_argv_at,
                                 _failed, _failed_mid, RubyError,
                                 ForeignJump, FOREIGN_TAG)
 
@@ -139,12 +141,32 @@ def funcallv(recv, rid, args, mid, public_only=False, blocking=False):
     argc = len(args)
     if argc > MAX_ARGC:
         raise RubyError(symbols.name_of(mid))
-    argv = _enter_argv(argc)
+    nesting = _current_nesting()
+    argv = _enter_argv_at(nesting, argc)
     i = 0
     while i < argc:
         argv[i] = rffi.cast(VALUE, args[i])
         i += 1
-    state = _enter_status()
+    return _funcallv_argv(nesting, argv, recv, rid, argc, mid, public_only,
+                          blocking)
+
+
+def funcalln(recv, rid, a0, a1, a2, argc, mid, public_only=False):
+    """funcallv for argc <= 3, with no RPython list to allocate per send."""
+    nesting = _current_nesting()
+    argv = _enter_argv_at(nesting, argc)
+    if argc > 0:
+        argv[0] = rffi.cast(VALUE, a0)
+    if argc > 1:
+        argv[1] = rffi.cast(VALUE, a1)
+    if argc > 2:
+        argv[2] = rffi.cast(VALUE, a2)
+    return _funcallv_argv(nesting, argv, recv, rid, argc, mid, public_only,
+                          False)
+
+
+def _funcallv_argv(nesting, argv, recv, rid, argc, mid, public_only, blocking):
+    state = _enter_status_at(nesting)
     if public_only:
         fn = (rb_funcallv_public_id_blocking if blocking
               else rb_funcallv_public_id)
@@ -156,9 +178,9 @@ def funcallv(recv, rid, args, mid, public_only=False, blocking=False):
         v = fn(
             rffi.cast(VALUE, recv), rffi.cast(VALUE, rid),
             rffi.cast(rffi.INT, argc), argv, state)
-    failed = _leave_status(state)
+    failed = _leave_status_at(nesting, state)
     ret = rffi.cast(lltype.Signed, v)
-    _leave_argv(argv)
+    _leave_argv_at(nesting, argv)
     if failed:
         _failed_mid(mid)
     return ret

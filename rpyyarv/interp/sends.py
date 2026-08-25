@@ -577,6 +577,16 @@ def invoke(frame, w_ci, w_block=None):
             "RubyVM::FrozenCore#%s is not supported"
             % symbols.name_of(mid))
 
+    # Short calls skip the args list: it is two allocations per foreign send.
+    if w_block is None and argc <= 3 and not debug.state.enabled:
+        a0 = frame.slots[recv_at + 1] if argc > 0 else 0
+        a1 = frame.slots[recv_at + 2] if argc > 1 else 0
+        a2 = frame.slots[recv_at + 3] if argc > 2 else 0
+        _drop(frame, recv_at)
+        ret = rubycall.calln(recv, mid, a0, a1, a2, argc,
+                             entry is not None and not fcall)
+        _check_block_error()
+        return ret
     args = []
     i = 0
     while i < argc:

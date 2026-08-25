@@ -128,8 +128,9 @@ def call(recv, mid, args, public_only=False):
         v = hooks.require.handle(mid, args[0])
         if v != NOT_HANDLED:
             return v
-    debug.count_foreign_site(mid, recv,
-                             args[0] if len(args) == 1 else value.Q_UNDEF)
+    if debug.coverage.enabled:
+        debug.count_foreign_site(mid, recv,
+                                 args[0] if len(args) == 1 else value.Q_UNDEF)
     ractor_wait = ((mid == RACTOR_VALUE or mid == RACTOR_TAKE)
                    and boot.ractor_p(recv))
     native_wait = ractor_wait and boot.native_ractors_p()
@@ -139,6 +140,30 @@ def call(recv, mid, args, public_only=False):
     finally:
         if native_wait:
             boot.native_ractors_poll(recv)
+
+
+@dont_look_inside
+def calln(recv, mid, a0, a1, a2, argc, public_only=False):
+    """call for argc <= 3: no args list, so a send allocates nothing."""
+    if (mid == REQUIRE or mid == REQUIRE_RELATIVE) and argc == 1:
+        v = hooks.require.handle(mid, a0)
+        if v != NOT_HANDLED:
+            return v
+    if (mid == RACTOR_VALUE or mid == RACTOR_TAKE) and boot.ractor_p(recv):
+        return call(recv, mid, _args_of(a0, a1, a2, argc), public_only)
+    if debug.coverage.enabled:
+        debug.count_foreign_site(mid, recv, a0 if argc == 1 else value.Q_UNDEF)
+    return boot.funcalln(recv, rid(mid), a0, a1, a2, argc, mid, public_only)
+
+
+def _args_of(a0, a1, a2, argc):
+    if argc == 0:
+        return []
+    if argc == 1:
+        return [a0]
+    if argc == 2:
+        return [a0, a1]
+    return [a0, a1, a2]
 
 
 @dont_look_inside

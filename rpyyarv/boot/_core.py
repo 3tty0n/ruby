@@ -207,7 +207,10 @@ def leave_foreign_depth():
 
 def _enter_status():
     """Status cell for one shim call; past SHIM_DEPTH, a fresh raw cell."""
-    nesting = _current_nesting()
+    return _enter_status_at(_current_nesting())
+
+
+def _enter_status_at(nesting):
     d = nesting.status
     nesting.status = d + 1
     if d >= SHIM_DEPTH:
@@ -236,7 +239,10 @@ def _leave_status_code(p):
 
 
 def _leave_status(p):
-    nesting = _current_nesting()
+    return _leave_status_at(_current_nesting(), p)
+
+
+def _leave_status_at(nesting, p):
     d = nesting.status - 1
     nesting.status = d
     failed = rffi.cast(lltype.Signed, p[0]) != 0
@@ -247,8 +253,11 @@ def _leave_status(p):
 
 def _enter_argv(n):
     """Copied to the machine stack before anything allocates, so unscanned."""
+    return _enter_argv_at(_current_nesting(), n)
+
+
+def _enter_argv_at(nesting, n):
     assert n <= MAX_ARGC
-    nesting = _current_nesting()
     d = nesting.argv
     nesting.argv = d + 1
     if d >= SHIM_DEPTH:
@@ -257,7 +266,10 @@ def _enter_argv(n):
 
 
 def _leave_argv(p):
-    nesting = _current_nesting()
+    _leave_argv_at(_current_nesting(), p)
+
+
+def _leave_argv_at(nesting, p):
     d = nesting.argv - 1
     nesting.argv = d
     if d >= SHIM_DEPTH:
