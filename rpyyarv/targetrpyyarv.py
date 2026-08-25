@@ -86,6 +86,8 @@ def entry_point(argv):
         return 1
 
     debug.configure_coverage()
+    if os.environ.get('RPYYARV_FAST_PATHS') == '0':
+        helpers.disable_fast_paths()
     dispatch.install()
 
     if not helpers.check_float_layout():

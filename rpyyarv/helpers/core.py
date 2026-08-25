@@ -189,6 +189,8 @@ class _Bops(object):
     def __init__(self):
         # Every bit set until refresh(): no fast path before CRuby is asked.
         self.mask = -1
+        # RPYYARV_FAST_PATHS=0 keeps that state, disabling every opt_* path.
+        self.disabled = False
 
 
 bops = _Bops()
@@ -205,13 +207,21 @@ class _Modules(object):
 modules = _Modules()
 
 
+def disable_fast_paths():
+    """Startup-only switch; refresh() then leaves every opt_* path off."""
+    bops.disabled = True
+
+
 def refresh():
     """Re-ask CRuby for the watched operators; some redefinitions missed."""
     dispatch.invalidate_owners()
     count, mask = boot.bop_mask()
     if count != B_COUNT:
         return False
-    bops.mask = mask
+    # Left at -1 the fast paths never fire; only refresh() reads the switch,
+    # so the per-send guard still folds on the quasi-immutable mask alone.
+    if not bops.disabled:
+        bops.mask = mask
     return True
 
 
