@@ -18,7 +18,10 @@ module RPyYARVEvaluation
     module_function
 
     def plot(raw_path, out_dir)
-      raw = JSON.parse(File.read(raw_path))
+      plot_raw(JSON.parse(File.read(raw_path)), out_dir)
+    end
+
+    def plot_raw(raw, out_dir)
       FileUtils.mkdir_p(out_dir)
       paths = []
       references = EvaluationConfig::REFERENCES.dup

@@ -7,6 +7,7 @@
 
 require "open3"
 require "json"
+require "fileutils"
 
 HERE = File.dirname(File.expand_path(__FILE__))
 ROOT = File.dirname(HERE)
@@ -15,6 +16,7 @@ BUILD = ENV.fetch("RPYYARV_BUILD", File.join(TOP, "build"))
 AWFY_DIR = File.join(ROOT, "awfy", "benchmarks", "Ruby")
 SHIM_DIR = File.join(HERE, "ruby-bench")
 INVENTORY_PATH = File.join(ROOT, ".bench-inventory.json")
+DEFAULT_JSONL = File.join(ROOT, "evaluation", "results", "bench.jsonl")
 
 LIBVAR = RUBY_PLATFORM.include?("darwin") ? "DYLD_LIBRARY_PATH" : "LD_LIBRARY_PATH"
 
@@ -88,6 +90,18 @@ end
 def geomean(a)
   return nil if a.empty?
   Math.exp(a.sum { |v| Math.log(v) } / a.size)
+end
+
+def git_commit
+  out, status = Open3.capture2("git", "-C", TOP, "rev-parse", "HEAD")
+  status.success? ? out.strip : nil
+end
+
+def append_jsonl(path, raw)
+  rec = { "ts" => Time.now.utc.strftime("%Y-%m-%dT%H:%M:%SZ"),
+          "commit" => git_commit, "raw" => JSON.parse(JSON.generate(raw)) }
+  FileUtils.mkdir_p(File.dirname(path))
+  File.open(path, "a") { |f| f.puts(JSON.generate(rec)) }
 end
 
 def fmt(v)
@@ -536,6 +550,7 @@ def main(argv)
   procs = 3
   filters = []
   raw_path = nil
+  jsonl_path = DEFAULT_JSONL
   suites = nil
   extra_engines = []
   opts = {}
@@ -551,6 +566,9 @@ def main(argv)
     when "--filter" then filters << argv.shift.to_s
     when /\A--raw=(.*)\z/ then raw_path = Regexp.last_match(1)
     when "--raw" then raw_path = argv.shift
+    when /\A--jsonl=(.*)\z/ then jsonl_path = Regexp.last_match(1)
+    when "--jsonl" then jsonl_path = argv.shift
+    when "--no-jsonl" then jsonl_path = nil
     when /\A--suite=(.*)\z/ then suites = Regexp.last_match(1)
     when "--suite" then suites = argv.shift
     when /\A--ruby-bench=(.*)\z/ then opts[:dir] = Regexp.last_match(1)
@@ -574,6 +592,7 @@ def main(argv)
       puts <<~USAGE
         usage: bench.rb [--suite awfy|ruby-bench|all] [--procs N] [--filter SUBSTRING]...
                         [--ruby-bench DIR] [--warmup N] [--iters N] [--raw FILE]
+                        [--jsonl FILE] [--no-jsonl]
                         [--engine NAME=PATH]... [--compare BIN] [--inventory] [--refresh-inventory]
                         [--foreign[=N]] [--gem-require|--no-gem-require]
         By default each Gemfile benchmark is probed once for whether RPyYARV can
@@ -636,6 +655,10 @@ def main(argv)
   if raw_path
     File.write(raw_path, JSON.pretty_generate(raw))
     puts "raw series: #{raw_path}"
+  end
+  unless jsonl_path.nil? || raw.empty?
+    append_jsonl(jsonl_path, raw)
+    puts "jsonl: #{jsonl_path}"
   end
   0
 end

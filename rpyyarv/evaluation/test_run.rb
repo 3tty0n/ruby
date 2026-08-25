@@ -93,4 +93,27 @@ Dir.mktmpdir("rpyyarv-mechanism-plot-test") do |dir|
   assert(plots.size == 3, "mechanism plot count")
 end
 
+require_relative "../scripts/bench_viz"
+
+Dir.mktmpdir("rpyyarv-jsonl-viz-test") do |dir|
+  jsonl = File.join(dir, "bench.jsonl")
+  File.open(jsonl, "w") do |file|
+    2.times do |i|
+      raw = {
+        "awfy/bounce/cruby+yjit" => { "median" => 5.0 },
+        "awfy/bounce/rpyyarv-jit" => { "median" => 4.0 + i }
+      }
+      file.puts(JSON.generate("ts" => "2026-01-0#{i + 1}T00:00:00Z",
+                              "commit" => "abc", "raw" => raw))
+    end
+  end
+  out = File.join(dir, "viz")
+  paths = viz(jsonl, out)
+  assert(paths.any? { |path| File.basename(path) == "history.svg" }, "history svg")
+  assert(File.read(File.join(out, "history.svg")).include?("polyline"),
+         "history series")
+  assert(paths.any? { |path| File.basename(path).start_with?("ratio-") },
+         "latest ratio plot")
+end
+
 puts "evaluation tests: ok"
