@@ -175,6 +175,7 @@ gccheck:
 	          test/pubsend.rb \
 	          test/aliasinherit.rb \
 	          test/bmethodreturn.rb \
+	          test/bmethodcref.rb \
 	          $(TOP)/benchmark/app_*.rb $(TOP)/benchmark/so_*.rb; do \
 	   n=`basename $$s`; \
 	   case $$s in test/*) \

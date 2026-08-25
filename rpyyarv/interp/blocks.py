@@ -14,6 +14,7 @@ from rpyyarv.rlib import dont_look_inside, promote, raw_word, unroll_safe
 
 from rpyyarv.interp.consts_ids import AREF, ARITY, CALL, EQQ_, LAMBDA_P, TO_PROC, YIELD
 from rpyyarv.interp.args import NO_KEYWORDS, _iseq_arity, _kw_to_positional, setup_params
+from rpyyarv.interp.cref import _cref_of
 
 class _Blocks(object):
     """Blocks C refers to by integer handle only: RPython's GC moves objects."""
@@ -166,6 +167,9 @@ def call_block(w_block, args, kw_names=NO_KEYWORDS, kw_splat=False,
         self_val = outer.self_val
     if cref is None:
         cref = outer.cref
+        # A bmethod entry is not the block's lexical home: take the writer's.
+        if cref is None and entry_override is not None:
+            cref = _cref_of(outer)
     entry = entry_override if entry_override is not None else outer.entry
     callee = Frame(b_iseq, self_val, cref, entry)
     callee.defining_frame = outer
