@@ -369,7 +369,7 @@ module RPyYARVEvaluation
       nil
     end
 
-    def census(log_path, inventory, csv_path)
+    def coverage(log_path, inventory, csv_path)
       sends = File.readlines(log_path, chomp: true).each_with_object({}) do |line, all|
         match = line.match(/\A(\S+)\s+sends: rpyyarv (\d+), cruby (\d+)/)
         all[match[1]] = [match[2].to_i, match[3].to_i] if match
@@ -601,8 +601,8 @@ module RPyYARVEvaluation
     ok ? 0 : 1
   end
 
-  def census(args, results_root)
-    run = Run.new("census", results_root)
+  def coverage(args, results_root)
+    run = Run.new("coverage", results_root)
     bench = [driver_ruby, File.join(ROOT, "scripts", "bench.rb")]
     ok = run.execute("inventory", base_env, bench + ["--inventory"] + args)
     ok &= run.execute("foreign", base_env, bench + ["--foreign=20"] + args)
@@ -611,9 +611,9 @@ module RPyYARVEvaluation
     rescue StandardError
       {}
     end
-    rows = Boundary.census(File.join(run.dir, "foreign.log"), inventory,
-                           File.join(run.dir, "census.csv"))
-    run.manifest["census_rows"] = rows.size
+    rows = Boundary.coverage(File.join(run.dir, "foreign.log"), inventory,
+                             File.join(run.dir, "coverage.csv"))
+    run.manifest["coverage_rows"] = rows.size
     run.finish(ok)
     puts "artifacts: #{run.dir}"
     ok ? 0 : 1
@@ -721,16 +721,43 @@ module RPyYARVEvaluation
              else
                args.map { |value| Integer(value) }
              end
+    probe = ENV.fetch("EVAL_GC_SCRIPT", File.join(ROOT, "test", "fastops.rb"))
     run = Run.new("gc", results_root)
-    outcomes = limits.map do |limit|
+    rows = limits.map do |limit|
       argv = ["make", "gccheck", "GCLIMIT=#{limit}"]
-      run.execute("gc-#{limit}", base_env, argv, chdir: ROOT)
+      ok = run.execute("gc-#{limit}", base_env, argv, chdir: ROOT)
+      gccheck_row(limit, File.join(run.dir, "gc-#{limit}.log"))
+        .merge("passed" => ok)
+        .merge(mark_overhead(limit, probe))
     end
-    ok = outcomes.all?
+    ok = rows.all? { |row| row["passed"] }
+    Csv.write(File.join(run.dir, "gc.csv"),
+              %w[malloc_limit ok skipped failed passed root_mark_walks
+                 root_mark_ns rpython_heap_bytes], rows)
     run.manifest["gc_limits"] = limits
     run.finish(ok)
     puts "artifacts: #{run.dir}"
     ok ? 0 : 1
+  end
+
+  def gccheck_row(limit, log_path)
+    tail = File.exist?(log_path) ? File.read(log_path) : ""
+    match = tail.match(/gccheck: (\d+) ok, (\d+) skipped, (\d+) failed/)
+    { "malloc_limit" => limit, "ok" => match && match[1].to_i,
+      "skipped" => match && match[2].to_i, "failed" => match && match[3].to_i }
+  end
+
+  # A separate probe run: the coverage report is never a timed measurement.
+  def mark_overhead(limit, script)
+    env = base_env.merge("RPYYARV_COVERAGE" => "1",
+                         "RUBY_GC_MALLOC_LIMIT" => limit.to_s)
+    out, = Open3.capture2e(env, File.join(ROOT, "rpyyarv-jit"), script,
+                           chdir: ROOT)
+    { "root_mark_walks" => out[/root marking: (\d+) walk/, 1]&.to_i,
+      "root_mark_ns" => out[/root marking: \d+ walk\(s\), (\d+) ns/, 1]&.to_i,
+      "rpython_heap_bytes" => out[/heap footprint: rpython (\d+)/, 1]&.to_i }
+  rescue StandardError
+    {}
   end
 
   def mechanisms(args, results_root)
@@ -793,8 +820,8 @@ module RPyYARVEvaluation
       commands:
         doctor                   check binaries without running benchmarks
         performance [BENCH-ARGS] run the five-engine steady-state experiment
-        boundary [BENCH-ARGS]    run the non-timing delegation census
-        census [BENCH-ARGS]      inventory plus delegation reasons and classes
+        boundary [BENCH-ARGS]    run the non-timing delegation check
+        coverage [BENCH-ARGS]    native/delegated compatibility and boundary calls
         crossing [ARGS]          nanoseconds per boundary send versus CRuby
         delegation [BENCH-ARGS]  native versus delegated gems, same binary
         memory [MECH-ARGS]       peak RSS per engine and benchmark
@@ -823,7 +850,7 @@ module RPyYARVEvaluation
     when "doctor" then doctor
     when "performance" then performance(argv, results_root)
     when "boundary" then boundary(argv, results_root)
-    when "census" then census(argv, results_root)
+    when "coverage" then coverage(argv, results_root)
     when "crossing" then child_script("crossing", "crossing.rb", argv, results_root)
     when "memory" then child_script("memory", "memory.rb", argv, results_root)
     when "delegation" then delegation(argv, results_root)

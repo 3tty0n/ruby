@@ -16,7 +16,8 @@ module MemoryHarness
 
   CSV_FIELDS = %w[
     suite benchmark engine peak_rss_bytes peak_rss_mb startup_rss_bytes
-    rss_over_startup_mb cruby_heap_live_slots status
+    rss_over_startup_mb cruby_heap_live_slots rpython_heap_bytes
+    root_mark_walks root_mark_ns status
   ].freeze
 
   module_function
@@ -85,11 +86,23 @@ module MemoryHarness
     if cruby_engine?(argv)
       row["cruby_heap_live_slots"] = run_heap(argv, script, env, timeout)
     else
-      row["cruby_heap_live_slots"] = nil
-      row["heaps_note"] =
-        "rpython heap size needs a VM hook (not implemented)"
+      row.merge!(run_rpython_report(argv, script, env, timeout))
     end
     row
+  end
+
+  # The coverage report is a probe, never the timed run it sits beside.
+  def run_rpython_report(argv, script, env, timeout)
+    full = timeout_argv(timeout, argv + [script])
+    out, err, status = Open3.capture3(
+      env.merge("RPYYARV_COVERAGE" => "1"), *full
+    )
+    return {} unless status.success?
+
+    text = out + err
+    { "rpython_heap_bytes" => text[/heap footprint: rpython (\d+)/, 1]&.to_i,
+      "root_mark_walks" => text[/root marking: (\d+) walk/, 1]&.to_i,
+      "root_mark_ns" => text[/root marking: \d+ walk\(s\), (\d+) ns/, 1]&.to_i }
   end
 
   def startup_row(ename, eargv, env, time_missing)

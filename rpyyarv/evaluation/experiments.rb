@@ -17,7 +17,8 @@ module EvaluationConfig
   ABLATIONS = {
     "baseline" => {},
     "gc-no-hook" => { "RPYYARV_GC_NO_HOOK" => "1" },
-    "gc-stress" => { "RPYYARV_GC_STRESS" => "1" }
+    "gc-stress" => { "RPYYARV_GC_STRESS" => "1" },
+    "fast-paths-off" => { "RPYYARV_FAST_PATHS" => "0" }
   }.freeze
 
   # Ablations that need their own translation; run.rb only reports the recipe.
@@ -29,11 +30,11 @@ module EvaluationConfig
 
   # First match wins; the hand taxonomy stays in docs, this is only a hint.
   DELEGATION_CLASSES = [
-    [/refine|using/i, "A-structural/refinements"],
-    [/C ext|\.bundle|\.so\b/i, "A-structural/c-extension"],
-    [/Thread|Ractor/i, "A-structural/threads"],
-    [/is not implemented/i, "B-engineering/loader"],
-    [//, "B-engineering/runtime"]
+    [/refine|using/i, "structural/refinements"],
+    [/C ext|\.bundle|\.so\b/i, "structural/c-extension"],
+    [/Thread|Ractor/i, "structural/threads"],
+    [/is not implemented/i, "engineering/loader"],
+    [//, "engineering/runtime"]
   ].freeze
 
   # Categories are disjoint by first match and intentionally file based.

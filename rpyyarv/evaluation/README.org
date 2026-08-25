@@ -19,7 +19,7 @@ experiments while implementation work is happening in the same checkout.
 ruby evaluation/run.rb doctor
 ruby evaluation/run.rb performance --suite all --procs 3
 ruby evaluation/run.rb boundary --suite all
-ruby evaluation/run.rb census --suite all
+ruby evaluation/run.rb coverage --suite all
 ruby evaluation/run.rb crossing
 ruby evaluation/run.rb delegation --filter sequel --filter mail --filter rack
 ruby evaluation/run.rb memory --suite all
@@ -68,7 +68,7 @@ Successful performance runs produce publication-ready SVG files:
 | End-to-end performance | Detected engines, 82 benchmarks | =performance= | Freeze machine and repetitions |
 | VALUE-direct causality | Fast path versus residual call | =ablate= plus binary variants | A fast-path env switch |
 | Delegation boundary | sends and dominant callees | =boundary=, =crossing= | time in CRuby and trampolines |
-| Compatibility | native/delegated/failure census | =census= | reviewed A/B classification |
+| Compatibility | native/delegated/failure coverage | =coverage= | reviewed structural/engineering classification |
 | Native versus delegated | one binary, RPYYARV_NO_REQUIRE | =delegation= | — |
 | Implementation effort | categorized physical LoC | =loc= | reviewed line-level taxonomy |
 | GC integration | malloc limits and nursery sizes | =gc=, =nursery= | root-marking time needs a VM counter |
