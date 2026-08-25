@@ -13,7 +13,7 @@ from rpyyarv.error import UnsupportedOperation
 from rpyyarv.frame import Frame
 from rpyyarv.rlib import dont_look_inside, promote, raw_word, unroll_safe, we_are_jitted
 
-from rpyyarv.interp.consts_ids import ALIAS_METHOD, ALLOCATE, ARITY, ATTR_ACCESSOR, ATTR_READER, ATTR_WRITER, BACKTRACE_PRIM, BLOCK_GIVEN, BUFFER, CALLEE_UNDERSCORE, CGI_CONST, CLASS_EVAL, CORE_ALIAS, CORE_GVAR_ALIAS, CORE_LAMBDA, CORE_UNDEF, DEFINE, DEFINE_METHOD, DIR_UNDERSCORE, EACH_SLICE, EACH_WITH_INDEX, ENC_FIND, EVAL, FORCE_ENCODING, FREEZE, GETBYTE, HASH_MERGE_KWD, HASH_MERGE_PTR, HASH_PAIRS_PRIM, INDEX, INITIALIZE, INSTANCE_EVAL, INSTANCE_EXEC, ITSELF, KERNEL_PROC, LAMBDA_P, MATCH, METHOD_UNDERSCORE, MODULE_EVAL, MODULE_FUNCTION, NEGATIVE_P, NEW, OFFSET, OWNER, PARAMETERS, PRIVATE, PRIVATE_CLASS_METHOD, PROTECTED, PUBLIC, PUBLIC_SEND, REMOVE_METHOD, REQUIRE_PRIM, REVERSE_EACH, RUBY2_KEYWORDS, SEND, SEND2, SETBYTE, SLICE, STEP, TO_A, TO_SYM, UNDEF_METHOD, UNPACK1
+from rpyyarv.interp.consts_ids import ALIAS_METHOD, ALLOCATE, ARITY, ATTR_ACCESSOR, ATTR_READER, ATTR_WRITER, BACKTRACE_PRIM, BINDING, BLOCK_GIVEN, BUFFER, CALLEE_UNDERSCORE, CGI_CONST, CLASS_EVAL, CORE_ALIAS, CORE_GVAR_ALIAS, CORE_LAMBDA, CORE_UNDEF, DEFINE, DEFINE_METHOD, DIR_UNDERSCORE, EACH_SLICE, EACH_WITH_INDEX, ENC_FIND, EVAL, FORCE_ENCODING, FREEZE, GETBYTE, HASH_MERGE_KWD, HASH_MERGE_PTR, HASH_PAIRS_PRIM, INDEX, INITIALIZE, INSTANCE_EVAL, INSTANCE_EXEC, ITSELF, KERNEL_PROC, LAMBDA_P, MATCH, METHOD_UNDERSCORE, MODULE_EVAL, MODULE_FUNCTION, NEGATIVE_P, NEW, OFFSET, OWNER, PARAMETERS, PRIVATE, PRIVATE_CLASS_METHOD, PROTECTED, PUBLIC, PUBLIC_SEND, REMOVE_METHOD, REQUIRE_PRIM, REVERSE_EACH, RUBY2_KEYWORDS, SEND, SEND2, SETBYTE, SLICE, STEP, TO_A, TO_SYM, UNDEF_METHOD, UNPACK1
 from rpyyarv.interp.args import NO_KEYWORDS, _arity_error, _kw_to_positional, _refuse_iseq, setup_params
 
 @unroll_safe
@@ -272,6 +272,14 @@ def invoke(frame, w_ci, w_block=None):
         v = helpers.ary_splice_set(recv, frame.slots[recv_at + 1],
                                    frame.slots[recv_at + 2],
                                    frame.slots[recv_at + 3])
+        if v != value.Q_UNDEF:
+            _drop(frame, recv_at)
+            debug.count_native()
+            return v
+    if entry is None and mid == BINDING and fcall and argc == 0 \
+            and w_block is None \
+            and dispatch.owner_of(klass, BINDING) == send_owners.binding:
+        v = _binding_rpy(frame)
         if v != value.Q_UNDEF:
             _drop(frame, recv_at)
             debug.count_native()
@@ -638,6 +646,7 @@ class _SendOwners(object):
         self.kernel = 0
         self.basic = 0
         self.eval = 0
+        self.binding = 0
         self.string_getbyte = 0
         self.string_setbyte = 0
         self.array_each_slice = 0
@@ -1321,7 +1330,7 @@ def _opt_send(frame, mid, argc):
 from rpyyarv.interp.builtins import _iseq_parameters, _array_each_slice, _array_each_with_index, _integer_step, _array_new, _array_new_block, _backtrace, _comparable_op, _dir_of, _encoding_find, _running_method, encodings, proxy, regexp_class, vm_core
 from rpyyarv.interp.supers import _ruby2_keywords
 from rpyyarv.interp.defs import _class_new_block, _exec_on_made, _alias_method, _attr_name, _core_method, _define_attrs, _define_bmethod, _define_bmethod_modfunc, _in_body_of, _instance_eval, _module_eval_block, _module_function, _private_class_method, _remove_or_undef, _visibility_names, _visibility_pragma
-from rpyyarv.interp.evalsrc import _eval_receiver, _eval_rpy, _module_eval_rpy
+from rpyyarv.interp.evalsrc import _binding_rpy, _eval_receiver, _eval_rpy, _module_eval_rpy
 from rpyyarv.interp.blocks import _block_from_value, _block_send, _block_send_args, _is_proxy_call, _proc_block_of, _run_bmethod, _to_proc
 from rpyyarv.interp.callbacks import _call_with_block, _check_block_error
 from rpyyarv.interp.stackops import _drop

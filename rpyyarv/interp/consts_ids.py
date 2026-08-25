@@ -42,6 +42,7 @@ NEW = symbols.intern('new')
 INITIALIZE = symbols.intern('initialize')
 
 
+BINDING = symbols.intern('binding')
 BLOCK_GIVEN = symbols.intern('block_given?')
 
 
@@ -217,6 +218,7 @@ CORE_LAMBDA = symbols.intern('lambda')
 
 
 KERNEL_PROC = symbols.intern('proc')
+LOCAL_VARIABLE_SET = symbols.intern('local_variable_set')
 
 
 ENC_FIND = symbols.intern('find')

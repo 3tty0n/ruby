@@ -5,13 +5,14 @@
 from rpyyarv import boot
 from rpyyarv import dispatch
 from rpyyarv import gcroots
+from rpyyarv import rubycall
 from rpyyarv import symbols
 from rpyyarv import value
 from rpyyarv.error import RPyYarvError, RubyException
 from rpyyarv.frame import Frame
 from rpyyarv.rlib import dont_look_inside, raw_word
 
-from rpyyarv.interp.consts_ids import COMPILE, EVAL
+from rpyyarv.interp.consts_ids import COMPILE, EVAL, INSTANCE_EVAL, LOCAL_VARIABLE_SET
 from rpyyarv.interp.cref import _cref_of, _push_cref
 from rpyyarv.interp.args import _declare_locals, _slot_named
 
@@ -112,6 +113,41 @@ def _compile_eval(text, file_v, line):
                              COMPILE)
     finally:
         gcroots.release(src)
+
+
+@dont_look_inside
+def _binding_rpy(frame):
+    """Kernel#binding: a CRuby Binding refilled from this frame's locals."""
+    src = boot.str_new('binding')
+    gcroots.hold(src)
+    try:
+        b = rubycall.call1(frame.self_val, INSTANCE_EVAL, src)
+    finally:
+        gcroots.release(src)
+    if value.is_immediate(b):
+        return value.Q_UNDEF
+    gcroots.hold(b)
+    try:
+        f = frame
+        n = 0
+        seen = {}
+        while f is not None and n < MAX_SCOPES:
+            names = f.w_iseq.local_names
+            i = 0
+            while i < len(names):
+                name = names[i]
+                if _is_local_name(name) and name not in seen:
+                    seen[name] = True
+                    rubycall.call2(b, LOCAL_VARIABLE_SET,
+                                   rubycall.sym_value(symbols.intern(name)),
+                                   f.local_get(i))
+                i += 1
+            f = f.defining_frame
+            n += 1
+    finally:
+        gcroots.release(b)
+    # ponytail: a copy, so an assignment through it never reaches our frame.
+    return b
 
 
 def _is_local_name(name):

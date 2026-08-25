@@ -18,7 +18,7 @@ from rpyyarv.frame import Frame, PENDING_BREAK, PENDING_FOREIGN, PENDING_NEXT, P
 from rpyyarv.iseq import NO_BLOCK_ISEQ
 from rpyyarv.rlib import JitDriver, set_user_param
 
-from rpyyarv.interp.consts_ids import ALLOCATE, DUP, EACH_SLICE, EACH_WITH_INDEX, EVAL, FORCE_ENCODING, GETBYTE, MATCH, SEND, SEND2, SETBYTE, STEP, SUCC, UNPACK1
+from rpyyarv.interp.consts_ids import BINDING, ALLOCATE, DUP, EACH_SLICE, EACH_WITH_INDEX, EVAL, FORCE_ENCODING, GETBYTE, MATCH, SEND, SEND2, SETBYTE, STEP, SUCC, UNPACK1
 from rpyyarv.interp.cref import _cref_of
 
 PROXY_NAME = '__rpyyarv_block_param_proxy__'
@@ -57,6 +57,8 @@ def install():
         value.core_class(value.C_BASIC_OBJECT), SEND2)
     send_owners.eval = dispatch.owner_of(
         value.core_class(value.C_OBJECT), EVAL)
+    send_owners.binding = dispatch.owner_of(
+        value.core_class(value.C_OBJECT), BINDING)
     send_owners.string_getbyte = dispatch.owner_of(
         value.core_class(value.C_STRING), GETBYTE)
     send_owners.string_setbyte = dispatch.owner_of(
