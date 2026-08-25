@@ -57,7 +57,8 @@ CRUBY_JIT_CONFIGURE_ARGS ?= --enable-yjit --enable-zjit
 GCLIMIT   ?= 16384
 GCTIMEOUT ?= 60
 
-.PHONY: all test microbench awfy bench bench-bootstrap bench-setup setup
+.PHONY: all test microbench awfy bench setup setup-gems
+.PHONY: bench-bootstrap bench-setup
 .PHONY: gccheck ractorcheck build build-cruby build-interp build-jit link clean
 
 build: build-cruby
@@ -104,19 +105,20 @@ $(RUBY_BENCH):
 	git clone --depth=1 https://github.com/ruby/ruby-bench $@
 
 # Each benchmark's Gemfile.lock, installed by the CRuby under test into
-# $(BENCH_GEMS), so another machine resolves the same versions.
+# $(BENCH_GEMS), so another machine resolves the same versions. The installer
+# bootstraps CRuby automatically if Psych cannot load.
 BENCH_GEMS ?= $(CURDIR)/.bench-gems
-bench-bootstrap:
+setup-gems: | $(RUBY_BENCH)
 	RPYYARV_BUILD=$(BUILD) RUBY_BENCH=$(RUBY_BENCH) BENCH_GEMS=$(BENCH_GEMS) \
-	  CRUBY_CONFIGURE_ARGS='$(CRUBY_CONFIGURE_ARGS)' scripts/bench-bootstrap $(BENCH)
-
-bench-setup: | $(RUBY_BENCH)
-	RPYYARV_BUILD=$(BUILD) RUBY_BENCH=$(RUBY_BENCH) BENCH_GEMS=$(BENCH_GEMS) \
+	  CRUBY_CONFIGURE_ARGS='$(CRUBY_CONFIGURE_ARGS)' \
 	  scripts/bench-setup $(BENCH)
 
-setup:
+setup: setup-gems
 	RPYYARV_BUILD=$(BUILD) BENCH_GEMS=$(BENCH_GEMS) RUBYLIB=$(UNINSTALLED_RUBYLIB) \
 	  $(LIBPATH) $(RUBY_CMD) scripts/setup.rb
+
+# Compatibility names. setup-gems already bootstraps CRuby when necessary.
+bench-setup bench-bootstrap: setup-gems
 
 # Compare stdout of both rpyyarv binaries against CRuby under a tight GC limit.
 gccheck:

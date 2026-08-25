@@ -1,6 +1,6 @@
 #!/bin/sh
-# Install the native dependency needed by Psych, rebuild CRuby, and install
-# ruby-bench's bundled gems. This target may prompt for sudo on Linux.
+# Internal recovery helper for setup-gems. Install Psych's native dependency,
+# rebuild CRuby, and install ruby-bench's gems. This may prompt on Linux.
 
 set -e
 HERE=`cd "\`dirname "$0"\`/.." && pwd`
@@ -12,7 +12,8 @@ extra_configure_args=${CRUBY_CONFIGURE_ARGS:-}
 # and Psych must actually load. Directory existence alone is not sufficient.
 ARCH=
 for candidate in "$BUILD"/.ext/*; do
-    if [ -f "$candidate/monitor.so" ]; then
+    if [ -f "$candidate/monitor.so" ] || \
+            [ -f "$candidate/monitor.bundle" ]; then
         ARCH=$candidate
         break
     fi
@@ -29,7 +30,8 @@ if [ -x "$BUILD/ruby" ] && [ -n "$ARCH" ] && [ -n "$SHARED_RUBY" ] && \
         LD_LIBRARY_PATH="$BUILD" DYLD_LIBRARY_PATH="$BUILD" RUBYOPT= \
         "$BUILD/ruby" -rpsych -e '' >/dev/null 2>&1; then
     echo "Using cached CRuby build in $BUILD"
-    exec env BENCH_BOOTSTRAPPED=1 "${MAKE:-make}" -C "$HERE" bench-setup BENCH="${1:-}"
+    exec env BENCH_BOOTSTRAPPED=1 "${MAKE:-make}" -C "$HERE" \
+        setup-gems BENCH="${1:-}"
 fi
 
 case `uname -s` in
@@ -76,4 +78,4 @@ if [ -d "$BUILD/ext/psych" ]; then
 fi
 
 "${MAKE:-make}" -C "$HERE" build-cruby CRUBY_CONFIGURE_ARGS="$extra_configure_args"
-BENCH_BOOTSTRAPPED=1 "${MAKE:-make}" -C "$HERE" bench-setup BENCH="${1:-}"
+BENCH_BOOTSTRAPPED=1 "${MAKE:-make}" -C "$HERE" setup-gems BENCH="${1:-}"

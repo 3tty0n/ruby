@@ -15,7 +15,7 @@ unless File.executable?(RUBY)
   exit 1
 end
 
-# Same uninstalled load path bench-setup and bench.rb use for $(BUILD)/ruby.
+# Same uninstalled load path setup-gems and bench.rb use for $(BUILD)/ruby.
 def uninstalled_rubylib
   arch = Dir.glob(File.join(BUILD, ".ext", "*"))
              .find { |d| File.directory?(d) && File.basename(d) != "common" }
@@ -29,10 +29,6 @@ def bench_gems_env
     "GEM_HOME" => GEMS, "GEM_PATH" => GEMS, "BUNDLE_PATH" => GEMS,
     "BUNDLE_APP_CONFIG" => File.join(GEMS, ".bundle") }
 end
-
-puts "== installing ruby-bench gems (make bench-setup)"
-system("make", "-C", ROOT, "bench-setup")
-warn "warning: some gem installs failed, see #{GEMS}/log" unless $?.success?
 
 rails_dir = File.join(ROOT, "ruby-bench", "benchmarks", "railsbench")
 env = bench_gems_env
@@ -53,6 +49,8 @@ puts <<~SUMMARY
   setup done.
     build ruby:  #{RUBY}
     bench gems:  #{GEMS}
+
+  Use `make setup-gems BENCH=name` to prepare one benchmark only.
 
   For manual `make bench`/`make awfy` runs, export:
     RPYYARV_BUILD=#{BUILD}

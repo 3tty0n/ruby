@@ -2,8 +2,10 @@
 # bundle install every ruby-bench benchmark, with the CRuby under test, into a
 # gem set inside the checkout.
 #
-#   make bench-setup            # all of them
-#   make bench-setup BENCH=mail # one
+#   make setup-gems            # all of them
+#   make setup-gems BENCH=mail # one
+#
+# bench-setup and bench-bootstrap remain compatibility aliases in the Makefile.
 #
 # Why not `gem install`: each benchmark ships a Gemfile.lock, so bundler is what
 # pins the versions another machine will resolve to. And the gems must be built
@@ -18,14 +20,18 @@ BENCH=${RUBY_BENCH:-$HERE/ruby-bench}
 GEMS=${BENCH_GEMS:-$HERE/.bench-gems}
 ARCH=
 for candidate in "$BUILD"/.ext/*; do
-    if [ -f "$candidate/monitor.so" ]; then
+    if [ -f "$candidate/monitor.so" ] || \
+            [ -f "$candidate/monitor.bundle" ]; then
         ARCH=$candidate
         break
     fi
 done
 
 [ -x "$BUILD/ruby" ] || { echo "build CRuby first: no $BUILD/ruby" >&2; exit 1; }
-[ -n "$ARCH" ] || { echo "build CRuby extensions first: no monitor.so under $BUILD/.ext" >&2; exit 1; }
+[ -n "$ARCH" ] || {
+    echo "build CRuby extensions first: no monitor extension under $BUILD/.ext" >&2
+    exit 1
+}
 [ -d "$BENCH/benchmarks" ] || { echo "no ruby-bench checkout at $BENCH" >&2; exit 1; }
 [ -f "$TOP/libexec/bundle" ] || { echo "no $TOP/libexec/bundle" >&2; exit 1; }
 
@@ -78,5 +84,5 @@ for gf in "$BENCH"/benchmarks/*/Gemfile; do
     fi
 done
 echo
-echo "bench-setup: $ok ready, $failed failed, gem set in $GEMS"
+echo "setup-gems: $ok ready, $failed failed, gem set in $GEMS"
 [ $failed -eq 0 ] || exit 1
