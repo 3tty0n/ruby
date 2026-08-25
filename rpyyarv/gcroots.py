@@ -4,7 +4,7 @@ from rpyyarv import block as block_mod
 from rpyyarv import boot
 from rpyyarv import threading
 from rpyyarv import value
-from rpyyarv.rlib import dont_look_inside, gc_mark_state
+from rpyyarv.rlib import clock_ns, dont_look_inside, gc_mark_state
 
 
 class Registry(object):
@@ -184,12 +184,26 @@ def _mark_word(w):
 gc_mark_state.mark_word = _mark_word
 
 
+class _MarkCost(object):
+    """Root-marking overhead; only the GC-time path ever writes it."""
+
+    def __init__(self):
+        self.walks = 0
+        self.ns = 0
+
+
+mark_cost = _MarkCost()
+
+
 @dont_look_inside
 def mark_roots():
     acquired = threading.enter_callback()
+    started = clock_ns()
     try:
         _mark_roots()
     finally:
+        mark_cost.walks += 1
+        mark_cost.ns += clock_ns() - started
         threading.leave_callback(acquired)
 
 
@@ -247,7 +261,7 @@ def _mark_all():
         state.fibers()
 
 
-def root_census():
+def root_inventory():
     """Sizes of every root set the mark hook walks, for the coverage report."""
     pools = 0
     i = 0

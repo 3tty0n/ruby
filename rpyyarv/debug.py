@@ -8,7 +8,7 @@ from rpyyarv import optable
 from rpyyarv import symbols
 from rpyyarv import value
 from rpyyarv.iseq import NO_BLOCK_ISEQ
-from rpyyarv.rlib import dont_look_inside, oswrite
+from rpyyarv.rlib import dont_look_inside, oswrite, rpython_heap_bytes
 
 INSN = 1
 STACK = 2
@@ -119,7 +119,10 @@ def report():
     from rpyyarv import gcroots
     note('method-cache invalidations: %d (skipped %d)'
          % (dispatch.owners.invalidations, dispatch.owners.skipped))
-    note('gc roots: %s' % gcroots.root_census())
+    note('gc roots: %s' % gcroots.root_inventory())
+    note('root marking: %d walk(s), %d ns' % (gcroots.mark_cost.walks,
+                                              gcroots.mark_cost.ns))
+    note('heap footprint: rpython %d bytes' % rpython_heap_bytes())
     note('files: rpyyarv %d, delegated to cruby %d'
          % (coverage.files_native, coverage.files_cruby))
     percent = (100 * coverage.iseqs_native // coverage.iseqs_total

@@ -55,6 +55,16 @@ try:
     def oswrite(fd, s):
         os.write(fd, s)
 
+    from rpython.rlib import rgc
+    from rpython.rlib.rtime import time as _clock
+
+    # rtime.time() raw-mallocs on purpose, so the mark hook may call it.
+    def clock_ns():
+        return int(_clock() * 1000000000.0)
+
+    def rpython_heap_bytes():
+        return rgc.get_stats(rgc.TOTAL_MEMORY)
+
 except ImportError:
     import struct
     import sys
@@ -127,6 +137,14 @@ except ImportError:
 
     def set_user_param(driver, text):
         pass
+
+    import time as _time
+
+    def clock_ns():
+        return int(_time.time() * 1000000000.0)
+
+    def rpython_heap_bytes():
+        return 0
 
     def always_inline(func):
         return func
