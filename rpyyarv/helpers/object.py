@@ -329,6 +329,13 @@ def aref(recv, idx):
         if i >= 0 and i < n:
             return value.ary_at(recv, i)
         return value.Q_NIL
+    # No BOP flag covers String#[], so ask our own table for a redefinition.
+    if value.is_plain_string(recv) and value.is_fixnum(idx) \
+            and dispatch.lookup_core(value.core_class(value.C_STRING),
+                                     AREF) is None:
+        v = boot.str_char_at(recv, idx)
+        if v != value.Q_UNDEF:
+            return v
     return int_bitref(recv, idx)
 
 

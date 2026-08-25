@@ -39,6 +39,10 @@ uintptr_t rpyyarv_getspecial(int type, int *state);
 
 uintptr_t rpyyarv_str_intern(uintptr_t str, int *state);
 
+uintptr_t rpyyarv_str_ord(uintptr_t str);
+
+uintptr_t rpyyarv_str_char_at(uintptr_t str, uintptr_t idx);
+
 uintptr_t rpyyarv_toregexp(int opt, int n, const uintptr_t *parts,
                            int *state);
 

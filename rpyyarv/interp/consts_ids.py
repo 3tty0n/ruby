@@ -145,6 +145,24 @@ TO_A = symbols.intern('to_a')
 NEGATIVE_P = symbols.intern('negative?')
 
 
+FIRST = symbols.intern('first')
+
+
+LAST = symbols.intern('last')
+
+
+TO_I = symbols.intern('to_i')
+
+
+TO_INT = symbols.intern('to_int')
+
+
+ABS = symbols.intern('abs')
+
+
+ORD = symbols.intern('ord')
+
+
 # opt_regexpmatch2 falls through to this send; CRuby sets $~ there.
 MATCH = symbols.intern('=~')
 

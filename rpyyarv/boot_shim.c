@@ -559,6 +559,33 @@ rpyyarv_str_intern(uintptr_t str, int *state)
     return (uintptr_t)r;
 }
 
+/* Qundef unless the string is 7-bit: a wide first char needs the encoding. */
+uintptr_t
+rpyyarv_str_ord(uintptr_t str)
+{
+    VALUE s = (VALUE)str;
+    if (!RB_TYPE_P(s, T_STRING)) return (uintptr_t)Qundef;
+    if (rb_enc_str_coderange(s) != ENC_CODERANGE_7BIT) return (uintptr_t)Qundef;
+    if (RSTRING_LEN(s) == 0) return (uintptr_t)Qundef;
+    return (uintptr_t)INT2FIX((unsigned char)RSTRING_PTR(s)[0]);
+}
+
+/* Qundef unless 7-bit: one byte is one character only then. */
+uintptr_t
+rpyyarv_str_char_at(uintptr_t str, uintptr_t idx)
+{
+    VALUE s = (VALUE)str;
+    long i, n;
+    if (!RB_TYPE_P(s, T_STRING) || !RB_FIXNUM_P((VALUE)idx))
+        return (uintptr_t)Qundef;
+    if (rb_enc_str_coderange(s) != ENC_CODERANGE_7BIT) return (uintptr_t)Qundef;
+    n = RSTRING_LEN(s);
+    i = FIX2LONG((VALUE)idx);
+    if (i < 0) i += n;
+    if (i < 0 || i >= n) return (uintptr_t)Qnil;
+    return (uintptr_t)rb_str_subseq(s, i, 1);
+}
+
 struct toregexp_args {
     int opt;
     int n;

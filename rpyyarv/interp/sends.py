@@ -13,7 +13,7 @@ from rpyyarv.error import UnsupportedOperation
 from rpyyarv.frame import Frame
 from rpyyarv.rlib import dont_look_inside, promote, raw_word, unroll_safe, we_are_jitted
 
-from rpyyarv.interp.consts_ids import ALIAS_METHOD, ALLOCATE, ARITY, ATTR_ACCESSOR, ATTR_READER, ATTR_WRITER, BACKTRACE_PRIM, BINDING, BLOCK_GIVEN, BUFFER, CALLEE_UNDERSCORE, CGI_CONST, CLASS_EVAL, CORE_ALIAS, CORE_GVAR_ALIAS, CORE_LAMBDA, CORE_UNDEF, DEFINE, DEFINE_METHOD, DIR_UNDERSCORE, EACH_SLICE, EACH_WITH_INDEX, ENC_FIND, EVAL, FORCE_ENCODING, FREEZE, GETBYTE, HASH_MERGE_KWD, HASH_MERGE_PTR, HASH_PAIRS_PRIM, INDEX, INITIALIZE, INSTANCE_EVAL, INSTANCE_EXEC, ITSELF, KERNEL_PROC, LAMBDA_P, MATCH, METHOD_UNDERSCORE, MODULE_EVAL, MODULE_FUNCTION, NEGATIVE_P, NEW, OFFSET, OWNER, PARAMETERS, PRIVATE, PRIVATE_CLASS_METHOD, PROTECTED, PUBLIC, PUBLIC_SEND, REMOVE_METHOD, REQUIRE_PRIM, REVERSE_EACH, RUBY2_KEYWORDS, SEND, SEND2, SETBYTE, SLICE, STEP, TO_A, TO_SYM, UNDEF_METHOD, UNPACK1
+from rpyyarv.interp.consts_ids import ABS, ALIAS_METHOD, ALLOCATE, ARITY, ATTR_ACCESSOR, ATTR_READER, ATTR_WRITER, BACKTRACE_PRIM, BINDING, BLOCK_GIVEN, BUFFER, CALLEE_UNDERSCORE, CGI_CONST, CLASS_EVAL, CORE_ALIAS, CORE_GVAR_ALIAS, CORE_LAMBDA, CORE_UNDEF, DEFINE, DEFINE_METHOD, DIR_UNDERSCORE, EACH_SLICE, EACH_WITH_INDEX, ENC_FIND, EVAL, FIRST, FORCE_ENCODING, FREEZE, GETBYTE, HASH_MERGE_KWD, HASH_MERGE_PTR, HASH_PAIRS_PRIM, INDEX, INITIALIZE, INSTANCE_EVAL, INSTANCE_EXEC, ITSELF, KERNEL_PROC, LAMBDA_P, LAST, MATCH, METHOD_UNDERSCORE, MODULE_EVAL, MODULE_FUNCTION, NEGATIVE_P, NEW, OFFSET, ORD, OWNER, PARAMETERS, PRIVATE, PRIVATE_CLASS_METHOD, PROTECTED, PUBLIC, PUBLIC_SEND, REMOVE_METHOD, REQUIRE_PRIM, REVERSE_EACH, RUBY2_KEYWORDS, SEND, SEND2, SETBYTE, SLICE, STEP, TO_A, TO_I, TO_INT, TO_SYM, UNDEF_METHOD, UNPACK1
 from rpyyarv.interp.args import NO_KEYWORDS, _arity_error, _kw_to_positional, _refuse_iseq, setup_params
 
 @unroll_safe
@@ -115,6 +115,57 @@ def invoke(frame, w_ci, w_block=None):
             _drop(frame, recv_at)
             debug.count_native()
             return value.newbool(value.fix2int(recv) < 0)
+        if mid == FIRST and value.is_plain_array(recv) \
+                and dispatch.owner_of(klass, FIRST) == \
+                value.core_class(value.C_ARRAY):
+            v = value.Q_NIL if value.ary_len(recv) == 0 \
+                else value.ary_at(recv, 0)
+            _drop(frame, recv_at)
+            debug.count_native()
+            return v
+        if mid == LAST and value.is_plain_array(recv) \
+                and dispatch.owner_of(klass, LAST) == \
+                value.core_class(value.C_ARRAY):
+            n = value.ary_len(recv)
+            v = value.Q_NIL if n == 0 else value.ary_at(recv, n - 1)
+            _drop(frame, recv_at)
+            debug.count_native()
+            return v
+        if (mid == TO_I or mid == TO_INT) and value.is_fixnum(recv) \
+                and dispatch.owner_of(klass, mid) == \
+                value.core_class(value.C_INTEGER):
+            _drop(frame, recv_at)
+            debug.count_native()
+            return recv
+        if mid == ABS and value.is_flonum(recv) \
+                and dispatch.owner_of(klass, ABS) == \
+                value.core_class(value.C_FLOAT):
+            d = value.float_val(recv)
+            if d < 0.0:
+                d = -d
+            if d != 0.0:
+                v = value.dbl2flonum(d)
+                if v != value.Q_UNDEF:
+                    _drop(frame, recv_at)
+                    debug.count_native()
+                    return v
+        # String#to_sym: rb_str_intern, protected (encoding table can raise).
+        if mid == TO_SYM and value.is_plain_string(recv) \
+                and dispatch.owner_of(klass, TO_SYM) == \
+                value.core_class(value.C_STRING):
+            v = boot.str_intern(recv)
+            if v != value.Q_UNDEF:
+                _drop(frame, recv_at)
+                debug.count_native()
+                return v
+        if mid == ORD and value.is_plain_string(recv) \
+                and dispatch.owner_of(klass, ORD) == \
+                value.core_class(value.C_STRING):
+            v = boot.str_ord(recv)
+            if v != value.Q_UNDEF:
+                _drop(frame, recv_at)
+                debug.count_native()
+                return v
     if mid == GETBYTE and argc == 1 and \
             dispatch.owner_of(klass, GETBYTE) == send_owners.string_getbyte:
         v = boot.str_getbyte(recv, frame.slots[recv_at + 1])

@@ -106,6 +106,12 @@ rb_str_append = _ext('rpyyarv_str_append', [VALUE, VALUE], VALUE,
                      reenters=True)
 
 
+rb_str_ord = _ext('rpyyarv_str_ord', [VALUE], VALUE)
+
+
+rb_str_char_at = _ext('rpyyarv_str_char_at', [VALUE, VALUE], VALUE)
+
+
 def str_of(v):
     # rb_string_value_cstr raises on embedded NUL: longjmp past this frame.
     n = rffi.cast(lltype.Signed, rb_str_len(_v(v)))
@@ -145,6 +151,16 @@ def str_append(string, other):
 def str_setbyte(string, index, v):
     return rffi.cast(lltype.Signed,
                      rb_str_setbyte(_v(string), _v(index), _v(v)))
+
+
+def str_ord(string):
+    """Unprotected: Qundef unless 7-bit and non-empty."""
+    return rffi.cast(lltype.Signed, rb_str_ord(_v(string)))
+
+
+def str_char_at(string, idx):
+    """Unprotected: Qundef unless 7-bit."""
+    return rffi.cast(lltype.Signed, rb_str_char_at(_v(string), _v(idx)))
 
 
 def str_eq(a, b):
