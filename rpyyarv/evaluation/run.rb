@@ -456,15 +456,40 @@ module RPyYARVEvaluation
     end
   end
 
+  def build_dir
+    ENV.fetch("RPYYARV_BUILD", File.join(TOP, "build"))
+  end
+
+  def library_path_var
+    RUBY_PLATFORM.include?("darwin") ? "DYLD_LIBRARY_PATH" : "LD_LIBRARY_PATH"
+  end
+
+  def arch_dir
+    Dir[File.join(build_dir, ".ext", "include", "*", "ruby", "config.h")]
+      .sort.first&.then { |path| File.dirname(File.dirname(path)) }
+  end
+
+  def uninstalled_rubylib
+    build = build_dir
+    arch = arch_dir
+    paths = [File.join(TOP, "lib"), File.join(build, ".ext", "common"), build]
+    paths << File.join(build, ".ext", File.basename(arch)) if arch
+    paths.join(File::PATH_SEPARATOR)
+  end
+
   def base_env
-    { "RPYYARV_BUILD" => ENV.fetch("RPYYARV_BUILD",
-                                    File.join(TOP, "build")) }
+    build = build_dir
+    inherited = ENV[library_path_var].to_s.split(File::PATH_SEPARATOR)
+    path = ([build] + inherited).reject(&:empty?).uniq
+                                .join(File::PATH_SEPARATOR)
+    { "RPYYARV_BUILD" => build, library_path_var => path,
+      "RUBYLIB" => ENV.fetch("RUBYLIB") { uninstalled_rubylib },
+      "AWFY_RUBYLIB" => ENV.fetch("AWFY_RUBYLIB") { File.join(TOP, "lib") } }
   end
 
   # RbConfig.ruby names the install prefix, which an uninstalled build lacks.
   def driver_ruby
-    built = File.join(ENV.fetch("RPYYARV_BUILD", File.join(TOP, "build")),
-                      "ruby")
+    built = File.join(build_dir, "ruby")
     File.executable?(built) ? built : RbConfig.ruby
   end
 
@@ -790,7 +815,7 @@ module RPyYARVEvaluation
                        :directory],
       "ruby-bench suite" => [File.join(ROOT, "ruby-bench", "benchmarks"),
                              :directory],
-      "cruby" => [File.join(TOP, "build", "ruby"), :engine],
+      "cruby" => [File.join(build_dir, "ruby"), :engine],
       "rpyyarv" => [File.join(ROOT, "rpyyarv"), :engine],
       "rpyyarv-jit" => [File.join(ROOT, "rpyyarv-jit"), :engine],
       "truffleruby (optional)" => [optional_engines["truffleruby"],
@@ -823,14 +848,7 @@ module RPyYARVEvaluation
     return "missing" unless present
     return "ok" unless kind == :engine
 
-    build = ENV.fetch("RPYYARV_BUILD", File.join(TOP, "build"))
-    libvar = RUBY_PLATFORM.include?("darwin") ?
-      "DYLD_LIBRARY_PATH" : "LD_LIBRARY_PATH"
-    inherited = ENV[libvar].to_s
-    library_path = [build, inherited].reject(&:empty?)
-                                     .join(File::PATH_SEPARATOR)
-    env = base_env.merge(libvar => library_path)
-    _output, ok = capture(env, path, "-e", "")
+    _output, ok = capture(base_env, path, "-e", "")
     ok ? "ok" : "broken"
   end
 
