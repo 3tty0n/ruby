@@ -53,6 +53,8 @@ RUBY    ?= $(BUILD)/ruby
 RUBY_CMD ?= $(RUBY)
 CRUBY_CONFIGURE_ARGS ?=
 CRUBY_JIT_CONFIGURE_ARGS ?= --enable-yjit --enable-zjit
+# rustup's rustc/cargo are often missing from make's PATH.
+export PATH := $(HOME)/.cargo/bin:$(PATH)
 
 # A tight malloc limit fires real GCs inside compiled traces; GC_STRESS cannot,
 # it escapes the vable and aborts tracing.
@@ -62,10 +64,16 @@ GCTIMEOUT ?= 60
 .PHONY: all test microbench awfy bench bench-viz eval eval-test setup setup-gems
 .PHONY: bench-bootstrap bench-setup
 .PHONY: gccheck ractorcheck build build-cruby build-interp build-jit link clean
+.PHONY: pypy-patch
 
-build: build-cruby
+build: build-cruby build-interp build-jit
 
 build-cruby:
+	@command -v rustc >/dev/null 2>&1 || { \
+	  echo "error: rustc is required to build CRuby with YJIT/ZJIT"; \
+	  echo "install: https://www.rust-lang.org/tools/install"; \
+	  exit 1; \
+	}
 	mkdir -p "$(BUILD)"
 	cd "$(BUILD)" && "$(TOP)/configure" --enable-shared \
 	  $(CRUBY_JIT_CONFIGURE_ARGS) $(CRUBY_CONFIGURE_ARGS)
@@ -241,17 +249,23 @@ ractorcheck:
 	 jo=`./rpyyarv-jit test/ractors.rb`; \
 	 [ "$$io" = "$$co" ] && [ "$$jo" = "$$co" ] && echo "ok ractors"
 
-build-interp: | $(PYPY)
+build-interp: pypy-patch
 	RPYYARV_BUILD=$(BUILD) PYTHONPATH=$(PYTHONPATH) $(RPYTHON) --output=rpyyarv targetrpyyarv.py
 	$(call fix_install_name,rpyyarv)
 
-build-jit: | $(PYPY)
+build-jit: pypy-patch
 	RPYYARV_BUILD=$(BUILD) PYTHONPATH=$(PYTHONPATH) $(RPYTHON) -Ojit --output=rpyyarv-jit targetrpyyarv.py
 	$(call fix_install_name,rpyyarv-jit)
 
+# Clone does not re-run once ./pypy exists; apply any patch that is still missing.
+pypy-patch: | $(PYPY)
+	@for p in $(CURDIR)/pypy-patches/*.patch; do \
+	  (cd $(PYPY) && git apply --reverse --check "$$p" >/dev/null 2>&1) \
+	    || (cd $(PYPY) && git apply "$$p"); \
+	done
+
 $(PYPY):
 	git clone --depth=1 https://github.com/pypy/pypy $@
-	cd $@ && git apply $(CURDIR)/pypy-patches/*.patch
 
 clean:
 	rm -f $(PROBE) $(SHIM) rpyyarv rpyyarv-jit
