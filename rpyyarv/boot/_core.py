@@ -4,7 +4,8 @@ import os
 import sys
 
 from rpython.rtyper.lltypesystem import lltype, rffi
-from rpython.rlib.rthread import ActivatableThreadLocalReference
+from rpython.rlib.objectmodel import not_rpython
+from rpython.rlib.rthread import ThreadLocalReference
 from rpython.translator.tool.cbuild import ExternalCompilationInfo
 
 from rpyyarv import symbols
@@ -129,6 +130,35 @@ def _v(n):
 
 # One cell per shim nesting level; CRuby can trampoline back in, so they nest.
 SHIM_DEPTH = 64
+
+
+class ActivatableThreadLocalReference(object):
+    """TLS after activate(); a plain field until then."""
+    _immutable_fields_ = ['_activated?']
+
+    @not_rpython
+    def __init__(self, Cls, initial=None, loop_invariant=False):
+        assert isinstance(initial, Cls) or initial is None
+        self._tls = ThreadLocalReference(Cls, loop_invariant=loop_invariant)
+        self._main_value = initial
+        self._activated = False
+
+    def get(self):
+        if self._activated:
+            return self._tls.get()
+        return self._main_value
+
+    def set(self, value):
+        if self._activated:
+            self._tls.set(value)
+        else:
+            self._main_value = value
+
+    def activate(self):
+        if self._activated:
+            return
+        self._tls.set(self._main_value)
+        self._activated = True
 
 
 class _Nesting(object):
