@@ -36,6 +36,10 @@ ruby evaluation/run.rb report evaluation/results/RUN
 build tree's Ruby and the benchmark environment already set.  The paper-side
 plan for each item is =docs/evaluation-plan.org=.
 
+Run =make eval= first: its doctor checks that both benchmark checkouts and all
+required engines are present and can start.  Run =make eval-test= for the
+controller's artifact-analysis and plotting regression tests.
+
 =performance= produces =measurements.csv=, =ratios.csv=, =comparisons.csv=,
 and =summary.csv= from the raw output.  CRuby, YJIT, and ZJIT are always
 requested.  TruffleRuby and

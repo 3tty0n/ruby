@@ -783,24 +783,55 @@ module RPyYARVEvaluation
 
   def doctor
     rows = {
-      "repository" => TOP,
-      "ruby" => driver_ruby,
-      "bench driver" => File.join(ROOT, "scripts", "bench.rb"),
-      "cruby" => File.join(TOP, "build", "ruby"),
-      "rpyyarv" => File.join(ROOT, "rpyyarv"),
-      "rpyyarv-jit" => File.join(ROOT, "rpyyarv-jit"),
-      "truffleruby (optional)" => optional_engines["truffleruby"],
-      "jruby (optional)" => optional_engines["jruby"],
-      "rebench (optional)" => ENV.fetch("PATH", "").split(File::PATH_SEPARATOR)
-                                  .map { |dir| File.join(dir, "rebench") }
-                                  .find { |path| File.executable?(path) }
+      "repository" => [TOP, :directory],
+      "ruby" => [driver_ruby, :executable],
+      "bench driver" => [File.join(ROOT, "scripts", "bench.rb"), :file],
+      "AWFY suite" => [File.join(ROOT, "awfy", "benchmarks", "Ruby"),
+                       :directory],
+      "ruby-bench suite" => [File.join(ROOT, "ruby-bench", "benchmarks"),
+                             :directory],
+      "cruby" => [File.join(TOP, "build", "ruby"), :engine],
+      "rpyyarv" => [File.join(ROOT, "rpyyarv"), :engine],
+      "rpyyarv-jit" => [File.join(ROOT, "rpyyarv-jit"), :engine],
+      "truffleruby (optional)" => [optional_engines["truffleruby"],
+                                   :engine],
+      "jruby (optional)" => [optional_engines["jruby"], :engine],
+      "rebench (optional)" => [
+        ENV.fetch("PATH", "").split(File::PATH_SEPARATOR)
+           .map { |dir| File.join(dir, "rebench") }
+           .find { |path| File.executable?(path) },
+        :executable
+      ]
     }
-    rows.each do |name, path|
-      state = path && File.exist?(path) ? "ok" : "missing"
+    states = rows.to_h do |name, (path, kind)|
+      state = doctor_state(path, kind)
       puts format("%-20s %-7s %s", name, state, path || "-")
+      [name, state]
     end
-    required = rows.reject { |name, _path| name.include?("optional") }
-    required.values.compact.all? { |path| File.exist?(path) } ? 0 : 1
+    required = states.reject { |name, _state| name.include?("optional") }
+    required.values.all? { |state| state == "ok" } ? 0 : 1
+  end
+
+  def doctor_state(path, kind)
+    return "missing" unless path
+
+    present = case kind
+              when :directory then File.directory?(path)
+              when :file then File.file?(path)
+              else File.executable?(path)
+              end
+    return "missing" unless present
+    return "ok" unless kind == :engine
+
+    build = ENV.fetch("RPYYARV_BUILD", File.join(TOP, "build"))
+    libvar = RUBY_PLATFORM.include?("darwin") ?
+      "DYLD_LIBRARY_PATH" : "LD_LIBRARY_PATH"
+    inherited = ENV[libvar].to_s
+    library_path = [build, inherited].reject(&:empty?)
+                                     .join(File::PATH_SEPARATOR)
+    env = base_env.merge(libvar => library_path)
+    _output, ok = capture(env, path, "-e", "")
+    ok ? "ok" : "broken"
   end
 
   def loc(out_path)

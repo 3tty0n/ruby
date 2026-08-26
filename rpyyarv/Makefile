@@ -59,7 +59,7 @@ CRUBY_JIT_CONFIGURE_ARGS ?= --enable-yjit --enable-zjit
 GCLIMIT   ?= 16384
 GCTIMEOUT ?= 60
 
-.PHONY: all test microbench awfy bench bench-viz eval setup setup-gems
+.PHONY: all test microbench awfy bench bench-viz eval eval-test setup setup-gems
 .PHONY: bench-bootstrap bench-setup
 .PHONY: gccheck ractorcheck build build-cruby build-interp build-jit link clean
 
@@ -109,6 +109,10 @@ eval:
 	RPYYARV_BUILD=$(BUILD) AWFY_RUBYLIB=$(AWFY_RUBYLIB) RUBY_BENCH=$(RUBY_BENCH) \
 	  BENCH_GEMS=$(BENCH_GEMS) RUBYLIB=$(UNINSTALLED_RUBYLIB) \
 	  $(LIBPATH) $(RUBY_CMD) evaluation/run.rb $(EVAL) $(EVALFLAGS)
+
+eval-test:
+	RPYYARV_BUILD=$(BUILD) RUBYLIB=$(UNINSTALLED_RUBYLIB) $(LIBPATH) \
+	  $(RUBY_CMD) evaluation/test_run.rb
 
 # JSONL history from bench.rb, plotted separately from the worker.
 bench-viz:
