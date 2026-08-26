@@ -54,8 +54,9 @@ rb_iseqw_children = _ext('rpyyarv_iseqw_children', [VALUE], VALUE,
                          reenters=True)
 
 
-rb_iseqw_child_for_array = _ext('rpyyarv_iseqw_child_for_array',
-                                [VALUE, VALUE], VALUE, reenters=True)
+rb_iseqw_child_index = _ext('rpyyarv_iseqw_child_index',
+                            [VALUE, VALUE, rffi.LONG], rffi.LONG,
+                            reenters=True)
 
 
 rb_cref_new = _ext('rb_rpyyarv_cref_new', [VOIDP, VALUE, rffi.INT], VOIDP)
@@ -115,9 +116,10 @@ def iseqw_children(iseqw):
     return rffi.cast(lltype.Signed, rb_iseqw_children(_v(iseqw)))
 
 
-def iseqw_child_for_array(children, ary):
+def iseqw_child_index(children, ary, hint):
     return rffi.cast(lltype.Signed,
-                     rb_iseqw_child_for_array(_v(children), _v(ary)))
+                     rb_iseqw_child_index(_v(children), _v(ary),
+                                          rffi.cast(rffi.LONG, hint)))
 
 
 def native_cref(cref):

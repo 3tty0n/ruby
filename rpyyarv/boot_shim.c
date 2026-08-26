@@ -867,18 +867,25 @@ rpyyarv_iseqw_children(uintptr_t iseqw)
     return (uintptr_t)children;
 }
 
-uintptr_t
-rpyyarv_iseqw_child_for_array(uintptr_t children, uintptr_t ary)
+/* Children come out in the order the loader asks for them, so start the
+   scan at the caller's cursor: a plain scan is quadratic in child count. */
+long
+rpyyarv_iseqw_child_index(uintptr_t children, uintptr_t ary, long hint)
 {
     VALUE list = (VALUE)children;
-    long i;
-    for (i = 0; i < RARRAY_LEN(list); i++) {
-        VALUE child = RARRAY_AREF(list, i);
-        VALUE child_ary = rb_funcall(child, rb_intern("to_a"), 0);
-        if (rb_equal(child_ary, (VALUE)ary)) return (uintptr_t)child;
+    long n = RARRAY_LEN(list), k;
+
+    if (n > 0) {
+        if (hint < 0 || hint >= n) hint = 0;
+        for (k = 0; k < n; k++) {
+            long i = (hint + k) % n;
+            VALUE child_ary = rb_funcall(RARRAY_AREF(list, i),
+                                         rb_intern("to_a"), 0);
+            if (rb_equal(child_ary, (VALUE)ary)) return i;
+        }
     }
     rb_raise(rb_eRuntimeError, "rpyyarv: native child ISeq not found");
-    return (uintptr_t)Qnil;
+    return -1;
 }
 
 long

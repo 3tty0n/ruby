@@ -81,7 +81,7 @@ void rpyyarv_special_consts(uintptr_t *qfalse, uintptr_t *qnil,
 uintptr_t rpyyarv_iseqw_new(void *iseq);
 void *rpyyarv_iseqw_ptr(uintptr_t iseqw);
 uintptr_t rpyyarv_iseqw_children(uintptr_t iseqw);
-uintptr_t rpyyarv_iseqw_child_for_array(uintptr_t children, uintptr_t ary);
+long rpyyarv_iseqw_child_index(uintptr_t children, uintptr_t ary, long hint);
 void *rb_rpyyarv_cref_new(const void *outer, uintptr_t klass, int by_eval);
 
 long      rpyyarv_str_len(uintptr_t str);

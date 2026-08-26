@@ -156,6 +156,13 @@ def _read_iseq(program, pending, native_pending, owners, ary, iseqw, parent):
             raw.set_line(boot.num2long(e))
 
 
+def _child(children, ary, child_at):
+    """The native ISeq for ary; child_at keeps the scan off O(n^2)."""
+    i = boot.iseqw_child_index(children, ary, child_at[0])
+    child_at[0] = i + 1
+    return boot.ary_entry(children, i)
+
+
 def _insn(pending, native_pending, owners, e, me, children, child_at):
     operands = []
     n = boot.ary_len(e)
@@ -186,7 +193,7 @@ def _operand(pending, native_pending, owners, v, me, children, child_at):
         if is_iseq(v):
             pending.append(v)
             owners.append(me)
-            native = boot.iseqw_child_for_array(children, v)
+            native = _child(children, v, child_at)
             gcroots.keepalive(native)
             native_pending.append(native)
             return rawiseq.RawOperand(rawiseq.OP_ISEQ, len(pending) - 1)
@@ -235,7 +242,7 @@ def _catches(pending, native_pending, owners, catch, me, children, child_at):
         if not boot.is_nil(body):
             pending.append(body)
             owners.append(me)
-            native = boot.iseqw_child_for_array(children, body)
+            native = _child(children, body, child_at)
             gcroots.keepalive(native)
             native_pending.append(native)
             index = len(pending) - 1
