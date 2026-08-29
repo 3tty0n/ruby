@@ -217,9 +217,11 @@ def _module_function(frame, recv, recv_at, argc):
         args.append(frame.slots[recv_at + 1 + i])
         i += 1
     _drop(frame, recv_at)
+    # Resolved first: CRuby's own def drops the entries standing for them.
+    entries = _own_entries(recv, args)
     # CRuby first, so a name it rejects raises before the registry is touched.
     ret = rubycall.call(recv, MODULE_FUNCTION, args)
-    _copy_to_singleton(recv, args)
+    _copy_to_singleton(recv, args, entries)
     return ret
 
 
@@ -231,9 +233,12 @@ def _private_class_method(frame, recv, recv_at, argc):
         args.append(frame.slots[recv_at + 1 + i])
         i += 1
     _drop(frame, recv_at)
+    # Resolved first: CRuby's own def drops the entries standing for them.
+    klass = _singleton_or_zero(recv)
+    entries = _own_entries(klass, args)
     # CRuby first, so a name it rejects raises before the registry is touched.
     ret = rubycall.call(recv, PRIVATE_CLASS_METHOD, args)
-    _hide_on_singleton(recv, args)
+    _hide_on_singleton(klass, args, entries)
     return ret
 
 
@@ -310,26 +315,46 @@ def _remove_or_undef(frame, mid, recv, recv_at, argc):
 
 
 @dont_look_inside
-def _hide_on_singleton(recv, args):
+def _singleton_or_zero(recv):
     klass = boot.singleton_class(recv)
     if klass == 0 or value.is_immediate(klass):
-        return
+        return 0
+    return klass
+
+
+@dont_look_inside
+def _own_entries(klass, args):
+    """What each name stands for now, before CRuby's def drops the entries."""
+    entries = []
     for v in args:
-        mid = symbols.intern(_attr_name(v))
-        entry = dispatch.own_lookup(klass, mid)
+        if klass == 0:
+            entries.append(None)
+        else:
+            entries.append(dispatch.own_lookup(klass,
+                                               symbols.intern(_attr_name(v))))
+    return entries
+
+
+@dont_look_inside
+def _hide_on_singleton(klass, args, entries):
+    if klass == 0:
+        return
+    for i in range(len(args)):
+        entry = entries[i]
         if entry is None or entry.kind != dispatch.KIND_ISEQ:
             continue
+        mid = symbols.intern(_attr_name(args[i]))
         dispatch.define(klass, mid, entry.w_iseq, True, entry.cref,
                         entry.lexical)
 
 
 @dont_look_inside
-def _copy_to_singleton(klass, args):
-    for v in args:
-        mid = symbols.intern(_attr_name(v))
-        entry = dispatch.own_lookup(klass, mid)
+def _copy_to_singleton(klass, args, entries):
+    for i in range(len(args)):
+        entry = entries[i]
         if entry is None or entry.kind != dispatch.KIND_ISEQ:
             continue
+        mid = symbols.intern(_attr_name(args[i]))
         dispatch.define(klass, mid, entry.w_iseq, True, entry.cref,
                         entry.lexical)
         dispatch.define_singleton(klass, mid, entry.w_iseq, entry.cref,
@@ -364,20 +389,26 @@ def _core_method(frame, mid, recv, recv_at, argc):
                         entry.prot)
         _drop(frame, recv_at)
         return value.Q_NIL
-    if entry is not None:
-        # An attr entry: without this the new name lives only in the registry.
-        dispatch.define_attr(cbase, name, entry.ivar, entry.kind)
     args = [cbase, frame.slots[recv_at + 2], frame.slots[recv_at + 3]]
     _drop(frame, recv_at)
     ret = rubycall.call(recv, mid, args)
+    # After CRuby's alias: its own def drops any entry standing for this name.
+    if entry is not None and _is_attr_kind(entry.kind):
+        dispatch.define_attr(cbase, name, entry.ivar, entry.kind)
     helpers.refresh()
     return ret
+
+
+def _is_attr_kind(kind):
+    return kind == dispatch.KIND_ATTR_READER or kind == dispatch.KIND_ATTR_WRITER
 
 
 def _alias_method(frame, recv, recv_at):
     """alias_method: an ISEQ alias stays here, not following the old name."""
     new_v = frame.slots[recv_at + 1]
     old_v = frame.slots[recv_at + 2]
+    name = 0
+    entry = None
     if boot.is_symbol(new_v) and boot.is_symbol(old_v):
         name = symbols.intern(boot.sym_of(new_v))
         old = symbols.intern(boot.sym_of(old_v))
@@ -390,10 +421,12 @@ def _alias_method(frame, recv, recv_at):
                                 entry.mid, entry.owner, entry.prot)
                 _drop(frame, recv_at)
                 return new_v
-            dispatch.define_attr(recv, name, entry.ivar, entry.kind)
     args = [frame.slots[recv_at + 1], frame.slots[recv_at + 2]]
     _drop(frame, recv_at)
     ret = rubycall.call(recv, ALIAS_METHOD, args)
+    # After CRuby's alias: its own def drops any entry standing for this name.
+    if entry is not None and _is_attr_kind(entry.kind):
+        dispatch.define_attr(recv, name, entry.ivar, entry.kind)
     helpers.refresh()
     return ret
 

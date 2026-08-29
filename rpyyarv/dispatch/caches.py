@@ -56,7 +56,22 @@ def method_state_changed(klass, rid):
         owners.skipped += 1
         return
     debug.count_invalidation(boot.as_signed(klass), own_rid)
+    _drop_redefined(boot.as_signed(klass), own_rid)
     invalidate_owners()
+
+
+@dont_look_inside
+def _drop_redefined(klass, rid):
+    """CRuby redefined rid on klass behind us, so our entry describes a method
+    that no longer exists; drop it and let lookup fall through to CRuby's."""
+    if rid == 0:
+        return
+    table = registry.methods.get(klass, None)
+    if table is None:
+        return
+    mid = rubycall.mid_of_rid(rid)
+    if mid != rubycall.NO_MID and mid in table:
+        del table[mid]
 
 
 OWNER_UNKNOWN = -1
