@@ -451,6 +451,10 @@ rb_imemo_mark_and_move(VALUE obj, bool reference_updating)
 
         if (!reference_updating) {
             rb_gc_mark_maybe((VALUE)ifunc->data);
+            // An ifunc kept past its frame outlives the env svar_lep points at.
+            if (ifunc->svar_lep && VM_ENV_ESCAPED_P(ifunc->svar_lep)) {
+                rb_gc_mark_maybe(VM_ENV_ENVVAL(ifunc->svar_lep));
+            }
         }
 
         break;
