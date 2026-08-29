@@ -171,6 +171,12 @@ reserve_ractor_block(long handle)
 static int
 enter_rpython(long handle)
 {
+    /* Until Ractor mode splits the interpreter state, only main may run it. */
+    if (!rpyyarv_threaded &&
+            !pthread_equal(pthread_self(), rpyyarv_main_thread)) {
+        rb_raise(rb_eThreadError,
+                 "rpyyarv runs Ruby on the main thread only");
+    }
     if (!rpyyarv_threaded) return 0;
     int depth = callback_depth();
     int flags = 0;
@@ -444,6 +450,7 @@ rpyyarv_boot(int argc, char **argv, int *status_out)
     ruby_sysinit(&argc, &argv);
     ruby_init_stack(&variable_in_this_stack_frame);
     ruby_init();
+    rpyyarv_main_thread = pthread_self();
 
     void *n = ruby_options(argc, argv);
 

@@ -6,9 +6,22 @@ from rpyyarv.rlib import (dont_look_inside, unchecked_stack_start,
                           unchecked_stack_stop)
 
 
+class _Promotion(object):
+    """False until the first Ractor; the GIL is nobody's lock before then."""
+
+    def __init__(self):
+        self.active = False
+
+
+promotion = _Promotion()
+
+
 @dont_look_inside
 def enter_callback():
     """Take RPython GIL only when C called us on a foreign thread."""
+    # The GVL serializes us already; taking the GIL here inverts lock order.
+    if not promotion.active:
+        return 0
     acquired = not rgil.am_I_holding_the_GIL()
     if acquired:
         rgil.acquire_maybe_in_new_thread()
@@ -67,5 +80,6 @@ def install():
 def activate():
     """Permanently promote the runtime before the first Ractor starts."""
     from rpyyarv import boot
+    promotion.active = True
     boot.activate_thread_state()
     boot.activate_threads()

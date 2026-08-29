@@ -203,6 +203,7 @@ gccheck:
 	          test/bmethodcref.rb \
 	          test/bindinglocals.rb \
 	          test/coreops.rb \
+	          test/threadmark.rb \
 	          $(TOP)/benchmark/app_*.rb $(TOP)/benchmark/so_*.rb; do \
 	   n=`basename $$s`; \
 	   case $$s in test/*) \
