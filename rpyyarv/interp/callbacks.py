@@ -84,6 +84,7 @@ def _block_callback(handle, argc, argv, cruby_self, bowner, bmid):
         if debug.state.channels & debug.SUMMARY:
             debug.note('Ractor block hit StackOverflow')
         # Returning normally would let CRuby re-call on an exhausted stack.
+        debug.dump_frames('block')
         check_stack_overflow()
         blocks.error = UnsupportedOperation(STACK_TOO_DEEP)
         return _park_unwind()
@@ -204,6 +205,7 @@ def _trampoline_callback(self_v, rid, owner_v, def_v, argc, argv, blockv, kw,
     except RPyYarvError, e:
         _tramp_failed(statusp, errp, e.msg)
     except StackOverflow:
+        debug.dump_frames('trampoline')
         check_stack_overflow()
         _tramp_failed(statusp, errp, STACK_TOO_DEEP)
     finally:

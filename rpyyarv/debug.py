@@ -16,11 +16,12 @@ CALL = 4
 ISEQ = 8
 SUMMARY = 16
 LOAD = 32
+FRAMES = 64
 ALL = INSN | STACK | CALL | ISEQ | SUMMARY | LOAD
 
-_NAMES = ['insn', 'stack', 'call', 'iseq', 'summary', 'load']
-_BITS = [INSN, STACK, CALL, ISEQ, SUMMARY, LOAD]
-CHANNELS = 'insn, stack, call, iseq, summary, load, all'
+_NAMES = ['insn', 'stack', 'call', 'iseq', 'summary', 'load', 'frames']
+_BITS = [INSN, STACK, CALL, ISEQ, SUMMARY, LOAD, FRAMES]
+CHANNELS = 'insn, stack, call, iseq, summary, load, frames, all'
 
 
 class _State(object):
@@ -217,6 +218,29 @@ def write(s):
 def note(msg):
     """Unconditional one-liner, for a print dropped in while hunting a bug."""
     write('[rpyyarv] %s\n' % msg)
+
+
+# Deep enough to show a cycle, short enough to read.
+FRAME_DUMP_MAX = 60
+
+
+@dont_look_inside
+def dump_frames(why):
+    """The RPython frame chain, so a runaway recursion names its own cycle."""
+    if state.channels & FRAMES == 0:
+        return
+    from rpyyarv import gcroots
+    note('frame chain (%s), innermost first:' % why)
+    f = gcroots.state.top
+    i = 0
+    while f is not None and i < FRAME_DUMP_MAX:
+        w = f.w_iseq
+        write('  #%d %s at %s:%d\n'
+              % (i, w.name, w.path, w.line_for(f.pc)))
+        f = f.prev_frame
+        i += 1
+    if f is not None:
+        note('... more frames below')
 
 
 class _Loads(object):

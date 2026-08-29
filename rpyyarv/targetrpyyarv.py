@@ -141,6 +141,7 @@ def entry_point(argv):
         print '[rpyyarv] Ruby exception in %s' % e.mid
         return 1
     except StackOverflow:
+        debug.dump_frames('main')
         check_stack_overflow()
         print '[rpyyarv] %s' % interp.STACK_TOO_DEEP
         return 1
