@@ -1191,24 +1191,33 @@ struct super_args {
     ID    id;
 };
 
+/* The method super lands on: the one past owner on klass's chain. */
+static VALUE
+super_method_after(VALUE klass, VALUE owner, ID id)
+{
+    ID owner_id = rb_intern("owner");
+    ID super_id = rb_intern("super_method");
+    /* super_method carries the iclass, so prepended/included modules count. */
+    VALUE first = rb_funcall(klass, rb_intern("instance_method"), 1,
+                             ID2SYM(id));
+    VALUE m = first;
+    while (!NIL_P(m)) {
+        VALUE found = rb_funcall(m, owner_id, 0);
+        m = rb_funcall(m, super_id, 0);
+        if (found == owner) return m;
+    }
+    /* Module#dup copied the entry to a fresh singleton, so owner is stale. */
+    if (NIL_P(first)) return Qnil;
+    return rb_funcall(first, super_id, 0);
+}
+
 static VALUE
 super_owner_body(VALUE argp)
 {
     struct super_args *p = (struct super_args *)argp;
-    ID owner_id = rb_intern("owner");
-    ID super_id = rb_intern("super_method");
-    /* super_method carries the iclass, so prepended/included modules count. */
-    VALUE m = rb_funcall(p->klass, rb_intern("instance_method"), 1,
-                         ID2SYM(p->id));
-    while (!NIL_P(m)) {
-        VALUE found = rb_funcall(m, owner_id, 0);
-        m = rb_funcall(m, super_id, 0);
-        if (found == p->owner) {
-            if (NIL_P(m)) return Qnil;
-            return rb_funcall(m, owner_id, 0);
-        }
-    }
-    return Qnil;
+    VALUE m = super_method_after(p->klass, p->owner, p->id);
+    if (NIL_P(m)) return Qnil;
+    return rb_funcall(m, rb_intern("owner"), 0);
 }
 
 uintptr_t
@@ -1255,16 +1264,7 @@ call_super_body(VALUE argp)
     struct super_call_args *p = (struct super_call_args *)argp;
     VALUE args[RPYYARV_MAX_ARGC + 1];
     int i;
-    ID owner_id = rb_intern("owner");
-    ID super_id = rb_intern("super_method");
-    /* The only walk seeing a prepended module; instance_method recurses. */
-    VALUE m = rb_funcall(p->klass, rb_intern("instance_method"), 1,
-                         ID2SYM(p->id));
-    while (!NIL_P(m)) {
-        VALUE found = rb_funcall(m, owner_id, 0);
-        m = rb_funcall(m, super_id, 0);
-        if (found == p->owner) break;
-    }
+    VALUE m = super_method_after(p->klass, p->owner, p->id);
     if (NIL_P(m)) return Qundef;
     /* bind_call, not rb_call_super: super needs a CRuby control frame. */
     args[0] = p->recv;
