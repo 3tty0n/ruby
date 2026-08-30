@@ -16,6 +16,40 @@ class Version(object):
     pass
 
 
+# One quasi-immutable per bucket of method names. A def of one name then
+# invalidates only the traces that looked a name in its bucket up, instead
+# of every trace in the process.
+# ponytail: buckets, not one cell per name, because an immutable-length
+# list is what folds the read away; widen if collisions ever show up.
+NAME_BUCKETS = 4096
+
+
+class _NameCell(object):
+    _immutable_fields_ = ['version?']
+
+    def __init__(self):
+        self.version = Version()
+
+
+class _NameVersions(object):
+    _immutable_fields_ = ['cells[*]']
+
+    def __init__(self):
+        self.cells = [_NameCell() for _ in range(NAME_BUCKETS)]
+
+
+names = _NameVersions()
+
+
+def name_version(mid):
+    """The version a lookup of mid depends on; folds, mid being green."""
+    return names.cells[mid & (NAME_BUCKETS - 1)].version
+
+
+def bump_name(mid):
+    names.cells[mid & (NAME_BUCKETS - 1)].version = Version()
+
+
 KIND_ISEQ = 0
 KIND_ATTR_READER = 1
 KIND_ATTR_WRITER = 2
@@ -88,7 +122,6 @@ def define(klass, mid, w_iseq, private, cref=0, lexical=None,
                         orig_mid if orig_mid != 0 else mid,
                         cref, KIND_ISEQ, 0, lexical, None, prot)
     _table_for(klass)[mid] = entry
-    registry.version = Version()
     flush_trampoline_cache()
     invalidate_for(mid)
     _install_trampoline(klass, mid, 2 if prot else (1 if private else 0),
@@ -99,7 +132,6 @@ def define_attr(klass, mid, ivar, kind, private=False, prot=False):
     """No trampoline: CRuby's own attr entry still answers a call from C."""
     _table_for(klass)[mid] = MethodEntry(None, private, klass, mid, 0, kind,
                                          ivar, None, None, prot)
-    registry.version = Version()
     flush_trampoline_cache()
     invalidate_for(mid)
 
@@ -108,7 +140,6 @@ def define_bmethod(klass, mid, w_block, private, prot=False):
     """No trampoline: CRuby's send already installed a bmethod for mid."""
     _table_for(klass)[mid] = MethodEntry(None, private, klass, mid, 0,
                                          KIND_BMETHOD, 0, None, w_block, prot)
-    registry.version = Version()
     flush_trampoline_cache()
     invalidate_for(mid)
     gcroots.register_bmethod(w_block)
@@ -144,7 +175,6 @@ def undefine(klass, mid):
     if table is None or mid not in table:
         return False
     del table[mid]
-    registry.version = Version()
     flush_trampoline_cache()
     invalidate_for(mid)
     return True
@@ -153,7 +183,6 @@ def undefine(klass, mid):
 def undef_method(klass, mid):
     """Module#undef_method leaves a poison entry, so ancestors are blocked."""
     _table_for(klass)[mid] = MethodEntry(None, False, klass, mid, 0, KIND_UNDEF)
-    registry.version = Version()
     flush_trampoline_cache()
     invalidate_for(mid)
 
@@ -228,7 +257,7 @@ def _module_lookup(klass, mid):
 
 
 @elidable
-def _lookup(klass, mid, version):
+def _lookup(klass, mid, version, nversion):
     """Walk and owner check in one elidable: one call_pure, not two."""
     entry = _walk(klass, mid)
     if entry is None:
@@ -250,7 +279,7 @@ def _lookup(klass, mid, version):
 @dont_look_inside
 def _lookup_filled(klass, mid):
     """Opaque on purpose: a trace must not reuse the pending answer."""
-    return _lookup(klass, mid, registry.version)
+    return _lookup(klass, mid, registry.version, name_version(mid))
 
 
 def lookup(klass, mid):
@@ -259,10 +288,10 @@ def lookup(klass, mid):
     # answer changes for one version and a trace must not memoize it.
     jitted = we_are_jitted()
     if not jitted:
-        got = resolved(klass, mid, registry.version)
+        got = resolved(klass, mid, registry.version, name_version(mid))
         if got is not LOOKUP_PENDING:
             return None if got is LOOKUP_MISS else got
-    entry = _lookup(klass, mid, registry.version)
+    entry = _lookup(klass, mid, registry.version, name_version(mid))
     if entry is OWNER_PENDING:
         _fill_owner(klass, mid)
         entry = _lookup_filled(klass, mid)
@@ -274,7 +303,7 @@ def lookup(klass, mid):
 
 
 @elidable
-def _own_lookup(klass, mid, version):
+def _own_lookup(klass, mid, version, nversion):
     table = registry.methods.get(klass, None)
     if table is None:
         return None
@@ -283,11 +312,11 @@ def _own_lookup(klass, mid, version):
 
 def lookup_owned(klass, mid):
     """own_lookup, but elidable on the method version."""
-    return _own_lookup(klass, mid, registry.version)
+    return _own_lookup(klass, mid, registry.version, name_version(mid))
 
 
 @elidable
-def _lookup_core(klass, mid, version):
+def _lookup_core(klass, mid, version, nversion):
     """No Object fallback, so a toplevel `def +` is no Integer#+ redefine."""
     methods = registry.methods
     supers = registry.supers
@@ -308,11 +337,11 @@ def lookup_core(klass, mid):
     """Every core operator asks this first, so off-trace it answers from a
     cache: the walk it replaces is a dozen table reads per arithmetic op."""
     if we_are_jitted():
-        return _lookup_core(klass, mid, registry.version)
-    got = core_resolved(klass, mid, registry.version)
+        return _lookup_core(klass, mid, registry.version, name_version(mid))
+    got = core_resolved(klass, mid, registry.version, name_version(mid))
     if got is not LOOKUP_PENDING:
         return None if got is LOOKUP_MISS else got
-    entry = _lookup_core(klass, mid, registry.version)
+    entry = _lookup_core(klass, mid, registry.version, name_version(mid))
     keep_core(klass, mid, entry)
     return entry
 

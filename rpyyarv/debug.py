@@ -118,6 +118,14 @@ def report():
     note('sends: rpyyarv %d, cruby %d' % (coverage.native, coverage.foreign))
     from rpyyarv import dispatch
     from rpyyarv import gcroots
+    named = 0
+    chain = 0
+    for key, n in coverage.by_inval.items():
+        if key[1] != 0:
+            named += n
+        else:
+            chain += n
+    note('invalidations: named %d, chain %d' % (named, chain))
     note('method-cache invalidations: %d (skipped %d)'
          % (dispatch.owners.invalidations, dispatch.owners.skipped))
     note('gc roots: %s' % gcroots.root_inventory())

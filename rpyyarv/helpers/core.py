@@ -213,14 +213,15 @@ def disable_fast_paths():
 
 
 def refresh():
-    """Re-ask CRuby for the watched operators; some redefinitions missed."""
-    dispatch.invalidate_owners()
+    """Re-ask CRuby for the watched operators. No blanket invalidation: the
+    method hook reports every cache clear CRuby makes, by name."""
     count, mask = boot.bop_mask()
     if count != B_COUNT:
         return False
     # Left at -1 the fast paths never fire; only refresh() reads the switch,
     # so the per-send guard still folds on the quasi-immutable mask alone.
-    if not bops.disabled:
+    # Written only on a change: a same-value write still kills every trace.
+    if not bops.disabled and mask != bops.mask:
         bops.mask = mask
     return True
 

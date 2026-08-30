@@ -7,7 +7,8 @@ from rpyyarv import gcroots
 from rpyyarv import symbols
 from rpyyarv import rubycall
 from rpyyarv.rlib import elidable, dont_look_inside
-from rpyyarv.dispatch.core import lookup, registry, MethodEntry, Version
+from rpyyarv.dispatch.core import (lookup, registry, MethodEntry, Version,
+                                   bump_name, name_version)
 
 
 class _Owners(object):
@@ -57,7 +58,11 @@ def method_state_changed(klass, rid):
         return
     debug.count_invalidation(boot.as_signed(klass), own_rid)
     _drop_redefined(boot.as_signed(klass), own_rid)
-    invalidate_owners()
+    mid = rubycall.mid_of_rid(own_rid) if own_rid != 0 else rubycall.NO_MID
+    if mid == rubycall.NO_MID:
+        invalidate_owners()
+    else:
+        invalidate_for(mid)
 
 
 @dont_look_inside
@@ -91,7 +96,7 @@ LOOKUP_MISS = MethodEntry(None, False)
 
 
 @elidable
-def resolved(klass, mid, version):
+def resolved(klass, mid, version, nversion):
     """The cached answer, LOOKUP_PENDING when the walk still owes one."""
     table = owners.res.get(klass, None)
     if table is None:
@@ -111,7 +116,7 @@ def keep_resolved(klass, mid, entry):
 
 
 @elidable
-def core_resolved(klass, mid, version):
+def core_resolved(klass, mid, version, nversion):
     table = owners.cres.get(klass, None)
     if table is None:
         return LOOKUP_PENDING
@@ -132,7 +137,8 @@ def keep_core(klass, mid, entry):
 def site_lookup(site, klass, mid):
     """lookup(), but a repeat send from the same site is two compares.
     Off-trace only: inside one the lookup folds into the class guard."""
-    if site.ic_klass == klass and site.ic_version is registry.version:
+    if site.ic_klass == klass and site.ic_version is registry.version \
+            and site.ic_name is name_version(mid):
         got = site.ic_entry
         return None if got is LOOKUP_MISS else got
     entry = lookup(klass, mid)
@@ -140,6 +146,7 @@ def site_lookup(site, klass, mid):
     site.ic_entry = LOOKUP_MISS if entry is None else entry
     site.ic_klass = klass
     site.ic_version = registry.version
+    site.ic_name = name_version(mid)
     return entry
 
 
@@ -182,7 +189,9 @@ def invalidate_for(mid):
             if (klass, sym) in owners.rtab:
                 del owners.rtab[(klass, sym)]
         del owners.by_sym[sym]
-    registry.version = Version()
+        # respond_to? answers hang off the global version, not the name's.
+        registry.version = Version()
+    bump_name(mid)
     flush_trampoline_cache()
 
 
@@ -209,7 +218,7 @@ def invalidate_owners():
 
 
 @elidable
-def _owner_of(klass, mid, version):
+def _owner_of(klass, mid, version, nversion):
     return owners.tab.get((klass, mid), OWNER_UNKNOWN)
 
 
@@ -229,7 +238,7 @@ def _fill_owner(klass, mid):
 
 def owner_of(klass, mid):
     """The module klass resolves mid through; CRuby answers, iclasses count."""
-    got = _owner_of(klass, mid, registry.version)
+    got = _owner_of(klass, mid, registry.version, name_version(mid))
     if got == OWNER_UNKNOWN:
         got = _fill_owner(klass, mid)
     return got
@@ -331,7 +340,7 @@ struct_slots = _StructSlots()
 
 
 @elidable
-def _struct_index(klass, mid, version):
+def _struct_index(klass, mid, version, nversion):
     return struct_slots.tab.get((klass, mid), IV_UNKNOWN)
 
 
@@ -351,14 +360,14 @@ def _fill_struct_index(klass, mid):
 
 def struct_member_index(klass, mid):
     """A Struct-generated reader/writer's slot, or -1 for another method."""
-    got = _struct_index(klass, mid, registry.version)
+    got = _struct_index(klass, mid, registry.version, name_version(mid))
     if got == IV_UNKNOWN:
         got = _fill_struct_index(klass, mid)
     return got
 
 
 @elidable
-def _super_owner(klass, owner, mid, version):
+def _super_owner(klass, owner, mid, version, nversion):
     return owners.stab.get((klass, owner, mid), OWNER_UNKNOWN)
 
 
@@ -379,7 +388,8 @@ def _fill_super_owner(klass, owner, mid):
 
 def super_owner(klass, owner, mid):
     """Where `super` from owner's mid lands; CRuby counts the iclasses."""
-    got = _super_owner(klass, owner, mid, registry.version)
+    got = _super_owner(klass, owner, mid, registry.version,
+                       name_version(mid))
     if got == OWNER_UNKNOWN:
         got = _fill_super_owner(klass, owner, mid)
     return got

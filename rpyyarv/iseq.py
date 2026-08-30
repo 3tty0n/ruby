@@ -151,6 +151,7 @@ class W_CallInfo(object):
         # method tables; the JIT folds the lookup away and never sees it.
         self.ic_klass = 0
         self.ic_version = None
+        self.ic_name = None
         self.ic_entry = None
 
     def repr(self):
