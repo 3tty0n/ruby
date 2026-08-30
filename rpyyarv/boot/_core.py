@@ -9,7 +9,8 @@ from rpython.rlib.rthread import ThreadLocalReference
 from rpython.translator.tool.cbuild import ExternalCompilationInfo
 
 from rpyyarv import symbols
-from rpyyarv.error import RubyException
+from rpyyarv.error import RubyException, errinfos
+from rpyyarv.value import Q_NIL
 
 
 _HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -122,7 +123,7 @@ FIBER_BORN_HOOK = lltype.Ptr(lltype.FuncType(
 FIBER_KEY_HOOK = lltype.Ptr(lltype.FuncType([lltype.Signed], lltype.Void))
 
 
-rb_take_errinfo = _ext('rpyyarv_take_errinfo', [], VALUE)
+rb_swap_errinfo = _ext('rpyyarv_swap_errinfo', [VALUE], VALUE)
 
 
 def _v(n):
@@ -313,9 +314,17 @@ class RubyError(Exception):
         self.mid = mid
 
 
+def take_errinfo():
+    """Hand the exception over, leaving $! as the running rescue's own."""
+    stack = errinfos.stack
+    keep = Q_NIL
+    if len(stack) > 0:
+        keep = stack[len(stack) - 1]
+    return rffi.cast(lltype.Signed, rb_swap_errinfo(_v(keep)))
+
+
 def _failed(name):
-    v = rffi.cast(lltype.Signed, rb_take_errinfo())
-    raise RubyException(v, name)
+    raise RubyException(take_errinfo(), name)
 
 
 def _failed_mid(mid):

@@ -6,6 +6,7 @@ from rpyyarv import dispatch
 from rpyyarv import helpers
 from rpyyarv import optable
 from rpyyarv import rubycall
+from rpyyarv import symbols
 from rpyyarv import value
 from rpyyarv.error import UnsupportedOperation
 from rpyyarv.frame import Frame
@@ -163,6 +164,8 @@ def _defined(frame, kind, obj, recv):
         return boot.method_defined(recv, rid, 1)
     if kind == DEFINED_METHOD:
         return boot.method_defined(recv, rid, 0)
+    if kind == DEFINED_GVAR:
+        return boot.gvar_defined(symbols.name_of(mid))
     if kind == DEFINED_YIELD:
         return frame.block is not None
     raise UnsupportedOperation('defined? type %d is not implemented' % kind)

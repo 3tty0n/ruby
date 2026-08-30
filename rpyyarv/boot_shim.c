@@ -421,6 +421,18 @@ protect_keeping_errinfo(VALUE (*body)(VALUE), VALUE arg, int *state)
     return r;
 }
 
+/* A send that returns normally must leave `$!` as it found it: CRuby's own C
+   clears ec->errinfo (exc_equal, error.c:2194) where a rescue frame would hold
+   the svar, and RPyYARV pushes no such frame. */
+static VALUE
+protect_send(VALUE (*body)(VALUE), VALUE arg, int *state)
+{
+    VALUE saved = rb_errinfo();
+    VALUE r = rb_protect(body, arg, state);
+    if (!*state && rb_errinfo() != saved) rb_set_errinfo(saved);
+    return r;
+}
+
 /* The RPython side holds the real unwind, so report success. */
 static void
 absorb_unwind(int *state)
@@ -515,7 +527,7 @@ rpyyarv_call0(uintptr_t recv, const char *mid, int *state)
 
     *state = 0;
     VALUE saved = rb_errinfo();
-    VALUE r = rb_protect(call0_body, (VALUE)&a, state);
+    VALUE r = protect_send(call0_body, (VALUE)&a, state);
     absorb_unwind(state);
     if (*state) {
         /* Put back what an enclosing rescue holds, not Qnil. */
@@ -683,7 +695,7 @@ rpyyarv_funcallv_id(uintptr_t recv, uintptr_t mid, int argc,
     a.argv = buf;
 
     *state = 0;
-    VALUE r = rb_protect(funcallv_body, (VALUE)&a, state);
+    VALUE r = protect_send(funcallv_body, (VALUE)&a, state);
     absorb_unwind(state);
     if (*state) return (uintptr_t)Qnil;
     return (uintptr_t)r;
@@ -728,7 +740,7 @@ rpyyarv_funcallv_public_id(uintptr_t recv, uintptr_t mid, int argc,
     a.argv = buf;
 
     *state = 0;
-    VALUE r = rb_protect(funcallv_public_body, (VALUE)&a, state);
+    VALUE r = protect_send(funcallv_public_body, (VALUE)&a, state);
     absorb_unwind(state);
     if (*state) return (uintptr_t)Qnil;
     return (uintptr_t)r;
@@ -777,7 +789,7 @@ rpyyarv_funcallv_kw_id(uintptr_t recv, uintptr_t mid, int argc,
     a.pub  = pub;
 
     *state = 0;
-    VALUE r = rb_protect(funcallv_kw_body, (VALUE)&a, state);
+    VALUE r = protect_send(funcallv_kw_body, (VALUE)&a, state);
     absorb_unwind(state);
     if (*state) return (uintptr_t)Qnil;
     return (uintptr_t)r;
@@ -1289,7 +1301,7 @@ rpyyarv_call_super(uintptr_t klass, uintptr_t owner, uintptr_t recv,
     a.kw_splat = kw ? RB_PASS_KEYWORDS : RB_NO_KEYWORDS;
     a.proc = proc ? (VALUE)proc : Qnil;
     *state = 0;
-    return (uintptr_t)rb_protect(call_super_body, (VALUE)&a, state);
+    return (uintptr_t)protect_send(call_super_body, (VALUE)&a, state);
 }
 
 static VALUE
@@ -1983,6 +1995,12 @@ rpyyarv_gvar_get(const char *name, int *state)
     return (uintptr_t)r;
 }
 
+int
+rpyyarv_gvar_defined(const char *name)
+{
+    return RTEST(rb_rpyyarv_gvar_defined(rb_intern(name))) ? 1 : 0;
+}
+
 static VALUE
 gvar_set_body(VALUE argp)
 {
@@ -2265,7 +2283,7 @@ rpyyarv_call_with_proc(uintptr_t recv, uintptr_t mid, int argc,
     a.kw_splat = kw ? RB_PASS_KEYWORDS : RB_NO_KEYWORDS;
 
     *state = 0;
-    VALUE r = rb_protect(call_with_proc_body, (VALUE)&a, state);
+    VALUE r = protect_send(call_with_proc_body, (VALUE)&a, state);
     /* A foreign Proc's break/return names a frame outside ours. Park the tag
        for the trampoline to re-issue; errinfo holds the throw's target, so it
        is left alone and never read as an exception. */
@@ -2308,7 +2326,7 @@ rpyyarv_call_with_block(uintptr_t recv, uintptr_t mid, int argc,
     if (ractor_new && native_iseq) prepare_native_ractors();
     if (ractor_new && !native_iseq) prepare_ractor_block(handle);
     *state = 0;
-    VALUE r = rb_protect(call_with_block_body, (VALUE)&a, state);
+    VALUE r = protect_send(call_with_block_body, (VALUE)&a, state);
     if (ractor_new && native_iseq && !*state) remember_native_ractor(r);
     if (ractor_new && !native_iseq && *state) cancel_ractor_block(handle);
     absorb_unwind(state);
@@ -2549,14 +2567,6 @@ rpyyarv_gc_register_mark_object(uintptr_t v)
 {
     if (SPECIAL_CONST_P((VALUE)v)) return;
     rb_gc_register_mark_object((VALUE)v);
-}
-
-uintptr_t
-rpyyarv_take_errinfo(void)
-{
-    VALUE e = rb_errinfo();
-    rb_set_errinfo(Qnil);
-    return (uintptr_t)e;
 }
 
 uintptr_t

@@ -21,6 +21,7 @@
 #include "id_table.h"
 #include "internal.h"
 #include "internal/box.h"
+#include "rpyyarv.h"
 #include "internal/class.h"
 #include "internal/compilers.h"
 #include "internal/error.h"
@@ -1105,6 +1106,13 @@ rb_gvar_defined(ID id)
 {
     struct rb_global_entry *entry = rb_global_entry(id);
     return RBOOL(entry->var->getter != rb_gvar_undef_getter);
+}
+
+/* defined?($x) from RPyYARV, which links against the public API only. */
+VALUE
+rb_rpyyarv_gvar_defined(ID id)
+{
+    return rb_gvar_defined(id);
 }
 
 rb_gvar_getter_t *

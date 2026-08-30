@@ -6,7 +6,8 @@ from rpyyarv import boot
 from rpyyarv import optable
 from rpyyarv import rubycall
 from rpyyarv import value
-from rpyyarv.error import RubyException, UnsupportedOperation
+from rpyyarv.dispatch.core import KIND_BMETHOD
+from rpyyarv.error import RubyException, UnsupportedOperation, errinfos
 from rpyyarv.frame import Frame, PENDING_BREAK, PENDING_FOREIGN, PENDING_NEXT, PENDING_NONE, PENDING_RAISE, PENDING_RETRY, PENDING_RETURN
 from rpyyarv.iseq import CATCH_ENSURE, CATCH_RESCUE, CATCH_RETRY
 from rpyyarv.rlib import dont_look_inside
@@ -41,12 +42,24 @@ def _rethrow(throw):
 MAX_SCOPES = 256
 
 
+def _owns_return(f):
+    """A lambda, or a bmethod whose block IS the body (VM_FRAME_BMETHOD_P)."""
+    w_block = f.own_block
+    if w_block is None:
+        return False
+    if w_block.is_lambda:
+        return True
+    entry = f.entry
+    return entry is not None and entry.kind == KIND_BMETHOD \
+        and entry.w_block is w_block
+
+
 def _return_target(frame):
     """Nearest lambda frame, else the outermost (vm_insnhelper.c:1834)."""
     f = frame
     n = 0
     while n < MAX_SCOPES:
-        if f.own_block is not None and f.own_block.is_lambda:
+        if _owns_return(f):
             return f
         if f.defining_frame is None:
             return f
@@ -63,8 +76,8 @@ def _local_jump_error(mesg, v, reason):
 def _return(frame, v):
     """return from a block; a dead target raises (vm_insnhelper.c:1926)."""
     target = _return_target(frame)
-    is_lambda = target.own_block is not None and target.own_block.is_lambda
-    if target.dead or not (target.w_iseq.catches_return or is_lambda):
+    if target.dead or not (target.w_iseq.catches_return
+                           or _owns_return(target)):
         raise _local_jump_error('unexpected return', v, optable.TAG_RETURN)
     raise block_mod.BlockReturn(target, v)
 
@@ -135,15 +148,6 @@ def _run_catch(frame, entry, throw):
         return execute(w_iseq, callee)
     return _run_with_errinfo(w_iseq, callee, callee.local_get(0)
                              if w_iseq.nlocals > 0 else value.Q_NIL)
-
-
-class _Errinfo(object):
-    def __init__(self):
-        # $! of each rescue body still running, innermost last.
-        self.stack = []
-
-
-errinfos = _Errinfo()
 
 
 def _run_with_errinfo(w_iseq, callee, errinfo):

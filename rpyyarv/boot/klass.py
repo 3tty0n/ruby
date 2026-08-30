@@ -4,7 +4,7 @@ from __future__ import absolute_import
 from rpython.rtyper.lltypesystem import lltype, rffi
 
 from rpyyarv.boot._core import (_ext, _v, VALUE, INTP, _enter_status,
-                                _leave_status, _failed, rb_take_errinfo)
+                                _leave_status, _failed, take_errinfo)
 
 
 rb_patch_method_equality = _ext('rpyyarv_patch_method_equality', [], lltype.Void,
@@ -114,7 +114,7 @@ def class_superclass(klass):
     failed = _leave_status(state)
     ret = rffi.cast(lltype.Signed, v)
     if failed:
-        rb_take_errinfo()
+        take_errinfo()
         return 0
     return ret
 

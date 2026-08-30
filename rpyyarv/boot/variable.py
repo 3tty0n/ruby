@@ -58,6 +58,14 @@ rb_class_ivar_get = _ext('rpyyarv_class_ivar_get', [VALUE, VALUE], VALUE)
 rb_ivar_defined = _ext('rpyyarv_ivar_defined', [VALUE, VALUE], rffi.INT)
 
 
+rb_gvar_defined_ = _ext('rpyyarv_gvar_defined', [rffi.CCHARP], rffi.INT)
+
+
+def gvar_defined(name):
+    with rffi.scoped_str2charp(name) as c_name:
+        return rffi.cast(lltype.Signed, rb_gvar_defined_(c_name)) != 0
+
+
 def gvar_get(name):
     state = _enter_status()
     with rffi.scoped_str2charp(name) as c_name:

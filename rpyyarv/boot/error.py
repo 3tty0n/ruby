@@ -4,10 +4,7 @@ from __future__ import absolute_import
 from rpython.rtyper.lltypesystem import lltype, rffi
 
 from rpyyarv.boot._core import (_ext, _v, VALUE, INTP, _enter_status,
-                                _leave_status, _failed)
-
-
-rb_swap_errinfo = _ext('rpyyarv_swap_errinfo', [VALUE], VALUE)
+                                _leave_status, _failed, rb_swap_errinfo)
 
 
 rb_cleanup_with_error = _ext('rpyyarv_cleanup_with_error', [VALUE], rffi.INT,

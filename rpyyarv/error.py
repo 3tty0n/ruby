@@ -19,3 +19,12 @@ class RubyException(Exception):
 class LoadError(RPyYarvError):
     # Apart from UnsupportedOperation: that count is unimplemented insns only.
     pass
+
+
+class _Errinfo(object):
+    def __init__(self):
+        # $! of each rescue body still running, innermost last.
+        self.stack = []
+
+
+errinfos = _Errinfo()

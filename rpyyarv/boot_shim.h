@@ -366,8 +366,8 @@ int rpyyarv_is_proc(uintptr_t v);
 
 int rpyyarv_is_class(uintptr_t v);
 
-/* Call on every non-zero *state or the next raise inherits this as cause. */
-uintptr_t rpyyarv_take_errinfo(void);
+/* defined?($x): rb_gvar_defined, without creating the global entry. */
+int rpyyarv_gvar_defined(const char *name);
 
 /* rb_ec_get_errinfo (eval.c) falls back to ec->errinfo; `$!` must go there. */
 uintptr_t rpyyarv_swap_errinfo(uintptr_t v);

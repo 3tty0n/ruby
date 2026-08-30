@@ -206,7 +206,9 @@ gccheck:
 	          test/threadmark.rb test/superdup.rb test/redefinealias.rb \
 	          test/errinfokeep.rb test/hashmerge.rb test/proccallblock.rb \
 	          test/bmethodkw.rb test/emptykwsplat.rb test/delegatemm.rb \
-	          test/nestedrescue.rb \
+	          test/nestedrescue.rb test/errinfoprobe.rb \
+	          test/bmethodkwreturn.rb \
+	          test/definedgvar.rb \
 	          $(TOP)/benchmark/app_*.rb $(TOP)/benchmark/so_*.rb; do \
 	   n=`basename $$s`; \
 	   case $$s in test/*) \
