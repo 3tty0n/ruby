@@ -982,10 +982,14 @@ def _kw_invoke(frame, w_ci, recv_at, argc, w_block, mid, fcall):
     if w_ci.splat:
         return _splat_invoke(frame, w_ci, recv_at, argc, w_block, mid, fcall)
     kw_splat = w_ci.kw_splat
-    if kw_splat and _empty_kw(frame.slots[recv_at + argc]):
-        frame.pop()
-        argc -= 1
-        kw_splat = False
+    if kw_splat:
+        # Restated so the codewriter sees the stack index as non-negative.
+        at = recv_at + argc
+        assert at >= 0
+        if _empty_kw(frame.slots[at]):
+            frame.pop()
+            argc -= 1
+            kw_splat = False
     rubycall.gc_stress_point()
     recv = frame.slots[recv_at]
     klass = promote(value.class_of(recv))
