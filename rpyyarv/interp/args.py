@@ -2,6 +2,7 @@
 from __future__ import absolute_import
 
 from rpyyarv import boot
+from rpyyarv import debug
 from rpyyarv import gcroots
 from rpyyarv import rubycall
 from rpyyarv import symbols
@@ -298,6 +299,7 @@ def _keyword_error(kind, names):
 
 @dont_look_inside
 def _arity_error(given, min_argc, max_argc):
+    debug.dump_frames('arity')
     raise RubyException(boot.arity_error(given, min_argc, max_argc),
                         'ArgumentError')
 
