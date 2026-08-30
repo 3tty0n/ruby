@@ -113,6 +113,9 @@ def entry_point(argv):
         fibers.install()
     if os.environ.get('RPYYARV_GC_STRESS') == '1':
         rubycall.stress.flag = True
+    # Names the root set a swept slot came from, instead of crashing on it.
+    if os.environ.get('RPYYARV_MARK_TAG') == '1':
+        gcroots.tags.on = True
 
     try:
         prelude.install()

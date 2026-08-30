@@ -2,10 +2,12 @@
 
 from rpyyarv import block as block_mod
 from rpyyarv import boot
+from rpyyarv import debug
 from rpyyarv.error import errinfos
 from rpyyarv import threading
 from rpyyarv import value
-from rpyyarv.rlib import clock_ns, dont_look_inside, gc_mark_state
+from rpyyarv.rlib import (clock_ns, dont_look_inside, gc_mark_state,
+                          raw_word)
 
 
 class Registry(object):
@@ -95,13 +97,31 @@ def pop_frame(frame):
     frame.prev_frame = None
 
 
-def _mark_array(a):
+class _MarkTags(object):
+    """RPYYARV_MARK_TAG=1: name the root set a swept slot came from."""
+
+    def __init__(self):
+        self.on = False
+
+
+tags = _MarkTags()
+
+
+def _mark(v, tag):
+    """A swept slot is reported and skipped, not handed to rb_gc_mark."""
+    if tags.on and raw_word(v, value.FLAGS_WORD) & value.T_MASK == 0:
+        debug.note('corpse in %s' % tag)
+        return
+    boot.gc_mark_value(v)
+
+
+def _mark_array(a, tag):
     i = 0
     n = len(a)
     while i < n:
         v = a[i]
         if not value.is_immediate(v):
-            boot.gc_mark_value(v)
+            _mark(v, tag)
         i += 1
 
 
@@ -113,15 +133,15 @@ def _mark_frame(f):
 
 
 def _mark_frame_now(f):
-    _mark_array(f.slots)
+    _mark_array(f.slots, 'frame-slots')
     s = f.shared
     if s is not None:
-        _mark_array(s.values)
+        _mark_array(s.values, 'frame-shared')
     if not value.is_immediate(f.self_val):
-        boot.gc_mark_value(f.self_val)
+        _mark(f.self_val, 'frame-self')
     # f.cref needs no mark: dispatch.root_base roots every Cref class.
     if not value.is_immediate(f.pending_value):
-        boot.gc_mark_value(f.pending_value)
+        _mark(f.pending_value, 'frame-pending')
     _mark_block_procs(f.block)
     _mark_block_procs(f.own_block)
     _mark_block_procs(f.pending_block)
@@ -131,7 +151,7 @@ def _mark_block_procs(w_block):
     """Frames are marked elsewhere; only the Proc it carries is left."""
     while w_block is not None:
         if not value.is_immediate(w_block.proc_value):
-            boot.gc_mark_value(w_block.proc_value)
+            _mark(w_block.proc_value, 'block-proc')
         w_block = w_block.outer
 
 
@@ -140,7 +160,7 @@ def _mark_block_deep(w_block):
     while w_block is not None:
         if w_block.kind != block_mod.KIND_ISEQ \
                 and not value.is_immediate(w_block.proc_value):
-            boot.gc_mark_value(w_block.proc_value)
+            _mark(w_block.proc_value, 'block-deep-proc')
         f = w_block.frame
         while f is not None:
             _mark_frame_now(f)
@@ -171,7 +191,7 @@ def _mark_handle(h):
     try:
         v = b.selves[h]
         if not value.is_immediate(v):
-            boot.gc_mark_value(v)
+            _mark(v, 'handle-self')
         _mark_block_deep(w_block)
     finally:
         gc_mark_state.marking = prev
@@ -227,19 +247,19 @@ def _mark_all():
     while k < len(pinned):
         v = pinned[k]
         if not value.is_immediate(v):
-            boot.gc_mark_value(v)
+            _mark(v, 'pinned')
         k += 1
     klasses = state.classes
     k = 0
     while k < len(klasses):
-        boot.gc_mark_value(klasses[k])
+        _mark(klasses[k], 'classes')
         k += 1
     held = state.held
     k = 0
     while k < len(held):
         v = held[k]
         if not value.is_immediate(v):
-            boot.gc_mark_value(v)
+            _mark(v, 'held')
         k += 1
     # $! of every running rescue: ec->errinfo no longer roots it.
     errs = errinfos.stack
@@ -247,12 +267,12 @@ def _mark_all():
     while k < len(errs):
         v = errs[k]
         if not value.is_immediate(v):
-            boot.gc_mark_value(v)
+            _mark(v, 'errinfo')
         k += 1
     pools = state.consts
     i = 0
     while i < len(pools):
-        _mark_array(pools[i])
+        _mark_array(pools[i], 'consts')
         i += 1
     bmethods = state.bmethods
     i = 0
