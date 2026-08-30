@@ -956,6 +956,15 @@ def _is_hash(v):
     return boot.is_hash(v)
 
 
+@dont_look_inside
+def _empty_kw(v):
+    """CALLER_SETUP_ARG: an empty **splat is no keywords at all."""
+    if v == value.Q_NIL:
+        return True
+    return not value.is_immediate(v) and _is_hash(v) \
+        and boot.hash_empty_p(v) != 0
+
+
 def _makes_class(recv, mid):
     if mid == NEW:
         return send_owners.struct_class != 0 \
@@ -972,6 +981,11 @@ def _kw_invoke(frame, w_ci, recv_at, argc, w_block, mid, fcall):
         _kw_splat_hash(frame, recv_at + argc)
     if w_ci.splat:
         return _splat_invoke(frame, w_ci, recv_at, argc, w_block, mid, fcall)
+    kw_splat = w_ci.kw_splat
+    if kw_splat and _empty_kw(frame.slots[recv_at + argc]):
+        frame.pop()
+        argc -= 1
+        kw_splat = False
     rubycall.gc_stress_point()
     recv = frame.slots[recv_at]
     klass = promote(value.class_of(recv))
@@ -995,10 +1009,10 @@ def _kw_invoke(frame, w_ci, recv_at, argc, w_block, mid, fcall):
             return _attr_send(frame, entry, recv, recv_at, argc, w_block)
         if w_block is None or w_ci.blockarg:
             return _enter(frame, entry, recv, recv_at, argc, mid,
-                          w_block, w_ci.kw_names, w_ci.kw_splat)
+                          w_block, w_ci.kw_names, kw_splat)
         try:
             return _enter(frame, entry, recv, recv_at, argc, mid,
-                          w_block, w_ci.kw_names, w_ci.kw_splat)
+                          w_block, w_ci.kw_names, kw_splat)
         except block_mod.BlockBreak, e:
             if e.w_block is not w_block:
                 raise
@@ -1031,12 +1045,12 @@ def _kw_invoke(frame, w_ci, recv_at, argc, w_block, mid, fcall):
     # A block RPyYARV holds runs here, keywords never crossing libruby.
     if proxy.value != 0 and recv == proxy.value:
         return _block_send(frame, mid, recv_at, argc, frame.block,
-                           w_ci.kw_names, w_ci.kw_splat, w_block)
+                           w_ci.kw_names, kw_splat, w_block)
     if _is_proxy_call(mid):
         w_own = _proc_block_of(recv)
         if w_own is not None:
             return _block_send(frame, mid, recv_at, argc, w_own,
-                               w_ci.kw_names, w_ci.kw_splat, w_block)
+                               w_ci.kw_names, kw_splat, w_block)
     # Left in the marked frame until rb_hash_aset has copied each one.
     kw_names = w_ci.kw_names
     nkw = len(kw_names)
@@ -1050,13 +1064,8 @@ def _kw_invoke(frame, w_ci, recv_at, argc, w_block, mid, fcall):
     while i < n:
         args.append(frame.slots[base + i])
         i += 1
-    pass_kw = True
-    if w_ci.kw_splat:
-        # `**{}` compiles to a putnil, which stands for no keywords at all.
-        if n > 0 and args[n - 1] == value.Q_NIL:
-            args.pop()
-            pass_kw = False
-    else:
+    pass_kw = kw_splat or nkw > 0
+    if nkw > 0:
         # Resolved first: rb_intern allocates, an RPython list is no GC root.
         rubycall.rid(mid)
         i = 0
@@ -1176,6 +1185,10 @@ def _splat_invoke(frame, w_ci, recv_at, argc, w_block, mid, fcall):
     trailing = 1 if w_ci.kw_splat else nkw
     args = _splat_args(frame, recv_at + 1, argc - trailing, trailing)
     kw_splat = _splat_kw(args, w_ci.kw_splat, trailing)
+    if kw_splat and len(args) > 0 and _empty_kw(args[len(args) - 1]):
+        args.pop()
+        kw_splat = False
+        trailing = 0
     rubycall.gc_stress_point()
     recv = frame.slots[recv_at]
     klass = promote(value.class_of(recv))
@@ -1217,12 +1230,7 @@ def _splat_invoke(frame, w_ci, recv_at, argc, w_block, mid, fcall):
                                     w_block)
     # Built while the arguments are still on the marked stack.
     pass_kw = kw_splat or nkw > 0
-    if kw_splat:
-        # `**{}` compiles to a putnil, which stands for no keywords at all.
-        if len(args) > 0 and args[len(args) - 1] == value.Q_NIL:
-            args.pop()
-            pass_kw = False
-    elif nkw > 0:
+    if nkw > 0:
         rubycall.rid(mid)
         args = _kw_to_positional(args, kw_names)
     _drop(frame, recv_at)
