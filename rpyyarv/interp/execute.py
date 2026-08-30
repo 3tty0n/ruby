@@ -16,7 +16,8 @@ from rpyyarv import value
 from rpyyarv.error import RubyException, UnsupportedOperation
 from rpyyarv.frame import Frame, PENDING_BREAK, PENDING_FOREIGN, PENDING_NEXT, PENDING_RAISE, PENDING_RETURN
 from rpyyarv.iseq import NO_BLOCK_ISEQ
-from rpyyarv.rlib import JitDriver, set_user_param
+from rpyyarv.rlib import (JitDriver, clock_ns, dont_look_inside,
+                          set_user_param)
 
 from rpyyarv.interp.consts_ids import BINDING, ALLOCATE, DUP, EACH_SLICE, EACH_WITH_INDEX, EVAL, FORCE_ENCODING, GETBYTE, MATCH, SEND, SEND2, SETBYTE, STEP, SUCC, UNPACK1
 from rpyyarv.interp.cref import _cref_of
@@ -24,14 +25,73 @@ from rpyyarv.interp.cref import _cref_of
 PROXY_NAME = '__rpyyarv_block_param_proxy__'
 
 
+# function_threshold=100: Ruby methods go hot before a backedge does.
+# Eager bridges: branchy code (rubykon MCTS) needs them anyway.
+# No retrace_limit/max_retrace_guards: they segfault force_op_from_preamble.
+EAGER_PARAMS = 'function_threshold=100,trace_eagerness=50'
+# pypy's own defaults: what to trace when traces do not survive.
+LAZY_PARAMS = 'function_threshold=1619,trace_eagerness=200'
+
+
+class _Eagerness(object):
+    """A global method-cache clear kills every compiled trace. While they
+    keep coming, eager tracing only pays for traces that get thrown away."""
+
+    def __init__(self):
+        self.pinned = False     # RPYYARV_JITPARAM was given: never adapt
+        self.lazy = False
+        self.count = 0
+        self.ticks = 0
+        self.since = 0
+
+
+# One second, and the clears per second above which tracing is a loss.
+INVAL_WINDOW_NS = 1000000000
+INVAL_BUSY = 50
+
+eagerness = _Eagerness()
+
+
 def configure_jitparams():
     """RPYYARV_JITPARAM tunes the JIT as pypy's --jit does, no translation."""
     spec = os.environ.get('RPYYARV_JITPARAM')
-    # function_threshold=100: Ruby methods go hot before a backedge does.
-    # Eager bridges: branchy code (rubykon MCTS) needs them anyway.
-    # No retrace_limit/max_retrace_guards: they segfault force_op_from_preamble.
-    set_user_param(jitdriver, spec if spec else
-                   'function_threshold=100,trace_eagerness=50')
+    eagerness.pinned = spec is not None
+    set_user_param(jitdriver, spec if spec else EAGER_PARAMS)
+    dispatch.set_invalidation_hook(global_invalidation)
+
+
+def _reconsider(now):
+    st = eagerness
+    if now - st.since < INVAL_WINDOW_NS:
+        return
+    lazy = st.count >= INVAL_BUSY
+    st.count = 0
+    st.since = now
+    if lazy != st.lazy:
+        st.lazy = lazy
+        set_user_param(jitdriver, LAZY_PARAMS if lazy else EAGER_PARAMS)
+
+
+@dont_look_inside
+def global_invalidation():
+    """One unnamed method-cache clear; re-decide once per window."""
+    st = eagerness
+    if st.pinned:
+        return
+    st.count += 1
+    _reconsider(clock_ns())
+
+
+@dont_look_inside
+def eagerness_tick():
+    """A program that stops clearing the cache stops calling the line above,
+    so the entry from CRuby is what lets the lazy state end."""
+    st = eagerness
+    if st.pinned or not st.lazy:
+        return
+    st.ticks += 1
+    if st.ticks & 1023 == 0:
+        _reconsider(clock_ns())
 
 
 def disable_jit_for_ractor():

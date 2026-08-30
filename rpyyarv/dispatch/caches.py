@@ -36,6 +36,20 @@ class _Owners(object):
 owners = _Owners()
 
 
+class _Invalidations(object):
+    """interp.install() puts the JIT's eagerness controller here."""
+
+    def __init__(self):
+        self.hook = None
+
+
+invalidations = _Invalidations()
+
+
+def set_invalidation_hook(hook):
+    invalidations.hook = hook
+
+
 class _OwnHook(object):
     """Depth of our own trampoline installs, which CRuby reports back to us."""
     def __init__(self):
@@ -202,6 +216,8 @@ def invalidate_owners():
         return
     owners.invalidations += 1
     debug.note_invalidation(owners.invalidations)
+    if invalidations.hook is not None:
+        invalidations.hook()
     owners.tab = {}
     owners.stab = {}
     owners.rtab = {}

@@ -141,6 +141,7 @@ TRAMP_JUMPTAG = 4
 
 def trampoline_callback(self_v, rid, owner_v, def_v, argc, argv, blockv, kw,
                         statusp, errp):
+    eagerness_tick()
     acquired = threading.enter_callback()
     try:
         return _trampoline_callback(self_v, rid, owner_v, def_v, argc, argv,
@@ -368,4 +369,4 @@ def _check_block_error():
 # above is already bound.
 from rpyyarv.interp.defs import _bmethod_identity
 from rpyyarv.interp.blocks import _alloc_handle, _run_bmethod, blocks, call_block
-from rpyyarv.interp.execute import execute
+from rpyyarv.interp.execute import eagerness_tick, execute
