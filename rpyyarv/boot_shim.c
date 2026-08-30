@@ -410,6 +410,17 @@ rpyyarv_set_block_unwind(void)
 /* internal/thread.h's RUBY_FATAL_FIBER_KILLED, spelled out here. */
 #define RPYYARV_FIBER_KILLED RB_INT2FIX(2)
 
+/* rb_protect for a probe whose failure is swallowed: putting Qnil back would
+   drop the $! an enclosing rescue is holding. */
+static VALUE
+protect_keeping_errinfo(VALUE (*body)(VALUE), VALUE arg, int *state)
+{
+    VALUE saved = rb_errinfo();
+    VALUE r = rb_protect(body, arg, state);
+    if (*state) rb_set_errinfo(saved);
+    return r;
+}
+
 /* The RPython side holds the real unwind, so report success. */
 static void
 absorb_unwind(int *state)
@@ -503,11 +514,12 @@ rpyyarv_call0(uintptr_t recv, const char *mid, int *state)
     a.mid  = rb_intern(mid);
 
     *state = 0;
+    VALUE saved = rb_errinfo();
     VALUE r = rb_protect(call0_body, (VALUE)&a, state);
     absorb_unwind(state);
     if (*state) {
-        /* Clear it, or the next call re-raises. */
-        rb_set_errinfo(Qnil);
+        /* Put back what an enclosing rescue holds, not Qnil. */
+        rb_set_errinfo(saved);
         return (uintptr_t)Qnil;
     }
     return (uintptr_t)r;
@@ -785,9 +797,10 @@ rpyyarv_top_self(void)
     static VALUE top_self = Qundef;
     if (top_self == Qundef) {
         int state = 0;
+        VALUE saved = rb_errinfo();
         VALUE v = rb_eval_string_protect("self", &state);
         if (state) {
-            rb_set_errinfo(Qnil);
+            rb_set_errinfo(saved);
             return (uintptr_t)Qnil;
         }
         rb_gc_register_mark_object(v);
@@ -930,9 +943,8 @@ rpyyarv_inspect_cstr(uintptr_t obj)
     a.out = Qnil;
 
     int state = 0;
-    rb_protect(inspect_body, (VALUE)&a, &state);
+    protect_keeping_errinfo(inspect_body, (VALUE)&a, &state);
     if (state) {
-        rb_set_errinfo(Qnil);
         return NULL;
     }
     return rb_string_value_cstr(&a.out);
@@ -1176,10 +1188,9 @@ rpyyarv_method_owner(uintptr_t klass, uintptr_t id)
     VALUE r;
     a.klass = (VALUE)klass;
     a.id = (ID)id;
-    r = rb_protect(method_owner_body, (VALUE)&a, &state);
+    r = protect_keeping_errinfo(method_owner_body, (VALUE)&a, &state);
     /* No such method, or klass is not a Module: not an error here. */
     if (state) {
-        rb_set_errinfo(Qnil);
         return (uintptr_t)Qnil;
     }
     return (uintptr_t)r;
@@ -1229,9 +1240,8 @@ rpyyarv_super_owner(uintptr_t klass, uintptr_t owner, uintptr_t id)
     a.klass = (VALUE)klass;
     a.owner = (VALUE)owner;
     a.id = (ID)id;
-    r = rb_protect(super_owner_body, (VALUE)&a, &state);
+    r = protect_keeping_errinfo(super_owner_body, (VALUE)&a, &state);
     if (state) {
-        rb_set_errinfo(Qnil);
         return (uintptr_t)Qnil;
     }
     return (uintptr_t)r;
@@ -1372,9 +1382,8 @@ rpyyarv_dir_of(uintptr_t path)
 {
     VALUE p = (VALUE)path;
     int state = 0;
-    VALUE r = rb_protect(dir_of_body, (VALUE)&p, &state);
+    VALUE r = protect_keeping_errinfo(dir_of_body, (VALUE)&p, &state);
     if (state) {
-        rb_set_errinfo(Qnil);
         return (uintptr_t)Qundef;
     }
     return (uintptr_t)r;
@@ -1407,9 +1416,8 @@ rpyyarv_responds(uintptr_t klass, uintptr_t sym)
     if (!rb_method_basic_definition_p(a.klass, rb_intern("respond_to?")) ||
         !rb_method_basic_definition_p(a.klass, rb_intern("respond_to_missing?")))
         return -1;
-    r = rb_protect(responds_body, (VALUE)&a, &state);
+    r = protect_keeping_errinfo(responds_body, (VALUE)&a, &state);
     if (state) {
-        rb_set_errinfo(Qnil);
         return -1;
     }
     return RTEST(r) ? 1 : 0;
@@ -2361,6 +2369,7 @@ rpyyarv_yield_values(int argc, const uintptr_t *argv, int kw, int *state)
     a.argv = (const VALUE *)argv;
     a.kw = kw;
     *state = 0;
+    VALUE saved = rb_errinfo();
     r = rb_protect(yield_body, (VALUE)&a, &st);
     if (st == 0) return (uintptr_t)r;
     if (st == RUBY_TAG_RAISE) {
@@ -2371,7 +2380,7 @@ rpyyarv_yield_values(int argc, const uintptr_t *argv, int kw, int *state)
         /* The value rides in the tag, which rb_protect does not hand back;
            every CRuby iterator that breaks ignores what `each` returned. */
         *state = 1;
-        rb_set_errinfo(Qnil);
+        rb_set_errinfo(saved);
         return (uintptr_t)Qnil;
     }
     /* return/next/redo/retry/throw belong to a frame further out. Park the
@@ -3358,9 +3367,8 @@ rpyyarv_struct_member_index(uintptr_t klass, uintptr_t id)
     VALUE out;
     a.klass = (VALUE)klass;
     a.id = (ID)id;
-    out = rb_protect(struct_member_index_body, (VALUE)&a, &state);
+    out = protect_keeping_errinfo(struct_member_index_body, (VALUE)&a, &state);
     if (state) {
-        rb_set_errinfo(Qnil);
         return -1;
     }
     return FIX2INT(out);
@@ -3406,9 +3414,8 @@ rpyyarv_struct_arity(uintptr_t klass)
         || RCLASS_SINGLETON_P(k) || !RCLASS_INITIALIZED_P(k)
         || rb_get_alloc_func(k) == 0)
         return -1;
-    n = rb_protect(struct_arity_body, k, &state);
+    n = protect_keeping_errinfo(struct_arity_body, k, &state);
     if (state) {
-        rb_set_errinfo(Qnil);
         return -1;
     }
     if (!RB_INTEGER_TYPE_P(n)) return -1;
@@ -3488,9 +3495,8 @@ rpyyarv_class_le(uintptr_t klass, uintptr_t target)
     VALUE r;
     a.klass = (VALUE)klass;
     a.id = (ID)target;
-    r = rb_protect(class_le_body, (VALUE)&a, &state);
+    r = protect_keeping_errinfo(class_le_body, (VALUE)&a, &state);
     if (state) {
-        rb_set_errinfo(Qnil);
         return -1;
     }
     if (NIL_P(r)) return 0;
