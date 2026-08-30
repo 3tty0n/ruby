@@ -318,7 +318,15 @@ class Hash
   def merge!(*others)
     i = 0
     while i < others.length
-      ps = __rpyyarv_hash_pairs__(others[i])
+      o = others[i]
+      o = Hash.try_convert(o) unless o.is_a?(Hash)
+      if o.nil?
+        d = others[i]
+        # rb_to_hash_type names nil/true/false themselves, others by class.
+        n = d.nil? || d == true || d == false ? d.inspect : d.class.to_s
+        raise TypeError, "no implicit conversion of #{n} into Hash"
+      end
+      ps = __rpyyarv_hash_pairs__(o)
       j = 0
       while j < ps.length
         k = ps[j]
