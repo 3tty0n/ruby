@@ -2,6 +2,7 @@
 
 from rpyyarv import block as block_mod
 from rpyyarv import boot
+from rpyyarv.error import errinfos
 from rpyyarv import threading
 from rpyyarv import value
 from rpyyarv.rlib import clock_ns, dont_look_inside, gc_mark_state
@@ -237,6 +238,14 @@ def _mark_all():
     k = 0
     while k < len(held):
         v = held[k]
+        if not value.is_immediate(v):
+            boot.gc_mark_value(v)
+        k += 1
+    # $! of every running rescue: ec->errinfo no longer roots it.
+    errs = errinfos.stack
+    k = 0
+    while k < len(errs):
+        v = errs[k]
         if not value.is_immediate(v):
             boot.gc_mark_value(v)
         k += 1

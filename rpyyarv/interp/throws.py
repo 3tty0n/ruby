@@ -151,18 +151,12 @@ def _run_catch(frame, entry, throw):
 
 
 def _run_with_errinfo(w_iseq, callee, errinfo):
-    """$! reads ec->errinfo: RPyYARV pushes no CRuby rescue frame."""
-    prev = rubycall.swap_errinfo(errinfo)
-    # Taking the exception out of libruby cleared ec->errinfo, so the
-    # enclosing rescue's own $! is what this body has to put back.
-    if prev == value.Q_NIL and len(errinfos.stack) > 0:
-        prev = errinfos.stack[len(errinfos.stack) - 1]
+    """$! comes off this stack; ec->errinfo stays nil, as it does in CRuby."""
     errinfos.stack.append(errinfo)
     try:
         return execute(w_iseq, callee)
     finally:
         errinfos.stack.pop()
-        rubycall.swap_errinfo(prev)
 
 
 def _unwind(iseq, frame, throw, epc):

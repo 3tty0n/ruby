@@ -2,6 +2,7 @@
 
 from rpyyarv import boot
 from rpyyarv import debug
+from rpyyarv.error import errinfos
 from rpyyarv import symbols
 from rpyyarv import threading
 from rpyyarv import value
@@ -30,6 +31,8 @@ class _Stress(object):
 
 stress = _Stress()
 
+ERRINFO = symbols.intern('$!')
+RAISE = symbols.intern('raise')
 REQUIRE = symbols.intern('require')
 REQUIRE_RELATIVE = symbols.intern('require_relative')
 NEW = symbols.intern('new')
@@ -122,6 +125,26 @@ def intern_rid(r):
     return mid
 
 
+def _publish_errinfo_now():
+    """Lend the running rescue's $! to CRuby for the length of one call."""
+    stack = errinfos.stack
+    if len(stack) == 0:
+        return value.Q_UNDEF
+    return boot.swap_errinfo(stack[len(stack) - 1])
+
+
+def _publish_errinfo(mid):
+    """CRuby's raise reads ec->errinfo for `cause` and for a bare re-raise."""
+    if mid != RAISE:
+        return value.Q_UNDEF
+    return _publish_errinfo_now()
+
+
+def _restore_errinfo(prev):
+    if prev != value.Q_UNDEF:
+        boot.swap_errinfo(prev)
+
+
 @dont_look_inside
 def call(recv, mid, args, public_only=False):
     if (mid == REQUIRE or mid == REQUIRE_RELATIVE) and len(args) == 1:
@@ -134,10 +157,12 @@ def call(recv, mid, args, public_only=False):
     ractor_wait = ((mid == RACTOR_VALUE or mid == RACTOR_TAKE)
                    and boot.ractor_p(recv))
     native_wait = ractor_wait and boot.native_ractors_p()
+    prev = _publish_errinfo(mid)
     try:
         return boot.funcallv(recv, rid(mid), args, mid, public_only,
                              ractor_wait and not native_wait)
     finally:
+        _restore_errinfo(prev)
         if native_wait:
             boot.native_ractors_poll(recv)
 
@@ -153,7 +178,12 @@ def calln(recv, mid, a0, a1, a2, argc, public_only=False):
         return call(recv, mid, _args_of(a0, a1, a2, argc), public_only)
     if debug.coverage.enabled:
         debug.count_foreign_site(mid, recv, a0 if argc == 1 else value.Q_UNDEF)
-    return boot.funcalln(recv, rid(mid), a0, a1, a2, argc, mid, public_only)
+    prev = _publish_errinfo(mid)
+    try:
+        return boot.funcalln(recv, rid(mid), a0, a1, a2, argc, mid,
+                             public_only)
+    finally:
+        _restore_errinfo(prev)
 
 
 def _args_of(a0, a1, a2, argc):
@@ -170,7 +200,11 @@ def _args_of(a0, a1, a2, argc):
 def call_kw(recv, mid, args, public_only=False):
     """args[-1] is the keyword Hash, unpacked by RB_PASS_KEYWORDS."""
     debug.count_foreign(mid)
-    return boot.funcallv_kw(recv, rid(mid), args, mid, public_only)
+    prev = _publish_errinfo(mid)
+    try:
+        return boot.funcallv_kw(recv, rid(mid), args, mid, public_only)
+    finally:
+        _restore_errinfo(prev)
 
 
 @dont_look_inside
@@ -307,7 +341,17 @@ def range_new(low, high, excl):
 
 @dont_look_inside
 def gvar_get(mid):
-    return boot.gvar_get(symbols.name_of(mid))
+    stack = errinfos.stack
+    if len(stack) == 0:
+        return boot.gvar_get(symbols.name_of(mid))
+    if mid == ERRINFO:
+        return stack[len(stack) - 1]
+    # An alias of $! reads ec->errinfo through CRuby's own getter.
+    prev = _publish_errinfo_now()
+    try:
+        return boot.gvar_get(symbols.name_of(mid))
+    finally:
+        _restore_errinfo(prev)
 
 
 @dont_look_inside

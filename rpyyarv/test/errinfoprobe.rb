@@ -19,3 +19,17 @@ rescue
   p $!.message
 end
 p $!
+
+# ec->errinfo stays nil while a rescue body runs, so `cause` has to come
+# from the rescue's own $! at the moment the new exception is raised.
+begin
+  begin
+    raise "inner"
+  rescue
+    def reraise; raise; end
+    begin; reraise; rescue => e; p [:bare, e.message]; end
+    raise ArgumentError, "outer"
+  end
+rescue => e
+  p [e.class, e.cause.class, e.cause.message]
+end

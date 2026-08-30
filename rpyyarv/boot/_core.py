@@ -9,7 +9,7 @@ from rpython.rlib.rthread import ThreadLocalReference
 from rpython.translator.tool.cbuild import ExternalCompilationInfo
 
 from rpyyarv import symbols
-from rpyyarv.error import RubyException, errinfos
+from rpyyarv.error import RubyException
 from rpyyarv.value import Q_NIL
 
 
@@ -318,12 +318,8 @@ class RubyError(Exception):
 
 
 def take_errinfo():
-    """Hand the exception over, leaving $! as the running rescue's own."""
-    stack = errinfos.stack
-    keep = Q_NIL
-    if len(stack) > 0:
-        keep = stack[len(stack) - 1]
-    return rffi.cast(lltype.Signed, rb_swap_errinfo(_v(keep)))
+    """Hand the exception over; CRuby leaves ec->errinfo nil once caught."""
+    return rffi.cast(lltype.Signed, rb_swap_errinfo(_v(Q_NIL)))
 
 
 def _failed(name):
