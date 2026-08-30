@@ -378,7 +378,7 @@ def invoke(frame, w_ci, w_block=None):
         return _define_attrs(frame, mid, recv, recv_at, argc)
     if mid == DEFINE_METHOD and argc == 1 and not w_ci.blockarg \
             and w_block is not None and w_block.kind == block_mod.KIND_ISEQ \
-            and w_block.w_iseq.simple_params and not frame.module_func \
+            and not frame.module_func \
             and _attr_name(frame.slots[recv_at + 1]) != '':
         return _define_bmethod(frame, mid, recv, recv_at, w_block,
                                frame.private_pragma)
