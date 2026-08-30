@@ -273,7 +273,7 @@ class Loader(object):
                         [p for p in pool.paths], opt_table, raw.rest_start,
                         raw.post_start, raw.post_num, '', autosplat,
                         returns, returns and raw.type in self.RETURN_TARGETS,
-                        [dispatch.new_const_site() for _ in pool.paths],
+                        [dispatch.new_const_site(p) for p in pool.paths],
                         kw_table, kw_defaults, raw.kw_required, kw_start,
                         raw.kw_bits, raw.kwrest, self.program.path,
                         [t for t in pool.case_tables],

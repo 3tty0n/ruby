@@ -43,7 +43,7 @@ def _const_path(frame, iseq, idx):
     """A per-site memo of _const_walk; the global cache is the fallback."""
     # Keyed on the innermost class: _push_cref interns one node per pair.
     base = _const_base(frame)
-    entry = dispatch.const_site(iseq.path_sites[idx], dispatch.consts.version)
+    entry = dispatch.const_site(iseq.path_sites[idx])
     if entry is not None and entry.base == base:
         return entry.value
     return _const_path_miss(iseq.path_sites[idx], base, _cref_of(frame),

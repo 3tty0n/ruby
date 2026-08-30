@@ -80,7 +80,7 @@ MARK_HOOK = lltype.Ptr(lltype.FuncType([], lltype.Void))
 THREAD_HOOK = lltype.Ptr(lltype.FuncType([], lltype.Void))
 
 
-CONST_HOOK = lltype.Ptr(lltype.FuncType([], lltype.Void))
+CONST_HOOK = lltype.Ptr(lltype.FuncType([VALUE], lltype.Void))
 
 METHOD_HOOK = lltype.Ptr(lltype.FuncType([VALUE, VALUE], lltype.Void))
 

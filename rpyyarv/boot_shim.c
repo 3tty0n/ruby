@@ -1140,17 +1140,16 @@ rpyyarv_gc_mark_maybe(uintptr_t v)
     rb_gc_mark_maybe((VALUE)v);
 }
 
-static void (*const_hook)(void);
+static void (*const_hook)(uintptr_t);
 
 static void
 const_changed(ID id)
 {
-    (void)id;
-    if (const_hook) const_hook();
+    if (const_hook) const_hook((uintptr_t)id);
 }
 
 void
-rpyyarv_set_const_hook(void (*fn)(void))
+rpyyarv_set_const_hook(void (*fn)(uintptr_t))
 {
     const_hook = fn;
     rb_rpyyarv_set_constant_hook(fn ? const_changed : NULL);

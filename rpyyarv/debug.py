@@ -128,6 +128,9 @@ def report():
     note('invalidations: named %d, chain %d' % (named, chain))
     note('method-cache invalidations: %d (skipped %d)'
          % (dispatch.owners.invalidations, dispatch.owners.skipped))
+    note('constant invalidations: %d (skipped %d)'
+         % (dispatch.const_invalidations.count,
+            dispatch.const_invalidations.skipped))
     note('gc roots: %s' % gcroots.root_inventory())
     note('root marking: %d walk(s), %d ns' % (gcroots.mark_cost.walks,
                                               gcroots.mark_cost.ns))

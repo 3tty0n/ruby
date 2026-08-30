@@ -190,8 +190,8 @@ void rpyyarv_set_fiber_hooks(rpyyarv_fiber_save_fn park,
 typedef void (*rpyyarv_handle_mark_fn)(long handle);
 void rpyyarv_set_handle_mark_callback(rpyyarv_handle_mark_fn fn);
 
-/* From rb_clear_constant_cache_for_id; RPyYARV invalidates its cache whole. */
-void rpyyarv_set_const_hook(void (*fn)(void));
+/* From rb_clear_constant_cache_for_id; the ID says which name changed. */
+void rpyyarv_set_const_hook(void (*fn)(uintptr_t id));
 
 /* From rb_clear_method_cache: CRuby's funnel for def/undef/alias/include. */
 void rpyyarv_set_method_hook(void (*fn)(uintptr_t, uintptr_t));
