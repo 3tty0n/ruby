@@ -179,14 +179,15 @@ def _trampoline_callback(self_v, rid, owner_v, def_v, argc, argv, blockv, kw,
             owner = value.class_of(recv)
         mid, entry = dispatch.lookup_from_trampoline(boot.as_signed(rid),
                                                      owner)
+        if entry is None and from_def is not None:
+            # A def copied by define_method(UnboundMethod): the name matched,
+            # so it beats self's class, whose method is the super's caller.
+            mid = from_def.mid
+            entry = from_def
         if entry is None and owner != value.class_of(recv):
             # Aliases and the like keep the old dynamic resolution as a net.
             mid, entry = dispatch.lookup_from_trampoline(boot.as_signed(rid),
                                                          value.class_of(recv))
-        if entry is None and from_def is not None:
-            # The shared def is the best identity the maps still hold.
-            mid = from_def.mid
-            entry = from_def
     # argv lives on CRuby's VM stack for the call, so it needs no root.
     w_block = None
     proc_v = boot.as_signed(blockv)

@@ -211,7 +211,7 @@ gccheck:
 	          test/nestedrescue.rb test/errinfoprobe.rb \
 	          test/bmethodkwreturn.rb \
 	          test/definedgvar.rb \
-	          test/blockraise.rb \
+	          test/blockraise.rb test/defmethodsuper.rb \
 	          $(TOP)/benchmark/app_*.rb $(TOP)/benchmark/so_*.rb; do \
 	   n=`basename $$s`; \
 	   case $$s in test/*) \
