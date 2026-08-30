@@ -401,6 +401,21 @@ rb_rpyyarv_method_def(VALUE klass, ID mid)
     return me ? (const void *)me->def : NULL;
 }
 
+/* The module a lookup lands in, without dispatching Module#instance_method:
+   a class may override it (delegate.rb does) and a probe must not run that. */
+VALUE
+rb_rpyyarv_method_owner(VALUE klass, ID mid)
+{
+    const rb_method_entry_t *me;
+    if (!RB_TYPE_P(klass, T_CLASS) && !RB_TYPE_P(klass, T_MODULE) &&
+        !RB_TYPE_P(klass, T_ICLASS)) {
+        return Qnil;
+    }
+    me = rb_method_entry(klass, mid);
+    if (!me || UNDEFINED_METHOD_ENTRY_P(me)) return Qnil;
+    return me->owner;
+}
+
 void
 rb_clear_constant_cache_for_id(ID id)
 {

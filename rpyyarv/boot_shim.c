@@ -1171,29 +1171,11 @@ struct owner_args {
     ID    id;
 };
 
-static VALUE
-method_owner_body(VALUE argp)
-{
-    struct owner_args *p = (struct owner_args *)argp;
-    VALUE m = rb_funcall(p->klass, rb_intern("instance_method"), 1,
-                         ID2SYM(p->id));
-    return rb_funcall(m, rb_intern("owner"), 0);
-}
-
 uintptr_t
 rpyyarv_method_owner(uintptr_t klass, uintptr_t id)
 {
-    struct owner_args a;
-    int state = 0;
-    VALUE r;
-    a.klass = (VALUE)klass;
-    a.id = (ID)id;
-    r = protect_keeping_errinfo(method_owner_body, (VALUE)&a, &state);
-    /* No such method, or klass is not a Module: not an error here. */
-    if (state) {
-        return (uintptr_t)Qnil;
-    }
-    return (uintptr_t)r;
+    /* No such method, or klass is not a Module: Qnil, never an error. */
+    return (uintptr_t)rb_rpyyarv_method_owner((VALUE)klass, (ID)id);
 }
 
 struct super_args {
@@ -2198,7 +2180,8 @@ block_yielder(RB_BLOCK_CALL_FUNC_ARGLIST(yielded, callback_arg))
                               ? (long)FIX2LONG(callback_arg)
                               : (long)(uintptr_t)RTYPEDDATA_DATA(callback_arg) - 1,
                               n, (uintptr_t *)buf, (uintptr_t)here,
-                              (uintptr_t)bowner, (uintptr_t)bmid);
+                              (uintptr_t)bowner, (uintptr_t)bmid,
+                              rb_keyword_given_p() ? 1 : 0);
     }
     /* The block left early and parked why; abort the CRuby method. */
     if (block_unwind) {
