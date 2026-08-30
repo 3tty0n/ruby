@@ -326,6 +326,8 @@ uintptr_t rpyyarv_call_with_proc(uintptr_t recv, uintptr_t mid, int argc,
 /* Early exit raises RPyYARV::Unwind for EC_JUMP_TAG (vm_insnhelper.c:1929). */
 void rpyyarv_set_block_unwind(void);
 void rpyyarv_set_block_jumptag(void);
+/* An exception instead: raised so CRuby's own rescue/ensure frames run. */
+void rpyyarv_set_block_raise(uintptr_t exc);
 
 /* No RPython exception may cross into libruby; failures use *status. */
 #define RPYYARV_TRAMP_OK          0

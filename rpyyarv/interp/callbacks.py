@@ -37,8 +37,7 @@ def block_callback(handle, argc, argv, cruby_self, bowner, bmid, kw):
 
 def _block_callback(handle, argc, argv, cruby_self, bowner, bmid, kw):
     """Called from C; no RPython exception may escape into libruby."""
-    if blocks.error is not None or blocks.exc is not None \
-            or blocks.jump is not None:
+    if blocks.error is not None or blocks.jump is not None:
         return boot.as_value(value.Q_NIL)
     w_block = blocks.table[handle]
     if w_block is None:
@@ -70,10 +69,10 @@ def _block_callback(handle, argc, argv, cruby_self, bowner, bmid, kw):
             debug.note('Ractor block raised RubyException')
         # A kill goes back to CRuby as the fatal it was; ensures have run.
         boot.rethrow_if_fiber_kill(e.value)
-        # Held: the RPython field it waits in is not something CRuby scans.
+        # Rooted until rb_exc_raise makes it ec->errinfo, which CRuby marks.
         gcroots.hold(e.value)
-        blocks.exc = e
-        return _park_unwind()
+        blocks.exc.append(e.value)
+        return _park_raise(e.value)
     except block_mod.ForeignTag:
         # A tag CRuby owns; the shim re-issues it once our frames are gone.
         return _park_jumptag()
@@ -107,6 +106,13 @@ STACK_TOO_DEEP = 'the call is nested too deeply for RPyYARV\'s stack'
 @dont_look_inside
 def _park_jumptag():
     boot.set_block_jumptag()
+    return boot.as_value(value.Q_NIL)
+
+
+@dont_look_inside
+def _park_raise(v):
+    """Raised into CRuby, so rescue/ensure between the block and us run."""
+    boot.set_block_raise(v)
     return boot.as_value(value.Q_NIL)
 
 
@@ -342,11 +348,9 @@ def _call_with_block(recv, mid, args, w_block, kw=False):
 
 def _check_block_error():
     """Raises what a callback could not raise through libruby's frames."""
-    exc = blocks.exc
-    if exc is not None:
-        blocks.exc = None
-        gcroots.release(exc.value)
-        raise exc
+    # CRuby already raised these; only their GC root is still ours to drop.
+    while len(blocks.exc) > 0:
+        gcroots.release(blocks.exc.pop())
     jump = blocks.jump
     if jump is not None:
         blocks.jump = None

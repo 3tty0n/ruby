@@ -24,7 +24,7 @@ class _Blocks(object):
         self.selves = []
         self.free = []          # handles whose GC owner died
         self.error = None       # an RPython error the callback could not raise
-        self.exc = None         # likewise, a Ruby exception
+        self.exc = []           # exceptions handed to CRuby, still rooted
         self.jump = None        # likewise, a break or a non-local return
 
 

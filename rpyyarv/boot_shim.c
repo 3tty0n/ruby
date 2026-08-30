@@ -41,6 +41,8 @@ struct rb_iseq_struct;
 VALUE rb_iseqw_new(const struct rb_iseq_struct *iseq);
 
 static _Thread_local int block_unwind;
+/* The Ruby exception block_yielder re-raises into CRuby's own frames. */
+static _Thread_local VALUE block_exc;
 /* A tag rb_protect caught inside a yield, re-issued past the trampoline. */
 static _Thread_local int pending_tag;
 static _Thread_local int rpyyarv_ractor_callback_depth;
@@ -412,6 +414,14 @@ void
 rpyyarv_set_block_jumptag(void)
 {
     block_unwind = 2;
+}
+
+/* A real Ruby exception: raised into CRuby so intervening rescues see it. */
+void
+rpyyarv_set_block_raise(uintptr_t exc)
+{
+    block_exc = (VALUE)exc;
+    block_unwind = 3;
 }
 
 /* internal/thread.h's RUBY_FATAL_FIBER_KILLED, spelled out here. */
@@ -2226,6 +2236,11 @@ block_yielder(RB_BLOCK_CALL_FUNC_ARGLIST(yielded, callback_arg))
             pending_tag = 0;
             /* Our frames are gone; the tag can finish the jump it started. */
             if (tag) rb_jump_tag(tag);
+        }
+        if (how == 3) {
+            VALUE e = block_exc;
+            block_exc = Qnil;
+            rb_exc_raise(e);
         }
         rb_raise(unwind_class(), "rpyyarv: non-local exit from a block");
     }
