@@ -137,12 +137,27 @@ def _run_catch(frame, entry, throw):
                              if w_iseq.nlocals > 0 else value.Q_NIL)
 
 
+class _Errinfo(object):
+    def __init__(self):
+        # $! of each rescue body still running, innermost last.
+        self.stack = []
+
+
+errinfos = _Errinfo()
+
+
 def _run_with_errinfo(w_iseq, callee, errinfo):
     """$! reads ec->errinfo: RPyYARV pushes no CRuby rescue frame."""
     prev = rubycall.swap_errinfo(errinfo)
+    # Taking the exception out of libruby cleared ec->errinfo, so the
+    # enclosing rescue's own $! is what this body has to put back.
+    if prev == value.Q_NIL and len(errinfos.stack) > 0:
+        prev = errinfos.stack[len(errinfos.stack) - 1]
+    errinfos.stack.append(errinfo)
     try:
         return execute(w_iseq, callee)
     finally:
+        errinfos.stack.pop()
         rubycall.swap_errinfo(prev)
 
 
