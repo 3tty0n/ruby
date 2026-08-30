@@ -186,6 +186,7 @@ gccheck:
 	          test/splatkw.rb test/r2kwargs.rb test/fwdargs.rb \
 	          test/delegators.rb \
 	          test/bmethodblockarg.rb test/throwacross.rb \
+	          test/procrecycle.rb \
 	          test/aryslice.rb \
 	          test/intstep.rb \
 	          test/classnewblock.rb \

@@ -23,7 +23,6 @@ class _Blocks(object):
         # handle -> the self it was handed over under, for instance_eval yields.
         self.selves = []
         self.free = []          # handles whose GC owner died
-        self.by_proc = {}       # a materialised Proc -> the block behind it
         self.error = None       # an RPython error the callback could not raise
         self.exc = None         # likewise, a Ruby exception
         self.jump = None        # likewise, a break or a non-local return
@@ -54,11 +53,8 @@ def _alloc_handle(w_block):
 def _release_handle(h):
     w_block = blocks.table[h]
     if w_block is not None:
-        v = w_block.proc_value
         # The Proc died; a later escape must build a fresh one.
         w_block.proc_value = 0
-        if v in blocks.by_proc and blocks.by_proc[v] is w_block:
-            del blocks.by_proc[v]
     blocks.table[h] = None
     blocks.selves[h] = 0
     blocks.free.append(h)
@@ -73,13 +69,12 @@ def _to_proc(w_block):
         return w_block.proc_value
     v = boot.proc_new(_alloc_handle(w_block))
     w_block.proc_value = v
-    blocks.by_proc[v] = w_block
     return v
 
 
 def _proc_block_of(recv):
     """The live block a proxyable receiver stands for; the proc itself says.
-    A by_proc lookup could hit a stale entry once the address was recycled."""
+    A VALUE-keyed map could hit a stale entry once the address was recycled."""
     if value.is_immediate(recv) or \
             (raw_word(recv, value.FLAGS_WORD) & value.T_MASK) != value.T_DATA:
         return None
@@ -102,8 +97,9 @@ def _block_from_value(frame_block, v):
     if v == proxy.value:
         # The frame's own block, without ever having built a Proc for it.
         return frame_block
-    if v in blocks.by_proc:
-        return blocks.by_proc[v]
+    w_own = _proc_block_of(v)
+    if w_own is not None:
+        return w_own
     if boot.is_symbol(v):
         return block_mod.from_symbol(symbols.intern(boot.sym_of(v)))
     if not value.is_immediate(v) and boot.is_proc(v):
