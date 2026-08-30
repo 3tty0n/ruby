@@ -8,6 +8,7 @@ from rpyyarv.boot._core import (_ext, _v, VALUE, VALUEP, INTP, MAX_ARGC,
                                 BLOCK_HOOK, TRAMP_HOOK, _enter_status,
                                 _leave_status, _leave_status_code,
                                 _enter_argv, _leave_argv, _current_nesting,
+                                _leave_status_code_at,
                                 _enter_status_at, _leave_status_at,
                                 _enter_argv_at, _leave_argv_at,
                                 _failed, _failed_mid, RubyError,
@@ -131,7 +132,10 @@ def call0(recv, mid):
         state[0] = rffi.cast(rffi.INT, 0)
         with rffi.scoped_str2charp(mid) as c_mid:
             v = rb_call0(_v(recv), c_mid, state)
-        if rffi.cast(lltype.Signed, state[0]) != 0:
+        code = rffi.cast(lltype.Signed, state[0])
+        if code == FOREIGN_TAG:
+            raise ForeignJump()
+        if code != 0:
             raise RubyError(mid)
         return rffi.cast(lltype.Signed, v)
 
@@ -178,10 +182,12 @@ def _funcallv_argv(nesting, argv, recv, rid, argc, mid, public_only, blocking):
         v = fn(
             rffi.cast(VALUE, recv), rffi.cast(VALUE, rid),
             rffi.cast(rffi.INT, argc), argv, state)
-    failed = _leave_status_at(nesting, state)
+    code = _leave_status_code_at(nesting, state)
     ret = rffi.cast(lltype.Signed, v)
     _leave_argv_at(nesting, argv)
-    if failed:
+    if code == FOREIGN_TAG:
+        raise ForeignJump()
+    if code != 0:
         _failed_mid(mid)
     return ret
 
@@ -201,10 +207,12 @@ def funcallv_kw(recv, rid, args, mid, public_only=False):
         rffi.cast(VALUE, recv), rffi.cast(VALUE, rid),
         rffi.cast(rffi.INT, argc), argv,
         rffi.cast(rffi.INT, 1 if public_only else 0), state)
-    failed = _leave_status(state)
+    code = _leave_status_code(state)
     ret = rffi.cast(lltype.Signed, v)
     _leave_argv(argv)
-    if failed:
+    if code == FOREIGN_TAG:
+        raise ForeignJump()
+    if code != 0:
         _failed_mid(mid)
     return ret
 
@@ -251,10 +259,12 @@ def call_with_block(recv, rid, args, handle, native, native_cref, mid,
                            rffi.cast(rffi.VOIDP, native),
                            rffi.cast(rffi.VOIDP, native_cref),
                            rffi.cast(rffi.INT, 1 if kw else 0), state)
-    failed = _leave_status(state)
+    code = _leave_status_code(state)
     ret = rffi.cast(lltype.Signed, v)
     _leave_argv(argv)
-    if failed:
+    if code == FOREIGN_TAG:
+        raise ForeignJump()
+    if code != 0:
         _failed_mid(mid)
     return ret
 

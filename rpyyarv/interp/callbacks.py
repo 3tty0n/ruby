@@ -74,6 +74,9 @@ def _block_callback(handle, argc, argv, cruby_self, bowner, bmid, kw):
         gcroots.hold(e.value)
         blocks.exc = e
         return _park_unwind()
+    except block_mod.ForeignTag:
+        # A tag CRuby owns; the shim re-issues it once our frames are gone.
+        return _park_jumptag()
     except block_mod.BlockJump, e:
         if debug.state.channels & debug.SUMMARY:
             debug.note('Ractor block raised BlockJump')
@@ -99,6 +102,12 @@ def _block_callback(handle, argc, argv, cruby_self, bowner, bmid, kw):
 
 
 STACK_TOO_DEEP = 'the call is nested too deeply for RPyYARV\'s stack'
+
+
+@dont_look_inside
+def _park_jumptag():
+    boot.set_block_jumptag()
+    return boot.as_value(value.Q_NIL)
 
 
 @dont_look_inside
@@ -285,10 +294,8 @@ def _from_cruby(recv, mid, entry, argv, argc, w_block, kw_splat=False):
 def _attr_from_cruby(entry, recv, args, w_block=None):
     """_from_cruby's accessor case; CRuby's argv is already a marked buffer."""
     if entry.kind == dispatch.KIND_BMETHOD:
-        if w_block is not None:
-            return _call_with_block(recv, entry.mid, args, w_block)
         debug.count_native()
-        return _run_bmethod(entry, recv, args)
+        return _run_bmethod(entry, recv, args, NO_KEYWORDS, False, w_block)
     if entry.kind == dispatch.KIND_ATTR_READER:
         if len(args) != 0:
             _arity_error(len(args), 0, 0)

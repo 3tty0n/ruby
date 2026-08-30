@@ -853,7 +853,8 @@ def _native_binop(recv, arg, mid):
 
 
 @unroll_safe
-def _attr_send(frame, entry, recv, recv_at, argc, w_block=None):
+def _attr_send(frame, entry, recv, recv_at, argc, w_block=None,
+               kw_names=NO_KEYWORDS, kw_splat=False):
     """attr_* entry: getinstancevariable's ivar access, without a frame."""
     if entry.kind == dispatch.KIND_BMETHOD:
         args = [0] * argc
@@ -862,11 +863,8 @@ def _attr_send(frame, entry, recv, recv_at, argc, w_block=None):
             args[i] = frame.slots[recv_at + 1 + i]
             i += 1
         _drop(frame, recv_at)
-        # A block here must reach a yield in the body: left to CRuby's bmethod.
-        if w_block is not None:
-            return _call_with_block(recv, entry.mid, args, w_block)
         debug.count_native()
-        return _run_bmethod(entry, recv, args)
+        return _run_bmethod(entry, recv, args, kw_names, kw_splat, w_block)
     if entry.kind == dispatch.KIND_ATTR_READER:
         if argc != 0:
             _arity_error(argc, 0, 0)
@@ -1010,7 +1008,8 @@ def _kw_invoke(frame, w_ci, recv_at, argc, w_block, mid, fcall):
     if entry is not None and (fcall or not (entry.private or entry.prot)):
         if entry.kind != dispatch.KIND_ISEQ:
             # attr_* takes no keywords: only the arity error CRuby raises.
-            return _attr_send(frame, entry, recv, recv_at, argc, w_block)
+            return _attr_send(frame, entry, recv, recv_at, argc, w_block,
+                              w_ci.kw_names, kw_splat)
         if w_block is None or w_ci.blockarg:
             return _enter(frame, entry, recv, recv_at, argc, mid,
                           w_block, w_ci.kw_names, kw_splat)
@@ -1211,7 +1210,8 @@ def _splat_invoke(frame, w_ci, recv_at, argc, w_block, mid, fcall):
         fcall = True
     if entry is not None and (fcall or not (entry.private or entry.prot)):
         if entry.kind != dispatch.KIND_ISEQ:
-            return _attr_send_args(frame, entry, recv, recv_at, args, w_block)
+            return _attr_send_args(frame, entry, recv, recv_at, args, w_block,
+                                   kw_names, kw_splat)
         if w_block is None or w_ci.blockarg:
             return _enter_args(frame, entry, recv, recv_at, args, mid,
                                w_block, kw_names, kw_splat)
@@ -1256,15 +1256,14 @@ def _splat_invoke(frame, w_ci, recv_at, argc, w_block, mid, fcall):
     return ret
 
 
-def _attr_send_args(frame, entry, recv, recv_at, args, w_block=None):
+def _attr_send_args(frame, entry, recv, recv_at, args, w_block=None,
+                    kw_names=NO_KEYWORDS, kw_splat=False):
     """_attr_send for a *splat call, whose arguments are already a list."""
     argc = len(args)
     if entry.kind == dispatch.KIND_BMETHOD:
         _drop(frame, recv_at)
-        if w_block is not None:
-            return _call_with_block(recv, entry.mid, args, w_block)
         debug.count_native()
-        return _run_bmethod(entry, recv, args)
+        return _run_bmethod(entry, recv, args, kw_names, kw_splat, w_block)
     if entry.kind == dispatch.KIND_ATTR_READER:
         if argc != 0:
             _arity_error(argc, 0, 0)

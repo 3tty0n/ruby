@@ -225,15 +225,25 @@ def _run_lambda(w_block, b_iseq, callee, args, kw_names, kw_splat):
 
 
 @unroll_safe
-def _run_bmethod(entry, recv, args, kw_names=NO_KEYWORDS, kw_splat=False):
+def _run_bmethod(entry, recv, args, kw_names=NO_KEYWORDS, kw_splat=False,
+                 passed=None):
     """entry.w_block: method-style arity; return/break leave the method."""
     w_block = entry.w_block
     b_iseq = promote(w_block.w_iseq)
     outer = w_block.frame
+    cref = outer.cref
+    if cref is None:
+        # The entry is not the block's lexical home: take the writer's.
+        cref = _cref_of(outer)
     # The method's own identity, not the defining frame's: super needs it.
-    callee = Frame(b_iseq, recv, outer.cref, entry)
+    callee = Frame(b_iseq, recv, cref, entry)
     callee.defining_frame = outer
     callee.own_block = w_block
+    # yield in a bmethod body takes the defining frame's block, not the call's.
+    callee.block = w_block.outer
+    if passed is not None and b_iseq.block_start >= 0:
+        callee.local_set(b_iseq.block_start, _to_proc(passed))
+        callee.block_param_set = True
     return _run_lambda(w_block, b_iseq, callee, args, kw_names, kw_splat)
 
 

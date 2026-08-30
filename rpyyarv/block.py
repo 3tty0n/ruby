@@ -1,4 +1,8 @@
 """KIND_PROC/KIND_SYM hold a VALUE gcroots marks; KIND_ISEQ holds none."""
+from __future__ import absolute_import
+
+# The one parked-tag exception: raised in the shim wrappers, caught here.
+from rpyyarv.boot._core import ForeignJump as ForeignTag
 
 KIND_ISEQ = 0
 KIND_PROC = 1
@@ -51,10 +55,6 @@ class BlockReturn(BlockJump):
     def __init__(self, frame, value):
         BlockJump.__init__(self, value)
         self.frame = frame
-
-
-class ForeignTag(Exception):
-    """A tag a yield caught for a frame past ours; the shim re-issues it."""
 
 
 class BlockBreak(BlockJump):

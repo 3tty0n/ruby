@@ -185,6 +185,7 @@ gccheck:
 	          test/superchain.rb test/blockself.rb test/fcallproc.rb \
 	          test/splatkw.rb test/r2kwargs.rb test/fwdargs.rb \
 	          test/delegators.rb \
+	          test/bmethodblockarg.rb test/throwacross.rb \
 	          test/aryslice.rb \
 	          test/intstep.rb \
 	          test/classnewblock.rb \

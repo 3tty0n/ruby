@@ -97,6 +97,9 @@ rb_vm_core = _ext('rpyyarv_vm_core', [], VALUE, reenters=True)
 rb_set_block_unwind = _ext('rpyyarv_set_block_unwind', [], lltype.Void)
 
 
+rb_set_block_jumptag = _ext('rpyyarv_set_block_jumptag', [], lltype.Void)
+
+
 rb_bop_mask = _ext('rpyyarv_bop_mask', [INTP], VALUE, reenters=True)
 
 
@@ -150,6 +153,11 @@ def vm_core():
 def set_block_unwind():
     """Tell the shim the block it is running left early; see boot_shim.h."""
     rb_set_block_unwind()
+
+
+def set_block_jumptag():
+    """As set_block_unwind, but the shim re-issues the parked tag first."""
+    rb_set_block_jumptag()
 
 
 def set_thread_callbacks(enter, leave, acquire, release):

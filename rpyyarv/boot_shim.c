@@ -407,6 +407,13 @@ rpyyarv_set_block_unwind(void)
     block_unwind = 1;
 }
 
+/* The block parked a tag CRuby owns; block_yielder re-issues it. */
+void
+rpyyarv_set_block_jumptag(void)
+{
+    block_unwind = 2;
+}
+
 /* internal/thread.h's RUBY_FATAL_FIBER_KILLED, spelled out here. */
 #define RPYYARV_FIBER_KILLED RB_INT2FIX(2)
 
@@ -439,6 +446,13 @@ absorb_unwind(int *state)
 {
     VALUE err;
     if (!*state) return;
+    /* break/return/throw name a frame past ours: park the tag for the shim to
+       re-issue. errinfo then holds throw data, never an exception. */
+    if (*state != RUBY_TAG_RAISE) {
+        pending_tag = *state;
+        *state = RPYYARV_PARKED_TAG;
+        return;
+    }
     err = rb_errinfo();
     if (!NIL_P(err) && rb_obj_is_kind_of(err, unwind_class())) {
         rb_set_errinfo(Qnil);
@@ -529,6 +543,7 @@ rpyyarv_call0(uintptr_t recv, const char *mid, int *state)
     VALUE saved = rb_errinfo();
     VALUE r = protect_send(call0_body, (VALUE)&a, state);
     absorb_unwind(state);
+    if (*state == RPYYARV_PARKED_TAG) return (uintptr_t)Qnil;
     if (*state) {
         /* Put back what an enclosing rescue holds, not Qnil. */
         rb_set_errinfo(saved);
@@ -2203,8 +2218,15 @@ block_yielder(RB_BLOCK_CALL_FUNC_ARGLIST(yielded, callback_arg))
     }
     /* The block left early and parked why; abort the CRuby method. */
     if (block_unwind) {
+        int how = block_unwind;
         block_unwind = 0;
         leave_rpython(acquired);
+        if (how == 2) {
+            int tag = pending_tag;
+            pending_tag = 0;
+            /* Our frames are gone; the tag can finish the jump it started. */
+            if (tag) rb_jump_tag(tag);
+        }
         rb_raise(unwind_class(), "rpyyarv: non-local exit from a block");
     }
     leave_rpython(acquired);

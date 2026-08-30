@@ -261,7 +261,10 @@ class ForeignJump(Exception):
 
 
 def _leave_status_code(p):
-    nesting = _current_nesting()
+    return _leave_status_code_at(_current_nesting(), p)
+
+
+def _leave_status_code_at(nesting, p):
     d = nesting.status - 1
     nesting.status = d
     code = rffi.cast(lltype.Signed, p[0])
