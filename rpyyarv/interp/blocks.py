@@ -119,7 +119,7 @@ def _block_from_value(frame_block, v):
 
 @unroll_safe
 def _block_send(frame, mid, recv_at, argc, w_block,
-                kw_names=NO_KEYWORDS, kw_splat=False):
+                kw_names=NO_KEYWORDS, kw_splat=False, passed=None):
     """A send onto a block RPyYARV holds: the proxy (compile.c:9564) or Proc."""
     args = [0] * argc
     i = 0
@@ -127,16 +127,16 @@ def _block_send(frame, mid, recv_at, argc, w_block,
         args[i] = frame.slots[recv_at + 1 + i]
         i += 1
     _drop(frame, recv_at)
-    return _block_send_args(mid, w_block, args, kw_names, kw_splat)
+    return _block_send_args(mid, w_block, args, kw_names, kw_splat, passed)
 
 
 @unroll_safe
 def _block_send_args(mid, w_block, args, kw_names=NO_KEYWORDS,
-                     kw_splat=False):
+                     kw_splat=False, passed=None):
     if _is_proxy_call(mid):
         if w_block is None:
             raise UnsupportedOperation('the block parameter is nil')
-        return call_block(w_block, args, kw_names, kw_splat)
+        return call_block(w_block, args, kw_names, kw_splat, passed=passed)
     if w_block is not None and w_block.kind == block_mod.KIND_ISEQ \
             and len(args) == 0 and len(kw_names) == 0 and not kw_splat:
         # The Proc wraps a C yielder, so these come from the ISeq it stands for.
@@ -153,7 +153,8 @@ def _block_send_args(mid, w_block, args, kw_names=NO_KEYWORDS,
 
 @unroll_safe
 def call_block(w_block, args, kw_names=NO_KEYWORDS, kw_splat=False,
-               self_val=value.Q_UNDEF, cref=None, entry_override=None):
+               self_val=value.Q_UNDEF, cref=None, entry_override=None,
+               passed=None):
     """Run a block's ISeq in a frame chaining to the defining one's locals."""
     keyed = len(kw_names) > 0 or kw_splat
     if w_block.kind != block_mod.KIND_ISEQ:
@@ -175,6 +176,10 @@ def call_block(w_block, args, kw_names=NO_KEYWORDS, kw_splat=False,
     callee.defining_frame = outer
     callee.block = w_block.outer
     callee.own_block = w_block
+    if passed is not None and b_iseq.block_start >= 0:
+        # Proc#call's block binds `&b` only; yield still takes the lep's.
+        callee.local_set(b_iseq.block_start, _to_proc(passed))
+        callee.block_param_set = True
     # entry_override names a bmethod invocation: define_method's block IS the
     # method body, so it owns its `return` and takes method-style arity.
     if w_block.is_lambda or entry_override is not None:

@@ -521,12 +521,14 @@ def invoke(frame, w_ci, w_block=None):
                     _drop(frame, recv_at)
                     return out
     if proxy.value != 0 and recv == proxy.value:
-        return _block_send(frame, mid, recv_at, argc, frame.block)
+        return _block_send(frame, mid, recv_at, argc, frame.block,
+                           passed=w_block)
     if _is_proxy_call(mid) or mid == ARITY or mid == LAMBDA_P:
         w_own = _proc_block_of(recv)
         if w_own is not None:
             # A Proc RPyYARV made: run its block here, not out through CRuby.
-            return _block_send(frame, mid, recv_at, argc, w_own)
+            return _block_send(frame, mid, recv_at, argc, w_own,
+                               passed=w_block)
     if w_block is not None and entry is None \
             and (mid == INSTANCE_EVAL or mid == INSTANCE_EXEC) \
             and w_block.kind == block_mod.KIND_ISEQ \
@@ -1029,12 +1031,12 @@ def _kw_invoke(frame, w_ci, recv_at, argc, w_block, mid, fcall):
     # A block RPyYARV holds runs here, keywords never crossing libruby.
     if proxy.value != 0 and recv == proxy.value:
         return _block_send(frame, mid, recv_at, argc, frame.block,
-                           w_ci.kw_names, w_ci.kw_splat)
+                           w_ci.kw_names, w_ci.kw_splat, w_block)
     if _is_proxy_call(mid):
         w_own = _proc_block_of(recv)
         if w_own is not None:
             return _block_send(frame, mid, recv_at, argc, w_own,
-                               w_ci.kw_names, w_ci.kw_splat)
+                               w_ci.kw_names, w_ci.kw_splat, w_block)
     # Left in the marked frame until rb_hash_aset has copied each one.
     kw_names = w_ci.kw_names
     nkw = len(kw_names)
@@ -1206,12 +1208,13 @@ def _splat_invoke(frame, w_ci, recv_at, argc, w_block, mid, fcall):
     if proxy.value != 0 and recv == proxy.value:
         _drop(frame, recv_at)
         return _block_send_args(mid, frame.block, args, kw_names,
-                                kw_splat)
+                                kw_splat, w_block)
     if _is_proxy_call(mid):
         w_proc = _proc_block_of(recv)
         if w_proc is not None:
             _drop(frame, recv_at)
-            return _block_send_args(mid, w_proc, args, kw_names, kw_splat)
+            return _block_send_args(mid, w_proc, args, kw_names, kw_splat,
+                                    w_block)
     # Built while the arguments are still on the marked stack.
     pass_kw = kw_splat or nkw > 0
     if kw_splat:
