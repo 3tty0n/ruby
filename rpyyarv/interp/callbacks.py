@@ -26,15 +26,16 @@ def _sub_self(handle, cruby_self):
     return v
 
 
-def block_callback(handle, argc, argv, cruby_self, bowner, bmid):
+def block_callback(handle, argc, argv, cruby_self, bowner, bmid, kw):
     acquired = threading.enter_callback()
     try:
-        return _block_callback(handle, argc, argv, cruby_self, bowner, bmid)
+        return _block_callback(handle, argc, argv, cruby_self, bowner, bmid,
+                               kw)
     finally:
         threading.leave_callback(acquired)
 
 
-def _block_callback(handle, argc, argv, cruby_self, bowner, bmid):
+def _block_callback(handle, argc, argv, cruby_self, bowner, bmid, kw):
     """Called from C; no RPython exception may escape into libruby."""
     if blocks.error is not None or blocks.exc is not None \
             or blocks.jump is not None:
@@ -45,6 +46,8 @@ def _block_callback(handle, argc, argv, cruby_self, bowner, bmid):
             'a block was called after its handle was released')
         return boot.as_value(value.Q_NIL)
     args = boot.read_values(argv, argc)
+    # A -1 cfunc frame gets keywords as a trailing Hash; only this flags it.
+    kw_splat = boot.as_int(kw) != 0 and len(args) > 0
     # Run as a bmethod the proc IS the method; super needs that identity.
     override = _bmethod_identity(boot.as_signed(bowner),
                                  boot.as_signed(bmid), w_block)
@@ -55,9 +58,11 @@ def _block_callback(handle, argc, argv, cruby_self, bowner, bmid):
         if override is not None and override.w_block is not None \
                 and override.w_block.is_lambda:
             return boot.as_value(_run_bmethod(
-                override, _sub_self(handle, cruby_self), args))
+                override, _sub_self(handle, cruby_self), args,
+                NO_KEYWORDS, kw_splat))
         # CRuby owns the frame, so the block keeps its written cref.
-        return boot.as_value(call_block(w_block, args, NO_KEYWORDS, False,
+        return boot.as_value(call_block(w_block, args, NO_KEYWORDS,
+                                        kw_splat,
                                         _sub_self(handle, cruby_self),
                                         None, override))
     except RubyException, e:

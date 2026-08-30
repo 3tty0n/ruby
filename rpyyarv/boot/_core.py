@@ -85,7 +85,8 @@ METHOD_HOOK = lltype.Ptr(lltype.FuncType([VALUE, VALUE], lltype.Void))
 
 
 BLOCK_HOOK = lltype.Ptr(lltype.FuncType([lltype.Signed, rffi.INT, VALUEP,
-                                         VALUE, VALUE, VALUE], VALUE))
+                                         VALUE, VALUE, VALUE, rffi.INT],
+                                        VALUE))
 
 
 # (self, mid, argc, argv, blockproc, kw, status, errval) -> result

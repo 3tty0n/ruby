@@ -310,7 +310,8 @@ void rpyyarv_gvar_set(const char *name, uintptr_t val, int *state);
 /* bowner/bmid: the bmethod identity when the proc runs as one, else Qnil/0. */
 typedef uintptr_t (*rpyyarv_block_fn)(long handle, int argc,
                                       uintptr_t *argv, uintptr_t sub_self,
-                                      uintptr_t bowner, uintptr_t bmid);
+                                      uintptr_t bowner, uintptr_t bmid,
+                                      int kw);
 void rpyyarv_set_block_callback(rpyyarv_block_fn fn);
 /* kw != 0 means the last argument is a Hash the callee takes as keywords. */
 uintptr_t rpyyarv_call_with_block(uintptr_t recv, uintptr_t mid, int argc,
