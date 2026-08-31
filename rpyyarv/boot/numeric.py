@@ -13,7 +13,8 @@ rb_int2inum = _ext('rpyyarv_int2inum', [rffi.LONG], VALUE, reenters=True)
 rb_float_new = _ext('rpyyarv_float_new', [rffi.DOUBLE], VALUE, reenters=True)
 
 
-rb_float_layout = _ext('rpyyarv_float_layout', [INTP], lltype.Void)
+rb_float_layout = _ext('rpyyarv_float_layout', [INTP], lltype.Void,
+                       reenters=False)
 
 
 rb_range_new_ = _ext('rpyyarv_range_new', [VALUE, VALUE, rffi.INT, INTP],

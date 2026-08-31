@@ -8,7 +8,7 @@ from rpyyarv.boot._core import (_ext, _v, VALUE, VALUEP, INTP, MAX_ARGC,
                                 _leave_argv, _failed)
 
 
-rb_ary_len = _ext('rpyyarv_ary_len', [VALUE], rffi.LONG)
+rb_ary_len = _ext('rpyyarv_ary_len', [VALUE], rffi.LONG, reenters=False)
 
 
 rb_ary_entry = _ext('rpyyarv_ary_entry', [VALUE, rffi.LONG], VALUE, reenters=True)
@@ -21,7 +21,8 @@ rb_ary_subseq = _ext('rpyyarv_ary_subseq', [VALUE, rffi.LONG, rffi.LONG],
 rb_ary_new = _ext('rpyyarv_ary_new', [rffi.INT, VALUEP], VALUE, reenters=True)
 
 
-rb_array_layout = _ext('rpyyarv_array_layout', [INTP], lltype.Void)
+rb_array_layout = _ext('rpyyarv_array_layout', [INTP], lltype.Void,
+                       reenters=False)
 
 
 rb_ary_resurrect = _ext('rpyyarv_ary_resurrect', [VALUE, INTP], VALUE, reenters=True)
@@ -53,25 +54,29 @@ rb_ary_cat = _ext('rpyyarv_ary_cat', [VALUE, rffi.INT, VALUEP, INTP],
                   lltype.Void, reenters=True)
 
 
-rb_ary_pop_fast = _ext('rpyyarv_ary_pop_fast', [VALUE], VALUE)
+rb_ary_pop_fast = _ext('rpyyarv_ary_pop_fast', [VALUE], VALUE, reenters=False)
 
 
-rb_ary_push1 = _ext('rpyyarv_ary_push1', [VALUE, VALUE], VALUE)
+rb_ary_push1 = _ext('rpyyarv_ary_push1', [VALUE, VALUE], VALUE, reenters=False)
 
 
-rb_ary_shift_fast = _ext('rpyyarv_ary_shift_fast', [VALUE], VALUE)
+rb_ary_shift_fast = _ext('rpyyarv_ary_shift_fast', [VALUE], VALUE,
+                         reenters=False)
 
 
-rb_ary_unshift1 = _ext('rpyyarv_ary_unshift1', [VALUE, VALUE], VALUE)
+rb_ary_unshift1 = _ext('rpyyarv_ary_unshift1', [VALUE, VALUE], VALUE,
+                       reenters=False)
 
 
-rb_ary_hash_freeze = _ext('rpyyarv_ary_hash_freeze', [VALUE], VALUE)
+rb_ary_hash_freeze = _ext('rpyyarv_ary_hash_freeze', [VALUE], VALUE,
+                          reenters=False)
 
 # reenters: freezing a plain object can evict its ivars, so it allocates.
 rb_obj_freeze = _ext('rpyyarv_obj_freeze', [VALUE], VALUE, reenters=True)
 
 
-rb_ary_flatten_bang1 = _ext('rpyyarv_ary_flatten_bang1', [VALUE], VALUE)
+rb_ary_flatten_bang1 = _ext('rpyyarv_ary_flatten_bang1', [VALUE], VALUE,
+                            reenters=False)
 
 
 rb_splat_array = _ext('rpyyarv_splat_array', [VALUE, rffi.INT, INTP], VALUE, reenters=True)

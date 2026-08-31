@@ -100,7 +100,9 @@ TRAMP_HOOK = lltype.Ptr(lltype.FuncType(
 MAX_ARGC = 256
 
 
-def _ext(name, args, result, reenters=False, marks=False, releasegil=False):
+def _ext(name, args, result, reenters=True, marks=False, releasegil=False):
+    # reenters is the safe default: an extern that re-enters Ruby can run
+    # the RPython GC under us, and a forgotten annotation must not lie.
     # Most shim calls keep GIL to preserve CRuby/RPython lock ordering.
     return rffi.llexternal(name, args, result, compilation_info=eci,
                            releasegil=releasegil,

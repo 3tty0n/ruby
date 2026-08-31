@@ -46,7 +46,7 @@ rb_is_singleton_class = _ext('rpyyarv_is_singleton_class', [VALUE], rffi.INT,
 
 
 rb_const_defined = _ext('rpyyarv_const_defined',
-                        [VALUE, VALUE, rffi.INT], rffi.INT)
+                        [VALUE, VALUE, rffi.INT], rffi.INT, reenters=False)
 
 
 rb_method_defined = _ext('rpyyarv_method_defined',

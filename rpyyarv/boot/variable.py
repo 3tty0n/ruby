@@ -52,13 +52,16 @@ rb_cvar_defined = _ext('rpyyarv_cvar_defined', [VALUE, VALUE], rffi.INT,
                        reenters=True)
 
 
-rb_class_ivar_get = _ext('rpyyarv_class_ivar_get', [VALUE, VALUE], VALUE)
+rb_class_ivar_get = _ext('rpyyarv_class_ivar_get', [VALUE, VALUE], VALUE,
+                         reenters=False)
 
 
-rb_ivar_defined = _ext('rpyyarv_ivar_defined', [VALUE, VALUE], rffi.INT)
+rb_ivar_defined = _ext('rpyyarv_ivar_defined', [VALUE, VALUE], rffi.INT,
+                       reenters=False)
 
 
-rb_gvar_defined_ = _ext('rpyyarv_gvar_defined', [rffi.CCHARP], rffi.INT)
+rb_gvar_defined_ = _ext('rpyyarv_gvar_defined', [rffi.CCHARP], rffi.INT,
+                        reenters=False)
 
 
 def gvar_defined(name):

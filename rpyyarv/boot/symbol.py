@@ -11,7 +11,7 @@ rb_sym_cstr = _ext('rpyyarv_sym_cstr', [VALUE], rffi.CCHARP, reenters=True)
 
 
 # No reenters: rejected inside an elidable; nothing here allocates.
-rb_intern_ = _ext('rpyyarv_intern', [rffi.CCHARP], VALUE)
+rb_intern_ = _ext('rpyyarv_intern', [rffi.CCHARP], VALUE, reenters=False)
 
 
 rb_sym_new = _ext('rpyyarv_sym_new', [rffi.CCHARP], VALUE, reenters=True)
@@ -21,7 +21,7 @@ rb_str_intern = _ext('rpyyarv_str_intern', [VALUE, INTP], VALUE,
                      reenters=True)
 
 
-rb_sym_to_s_fast = _ext('rpyyarv_sym_to_s', [VALUE], VALUE)
+rb_sym_to_s_fast = _ext('rpyyarv_sym_to_s', [VALUE], VALUE, reenters=False)
 
 
 rb_sym_name = _ext('rpyyarv_sym_name', [VALUE], VALUE, reenters=True)

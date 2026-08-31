@@ -12,42 +12,47 @@ from rpyyarv.boot._core import (_ext, _v, VALUE, VOIDP, INTP, _ARCH,
 
 rb_set_thread_callbacks = _ext('rpyyarv_set_thread_callbacks',
                                [THREAD_HOOK, THREAD_HOOK,
-                                THREAD_HOOK, THREAD_HOOK], lltype.Void)
+                                THREAD_HOOK, THREAD_HOOK], lltype.Void,
+reenters=False)
 
 
 rb_activate_threads = _ext('rpyyarv_activate_threads', [], lltype.Void,
                            reenters=True)
 
 
-rb_ractor_class_p = _ext('rpyyarv_ractor_class_p', [VALUE], rffi.INT)
+rb_ractor_class_p = _ext('rpyyarv_ractor_class_p', [VALUE], rffi.INT,
+                         reenters=False)
 
 
-rb_ractor_p = _ext('rpyyarv_ractor_p', [VALUE], rffi.INT)
+rb_ractor_p = _ext('rpyyarv_ractor_p', [VALUE], rffi.INT, reenters=False)
 
 
-rb_ractor_callback_p = _ext('rpyyarv_ractor_callback_p', [], rffi.INT)
+rb_ractor_callback_p = _ext('rpyyarv_ractor_callback_p', [], rffi.INT,
+                            reenters=False)
 
 
-rb_native_ractors_p = _ext('rpyyarv_native_ractors_p', [], rffi.INT)
+rb_native_ractors_p = _ext('rpyyarv_native_ractors_p', [], rffi.INT,
+                           reenters=False)
 
 
 rb_native_ractors_poll = _ext('rpyyarv_native_ractors_poll', [VALUE],
                               lltype.Void, reenters=True)
 
 
-rb_boot = _ext('rpyyarv_boot', [rffi.INT, rffi.CCHARPP, INTP], VOIDP)
+rb_boot = _ext('rpyyarv_boot', [rffi.INT, rffi.CCHARPP, INTP], VOIDP,
+               reenters=False)
 
 
-rb_cleanup = _ext('rpyyarv_cleanup', [rffi.INT], rffi.INT)
+rb_cleanup = _ext('rpyyarv_cleanup', [rffi.INT], rffi.INT, reenters=False)
 
 
 rb_run_node = _ext('rpyyarv_run_node', [VOIDP], rffi.INT, reenters=True)
 
 
-rb_iseqw_new = _ext('rpyyarv_iseqw_new', [VOIDP], VALUE)
+rb_iseqw_new = _ext('rpyyarv_iseqw_new', [VOIDP], VALUE, reenters=False)
 
 
-rb_iseqw_ptr = _ext('rpyyarv_iseqw_ptr', [VALUE], VOIDP)
+rb_iseqw_ptr = _ext('rpyyarv_iseqw_ptr', [VALUE], VOIDP, reenters=False)
 
 
 rb_iseqw_children = _ext('rpyyarv_iseqw_children', [VALUE], VALUE,
@@ -59,7 +64,8 @@ rb_iseqw_child_index = _ext('rpyyarv_iseqw_child_index',
                             reenters=True)
 
 
-rb_cref_new = _ext('rb_rpyyarv_cref_new', [VOIDP, VALUE, rffi.INT], VOIDP)
+rb_cref_new = _ext('rb_rpyyarv_cref_new', [VOIDP, VALUE, rffi.INT], VOIDP,
+                   reenters=False)
 
 
 class _NativeCrefState(object):
@@ -70,37 +76,44 @@ class _NativeCrefState(object):
 native_cref_state = _NativeCrefState()
 
 
-rb_top_self = _ext('rpyyarv_top_self', [], VALUE)
+rb_top_self = _ext('rpyyarv_top_self', [], VALUE, reenters=False)
 
 
-rb_set_const_hook = _ext('rpyyarv_set_const_hook', [CONST_HOOK], lltype.Void)
+rb_set_const_hook = _ext('rpyyarv_set_const_hook', [CONST_HOOK], lltype.Void,
+                         reenters=False)
 
 
-rb_fiber_killed_value = _ext('rpyyarv_fiber_killed_value', [], VALUE)
+rb_fiber_killed_value = _ext('rpyyarv_fiber_killed_value', [], VALUE,
+                             reenters=False)
 
 
 rb_rethrow_if_fiber_kill = _ext('rpyyarv_rethrow_if_fiber_kill', [VALUE],
-                                rffi.INT)
+                                rffi.INT, reenters=False)
 
 
 rb_set_fiber_hooks = _ext('rpyyarv_set_fiber_hooks',
                           [FIBER_SAVE_HOOK, FIBER_ARRIVE_HOOK, FIBER_BORN_HOOK,
-                           FIBER_KEY_HOOK, VOIDP, VOIDP], lltype.Void)
+                           FIBER_KEY_HOOK, VOIDP, VOIDP], lltype.Void,
+reenters=False)
 
 
-rb_set_method_hook = _ext('rpyyarv_set_method_hook', [METHOD_HOOK], lltype.Void)
+rb_set_method_hook = _ext('rpyyarv_set_method_hook', [METHOD_HOOK],
+                          lltype.Void, reenters=False)
 
 
 rb_vm_core = _ext('rpyyarv_vm_core', [], VALUE, reenters=True)
 
 
-rb_set_block_unwind = _ext('rpyyarv_set_block_unwind', [], lltype.Void)
+rb_set_block_unwind = _ext('rpyyarv_set_block_unwind', [], lltype.Void,
+                           reenters=False)
 
 
-rb_set_block_jumptag = _ext('rpyyarv_set_block_jumptag', [], lltype.Void)
+rb_set_block_jumptag = _ext('rpyyarv_set_block_jumptag', [], lltype.Void,
+                            reenters=False)
 
 
-rb_set_block_raise = _ext('rpyyarv_set_block_raise', [VALUE], lltype.Void)
+rb_set_block_raise = _ext('rpyyarv_set_block_raise', [VALUE], lltype.Void,
+                          reenters=False)
 
 
 rb_bop_mask = _ext('rpyyarv_bop_mask', [INTP], VALUE, reenters=True)

@@ -44,7 +44,7 @@ rb_funcallv_kw_id = _ext('rpyyarv_funcallv_kw_id',
 
 
 rb_set_block_callback = _ext('rpyyarv_set_block_callback', [BLOCK_HOOK],
-                             lltype.Void)
+                             lltype.Void, reenters=False)
 
 
 rb_call_with_block = _ext('rpyyarv_call_with_block',
@@ -59,7 +59,7 @@ rb_call_with_proc = _ext('rpyyarv_call_with_proc',
 
 
 rb_set_trampoline_callback = _ext('rpyyarv_set_trampoline_callback',
-                                  [TRAMP_HOOK], lltype.Void)
+                                  [TRAMP_HOOK], lltype.Void, reenters=False)
 
 
 rb_define_method_id = _ext('rpyyarv_define_method',
@@ -70,16 +70,18 @@ rb_define_method_id = _ext('rpyyarv_define_method',
 rb_proc_new = _ext('rpyyarv_proc_new', [rffi.LONG, INTP], VALUE, reenters=True)
 
 
-rb_pop_dead_handle = _ext('rpyyarv_pop_dead_handle', [], rffi.LONG)
+rb_pop_dead_handle = _ext('rpyyarv_pop_dead_handle', [], rffi.LONG,
+                          reenters=False)
 
 
-rb_is_proc = _ext('rpyyarv_is_proc', [VALUE], rffi.INT)
+rb_is_proc = _ext('rpyyarv_is_proc', [VALUE], rffi.INT, reenters=False)
 
 
 rb_block_sentinel = _ext('rpyyarv_block_sentinel', [], VALUE, reenters=True)
 
 
-rb_proc_handle = _ext('rpyyarv_proc_handle', [VALUE], rffi.LONG)
+rb_proc_handle = _ext('rpyyarv_proc_handle', [VALUE], rffi.LONG,
+                      reenters=False)
 
 
 rb_yield_values = _ext('rpyyarv_yield_values',
@@ -114,7 +116,7 @@ def yield_values(args, kw):
     return rffi.cast(lltype.Signed, v), state
 
 
-rb_kw_hash_p = _ext('rpyyarv_kw_hash_p', [VALUE], rffi.INT)
+rb_kw_hash_p = _ext('rpyyarv_kw_hash_p', [VALUE], rffi.INT, reenters=False)
 
 
 rb_kw_hash_dup = _ext('rpyyarv_kw_hash_dup', [VALUE, INTP], VALUE,

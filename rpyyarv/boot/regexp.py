@@ -21,7 +21,8 @@ rb_str_gsub2 = _ext('rpyyarv_str_gsub2', [VALUE, VALUE, VALUE, VALUE, INTP],
                     VALUE, reenters=True)
 
 
-rb_str_tr1 = _ext('rpyyarv_str_tr1', [VALUE, VALUE, VALUE], VALUE)
+rb_str_tr1 = _ext('rpyyarv_str_tr1', [VALUE, VALUE, VALUE], VALUE,
+                  reenters=False)
 
 
 rb_str_match_p = _ext('rpyyarv_str_match_p', [VALUE, VALUE, INTP], VALUE,
@@ -36,33 +37,36 @@ rb_reg_eqq_fast = _ext('rpyyarv_reg_eqq', [VALUE, VALUE, INTP], VALUE,
                        reenters=True)
 
 
-rb_last_match0 = _ext('rpyyarv_last_match0', [], VALUE)
+rb_last_match0 = _ext('rpyyarv_last_match0', [], VALUE, reenters=False)
 
 
-rb_last_match1 = _ext('rpyyarv_last_match1', [VALUE], VALUE)
+rb_last_match1 = _ext('rpyyarv_last_match1', [VALUE], VALUE, reenters=False)
 
 
 rb_str_match_fast = _ext('rpyyarv_str_match', [VALUE, VALUE, INTP], VALUE,
                          reenters=True)
 
 
-rb_ss_pos = _ext('rpyyarv_ss_pos', [VALUE], VALUE)
+rb_ss_pos = _ext('rpyyarv_ss_pos', [VALUE], VALUE, reenters=False)
 
 
-rb_ss_set_pos = _ext('rpyyarv_ss_set_pos', [VALUE, VALUE], VALUE)
+rb_ss_set_pos = _ext('rpyyarv_ss_set_pos', [VALUE, VALUE], VALUE,
+                     reenters=False)
 
 
-rb_ss_eos_p = _ext('rpyyarv_ss_eos_p', [VALUE], VALUE)
+rb_ss_eos_p = _ext('rpyyarv_ss_eos_p', [VALUE], VALUE, reenters=False)
 
 
-rb_ss_matched_size = _ext('rpyyarv_ss_matched_size', [VALUE], VALUE)
+rb_ss_matched_size = _ext('rpyyarv_ss_matched_size', [VALUE], VALUE,
+                          reenters=False)
 
 
 rb_ss_skip = _ext('rpyyarv_ss_skip', [VALUE, VALUE, INTP], VALUE,
                   reenters=True)
 
 
-rb_str_match_p_fast = _ext('rpyyarv_str_match_p_fast', [VALUE, VALUE], VALUE)
+rb_str_match_p_fast = _ext('rpyyarv_str_match_p_fast', [VALUE, VALUE], VALUE,
+                           reenters=False)
 
 
 def getspecial(type):

@@ -8,10 +8,10 @@ from rpyyarv.boot._core import (_ext, _v, VALUE, VALUEP, INTP, MAX_ARGC,
                                 _leave_argv, _failed, RubyError)
 
 
-rb_str_len = _ext('rpyyarv_str_len', [VALUE], rffi.LONG)
+rb_str_len = _ext('rpyyarv_str_len', [VALUE], rffi.LONG, reenters=False)
 
 
-rb_str_ptr = _ext('rpyyarv_str_ptr', [VALUE], rffi.CCHARP)
+rb_str_ptr = _ext('rpyyarv_str_ptr', [VALUE], rffi.CCHARP, reenters=False)
 
 
 rb_str_new = _ext('rpyyarv_str_new', [rffi.CCHARP, rffi.LONG], VALUE,
@@ -22,54 +22,61 @@ rb_str_concat = _ext('rpyyarv_str_concat', [rffi.INT, VALUEP], VALUE, reenters=T
 
 
 # No reenters: rb_str_eql_internal neither allocates nor raises.
-rb_str_eq = _ext('rpyyarv_str_eq', [VALUE, VALUE], VALUE)
+rb_str_eq = _ext('rpyyarv_str_eq', [VALUE, VALUE], VALUE, reenters=False)
 
 
 rb_str_push = _ext('rpyyarv_str_push', [VALUE, VALUE, INTP], VALUE,
                    reenters=True)
 
 
-rb_str_start_with = _ext('rpyyarv_str_start_with', [VALUE, VALUE], VALUE)
+rb_str_start_with = _ext('rpyyarv_str_start_with', [VALUE, VALUE], VALUE,
+                         reenters=False)
 
 
-rb_int_to_s_fast = _ext('rpyyarv_int_to_s', [VALUE], VALUE)
+rb_int_to_s_fast = _ext('rpyyarv_int_to_s', [VALUE], VALUE, reenters=False)
 
 
-rb_str_casecmp_fast = _ext('rpyyarv_str_casecmp', [VALUE, VALUE], VALUE)
+rb_str_casecmp_fast = _ext('rpyyarv_str_casecmp', [VALUE, VALUE], VALUE,
+                           reenters=False)
 
 
-rb_str_cmp_fast = _ext('rpyyarv_str_cmp', [VALUE, VALUE], VALUE)
+rb_str_cmp_fast = _ext('rpyyarv_str_cmp', [VALUE, VALUE], VALUE,
+                       reenters=False)
 
 
-rb_str_downcase_fast = _ext('rpyyarv_str_downcase', [VALUE], VALUE)
+rb_str_downcase_fast = _ext('rpyyarv_str_downcase', [VALUE], VALUE,
+                            reenters=False)
 
 
-rb_str_downcase_bang = _ext('rpyyarv_str_downcase_bang', [VALUE], VALUE)
+rb_str_downcase_bang = _ext('rpyyarv_str_downcase_bang', [VALUE], VALUE,
+                            reenters=False)
 
 
-rb_str_upcase_fast = _ext('rpyyarv_str_upcase', [VALUE], VALUE)
+rb_str_upcase_fast = _ext('rpyyarv_str_upcase', [VALUE], VALUE, reenters=False)
 
 
-rb_str_upcase_bang = _ext('rpyyarv_str_upcase_bang', [VALUE], VALUE)
+rb_str_upcase_bang = _ext('rpyyarv_str_upcase_bang', [VALUE], VALUE,
+                          reenters=False)
 
 
-rb_str_dup_fast = _ext('rpyyarv_str_dup', [VALUE], VALUE)
+rb_str_dup_fast = _ext('rpyyarv_str_dup', [VALUE], VALUE, reenters=False)
 
 
-rb_str_length_fast = _ext('rpyyarv_str_length', [VALUE], VALUE)
+rb_str_length_fast = _ext('rpyyarv_str_length', [VALUE], VALUE, reenters=False)
 
 
-rb_str_index_of = _ext('rpyyarv_str_index_of', [VALUE, VALUE], VALUE)
+rb_str_index_of = _ext('rpyyarv_str_index_of', [VALUE, VALUE], VALUE,
+                       reenters=False)
 
 
-rb_str_empty_p = _ext('rpyyarv_str_empty_p', [VALUE], VALUE)
+rb_str_empty_p = _ext('rpyyarv_str_empty_p', [VALUE], VALUE, reenters=False)
 
 
-rb_str_uminus = _ext('rpyyarv_str_uminus', [VALUE], VALUE)
+rb_str_uminus = _ext('rpyyarv_str_uminus', [VALUE], VALUE, reenters=False)
 
 
 rb_str_byteslice2 = _ext('rpyyarv_str_byteslice2', [VALUE, VALUE, VALUE],
-                         VALUE)
+                         VALUE, reenters=False)
 
 
 rb_str_force_encoding_fast = _ext('rpyyarv_str_force_encoding_fast',
@@ -81,7 +88,8 @@ rb_unpack1_double = _ext('rpyyarv_unpack1_double', [VALUE, VALUE, VALUE],
 
 
 # No reenters: scans and caches a coderange in the flags, allocating nothing.
-rb_str_ascii_only_p = _ext('rpyyarv_str_ascii_only_p', [VALUE], VALUE)
+rb_str_ascii_only_p = _ext('rpyyarv_str_ascii_only_p', [VALUE], VALUE,
+                           reenters=False)
 
 
 rb_pack_double_into = _ext('rpyyarv_pack_double_into', [VALUE, VALUE, VALUE],
@@ -92,10 +100,12 @@ rb_sprintf_ = _ext('rpyyarv_sprintf', [rffi.INT, VALUEP, VALUE, INTP], VALUE,
                    reenters=True)
 
 
-rb_cgi_escape_html = _ext('rpyyarv_cgi_escape_html', [VALUE], VALUE)
+rb_cgi_escape_html = _ext('rpyyarv_cgi_escape_html', [VALUE], VALUE,
+                          reenters=False)
 
 
-rb_str_getbyte = _ext('rpyyarv_str_getbyte', [VALUE, VALUE], VALUE)
+rb_str_getbyte = _ext('rpyyarv_str_getbyte', [VALUE, VALUE], VALUE,
+                      reenters=False)
 
 
 rb_str_setbyte = _ext('rpyyarv_str_setbyte', [VALUE, VALUE, VALUE], VALUE,
@@ -106,10 +116,11 @@ rb_str_append = _ext('rpyyarv_str_append', [VALUE, VALUE], VALUE,
                      reenters=True)
 
 
-rb_str_ord = _ext('rpyyarv_str_ord', [VALUE], VALUE)
+rb_str_ord = _ext('rpyyarv_str_ord', [VALUE], VALUE, reenters=False)
 
 
-rb_str_char_at = _ext('rpyyarv_str_char_at', [VALUE, VALUE], VALUE)
+rb_str_char_at = _ext('rpyyarv_str_char_at', [VALUE, VALUE], VALUE,
+                      reenters=False)
 
 
 def str_of(v):

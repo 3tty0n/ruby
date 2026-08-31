@@ -7,17 +7,19 @@ from rpyyarv.boot._core import _ext, _v, VALUE, MARK_HOOK, HANDLE_MARK_HOOK
 
 
 rb_gc_set_mark_hook = _ext('rpyyarv_gc_set_mark_hook', [MARK_HOOK],
-                           lltype.Void)
+                           lltype.Void, reenters=False)
 
 
-rb_gc_mark_value = _ext('rpyyarv_gc_mark_value', [VALUE], lltype.Void)
+rb_gc_mark_value = _ext('rpyyarv_gc_mark_value', [VALUE], lltype.Void,
+                        reenters=False)
 
 
-rb_gc_mark_maybe = _ext('rpyyarv_gc_mark_maybe', [VALUE], lltype.Void)
+rb_gc_mark_maybe = _ext('rpyyarv_gc_mark_maybe', [VALUE], lltype.Void,
+                        reenters=False)
 
 
 rb_set_handle_mark = _ext('rpyyarv_set_handle_mark_callback',
-                          [HANDLE_MARK_HOOK], lltype.Void)
+                          [HANDLE_MARK_HOOK], lltype.Void, reenters=False)
 
 
 rb_gc_start = _ext('rpyyarv_gc_start', [], lltype.Void, reenters=True)
@@ -27,10 +29,11 @@ rb_gc_register = _ext('rpyyarv_gc_register_mark_object', [VALUE], lltype.Void, r
 
 
 # No reenters: sets bits in preallocated bitmaps, reaching no mark callback.
-rb_obj_written = _ext('rpyyarv_obj_written', [VALUE, VALUE], lltype.Void)
+rb_obj_written = _ext('rpyyarv_obj_written', [VALUE, VALUE], lltype.Void,
+                      reenters=False)
 
 
-rb_wb_direct = _ext('rpyyarv_wb_direct', [], rffi.INT)
+rb_wb_direct = _ext('rpyyarv_wb_direct', [], rffi.INT, reenters=False)
 
 
 def obj_written(a, b):
