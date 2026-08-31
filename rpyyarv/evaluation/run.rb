@@ -133,9 +133,14 @@ module RPyYARVEvaluation
   module Analyzer
     module_function
 
-    def analyze(raw_path, out_dir)
+    # delegated_raw_path is item 8's second (--no-gem-require) pass: same
+    # binary, gem benchmarks run delegated instead of native. See item 1 and
+    # 8 in docs/evaluation-plan.org for the native/delegated policy.
+    def analyze(raw_path, out_dir, delegated_raw_path: nil)
       raw = JSON.parse(File.read(raw_path))
-      rows = raw.map { |key, value| row_for(key, value) }
+      delegated_raw = delegated_raw_path && File.exist?(delegated_raw_path) ?
+        JSON.parse(File.read(delegated_raw_path)) : {}
+      rows = raw.map { |key, value| row_for(key, value, delegated_raw[key]) }
       FileUtils.mkdir_p(out_dir)
       write_measurements(File.join(out_dir, "measurements.csv"), rows)
       ratios = ratio_rows(rows)
@@ -144,7 +149,7 @@ module RPyYARVEvaluation
       write_comparisons(File.join(out_dir, "comparisons.csv"), comparisons)
       warmup = warmup_rows(raw)
       write_warmup(File.join(out_dir, "warmup.csv"), warmup)
-      summary = summarize(ratios)
+      summary = summarize(ratios, rows)
       summary = attach_status_counts(summary, rows)
       write_summary(File.join(out_dir, "summary.csv"), summary)
       { "measurements" => rows.size, "ratios" => ratios.size,
@@ -152,7 +157,7 @@ module RPyYARVEvaluation
         "summary" => summary }
     end
 
-    def row_for(key, value)
+    def row_for(key, value, delegated_value = nil)
       suite, benchmark, engine = key.split("/", 3)
       info = value["info"] || {}
       {
@@ -161,8 +166,19 @@ module RPyYARVEvaluation
         "min_ms" => value["min"], "samples" => value["n"],
         "spread" => value["spread"], "iseqs" => info["iseqs"],
         "files_native" => info["files_native"],
-        "files_delegated" => info["files_delegated"]
+        "files_delegated" => info["files_delegated"],
+        "native_ms" => value["median"],
+        "delegated_ms" => delegated_value && delegated_value["median"],
+        "native_iseq_pct" => iseq_pct(info["iseqs"])
       }
+    end
+
+    # "12/34" iseqs owned/total -> 35.3 percent; nil when the line is absent.
+    def iseq_pct(iseqs)
+      match = iseqs.to_s.match(/\A(\d+)\/(\d+)\z/)
+      return nil unless match && match[2].to_i.positive?
+
+      (match[1].to_f / match[2].to_i * 100).round(1)
     end
 
     def ratio_rows(rows)
@@ -255,9 +271,13 @@ module RPyYARVEvaluation
       Math.exp(vals.sum { |v| Math.log(v) } / vals.size)
     end
 
-    def summarize(ratios)
+    # geomean_jit_over_* is always native (raw.json's rpyyarv-jit column);
+    # geomean_native_over_delegated is the same benchmarks' second number,
+    # printed alongside rather than folded into a best-of. Item 1/8 policy.
+    def summarize(ratios, rows)
       groups = ratios.group_by { |r| r["suite"] }
       groups["all"] = ratios
+      jit_rows = rows.select { |r| r["engine"] == "rpyyarv-jit" }
       groups.map do |suite, group|
         row = { "suite" => suite }
         EvaluationConfig::REFERENCES.each_key do |label|
@@ -267,6 +287,14 @@ module RPyYARVEvaluation
           row["n_#{label}"] = values.size
           row["geomean_jit_over_#{label}"] = geomean(values)
         end
+        scoped = suite == "all" ? jit_rows : jit_rows.select { |r| r["suite"] == suite }
+        delegated_ratios = scoped.filter_map do |r|
+          native = numeric(r["native_ms"])
+          delegated = numeric(r["delegated_ms"])
+          native && delegated ? native / delegated : nil
+        end
+        row["n_delegated_pairs"] = delegated_ratios.size
+        row["geomean_native_over_delegated"] = geomean(delegated_ratios)
         row
       end
     end
@@ -290,7 +318,8 @@ module RPyYARVEvaluation
 
     def write_measurements(path, rows)
       headers = %w[suite benchmark engine status median_ms min_ms samples
-                   spread iseqs files_native files_delegated]
+                   spread iseqs files_native files_delegated
+                   native_ms delegated_ms native_iseq_pct]
       write_csv(path, headers, rows)
     end
 
@@ -307,7 +336,8 @@ module RPyYARVEvaluation
         headers << "n_#{label}"
         headers << "geomean_jit_over_#{label}"
       end
-      headers += %w[n_benchmarks n_ok n_delegated n_failed]
+      headers += %w[n_delegated_pairs geomean_native_over_delegated
+                    n_benchmarks n_ok n_delegated n_failed]
       write_csv(path, headers, rows)
     end
 
@@ -589,17 +619,27 @@ module RPyYARVEvaluation
     end
   end
 
+  # Item 1/8: peak performance is native by default; gem benchmarks also get
+  # a --no-gem-require pass on the same binary, so measurements.csv carries
+  # both native_ms and delegated_ms instead of picking a best-of.
   def performance(args, results_root)
     run = Run.new("performance", results_root)
     raw = File.join(run.dir, "raw.json")
+    delegated_raw = File.join(run.dir, "raw-delegated.json")
     argv = [driver_ruby, File.join(ROOT, "scripts", "bench.rb"),
-            "--raw", raw] + optional_engine_args + args
+            "--raw", raw, "--gem-require"] + optional_engine_args + args
+    delegated_argv = [driver_ruby, File.join(ROOT, "scripts", "bench.rb"),
+                      "--raw", delegated_raw, "--no-gem-require", "--no-jsonl"] +
+                     optional_engine_args + args
     run.manifest["optional_engines"] = optional_engines
     run.manifest["engine_binaries"] = binary_metadata(engine_paths(args))
     ok = run.execute("performance", base_env, argv)
+    # Delegated pass is supplementary: its failure does not fail the run.
+    run.execute("performance-delegated", base_env, delegated_argv)
     if File.exist?(raw)
       begin
-        Analyzer.analyze(raw, run.dir)
+        delegated_path = File.exist?(delegated_raw) ? delegated_raw : nil
+        Analyzer.analyze(raw, run.dir, delegated_raw_path: delegated_path)
         Plotter.plot(raw, run.dir)
       rescue StandardError => error
         run.manifest["postprocess_error"] =
