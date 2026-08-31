@@ -1,9 +1,23 @@
 import os
 
+
+class _GCMarkState(object):
+    def __init__(self):
+        self.marking = False
+        self.generation = 0
+        self.mark_word = None
+
+
+try:
+    # Own try/except: reversing pypy-patch 0002 degrades only this symbol.
+    from rpython.rlib.jit import gc_mark_state
+except ImportError:
+    gc_mark_state = _GCMarkState()
+
 try:
     from rpython.rlib.jit import (
         JitDriver, elidable, promote, unroll_safe, dont_look_inside, hint,
-        set_user_param, gc_mark_state, we_are_jitted)
+        set_user_param, we_are_jitted)
     from rpython.rlib.objectmodel import always_inline
     from rpython.rlib.longlong2float import float2longlong, longlong2float
     from rpython.rlib.rarithmetic import LONG_BIT, intmask, ovfcheck, r_uint
@@ -148,14 +162,6 @@ except ImportError:
 
     def always_inline(func):
         return func
-
-    class _GCMarkState(object):
-        def __init__(self):
-            self.marking = False
-            self.generation = 0
-            self.mark_word = None
-
-    gc_mark_state = _GCMarkState()
 
     def raw_word(addr, index):
         raise NotImplementedError('raw_word needs the RPython backend')

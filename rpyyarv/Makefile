@@ -267,9 +267,14 @@ build-jit: pypy-patch
 	RPYYARV_BUILD=$(BUILD) PYTHONPATH=$(PYTHONPATH) $(RPYTHON) -Ojit --output=rpyyarv-jit targetrpyyarv.py
 	$(call fix_install_name,rpyyarv-jit)
 
-# Clone does not re-run once ./pypy exists; apply any patch that is still missing.
+# Clone does not re-run once ./pypy exists; apply any patch that is still
+# missing. PYPY_PATCH_SKIP=0002 (a patch file's number prefix) leaves that
+# one file unapplied, for a reproducible no-patch ablation build.
 pypy-patch: | $(PYPY)
 	@for p in $(CURDIR)/pypy-patches/*.patch; do \
+	  case "$$(basename $$p)" in \
+	    $(PYPY_PATCH_SKIP)*) continue;; \
+	  esac; \
 	  (cd $(PYPY) && git apply --reverse --check "$$p" >/dev/null 2>&1) \
 	    || (cd $(PYPY) && git apply "$$p"); \
 	done
