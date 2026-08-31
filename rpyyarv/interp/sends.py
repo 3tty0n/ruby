@@ -85,8 +85,7 @@ def invoke(frame, w_ci, w_block=None):
             raise UnsupportedOperation(
                 "call to '%s' passes a &block the stack does not hold"
                 % symbols.name_of(w_ci.mid))
-        w_block = _block_from_value(frame.block, frame.slots[top])
-        frame.pop()
+        w_block = _blockarg(frame, top)
     # A `send` rewrites these three; the callinfo keeps the rest of the site.
     mid = w_ci.mid
     argc = w_ci.argc
@@ -1395,7 +1394,7 @@ from rpyyarv.interp.builtins import _iseq_parameters, _array_each_slice, _array_
 from rpyyarv.interp.supers import _ruby2_keywords
 from rpyyarv.interp.defs import _class_new_block, _exec_on_made, _alias_method, _attr_name, _core_method, _define_attrs, _define_bmethod, _define_bmethod_modfunc, _in_body_of, _instance_eval, _module_eval_block, _module_function, _private_class_method, _remove_or_undef, _visibility_names, _visibility_pragma
 from rpyyarv.interp.evalsrc import _binding_rpy, _eval_receiver, _eval_rpy, _module_eval_rpy
-from rpyyarv.interp.blocks import _block_from_value, _block_send, _block_send_args, _is_proxy_call, _proc_block_of, _run_bmethod, _to_proc
+from rpyyarv.interp.blocks import _blockarg, _block_send, _block_send_args, _is_proxy_call, _proc_block_of, _run_bmethod, _to_proc
 from rpyyarv.interp.callbacks import _call_with_block, _check_block_error
 from rpyyarv.interp.stackops import _drop
 from rpyyarv.interp.execute import execute

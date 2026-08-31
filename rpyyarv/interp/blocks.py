@@ -113,6 +113,15 @@ def _block_from_value(frame_block, v):
     return block_mod.from_proc(p)
 
 
+def _blockarg(frame, top):
+    """A &arg's block; the popped slot re-roots a Proc nothing else holds."""
+    w_block = _block_from_value(frame.block, frame.slots[top])
+    frame.pop()
+    if w_block is not None and w_block.kind == block_mod.KIND_PROC:
+        frame.slots[top] = w_block.proc_value
+    return w_block
+
+
 @unroll_safe
 def _block_send(frame, mid, recv_at, argc, w_block,
                 kw_names=NO_KEYWORDS, kw_splat=False, passed=None):

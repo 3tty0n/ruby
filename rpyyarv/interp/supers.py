@@ -103,8 +103,7 @@ def invoke_super(frame, w_ci, w_block=None, has_block=False):
         if top < 0:
             raise UnsupportedOperation(
                 "super passes a &block the stack does not hold")
-        w_block = _block_from_value(frame.block, frame.slots[top])
-        frame.pop()
+        w_block = _blockarg(frame, top)
         # super(&nil) suppresses forwarding; only a bare super inherits.
         has_block = True
     blk = w_block if has_block else frame.block
@@ -169,6 +168,6 @@ def invoke_super(frame, w_ci, w_block=None, has_block=False):
 # own bottom import asks this module for a name, everything
 # above is already bound.
 from rpyyarv.interp.sends import _attr_send, _attr_send_args, _enter, _enter_args, _kw_splat_hash, _name_mid, _splat_args, _splat_kw
-from rpyyarv.interp.blocks import _block_from_value, _to_proc
+from rpyyarv.interp.blocks import _blockarg, _to_proc
 from rpyyarv.interp.callbacks import _check_block_error
 from rpyyarv.interp.stackops import _drop
