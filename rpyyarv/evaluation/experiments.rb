@@ -18,13 +18,20 @@ module EvaluationConfig
     "baseline" => {},
     "gc-no-hook" => { "RPYYARV_GC_NO_HOOK" => "1" },
     "gc-stress" => { "RPYYARV_GC_STRESS" => "1" },
-    "fast-paths-off" => { "RPYYARV_FAST_PATHS" => "0" }
+    "fast-paths-off" => { "RPYYARV_FAST_PATHS" => "0" },
+    # Pins trace eagerness, per interp/execute.py's EAGER_PARAMS/LAZY_PARAMS.
+    "jit-params-eager" =>
+      { "RPYYARV_JITPARAM" => "function_threshold=100,trace_eagerness=50" },
+    "jit-params-lazy" =>
+      { "RPYYARV_JITPARAM" => "function_threshold=1619,trace_eagerness=200" }
   }.freeze
 
   # Ablations that need their own translation; run.rb only reports the recipe.
   BUILD_ABLATIONS = {
-    "no-patch-0002" => "drop pypy-patches/0002 (gc mark forces vables)",
-    "no-patch-0004" => "drop pypy-patches/0004 (extern forces virtualizable)",
+    "no-patch-0002" =>
+      "make build-jit PYPY_PATCH_SKIP=0002 (gc mark forces vables)",
+    "no-patch-0004" =>
+      "make build-jit PYPY_PATCH_SKIP=0004 (extern forces virtualizable)",
     "no-quasiimmut" => "debug build with quasi-immutable fields disabled"
   }.freeze
 

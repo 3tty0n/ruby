@@ -728,17 +728,29 @@ module RPyYARVEvaluation
     script = args.shift or abort "usage: nursery SCRIPT [SIZE ...]"
     sizes = args.empty? ? EvaluationConfig::GC_NURSERIES : args.map { |v| Integer(v) }
     run = Run.new("nursery", results_root)
+    run.manifest["engine_binaries"] = binary_metadata(
+      "rpyyarv" => File.join(ROOT, "rpyyarv"),
+      "rpyyarv-jit" => File.join(ROOT, "rpyyarv-jit"))
+    benchmark = File.basename(script, ".*")
     rows = sizes.map do |size|
+      seconds = []
       failures = (1..trials).count do |trial|
         env = base_env.merge("PYPY_GC_NURSERY" => size.to_s)
-        !run.execute("nursery-#{size}-#{trial}", env,
-                     [File.join(ROOT, "rpyyarv-jit"), script])
+        started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+        ok = run.execute("nursery-#{size}-#{trial}", env,
+                         [File.join(ROOT, "rpyyarv-jit"), script])
+        seconds << Process.clock_gettime(Process::CLOCK_MONOTONIC) - started if ok
+        !ok
       end
       { "nursery_bytes" => size, "trials" => trials, "failures" => failures,
-        "failure_rate" => failures.to_f / trials }
+        "failure_rate" => failures.to_f / trials,
+        "benchmark" => benchmark,
+        "median_ms" => Analyzer.median_value(seconds)&.*(1000.0) }
     end
     Csv.write(File.join(run.dir, "nursery.csv"),
               %w[nursery_bytes trials failures failure_rate], rows)
+    Csv.write(File.join(run.dir, "nursery-measurements.csv"),
+              %w[benchmark nursery_bytes median_ms], rows)
     run.finish(true)
     puts "artifacts: #{run.dir}"
     0
@@ -751,6 +763,9 @@ module RPyYARVEvaluation
     rest = args.drop(names.size)
     run = Run.new("ablation", results_root)
     run.manifest["build_ablations"] = EvaluationConfig::BUILD_ABLATIONS
+    run.manifest["engine_binaries"] = binary_metadata(
+      "rpyyarv" => File.join(ROOT, "rpyyarv"),
+      "rpyyarv-jit" => File.join(ROOT, "rpyyarv-jit"))
     rows = names.map do |name|
       raw = File.join(run.dir, "#{name}.json")
       argv = [driver_ruby, File.join(ROOT, "scripts", "bench.rb"),
@@ -763,6 +778,19 @@ module RPyYARVEvaluation
     end
     Csv.write(File.join(run.dir, "ablation.csv"),
               %w[ablation env status raw], rows)
+    measurements = rows.flat_map do |row|
+      raw_path = File.join(run.dir, row["raw"])
+      next [] unless File.exist?(raw_path)
+
+      JSON.parse(File.read(raw_path)).map do |key, value|
+        suite, benchmark, engine = key.split("/", 3)
+        { "ablation" => row["ablation"], "suite" => suite,
+          "benchmark" => benchmark, "engine" => engine,
+          "median_ms" => value["median"] }
+      end
+    end
+    Csv.write(File.join(run.dir, "ablation-measurements.csv"),
+              %w[ablation suite benchmark engine median_ms], measurements)
     run.finish(rows.all? { |row| row["status"] == "ok" })
     puts "artifacts: #{run.dir}"
     puts "build-only ablations (need a translation, not run here):"
