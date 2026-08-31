@@ -52,6 +52,7 @@ static void (*rpyyarv_thread_leave)(void);
 static void (*rpyyarv_gil_acquire)(void);
 static void (*rpyyarv_gil_release)(void);
 static pthread_t rpyyarv_main_thread;
+static int rpyyarv_main_thread_known;
 static VALUE rpyyarv_main_ractor;
 static rb_ractor_local_key_t rpyyarv_callback_depth_key;
 static rb_ractor_local_key_t rpyyarv_main_marker_key;
@@ -136,6 +137,38 @@ set_callback_depth(int depth)
 {
     rb_ractor_local_storage_value_set(rpyyarv_callback_depth_key,
                                       INT2FIX(depth));
+}
+
+/* Not the thread rpyyarv_boot ran on, or a Ractor that may have migrated. */
+static int
+foreign_thread_p(void)
+{
+    if (!rpyyarv_main_thread_known) return 0;
+    if (!pthread_equal(pthread_self(), rpyyarv_main_thread)) return 1;
+    return rpyyarv_threaded &&
+        rb_ractor_local_storage_value(rpyyarv_main_marker_key) != Qtrue;
+}
+
+/* The method entry for our own iseq, so CRuby can run the body itself.
+ * A thread we cannot run the interpreter on still runs the right Ruby. */
+static const void *
+native_me_for(uintptr_t defkey)
+{
+    const void *me = NULL;
+    pthread_mutex_lock(&rpyyarv_native_lock);
+    for (struct rpyyarv_native_method *it = rpyyarv_native_methods;
+            it != NULL; it = it->next) {
+        if (it->def == (const void *)defkey) {
+            if (!it->me) {
+                it->me = rb_rpyyarv_method_iseq(it->klass, it->mid,
+                                                it->iseq, it->cref);
+            }
+            me = it->me;
+            break;
+        }
+    }
+    pthread_mutex_unlock(&rpyyarv_native_lock);
+    return me;
 }
 
 static void *
@@ -260,6 +293,7 @@ rpyyarv_activate_threads(void)
 {
     if (rpyyarv_threaded) return;
     rpyyarv_main_thread = pthread_self();
+    rpyyarv_main_thread_known = 1;
     rpyyarv_callback_depth_key = rb_ractor_local_storage_value_newkey();
     rpyyarv_main_marker_key = rb_ractor_local_storage_value_newkey();
     rb_ractor_local_storage_value_set(rpyyarv_main_marker_key, Qtrue);
@@ -498,6 +532,7 @@ rpyyarv_boot(int argc, char **argv, int *status_out)
     ruby_init_stack(&variable_in_this_stack_frame);
     ruby_init();
     rpyyarv_main_thread = pthread_self();
+    rpyyarv_main_thread_known = 1;
 
     void *n = ruby_options(argc, argv);
 
@@ -2444,18 +2479,8 @@ rpyyarv_trampoline(int argc, VALUE *argv, VALUE self)
     VALUE r;
     int acquired;
 
-    if (rpyyarv_threaded &&
-            rb_ractor_local_storage_value(rpyyarv_main_marker_key) != Qtrue) {
-        const void *native_me = NULL;
-        pthread_mutex_lock(&rpyyarv_native_lock);
-        for (struct rpyyarv_native_method *it = rpyyarv_native_methods;
-                it != NULL; it = it->next) {
-            if (it->def == (const void *)defkey) {
-                native_me = it->me;
-                break;
-            }
-        }
-        pthread_mutex_unlock(&rpyyarv_native_lock);
+    if (foreign_thread_p()) {
+        const void *native_me = native_me_for(defkey);
         if (native_me) {
             return rb_rpyyarv_call_method_iseq(
                 self, native_me, argc, argv, blockproc,
