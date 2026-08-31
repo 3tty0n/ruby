@@ -9,6 +9,7 @@
 
 void rb_rpyyarv_constant_state_changed(ID id);
 void rb_rpyyarv_method_state_changed(VALUE klass, ID mid);
+void rb_rpyyarv_chain_moved(VALUE klass);
 
 // A switch brackets coroutine_transfer, keyed by the rb_fiber_t address.
 // unpark/born carry the arriving stack so the JIT depth window follows it.

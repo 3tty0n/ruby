@@ -8,7 +8,8 @@ from rpyyarv import symbols
 from rpyyarv import rubycall
 from rpyyarv.rlib import elidable, dont_look_inside
 from rpyyarv.dispatch.core import (lookup, registry, MethodEntry, Version,
-                                   bump_name, name_version)
+                                   bump_name, name_version,
+                                   bump_class, class_version)
 
 
 class _Owners(object):
@@ -70,13 +71,16 @@ def method_state_changed(klass, rid):
     if own_hook.depth > 0 and own_rid != 0 and own_rid == own_hook.rid:
         owners.skipped += 1
         return
-    debug.count_invalidation(boot.as_signed(klass), own_rid)
-    _drop_redefined(boot.as_signed(klass), own_rid)
+    own_klass = boot.as_signed(klass)
+    debug.count_invalidation(own_klass, own_rid)
+    _drop_redefined(own_klass, own_rid)
     mid = rubycall.mid_of_rid(own_rid) if own_rid != 0 else rubycall.NO_MID
-    if mid == rubycall.NO_MID:
-        invalidate_owners()
-    else:
+    if mid != rubycall.NO_MID:
         invalidate_for(mid)
+    elif own_klass != 0:
+        invalidate_class(own_klass)
+    else:
+        invalidate_owners()
 
 
 @dont_look_inside
@@ -152,7 +156,8 @@ def site_lookup(site, klass, mid):
     """lookup(), but a repeat send from the same site is two compares.
     Off-trace only: inside one the lookup folds into the class guard."""
     if site.ic_klass == klass and site.ic_version is registry.version \
-            and site.ic_name is name_version(mid):
+            and site.ic_name is name_version(mid) \
+            and site.ic_cls is class_version(klass):
         got = site.ic_entry
         return None if got is LOOKUP_MISS else got
     entry = lookup(klass, mid)
@@ -161,6 +166,7 @@ def site_lookup(site, klass, mid):
     site.ic_klass = klass
     site.ic_version = registry.version
     site.ic_name = name_version(mid)
+    site.ic_cls = class_version(klass)
     return entry
 
 
@@ -209,15 +215,12 @@ def invalidate_for(mid):
     flush_trampoline_cache()
 
 
-def invalidate_owners():
-    """rb_clear_method_cache: def, undef, alias, include, prepend all hit."""
+def _purge_tables():
+    """The tables are a cache and are refilled; what a version bump decides
+    is which compiled traces die with them."""
     if len(owners.tab) == 0 and len(owners.stab) == 0 \
             and len(owners.rtab) == 0 and len(owners.ktab) == 0:
-        return
-    owners.invalidations += 1
-    debug.note_invalidation(owners.invalidations)
-    if invalidations.hook is not None:
-        invalidations.hook()
+        return False
     owners.tab = {}
     owners.stab = {}
     owners.rtab = {}
@@ -229,12 +232,41 @@ def invalidate_owners():
     owners.by_mid = {}
     owners.by_sup = {}
     owners.by_sym = {}
+    return True
+
+
+def invalidate_class(klass):
+    """A chain move under klass: only an answer reached through klass or one
+    of its subclasses can change, and CRuby reports every one of those."""
+    # Nokogiri decorates each node with Object#extend, so most reports name a
+    # singleton class no lookup of ours ever touched. Nothing can be stale.
+    if not gcroots.seen_class(klass):
+        owners.skipped += 1
+        return
+    bump_class(klass)
+    if _purge_tables():
+        owners.invalidations += 1
+        # A class-scoped kill is still a kill: the eagerness controller
+        # counts these too, or a program that only moves chains stays greedy.
+        if invalidations.hook is not None:
+            invalidations.hook()
+    flush_trampoline_cache()
+
+
+def invalidate_owners():
+    """rb_clear_method_cache with no class to name: def, undef, alias."""
+    if not _purge_tables():
+        return
+    owners.invalidations += 1
+    debug.note_invalidation(owners.invalidations)
+    if invalidations.hook is not None:
+        invalidations.hook()
     registry.version = Version()
     flush_trampoline_cache()
 
 
 @elidable
-def _owner_of(klass, mid, version, nversion):
+def _owner_of(klass, mid, version, nversion, cversion):
     return owners.tab.get((klass, mid), OWNER_UNKNOWN)
 
 
@@ -254,7 +286,8 @@ def _fill_owner(klass, mid):
 
 def owner_of(klass, mid):
     """The module klass resolves mid through; CRuby answers, iclasses count."""
-    got = _owner_of(klass, mid, registry.version, name_version(mid))
+    got = _owner_of(klass, mid, registry.version, name_version(mid),
+                    class_version(klass))
     if got == OWNER_UNKNOWN:
         got = _fill_owner(klass, mid)
     return got
@@ -265,7 +298,7 @@ RESPONDS_RECV = -1
 
 
 @elidable
-def _responds(klass, sym, version):
+def _responds(klass, sym, version, cversion):
     return owners.rtab.get((klass, sym), RESPONDS_UNKNOWN)
 
 
@@ -283,7 +316,7 @@ def _fill_responds(klass, sym):
 
 def responds(klass, sym):
     """respond_to? from the class alone, or RESPONDS_RECV when per-receiver."""
-    got = _responds(klass, sym, registry.version)
+    got = _responds(klass, sym, registry.version, class_version(klass))
     if got == RESPONDS_UNKNOWN:
         got = _fill_responds(klass, sym)
     return got
@@ -323,7 +356,7 @@ def sym_name(sym):
 
 
 @elidable
-def _kind_of(klass, target, version):
+def _kind_of(klass, target, version, cversion):
     return owners.ktab.get((klass, target), RESPONDS_UNKNOWN)
 
 
@@ -341,7 +374,8 @@ def _fill_kind_of(klass, target):
 
 def kind_of(klass, target):
     """kind_of? from the two classes; include or prepend clears the table."""
-    got = _kind_of(klass, target, registry.version)
+    got = _kind_of(klass, target, registry.version,
+                   class_version(klass))
     if got == RESPONDS_UNKNOWN:
         got = _fill_kind_of(klass, target)
     return got
@@ -383,7 +417,7 @@ def struct_member_index(klass, mid):
 
 
 @elidable
-def _super_owner(klass, owner, mid, version, nversion):
+def _super_owner(klass, owner, mid, version, nversion, cversion):
     return owners.stab.get((klass, owner, mid), OWNER_UNKNOWN)
 
 
@@ -405,7 +439,7 @@ def _fill_super_owner(klass, owner, mid):
 def super_owner(klass, owner, mid):
     """Where `super` from owner's mid lands; CRuby counts the iclasses."""
     got = _super_owner(klass, owner, mid, registry.version,
-                       name_version(mid))
+                       name_version(mid), class_version(klass))
     if got == OWNER_UNKNOWN:
         got = _fill_super_owner(klass, owner, mid)
     return got

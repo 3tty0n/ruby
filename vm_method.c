@@ -358,6 +358,32 @@ rb_rpyyarv_method_state_changed(VALUE klass, ID mid)
     if (rpyyarv_method_hook) rpyyarv_method_hook(klass, (VALUE)mid);
 }
 
+/* rpyyarv caches a lookup per receiver class, so a chain move under klass
+ * stales klass and everything that inherits from it, and nothing else. */
+#define RPYYARV_CHAIN_BUDGET 512
+
+static void
+rpyyarv_chain_moved_i(VALUE sub, VALUE arg)
+{
+    int *budget = (int *)arg;
+    if (*budget <= 0) return;
+    --*budget;
+    /* An iclass is no receiver's class, but real subclasses hang under it. */
+    if (!RB_TYPE_P(sub, T_ICLASS)) rpyyarv_method_hook(sub, 0);
+    rb_class_foreach_subclass(sub, rpyyarv_chain_moved_i, arg);
+}
+
+void
+rb_rpyyarv_chain_moved(VALUE klass)
+{
+    int budget = RPYYARV_CHAIN_BUDGET;
+    if (!rpyyarv_method_hook) return;
+    rpyyarv_method_hook(klass, 0);
+    rb_class_foreach_subclass(klass, rpyyarv_chain_moved_i, (VALUE)&budget);
+    /* Too wide to name: fall back to the clear that stales everything. */
+    if (budget <= 0) rpyyarv_method_hook(0, 0);
+}
+
 // The owner CRuby's dispatch chose, so a trampoline can honor super/bind_call.
 VALUE
 rb_rpyyarv_frame_owner(void)

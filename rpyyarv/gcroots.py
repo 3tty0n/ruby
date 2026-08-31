@@ -50,6 +50,11 @@ def register_class(v):
     state.classes.append(v)
 
 
+def seen_class(v):
+    """True once a cache fill or a def has named this class."""
+    return v in state.class_seen
+
+
 def register_consts(consts):
     if len(consts) > 0:
         state.consts.append(consts)

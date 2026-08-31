@@ -50,6 +50,42 @@ def bump_name(mid):
     names.cells[mid & (NAME_BUCKETS - 1)].version = Version()
 
 
+# The same, bucketed by receiver class: an include under one class then
+# invalidates only the traces that dispatched on a class in its bucket.
+CLASS_BUCKETS = 4096
+
+
+class _ClassCell(object):
+    _immutable_fields_ = ['version?']
+
+    def __init__(self):
+        self.version = Version()
+
+
+class _ClassVersions(object):
+    _immutable_fields_ = ['cells[*]']
+
+    def __init__(self):
+        self.cells = [_ClassCell() for _ in range(CLASS_BUCKETS)]
+
+
+klasses = _ClassVersions()
+
+
+def _class_bucket(klass):
+    # Object slots are 40 bytes apart, so one shift alone barely spreads.
+    return ((klass >> 3) ^ (klass >> 13)) & (CLASS_BUCKETS - 1)
+
+
+def class_version(klass):
+    """The version a lookup on klass depends on; folds, klass being green."""
+    return klasses.cells[_class_bucket(klass)].version
+
+
+def bump_class(klass):
+    klasses.cells[_class_bucket(klass)].version = Version()
+
+
 KIND_ISEQ = 0
 KIND_ATTR_READER = 1
 KIND_ATTR_WRITER = 2
@@ -257,7 +293,7 @@ def _module_lookup(klass, mid):
 
 
 @elidable
-def _lookup(klass, mid, version, nversion):
+def _lookup(klass, mid, version, nversion, cversion):
     """Walk and owner check in one elidable: one call_pure, not two."""
     entry = _walk(klass, mid)
     if entry is None:
@@ -279,7 +315,8 @@ def _lookup(klass, mid, version, nversion):
 @dont_look_inside
 def _lookup_filled(klass, mid):
     """Opaque on purpose: a trace must not reuse the pending answer."""
-    return _lookup(klass, mid, registry.version, name_version(mid))
+    return _lookup(klass, mid, registry.version, name_version(mid),
+                   class_version(klass))
 
 
 def lookup(klass, mid):
@@ -291,7 +328,8 @@ def lookup(klass, mid):
         got = resolved(klass, mid, registry.version, name_version(mid))
         if got is not LOOKUP_PENDING:
             return None if got is LOOKUP_MISS else got
-    entry = _lookup(klass, mid, registry.version, name_version(mid))
+    entry = _lookup(klass, mid, registry.version, name_version(mid),
+                    class_version(klass))
     if entry is OWNER_PENDING:
         _fill_owner(klass, mid)
         entry = _lookup_filled(klass, mid)
