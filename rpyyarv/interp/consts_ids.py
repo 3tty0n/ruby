@@ -29,6 +29,9 @@ TO_S = symbols.intern('to_s')
 DUP = symbols.intern('dup')
 
 
+BANG = symbols.intern('!')
+
+
 EVAL = symbols.intern('eval')
 
 

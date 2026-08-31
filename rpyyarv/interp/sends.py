@@ -20,6 +20,8 @@ from rpyyarv.interp.args import NO_KEYWORDS, _arity_error, _kw_to_positional, _r
 @always_inline
 def zero_arg_native(recv, klass, mid):
     """argc 0 core methods, Q_UNDEF when none matches; &:sym shares this."""
+    if helpers.bops.disabled:
+        return value.Q_UNDEF
     # Kernel#freeze is rb_obj_freeze: a C call, not a send back through it.
     if mid == FREEZE and dispatch.owner_of(klass, FREEZE) == \
             send_owners.kernel:
@@ -154,14 +156,14 @@ def invoke(frame, w_ci, w_block=None):
             _drop(frame, recv_at)
             debug.count_native()
             return v
-    if mid == GETBYTE and argc == 1 and \
+    if not helpers.bops.disabled and mid == GETBYTE and argc == 1 and \
             dispatch.owner_of(klass, GETBYTE) == send_owners.string_getbyte:
         v = boot.str_getbyte(recv, frame.slots[recv_at + 1])
         if v != value.Q_UNDEF:
             _drop(frame, recv_at)
             debug.count_native()
             return v
-    if mid == SETBYTE and argc == 2 and \
+    if not helpers.bops.disabled and mid == SETBYTE and argc == 2 and \
             dispatch.owner_of(klass, SETBYTE) == send_owners.string_setbyte:
         v = boot.str_setbyte(recv, frame.slots[recv_at + 1],
                              frame.slots[recv_at + 2])
@@ -169,8 +171,8 @@ def invoke(frame, w_ci, w_block=None):
             _drop(frame, recv_at)
             debug.count_native()
             return v
-    if mid == SLICE and argc == 2 and entry is None and \
-            value.is_plain_array(recv) and \
+    if not helpers.bops.disabled and mid == SLICE and argc == 2 and \
+            entry is None and value.is_plain_array(recv) and \
             dispatch.owner_of(klass, SLICE) == value.core_class(value.C_ARRAY):
         beg = frame.slots[recv_at + 1]
         length = frame.slots[recv_at + 2]
@@ -183,7 +185,8 @@ def invoke(frame, w_ci, w_block=None):
             _drop(frame, recv_at)
             debug.count_native()
             return v
-    if entry is None and argc == 0 and w_block is None and mid == ALLOCATE \
+    if not helpers.bops.disabled and entry is None and argc == 0 \
+            and w_block is None and mid == ALLOCATE \
             and not value.is_immediate(recv) \
             and send_owners.class_allocate != 0 \
             and dispatch.owner_of(klass, ALLOCATE) == \
@@ -193,8 +196,8 @@ def invoke(frame, w_ci, w_block=None):
             _drop(frame, recv_at)
             debug.count_native()
             return v
-    if entry is None and argc == 1 and w_block is None \
-            and mid == FORCE_ENCODING \
+    if not helpers.bops.disabled and entry is None and argc == 1 \
+            and w_block is None and mid == FORCE_ENCODING \
             and send_owners.string_force_encoding != 0 \
             and dispatch.owner_of(klass, FORCE_ENCODING) == \
             send_owners.string_force_encoding:
@@ -203,7 +206,8 @@ def invoke(frame, w_ci, w_block=None):
             _drop(frame, recv_at)
             debug.count_native()
             return v
-    if entry is None and argc == 1 and w_block is None and mid == UNPACK1 \
+    if not helpers.bops.disabled and entry is None and argc == 1 \
+            and w_block is None and mid == UNPACK1 \
             and send_owners.string_unpack1 != 0 \
             and dispatch.owner_of(klass, UNPACK1) == \
             send_owners.string_unpack1:
@@ -223,7 +227,7 @@ def invoke(frame, w_ci, w_block=None):
             _drop(frame, recv_at)
             debug.count_native()
             return v
-    if entry is None and argc == 1 \
+    if not helpers.bops.disabled and entry is None and argc == 1 \
             and (mid == helpers.LT or mid == helpers.GT
                  or mid == helpers.LE or mid == helpers.GE) \
             and send_owners.comparable != 0 \
@@ -1371,7 +1375,7 @@ def _opt_send(frame, mid, argc):
             _drop(frame, recv_at)
             debug.count_native()
             return v
-    if entry is None and argc == 1 \
+    if not helpers.bops.disabled and entry is None and argc == 1 \
             and (mid == helpers.LT or mid == helpers.GT
                  or mid == helpers.LE or mid == helpers.GE) \
             and send_owners.comparable != 0 \

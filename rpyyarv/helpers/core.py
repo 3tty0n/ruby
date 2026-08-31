@@ -344,19 +344,19 @@ START_WITH_P = symbols.intern('start_with?')
 
 def _owned_by_core(recv, klass_i, mid):
     """CRuby's core method still answers mid; elidable on the version."""
-    return dispatch.owner_of(promote(value.class_of(recv)),
-                             mid) == value.core_class(klass_i)
+    return not bops.disabled and dispatch.owner_of(
+        promote(value.class_of(recv)), mid) == value.core_class(klass_i)
 
 
 def _int_owns(mid):
     """No BOP flag watches these, so ask CRuby who owns them."""
     klass = value.core_class(value.C_INTEGER)
-    return (dispatch.owner_of(klass, mid) == klass
+    return (not bops.disabled and dispatch.owner_of(klass, mid) == klass
             and dispatch.lookup_core(klass, mid) is None)
 
 
 def _flt_owns(mid):
     """No BOP flag watches these, so ask CRuby who owns them."""
     klass = value.core_class(value.C_FLOAT)
-    return (dispatch.owner_of(klass, mid) == klass
+    return (not bops.disabled and dispatch.owner_of(klass, mid) == klass
             and dispatch.lookup_core(klass, mid) is None)

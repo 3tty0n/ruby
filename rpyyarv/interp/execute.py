@@ -19,7 +19,7 @@ from rpyyarv.iseq import NO_BLOCK_ISEQ
 from rpyyarv.rlib import (JitDriver, clock_ns, dont_look_inside,
                           set_user_param)
 
-from rpyyarv.interp.consts_ids import BINDING, ALLOCATE, DUP, EACH_SLICE, EACH_WITH_INDEX, EVAL, FORCE_ENCODING, GETBYTE, MATCH, SEND, SEND2, SETBYTE, STEP, SUCC, UNPACK1
+from rpyyarv.interp.consts_ids import BANG, BINDING, ALLOCATE, DUP, EACH_SLICE, EACH_WITH_INDEX, EVAL, FORCE_ENCODING, GETBYTE, MATCH, SEND, SEND2, SETBYTE, STEP, SUCC, UNPACK1
 from rpyyarv.interp.cref import _cref_of
 
 PROXY_NAME = '__rpyyarv_block_param_proxy__'
@@ -807,7 +807,9 @@ def _execute(iseq, frame, pc):
             frame.push(v if v != value.Q_UNDEF
                        else _unop(frame, recv, helpers.EMPTY_P))
         elif opcode == insns.OPT_NOT:
-            frame.push(helpers.opt_not(frame.pop()))
+            recv = frame.pop()
+            v = helpers.opt_not(recv)
+            frame.push(v if v != value.Q_UNDEF else _unop(frame, recv, BANG))
         elif opcode == insns.OPT_LTLT:
             b = frame.pop()
             a = frame.pop()

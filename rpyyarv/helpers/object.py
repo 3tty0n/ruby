@@ -42,6 +42,8 @@ def basic_initialize(klass):
 
 def identity_op(recv, mid):
     """vm_opt_equality's second half: mid still resolves to BasicObject's."""
+    if bops.disabled:
+        return False
     klass = value.class_of(recv)
     if klass == 0:
         return False
@@ -91,7 +93,7 @@ def responds_to(recv, sym):
 
 def _real_class_of(recv, mid):
     """Kernel#class's answer: no singleton, mid still Kernel's; else 0."""
-    if modules.kernel == 0:
+    if modules.kernel == 0 or bops.disabled:
         return 0
     klass = value.class_of(recv)
     if klass == 0:
@@ -408,4 +410,6 @@ def nil_p(recv):
 
 def opt_not(recv):
     # TODO: no BOP flag records #!, so a redefined #! is ignored here.
+    if bops.disabled:
+        return value.Q_UNDEF
     return value.newbool(not value.is_true(recv))
