@@ -37,6 +37,19 @@ class _Owners(object):
 owners = _Owners()
 
 
+class _InvalidationScope(object):
+    """Ablation switch: fall back to invalidating the whole cache."""
+    # Quasi-immutable: startup writes it once, so the read folds away.
+    _immutable_fields_ = ['method_global?', 'class_global?']
+
+    def __init__(self):
+        self.method_global = False
+        self.class_global = False
+
+
+invalidation_scope = _InvalidationScope()
+
+
 class _Invalidations(object):
     """interp.install() puts the JIT's eagerness controller here."""
 
@@ -173,6 +186,10 @@ def site_lookup(site, klass, mid):
 def invalidate_for(mid):
     """A def of mid stales only answers naming mid; drop exactly those.
     kind_of? does not depend on methods, so ktab is never touched here."""
+    if invalidation_scope.method_global:
+        flush_trampoline_cache()
+        invalidate_owners()
+        return
     owners.skipped += 1
     res = owners.res_by_mid.get(mid, None)
     if res is not None:
@@ -238,6 +255,10 @@ def _purge_tables():
 def invalidate_class(klass):
     """A chain move under klass: only an answer reached through klass or one
     of its subclasses can change, and CRuby reports every one of those."""
+    if invalidation_scope.class_global:
+        flush_trampoline_cache()
+        invalidate_owners()
+        return
     # Nokogiri decorates each node with Object#extend, so most reports name a
     # singleton class no lookup of ours ever touched. Nothing can be stale.
     if not gcroots.seen_class(klass):

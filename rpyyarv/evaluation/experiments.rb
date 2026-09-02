@@ -19,6 +19,13 @@ module EvaluationConfig
     "gc-no-hook" => { "RPYYARV_GC_NO_HOOK" => "1" },
     "gc-stress" => { "RPYYARV_GC_STRESS" => "1" },
     "fast-paths-off" => { "RPYYARV_FAST_PATHS" => "0" },
+    # Each falls back to invalidating the whole cache, per dispatch/.
+    "method-invalidation-global" =>
+      { "RPYYARV_METHOD_INVALIDATION" => "global" },
+    "class-invalidation-global" =>
+      { "RPYYARV_CLASS_INVALIDATION" => "global" },
+    "constant-invalidation-global" =>
+      { "RPYYARV_CONSTANT_INVALIDATION" => "global" },
     # Pins trace eagerness, per interp/execute.py's EAGER_PARAMS/LAZY_PARAMS.
     "jit-params-eager" =>
       { "RPYYARV_JITPARAM" => "function_threshold=100,trace_eagerness=50" },

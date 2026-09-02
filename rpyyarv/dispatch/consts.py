@@ -105,6 +105,36 @@ class _Invalidations(object):
 const_invalidations = _Invalidations()
 
 
+class _ConstScope(object):
+    """Ablation switch: fall back to invalidating every constant name."""
+    # Quasi-immutable: startup writes it once, so the read folds away.
+    _immutable_fields_ = ['global_?']
+
+    def __init__(self):
+        self.global_ = False
+
+
+const_invalidation_scope = _ConstScope()
+
+
+def _invalidate_all_consts():
+    """The behaviour before names were tracked: one write kills every trace."""
+    consts.tab = {}
+    consts.attab = {}
+    consts.ftab = {}
+    for sites in consts.by_name.values():
+        i = 0
+        while i < len(sites):
+            if sites[i].entry is not None:
+                sites[i].entry = None
+            i += 1
+    i = 0
+    while i < CONST_BUCKETS:
+        const_names.cells[i].version = Version()
+        i += 1
+    const_invalidations.count += 1
+
+
 def _drop_named(tab, mid):
     dead = []
     for key in tab:
@@ -118,6 +148,9 @@ def _drop_named(tab, mid):
 
 def invalidate_consts(rid):
     """CRuby's rb_clear_constant_cache_for_id, via the shim's const hook."""
+    if const_invalidation_scope.global_:
+        _invalidate_all_consts()
+        return
     mid = rubycall.mid_of_rid(boot.as_signed(rid))
     if mid == rubycall.NO_MID:
         # A name no lookup of ours ever interned: nothing caches it.

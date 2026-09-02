@@ -88,6 +88,13 @@ def entry_point(argv):
     debug.configure_coverage()
     if os.environ.get('RPYYARV_FAST_PATHS') == '0':
         helpers.disable_fast_paths()
+    # Ablations: drop back to killing every trace instead of the named ones.
+    if os.environ.get('RPYYARV_METHOD_INVALIDATION') == 'global':
+        dispatch.invalidation_scope.method_global = True
+    if os.environ.get('RPYYARV_CLASS_INVALIDATION') == 'global':
+        dispatch.invalidation_scope.class_global = True
+    if os.environ.get('RPYYARV_CONSTANT_INVALIDATION') == 'global':
+        dispatch.const_invalidation_scope.global_ = True
     dispatch.install()
 
     if not helpers.check_float_layout():
