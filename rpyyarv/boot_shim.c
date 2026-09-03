@@ -2169,7 +2169,8 @@ handle_owner_dmark(void *p)
 static const rb_data_type_t handle_owner_type = {
     "rpyyarv/block_handle",
     { handle_owner_dmark, handle_owner_dfree, 0 },
-    0, 0, RUBY_TYPED_FREE_IMMEDIATELY
+    /* It holds a handle, no VALUE, so freezing it really does share it. */
+    0, 0, RUBY_TYPED_FREE_IMMEDIATELY | RUBY_TYPED_FROZEN_SHAREABLE
 };
 
 long
@@ -2186,6 +2187,8 @@ sentinel_self(void)
 {
     if (NIL_P(block_self_sentinel)) {
         block_self_sentinel = rb_obj_alloc(rb_cBasicObject);
+        /* Frozen so Ractor.make_shareable can walk a handle Proc's self. */
+        rb_obj_freeze(block_self_sentinel);
         rb_gc_register_mark_object(block_self_sentinel);
     }
     return block_self_sentinel;

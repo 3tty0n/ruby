@@ -34,6 +34,7 @@ VALUE rb_rpyyarv_method_owner(VALUE klass, ID mid);
 VALUE rb_rpyyarv_gvar_defined(ID id);
 VALUE rb_rpyyarv_proc_new(rb_block_call_func_t func, VALUE data, VALUE self_v);
 VALUE rb_rpyyarv_ifunc_data(VALUE procval, rb_block_call_func_t func);
+int rb_rpyyarv_handle_proc_p(VALUE procval);
 VALUE rb_rpyyarv_block_call_kw(VALUE obj, ID mid, int argc, const VALUE *argv,
                                rb_block_call_func_t bl_proc, VALUE data2,
                                int kw_splat, VALUE block_self);

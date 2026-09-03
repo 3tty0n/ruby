@@ -3586,11 +3586,22 @@ rb_rpyyarv_ifunc_data(VALUE procval, rb_block_call_func_t func)
     return (VALUE)ifunc->data;
 }
 
+static rb_block_call_func_t rpyyarv_block_func;
+
+// True for a Proc whose body is an rpyyarv block, not a CRuby iseq.
+int
+rb_rpyyarv_handle_proc_p(VALUE procval)
+{
+    return rpyyarv_block_func != NULL &&
+           !UNDEF_P(rb_rpyyarv_ifunc_data(procval, rpyyarv_block_func));
+}
+
 // rb_proc_new with a chosen captured self, so a caller can plant a sentinel.
 VALUE
 rb_rpyyarv_proc_new(rb_block_call_func_t func, VALUE data, VALUE self_v)
 {
     VALUE procval = rb_proc_new(func, data);
+    rpyyarv_block_func = func;
     rb_proc_t *proc;
     GetProcPtr(procval, proc);
     RB_OBJ_WRITE(procval, &proc->block.as.captured.self, self_v);

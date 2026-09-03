@@ -204,6 +204,7 @@ gccheck:
 	          test/bmethodreturn.rb \
 	          test/bmethodcref.rb \
 	          test/bindinglocals.rb \
+	          test/makeshareable.rb \
 	          test/coreops.rb \
 	          test/threadmark.rb test/superdup.rb test/redefinealias.rb \
 	          test/errinfokeep.rb test/hashmerge.rb test/proccallblock.rb \

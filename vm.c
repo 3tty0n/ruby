@@ -1652,7 +1652,8 @@ rb_proc_ractor_make_shareable(VALUE self, VALUE replace_self)
         proc_isolate_env(self, proc, read_only_variables);
         proc->is_isolated = TRUE;
     }
-    else {
+    /* An rpyyarv block keeps its closure outside CRuby: freeze, do not isolate. */
+    else if (!rb_rpyyarv_handle_proc_p(self)) {
         const struct rb_block *block = vm_proc_block(self);
         if (block->type != block_type_symbol) rb_raise(rb_eRuntimeError, "not supported yet");
 
