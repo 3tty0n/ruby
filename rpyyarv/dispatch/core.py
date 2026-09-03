@@ -95,8 +95,8 @@ KIND_UNDEF = 4
 
 
 class MethodEntry(object):
-    _immutable_fields_ = ['w_iseq', 'private', 'prot', 'owner', 'mid', 'cref',
-                          'kind', 'ivar', 'lexical', 'w_block']
+    _immutable_fields_ = ['w_iseq', 'private?', 'prot?', 'owner', 'mid',
+                          'cref', 'kind', 'ivar', 'lexical', 'w_block']
 
     def __init__(self, w_iseq, private, owner=0, mid=0, cref=0,
                  kind=KIND_ISEQ, ivar=0, lexical=None, w_block=None,
@@ -162,6 +162,17 @@ def define(klass, mid, w_iseq, private, cref=0, lexical=None,
     invalidate_for(mid)
     _install_trampoline(klass, mid, 2 if prot else (1 if private else 0),
                         entry)
+
+
+def set_visibility(klass, mid, entry, private, prot):
+    """`private :name` on a method klass owns: only the flags change, so no
+    CRuby entry is reinstalled and method_added stays fired exactly once.
+    CRuby's own visibility change dropped the entry, so put it back."""
+    entry.private = private
+    entry.prot = prot
+    _table_for(klass)[mid] = entry
+    flush_trampoline_cache()
+    invalidate_for(mid)
 
 
 def define_attr(klass, mid, ivar, kind, private=False, prot=False):

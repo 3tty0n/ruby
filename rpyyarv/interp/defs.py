@@ -283,7 +283,9 @@ def _mark_visibility(klass, args, entries, private, prot=False):
         entry = entries[i]
         if entry is not None and entry.kind != dispatch.KIND_UNDEF:
             name_mid = symbols.intern(_attr_name(args[i]))
-            if entry.kind == dispatch.KIND_ISEQ:
+            if entry.owner == klass:
+                dispatch.set_visibility(klass, name_mid, entry, private, prot)
+            elif entry.kind == dispatch.KIND_ISEQ:
                 dispatch.define(klass, name_mid, entry.w_iseq, private,
                                 entry.cref, entry.lexical, 0, 0, prot)
             elif entry.kind == dispatch.KIND_BMETHOD:
