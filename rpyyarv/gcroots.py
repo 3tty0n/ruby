@@ -18,6 +18,7 @@ class Registry(object):
         self.classes = []       # classes RPyYARV defined, keys of the registry
         self.class_seen = {}    # the same, as a set: a root is never dropped
         self.held = []          # exception VALUEs parked outside any frame
+        self.forever = []       # VALUEs rooted for the life of the process
         self.blocks = None      # interp's handle table, once it exists
         self.fibers = None      # fibers.mark_suspended, once installed
         # ponytail: leaks redefined blocks, bounded by define_method count.
@@ -85,11 +86,19 @@ def hold(v):
     state.held.append(v)
 
 
+def pin_forever(v):
+    """A root with no scope; held is a stack that release() searches."""
+    state.forever.append(v)
+
+
 def release(v):
-    for i in range(len(state.held)):
+    # Backwards: hold/release nest, so the match is at or near the top.
+    i = len(state.held) - 1
+    while i >= 0:
         if state.held[i] == v:
             del state.held[i]
             return
+        i -= 1
 
 
 def push_frame(frame):
@@ -266,6 +275,13 @@ def _mark_all():
         if not value.is_immediate(v):
             _mark(v, 'held')
         k += 1
+    forever = state.forever
+    k = 0
+    while k < len(forever):
+        v = forever[k]
+        if not value.is_immediate(v):
+            _mark(v, 'forever')
+        k += 1
     # $! of every running rescue: ec->errinfo no longer roots it.
     errs = errinfos.stack
     k = 0
@@ -303,9 +319,10 @@ def root_inventory():
         pools += len(state.consts[i])
         i += 1
     return ('classes %d, const pools %d (%d values), pinned %d, held %d, '
-            'bmethods %d' % (len(state.classes), len(state.consts), pools,
-                             len(state.pinned), len(state.held),
-                             len(state.bmethods)))
+            'forever %d, bmethods %d'
+            % (len(state.classes), len(state.consts), pools,
+               len(state.pinned), len(state.held), len(state.forever),
+               len(state.bmethods)))
 
 
 def install():

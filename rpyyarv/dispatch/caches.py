@@ -362,8 +362,8 @@ def _fill_sym_name(sym):
     if got != 0:
         return got
     v = boot.sym_name(sym)
-    # Held, not registered as a class: it is a String, in no frame.
-    gcroots.hold(v)
+    # A String in no frame, and never released: not on the held stack.
+    gcroots.pin_forever(v)
     sym_names.tab[sym] = v
     return v
 
