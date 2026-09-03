@@ -65,6 +65,40 @@ Successful performance runs produce publication-ready SVG files:
 - =scatter-ENGINE.svg=: reference time versus RPyYARV JIT time on equal log
   scales.  Points below the diagonal are RPyYARV wins.
 
+* Running on Linux/amd64
+
+The harness selects the shared-library suffix, the loader variable
+(=DYLD_LIBRARY_PATH= or =LD_LIBRARY_PATH=), and the peak-RSS reader
+(=/usr/bin/time -l= or =-v=) from the running platform; nothing is
+architecture-specific.  The translated binaries find =libruby= through an
+absolute =RPATH= into the build directory, so no =patchelf= or
+=LD_LIBRARY_PATH= is needed after =make build=.
+
+Prerequisites beyond a normal CRuby build (Debian/Ubuntu names):
+
+- =build-essential=, =libssl-dev=, =zlib1g-dev=, =libyaml-dev=, =libffi-dev=
+  (=make setup= installs =libyaml-dev= itself when it is missing)
+- =rustc= and =cargo= for YJIT/ZJIT, from rustup rather than the distribution
+- a Python 2 for RPython translation: =python2= if the distribution still has
+  it, otherwise =pypy= (the =pypy= Debian package is PyPy2); the Makefile
+  finds either, or accepts =PYTHON2=/=RPYTHON=
+- =python3= for =make test=, =perl= for the run timeouts, =git=
+- optional: =time= for the memory experiment, =linux-perf= for external
+  profiling, TruffleRuby/JRuby for the extra engines
+
+From a fresh clone:
+
+#+begin_src sh
+cd rpyyarv
+make build          # CRuby --enable-shared, then both RPython binaries
+make setup          # clones ruby-bench and installs its pinned gems
+make eval EVAL=doctor
+make eval EVAL=performance EVALFLAGS="--suite all --procs 3"
+#+end_src
+
+=make build-cruby= alone is enough for the CRuby-only experiments.  All paths
+are derived from the checkout; no per-host environment variable is required.
+
 * Evaluation matrix
 
 | Claim | Experiment | Current collector | Required extension |
