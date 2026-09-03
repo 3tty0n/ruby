@@ -214,6 +214,7 @@ gccheck:
 	          test/definedgvar.rb \
 	          test/blockraise.rb test/defmethodsuper.rb \
 	          test/includelate.rb test/threads.rb \
+	          test/methodintro.rb \
 	          $(TOP)/benchmark/app_*.rb $(TOP)/benchmark/so_*.rb; do \
 	   n=`basename $$s`; \
 	   case $$s in test/*) \
