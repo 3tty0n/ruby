@@ -170,7 +170,9 @@ WHY_NOISE = /another thread is not supported|terminated with exception|invalidat
 
 def why(err, status)
   msg = err.lines.map(&:chomp)
-           .reject { |l| l.include?("not loaded") || l =~ WHY_NOISE }
+           # A warning names no failure; the path alone must not match below.
+           .reject { |l| l.include?("not loaded") || l.include?(": warning: ") ||
+                         l =~ WHY_NOISE }
            .grep(/rror|xception|undefined|rpyyarv|undler|ould not find/).first
   return "exit #{status.exitstatus}" unless msg
   msg.gsub(%r{\S*/bench_tmp_drv_\S+\.rb:?}, "").strip[0, 100]
