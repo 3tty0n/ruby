@@ -52,9 +52,7 @@ puts <<~SUMMARY
 
   Use `make setup-gems BENCH=name` to prepare one benchmark only.
 
-  For manual `make bench`/`make awfy` runs, export:
-    RPYYARV_BUILD=#{BUILD}
-    BENCH_GEMS=#{GEMS}
-    GEM_PATH=<gem path for the driver ruby running scripts/bench.rb>
-    AWFY_RUBYLIB=<path to the awfy suite's set/subclass_compatible.rb>
+  make bench/awfy/eval derive every path above from this tree; no per-host
+  environment variable is needed. Override RPYYARV_BUILD, BENCH_GEMS or
+  AWFY_RUBYLIB (now #{File.join(TOP, "lib")}) only to point elsewhere.
 SUMMARY

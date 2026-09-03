@@ -77,7 +77,8 @@ def bench_gems_env
 end
 
 def rubylib
-  ENV["AWFY_RUBYLIB"].to_s
+  # Defaulted here too, so a direct run needs no per-host env.
+  ENV.fetch("AWFY_RUBYLIB") { File.join(TOP, "lib") }
 end
 
 def median(a)
