@@ -579,12 +579,16 @@ def invoke(frame, w_ci, w_block=None):
             and (dispatch.is_known_class(recv)
                  or dispatch.is_known_module(recv)):
         return _remove_or_undef(frame, mid, recv, recv_at, argc)
-    if mid == RUBY2_KEYWORDS and fcall and argc == 1 \
-            and (dispatch.is_known_class(recv)
-                 or dispatch.is_known_module(recv)):
-        v = _ruby2_keywords(frame, recv, recv_at)
-        if v != value.Q_UNDEF:
-            return v
+    if mid == RUBY2_KEYWORDS and fcall and argc == 1:
+        owner = recv
+        if value.is_immediate(recv) or not _is_class_or_module(recv):
+            # Toplevel: Object holds the def, as rb_top_main_class names it.
+            owner = value.core_class(value.C_OBJECT) if frame.cref is None \
+                else 0
+        if owner != 0:
+            v = _ruby2_keywords(frame, owner, recv_at)
+            if v != value.Q_UNDEF:
+                return v
     if mid == CORE_ALIAS or mid == CORE_UNDEF:
         return _core_method(frame, mid, recv, recv_at, argc)
     if mid == ALIAS_METHOD and argc == 2 and entry is None \

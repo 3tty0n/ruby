@@ -55,10 +55,16 @@ def _ruby2_keywords(frame, recv, recv_at):
     if mid == rubycall.NO_MID:
         return value.Q_UNDEF
     entry = dispatch.lookup_owned(recv, mid)
-    if entry is None or entry.kind != dispatch.KIND_ISEQ:
+    if entry is None:
         # A CRuby-owned method: its own Module#ruby2_keywords handles it.
         return value.Q_UNDEF
-    w = entry.w_iseq
+    if entry.kind == dispatch.KIND_ISEQ:
+        w = entry.w_iseq
+    elif entry.kind == dispatch.KIND_BMETHOD:
+        # define_method's block is our ISeq too, though CRuby sees an ifunc.
+        w = entry.w_block.w_iseq
+    else:
+        return value.Q_UNDEF
     # CRuby only marks a *rest method without keyword parameters; else warns.
     if w.rest_start < 0 or len(w.kw_table) > 0 or w.kwrest >= 0:
         return value.Q_UNDEF
