@@ -46,7 +46,9 @@ RUBY_BENCH ?= $(CURDIR)/ruby-bench
 AWFY_RUBYLIB ?= $(TOP)/lib
 PYTHON  ?= python3
 PYTHONPATH ?= $(TOP)
-RPYTHON ?= python2 $(PYPY)/rpython/bin/rpython
+# RPython needs a Python 2; Linux distributions now ship pypy2, not python2.
+PYTHON2 ?= $(shell command -v python2 || command -v pypy2 || echo python2)
+RPYTHON ?= $(PYTHON2) $(PYPY)/rpython/bin/rpython
 RUBY    ?= $(BUILD)/ruby
 # Run benchmark drivers with the same local CRuby build as their child jobs.
 # This avoids accidentally selecting a system or rbenv Ruby from PATH.
