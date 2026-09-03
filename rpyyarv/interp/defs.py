@@ -123,6 +123,21 @@ def _define_bmethod(frame, mid, recv, recv_at, w_block, private_pragma=False):
 
 
 @unroll_safe
+def _define_singleton_bmethod(frame, mid, recv, recv_at, w_block):
+    """define_singleton_method: the entry lands on recv's singleton class."""
+    name_v = frame.slots[recv_at + 1]
+    _drop(frame, recv_at)
+    ret = _call_with_block(recv, mid, [name_v], w_block)
+    if not boot.is_symbol(ret):
+        return ret
+    returned_mid = symbols.intern(boot.sym_of(ret))
+    lambda_block = block_mod.W_Block(w_block.w_iseq, w_block.frame,
+                                     w_block.outer, is_lambda=True)
+    dispatch.define_singleton_bmethod(recv, returned_mid, lambda_block)
+    return ret
+
+
+@unroll_safe
 def _define_bmethod_modfunc(frame, mid, recv, recv_at, w_block):
     """define_method under module_function: private plus a singleton copy."""
     name_v = frame.slots[recv_at + 1]
@@ -394,15 +409,24 @@ def _core_method(frame, mid, recv, recv_at, argc):
     args = [cbase, frame.slots[recv_at + 2], frame.slots[recv_at + 3]]
     _drop(frame, recv_at)
     ret = rubycall.call(recv, mid, args)
-    # After CRuby's alias: its own def drops any entry standing for this name.
-    if entry is not None and _is_attr_kind(entry.kind):
-        dispatch.define_attr(cbase, name, entry.ivar, entry.kind)
+    _realias(cbase, name, entry)
     helpers.refresh()
     return ret
 
 
 def _is_attr_kind(kind):
     return kind == dispatch.KIND_ATTR_READER or kind == dispatch.KIND_ATTR_WRITER
+
+
+def _realias(klass, name, entry):
+    """After CRuby's alias: its own def dropped the entry for this name."""
+    if entry is None:
+        return
+    if _is_attr_kind(entry.kind):
+        dispatch.define_attr(klass, name, entry.ivar, entry.kind)
+    elif entry.kind == dispatch.KIND_BMETHOD and entry.w_block is not None:
+        dispatch.define_bmethod(klass, name, entry.w_block, entry.private,
+                                entry.prot)
 
 
 def _alias_method(frame, recv, recv_at):
@@ -426,9 +450,7 @@ def _alias_method(frame, recv, recv_at):
     args = [frame.slots[recv_at + 1], frame.slots[recv_at + 2]]
     _drop(frame, recv_at)
     ret = rubycall.call(recv, ALIAS_METHOD, args)
-    # After CRuby's alias: its own def drops any entry standing for this name.
-    if entry is not None and _is_attr_kind(entry.kind):
-        dispatch.define_attr(recv, name, entry.ivar, entry.kind)
+    _realias(recv, name, entry)
     helpers.refresh()
     return ret
 

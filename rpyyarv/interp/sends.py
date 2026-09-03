@@ -379,12 +379,17 @@ def invoke(frame, w_ci, w_block=None):
             and (dispatch.is_known_class(recv)
                  or dispatch.is_known_module(recv)):
         return _define_attrs(frame, mid, recv, recv_at, argc)
-    if mid == DEFINE_METHOD and argc == 1 and not w_ci.blockarg \
+    if mid == DEFINE_METHOD and argc == 1 \
             and w_block is not None and w_block.kind == block_mod.KIND_ISEQ \
             and not frame.module_func \
             and _attr_name(frame.slots[recv_at + 1]) != '':
         return _define_bmethod(frame, mid, recv, recv_at, w_block,
                                frame.private_pragma)
+    if mid == DEFINE_SINGLETON_METHOD and argc == 1 \
+            and w_block is not None and w_block.kind == block_mod.KIND_ISEQ \
+            and not value.is_immediate(recv) \
+            and _attr_name(frame.slots[recv_at + 1]) != '':
+        return _define_singleton_bmethod(frame, mid, recv, recv_at, w_block)
     if mid == DEFINE_METHOD and argc == 1 and frame.module_func \
             and _attr_name(frame.slots[recv_at + 1]) != '':
         # CRuby's send never learns RPyYARV's module_function pragma.
@@ -1399,7 +1404,7 @@ def _opt_send(frame, mid, argc):
 # above is already bound.
 from rpyyarv.interp.builtins import _iseq_parameters, _array_each_slice, _array_each_with_index, _integer_step, _array_new, _array_new_block, _backtrace, _comparable_op, _dir_of, _encoding_find, _running_method, encodings, proxy, regexp_class, vm_core
 from rpyyarv.interp.supers import _ruby2_keywords
-from rpyyarv.interp.defs import _class_new_block, _exec_on_made, _alias_method, _attr_name, _core_method, _define_attrs, _define_bmethod, _define_bmethod_modfunc, _in_body_of, _instance_eval, _module_eval_block, _module_function, _private_class_method, _remove_or_undef, _visibility_names, _visibility_pragma
+from rpyyarv.interp.defs import _class_new_block, _exec_on_made, _alias_method, _attr_name, _is_class_or_module, _core_method, _define_attrs, _define_bmethod, _define_bmethod_modfunc, _define_singleton_bmethod, _in_body_of, _instance_eval, _module_eval_block, _module_function, _private_class_method, _remove_or_undef, _visibility_names, _visibility_pragma
 from rpyyarv.interp.evalsrc import _binding_rpy, _eval_receiver, _eval_rpy, _module_eval_rpy
 from rpyyarv.interp.blocks import _blockarg, _block_send, _block_send_args, _is_proxy_call, _proc_block_of, _run_bmethod, _to_proc
 from rpyyarv.interp.callbacks import _call_with_block, _check_block_error
