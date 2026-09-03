@@ -27,6 +27,8 @@ ruby evaluation/run.rb mechanisms --suite all --performance RESULTS/raw.json
 ruby evaluation/run.rb gc 16384 4096 1024
 ruby evaluation/run.rb nursery SCRIPT 1073741824 131072
 ruby evaluation/run.rb ablate baseline gc-no-hook --suite awfy
+# no names given: runs every ablation but gc-stress (see EVAL=gc), and
+# times only rpyyarv/rpyyarv-jit, since the env switches don't touch CRuby
 ruby evaluation/run.rb loc
 ruby evaluation/run.rb plot evaluation/results/RUN/raw.json
 ruby evaluation/run.rb report evaluation/results/RUN

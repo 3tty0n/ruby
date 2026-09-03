@@ -759,8 +759,12 @@ module RPyYARVEvaluation
   # Item 6: runtime ablations only; build variants are reported, not run.
   def ablate(args, results_root)
     names = args.take_while { |arg| EvaluationConfig::ABLATIONS.key?(arg) }
-    names = EvaluationConfig::ABLATIONS.keys if names.empty?
+    names = EvaluationConfig::DEFAULT_ABLATIONS if names.empty?
     rest = args.drop(names.size)
+    # Env switches only affect rpyyarv/rpyyarv-jit; the CRuby rows are timed
+    # elsewhere (the performance run), so skip them here unless overridden.
+    rest += %w[--only-engine rpyyarv --only-engine rpyyarv-jit] \
+      unless rest.include?("--only-engine")
     run = Run.new("ablation", results_root)
     run.manifest["build_ablations"] = EvaluationConfig::BUILD_ABLATIONS
     run.manifest["engine_binaries"] = binary_metadata(

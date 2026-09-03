@@ -410,8 +410,9 @@ end
 
 # --- run --------------------------------------------------------------------
 
-def resolve_engines(extra, env)
+def resolve_engines(extra, env, only)
   list = BASE_ENGINES.map { |n, a| [n, a] } + extra
+  list = list.select { |name, _| only.include?(name) } unless only.empty?
   list.select do |name, argv|
     if !File.executable?(argv[0])
       puts format("note: skipping %s (%s not found)", name, argv[0])
@@ -556,6 +557,7 @@ def main(argv)
   jsonl_path = DEFAULT_JSONL
   suites = nil
   extra_engines = []
+  only_engines = []
   opts = {}
   inventory_only = false
   foreign_top = nil
@@ -586,6 +588,8 @@ def main(argv)
       return 2 unless path
       extra_engines << [n, [File.expand_path(path)]]
     when "--compare" then extra_engines << ["alt", [File.expand_path(argv.shift.to_s)]]
+    when /\A--only-engine=(.*)\z/ then only_engines << Regexp.last_match(1)
+    when "--only-engine" then only_engines << argv.shift.to_s
     when /\A--foreign(?:=(\d+))?\z/ then foreign_top = (Regexp.last_match(1) || 12).to_i
     when "--gem-require" then opts[:gem_require] = true
     when "--no-gem-require" then opts[:gem_require] = false
@@ -597,7 +601,7 @@ def main(argv)
                         [--ruby-bench DIR] [--warmup N] [--iters N] [--raw FILE]
                         [--jsonl FILE] [--no-jsonl]
                         [--engine NAME=PATH]... [--compare BIN] [--inventory] [--refresh-inventory]
-                        [--foreign[=N]] [--gem-require|--no-gem-require]
+                        [--only-engine NAME]... [--foreign[=N]] [--gem-require|--no-gem-require]
         By default each Gemfile benchmark is probed once for whether RPyYARV can
         own its gem requires, and timed the way the probe says. --gem-require
         forces it on for every benchmark, --no-gem-require leaves every require
@@ -606,6 +610,7 @@ def main(argv)
         sends to CRuby; it prints no timings, since coverage perturbs them.
         --engine/--compare add an engine that is timed interleaved with the others and
         gets its own ratio column against rpyyarv-jit.
+        --only-engine keeps only the named base/extra engines, dropping the rest.
       USAGE
       return 0
     else
@@ -622,7 +627,7 @@ def main(argv)
            end
 
   env = base_env
-  engines = resolve_engines(extra_engines, env)
+  engines = resolve_engines(extra_engines, env, only_engines)
   return 1 if engines.empty?
 
   all_rows = []

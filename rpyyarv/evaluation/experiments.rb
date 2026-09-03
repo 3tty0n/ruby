@@ -32,6 +32,8 @@ module EvaluationConfig
     "jit-params-lazy" =>
       { "RPYYARV_JITPARAM" => "function_threshold=1619,trace_eagerness=200" }
   }.freeze
+  # gc-stress is orders of magnitude slower and is covered by EVAL=gc.
+  DEFAULT_ABLATIONS = (ABLATIONS.keys - ["gc-stress"]).freeze
 
   # Ablations that need their own translation; run.rb only reports the recipe.
   BUILD_ABLATIONS = {
