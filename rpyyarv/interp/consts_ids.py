@@ -86,6 +86,7 @@ PARAMETERS = symbols.intern('parameters')
 
 
 OWNER = symbols.intern('owner')
+SOURCE_LOCATION = symbols.intern('source_location')
 
 
 INDEX = symbols.intern('index')
@@ -125,6 +126,7 @@ ATTR_ACCESSOR = symbols.intern('attr_accessor')
 
 
 DEFINE_METHOD = symbols.intern('define_method')
+DEFINE_SINGLETON_METHOD = symbols.intern('define_singleton_method')
 
 
 SEND = symbols.intern('send')

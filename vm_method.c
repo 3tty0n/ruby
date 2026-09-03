@@ -351,6 +351,22 @@ rb_rpyyarv_set_method_hook(void (*fn)(VALUE, VALUE))
     rpyyarv_method_hook = fn;
 }
 
+static const void *(*rpyyarv_iseq_hook)(const void *);
+
+void
+rb_rpyyarv_set_iseq_hook(const void *(*fn)(const void *))
+{
+    rpyyarv_iseq_hook = fn;
+}
+
+/* rpyyarv installs a Ruby def as a cfunc trampoline; this is the ISeq behind
+ * one, so introspection reports the Ruby definition and not a native method. */
+const void *
+rb_rpyyarv_def_iseq(const void *def)
+{
+    return rpyyarv_iseq_hook ? rpyyarv_iseq_hook(def) : NULL;
+}
+
 /* mid 0 when the change is a chain move with no single name behind it. */
 void
 rb_rpyyarv_method_state_changed(VALUE klass, ID mid)

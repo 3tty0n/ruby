@@ -78,7 +78,22 @@ struct rpyyarv_native_method {
     struct rpyyarv_native_method *next;
 };
 static struct rpyyarv_native_method *rpyyarv_native_methods;
+static st_table *rpyyarv_native_by_def;
 static pthread_mutex_t rpyyarv_native_lock = PTHREAD_MUTEX_INITIALIZER;
+
+/* The ISeq behind a trampoline def, so CRuby's Method#source_location,
+ * #parameters and #arity report the Ruby definition (proc.c). */
+static const void *
+native_iseq_for(const void *def)
+{
+    st_data_t iseq = 0;
+    pthread_mutex_lock(&rpyyarv_native_lock);
+    if (rpyyarv_native_by_def) {
+        st_lookup(rpyyarv_native_by_def, (st_data_t)def, &iseq);
+    }
+    pthread_mutex_unlock(&rpyyarv_native_lock);
+    return (const void *)iseq;
+}
 struct rpyyarv_native_proc {
     const void *iseq;
     const void *cref;
@@ -2414,6 +2429,7 @@ void
 rpyyarv_set_trampoline_callback(rpyyarv_tramp_fn fn)
 {
     tramp_callback = fn;
+    rb_rpyyarv_set_iseq_hook(fn ? native_iseq_for : NULL);
 }
 
 struct yield_args {
@@ -2551,6 +2567,9 @@ define_method_body(VALUE argp)
         pthread_mutex_lock(&rpyyarv_native_lock);
         entry->next = rpyyarv_native_methods;
         rpyyarv_native_methods = entry;
+        if (!rpyyarv_native_by_def) rpyyarv_native_by_def = st_init_numtable();
+        st_insert(rpyyarv_native_by_def, (st_data_t)p->def,
+                  (st_data_t)p->native_iseq);
         pthread_mutex_unlock(&rpyyarv_native_lock);
     }
     return Qnil;

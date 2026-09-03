@@ -2940,12 +2940,15 @@ method_def_min_max_arity(const rb_method_definition_t *def, int *max)
   again:
     if (!def) return *max = 0;
     switch (def->type) {
-      case VM_METHOD_TYPE_CFUNC:
+      case VM_METHOD_TYPE_CFUNC: {
+        const rb_iseq_t *tramp = rb_rpyyarv_def_iseq(def);
+        if (tramp) return rb_iseq_min_max_arity(tramp, max);
         if (def->body.cfunc.argc < 0) {
             *max = UNLIMITED_ARGUMENTS;
             return 0;
         }
         return *max = check_argc(def->body.cfunc.argc);
+      }
       case VM_METHOD_TYPE_ZSUPER:
         *max = UNLIMITED_ARGUMENTS;
         return 0;
@@ -3155,6 +3158,7 @@ method_def_iseq(const rb_method_definition_t *def)
       case VM_METHOD_TYPE_ALIAS:
         return method_def_iseq(def->body.alias.original_me->def);
       case VM_METHOD_TYPE_CFUNC:
+        return (const rb_iseq_t *)rb_rpyyarv_def_iseq(def);
       case VM_METHOD_TYPE_ATTRSET:
       case VM_METHOD_TYPE_IVAR:
       case VM_METHOD_TYPE_ZSUPER:
@@ -3279,6 +3283,11 @@ method_def_parameters(const rb_method_definition_t *def)
         break;
 
       case VM_METHOD_TYPE_CFUNC:
+        if ((iseq = method_def_iseq(def)) != NULL) {
+            return rb_iseq_parameters(iseq, 0);
+        }
+        break;
+
       case VM_METHOD_TYPE_ATTRSET:
       case VM_METHOD_TYPE_IVAR:
       case VM_METHOD_TYPE_ZSUPER:

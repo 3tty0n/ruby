@@ -24,6 +24,8 @@ RBIMPL_SYMBOL_EXPORT_BEGIN()
 // rpyyarv links libruby from outside the tree, so it registers at runtime.
 void rb_rpyyarv_set_constant_hook(void (*fn)(ID id));
 void rb_rpyyarv_set_method_hook(void (*fn)(VALUE, VALUE));
+void rb_rpyyarv_set_iseq_hook(const void *(*fn)(const void *));
+const void *rb_rpyyarv_def_iseq(const void *def);
 void rb_rpyyarv_set_fiber_hooks(const rb_rpyyarv_fiber_hooks_t *hooks);
 void rb_rpyyarv_fiber_kill_rethrow(void);
 VALUE rb_rpyyarv_frame_owner(void);
