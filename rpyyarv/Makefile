@@ -19,7 +19,6 @@ LDLIBS  += -lruby.$(SOVER)
 SHARED  := -dynamiclib
 LIBPATH := DYLD_LIBRARY_PATH=$(BUILD)
 LDFLAGS += -Wl,-headerpad_max_install_names
-INSTNAME := $(shell otool -D $(LIBRUBY) 2>/dev/null | tail -1)
 
 define fix_install_name
 	@[ -e "$(1)" ] || exit 0; \

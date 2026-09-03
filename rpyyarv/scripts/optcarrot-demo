@@ -93,6 +93,6 @@ env = {
                  .compact.join(File::PATH_SEPARATOR),
   library_var => [build, ENV[library_var]].compact.join(File::PATH_SEPARATOR)
 }
-env["DYLD_FALLBACK_LIBRARY_PATH"] = "/opt/homebrew/lib" if RUBY_PLATFORM.include?("darwin")
+env["DYLD_FALLBACK_LIBRARY_PATH"] = "/opt/homebrew/lib:/usr/local/lib" if RUBY_PLATFORM.include?("darwin")
 
 exec(env, *engine[1], display, *args)
