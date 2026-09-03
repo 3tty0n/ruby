@@ -44,6 +44,8 @@ VALUE rb_rpyyarv_call_with_proc_kw(VALUE obj, ID mid, int argc,
                                    const VALUE *argv, VALUE proc,
                                    int kw_splat);
 VALUE rb_rpyyarv_proc_from_iseq(const void *iseq, const void *cref);
+const void *rb_rpyyarv_add_cfunc(VALUE klass, ID mid, VALUE (*func)(ANYARGS),
+                                 int visi);
 const void *rb_rpyyarv_method_iseq(VALUE klass, ID mid, const void *iseq,
                                     const void *cref);
 VALUE rb_rpyyarv_call_method_iseq(VALUE self, const void *me, int argc,

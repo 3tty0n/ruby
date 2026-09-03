@@ -1804,6 +1804,27 @@ rb_add_method_iseq(VALUE klass, ID mid, const rb_iseq_t *iseq, rb_cref_t *cref, 
     rb_add_method(klass, mid, VM_METHOD_TYPE_ISEQ, &iseq_body, visi);
 }
 
+/* rb_add_method_cfunc, but the def is read before method_added runs: a hook
+ * may replace the method, and the def would then name someone else's entry. */
+const void *
+rb_rpyyarv_add_cfunc(VALUE klass, ID mid, VALUE (*func)(ANYARGS), int visi)
+{
+    rb_method_cfunc_t opt;
+    rb_method_entry_t *me;
+    const void *def;
+
+    opt.func = func;
+    opt.argc = -1;
+    RB_VM_LOCKING() {
+        me = rb_method_entry_make(klass, mid, klass,
+                                  (rb_method_visibility_t)visi,
+                                  VM_METHOD_TYPE_CFUNC, NULL, mid, &opt);
+    }
+    def = (const void *)me->def;
+    method_added(klass, mid);
+    return def;
+}
+
 const void *
 rb_rpyyarv_method_iseq(VALUE klass, ID mid, const void *iseq,
                         const void *cref)

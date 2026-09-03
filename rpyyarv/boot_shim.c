@@ -2546,15 +2546,12 @@ static VALUE
 define_method_body(VALUE argp)
 {
     struct defmeth_args *p = (struct defmeth_args *)argp;
-    rb_define_method_id(p->klass, p->mid,
-                        RUBY_METHOD_FUNC(rpyyarv_trampoline), -1);
-    if (p->visibility) {
-        /* A toplevel def is private on Object; no ID-taking API exists. */
-        rb_funcall(p->klass,
-                   rb_intern(p->visibility == 2 ? "protected" : "private"),
-                   1, ID2SYM(p->mid));
-    }
-    p->def = rb_rpyyarv_method_def(p->klass, p->mid);
+    /* Visibility up front, and the def before method_added: CRuby sets both
+       that way, and a hook that replaces the method must not steal our def. */
+    p->def = rb_rpyyarv_add_cfunc(
+        p->klass, p->mid, RUBY_METHOD_FUNC(rpyyarv_trampoline),
+        p->visibility == 2 ? METHOD_VISI_PROTECTED :
+        (p->visibility == 1 ? METHOD_VISI_PRIVATE : METHOD_VISI_PUBLIC));
     if (p->native_iseq) {
         struct rpyyarv_native_method *entry = malloc(sizeof(*entry));
         if (!entry) rb_memerror();
