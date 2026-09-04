@@ -29,7 +29,7 @@ static VALUE rb_eUncaughtThrow;
 static ID id_result, id_tag, id_value;
 #define id_mesg idMesg
 
-static VALUE send_internal(int argc, const VALUE *argv, VALUE recv, call_type scope);
+static VALUE send_internal(int argc, const VALUE *argv, VALUE recv, call_type scope, VALUE block_handler);
 static VALUE vm_call0_body(rb_execution_context_t* ec, struct rb_calling_info *calling, const VALUE *argv);
 
 static VALUE *
@@ -284,7 +284,8 @@ vm_call0_body(rb_execution_context_t *ec, struct rb_calling_info *calling, const
       case VM_METHOD_TYPE_OPTIMIZED:
         switch (vm_cc_cme(cc)->def->body.optimized.type) {
           case OPTIMIZED_METHOD_TYPE_SEND:
-            ret = send_internal(calling->argc, argv, calling->recv, calling->kw_splat ? CALL_FCALL_KW : CALL_FCALL);
+            ret = send_internal(calling->argc, argv, calling->recv, calling->kw_splat ? CALL_FCALL_KW : CALL_FCALL,
+                                calling->block_handler);
             goto success;
           case OPTIMIZED_METHOD_TYPE_CALL:
             {
@@ -1220,7 +1221,7 @@ current_vm_stack_arg(const rb_execution_context_t *ec, const VALUE *argv)
 }
 
 static VALUE
-send_internal(int argc, const VALUE *argv, VALUE recv, call_type scope)
+send_internal(int argc, const VALUE *argv, VALUE recv, call_type scope, VALUE block_handler)
 {
     ID id;
     VALUE vid;
@@ -1272,7 +1273,13 @@ send_internal(int argc, const VALUE *argv, VALUE recv, call_type scope)
     else {
         argv++; argc--;
     }
-    PASS_PASSED_BLOCK_HANDLER_EC(ec);
+    /* Qundef: no caller-supplied handler, so inherit the frame's own block. */
+    if (UNDEF_P(block_handler)) {
+        PASS_PASSED_BLOCK_HANDLER_EC(ec);
+    }
+    else {
+        vm_passed_block_handler_set(ec, block_handler);
+    }
     ret = rb_call0(ec, recv, id, argc, argv, scope, self);
     ALLOCV_END(vargv);
     return ret;
@@ -1293,7 +1300,7 @@ send_internal_kw(int argc, const VALUE *argv, VALUE recv, call_type scope)
             break;
         }
     }
-    return send_internal(argc, argv, recv, scope);
+    return send_internal(argc, argv, recv, scope, Qundef);
 }
 
 /*

@@ -115,3 +115,23 @@ p z
 p({ a: 1 }.send(:fetch, :a))
 p [1, 2, 3].send(:sum, 10)
 p kw.send(:none)
+
+# An alias of send is not the pristine Kernel#send, so the call reaches
+# CRuby's optimized send entry with the block only the caller holds.
+class Object
+  alias xsend send
+  def taker(*a) = block_given? ? [a, yield(:v)] : [a, :noblock]
+end
+
+a = 0
+1.xsend(:times) { a += 1 }
+p a
+d = 0
+1.method(:send).call(:times) { d += 1 }
+p d
+
+p 1.xsend(:taker, 7) { |v| v }
+p 1.xsend(:taker)
+p 1.xsend(:taker, 1, &proc { |v| [:blk, v] })
+p [3, 1, 2].xsend(:sort) { |x, y| y <=> x }
+p 2.xsend(:times).to_a
