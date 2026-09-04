@@ -454,39 +454,6 @@ module RPyYARVEvaluation
     end
   end
 
-  module Loc
-    module_function
-
-    def collect
-      files, ok = RPyYARVEvaluation.capture("git", "ls-files", "rpyyarv",
-                                            chdir: TOP)
-      raise "git ls-files failed" unless ok
-
-      counts = Hash.new { |hash, key| hash[key] = [0, 0] }
-      files.lines.map(&:strip).each do |repo_path|
-        relative = repo_path.delete_prefix("rpyyarv/")
-        category = classify(relative)
-        next unless category
-
-        path = File.join(TOP, repo_path)
-        next unless File.file?(path)
-
-        counts[category][0] += 1
-        counts[category][1] += File.foreach(path).count
-      end
-      counts
-    end
-
-    def classify(relative)
-      EvaluationConfig::LOC_CATEGORIES.each do |category, patterns|
-        return category if patterns.any? do |pattern|
-          File.fnmatch?(pattern, relative, File::FNM_PATHNAME)
-        end
-      end
-      nil
-    end
-  end
-
   def build_dir
     ENV.fetch("RPYYARV_BUILD", File.join(TOP, "build"))
   end
@@ -925,16 +892,6 @@ module RPyYARVEvaluation
     ok ? "ok" : "broken"
   end
 
-  def loc(out_path)
-    rows = Loc.collect.sort.map do |category, (files, lines)|
-      { "category" => category, "files" => files, "physical_lines" => lines }
-    end
-    FileUtils.mkdir_p(File.dirname(File.expand_path(out_path)))
-    Csv.write(out_path, %w[category files physical_lines], rows)
-    puts "wrote #{out_path}"
-    0
-  end
-
   # Paper figures: read-only over any mix of results directories.
   def figures(args)
     out = File.join(__dir__, "figures")
@@ -976,7 +933,7 @@ module RPyYARVEvaluation
         plot RAW [OUT-DIR]       render ratio and log-log scatter SVGs
         report DIR [OUT.org]     turn a results directory's CSVs into org tables
         figures DIR ... [--out D] render the paper figures from results dirs
-        loc [OUT.csv]            count the categorized implementation surface
+        loc [LOC-ARGS]           count implementation and host-patch lines
 
       BENCH-ARGS are passed unchanged to scripts/bench.rb. Examples include
       --suite, --filter, --procs, --warmup, and --iters.
@@ -1018,7 +975,8 @@ module RPyYARVEvaluation
       0
     when "figures" then figures(argv)
     when "loc"
-      loc(argv.shift || File.join(DEFAULT_RESULTS, "implementation-loc.csv"))
+      require_relative "loc"
+      Loc.run(argv)
     else
       warn usage
       command ? 2 : 0

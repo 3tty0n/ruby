@@ -53,22 +53,6 @@ module EvaluationConfig
     [//, "engineering/runtime"]
   ].freeze
 
-  # Categories are disjoint by first match and intentionally file based.
-  LOC_CATEGORIES = {
-    "bytecode-interpreter" => %w[
-      interp.py insns.py iseq.py loader.py optable.py rawiseq.py yarv_map.py
-    ],
-    "value-specialization" => %w[
-      value.py classlib.py methods.py objects/*.py
-    ],
-    "boundary-trampoline" => %w[
-      boot.py boot_shim.c boot_shim.h dispatch.py rubycall.py requires.py
-    ],
-    "gc-bridge" => %w[gcroots.py],
-    "fiber-integration" => %w[fibers.py],
-    "jit-runtime" => %w[frame.py targetrpyyarv.py]
-  }.freeze
-
   CLAIMS = {
     "performance" => "End-to-end comparison across all five engines",
     "value-direct" => "Fast path versus residual CRuby call",
