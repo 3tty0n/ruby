@@ -45,6 +45,8 @@ module RPyYARVEvaluation
       skipped = {}
       SPECS.each do |name, kinds|
         dirs = kinds.to_h { |kind| [kind, by_kind[kind]&.last] }
+        # Ablation runs are merged; every other kind takes the last directory.
+        dirs["ablation_dirs"] = by_kind["ablation"] || []
         unless dirs[kinds.first]
           skipped[name] = "no #{kinds.first} results directory given"
           next
@@ -55,7 +57,9 @@ module RPyYARVEvaluation
           next
         end
         figures << { "name" => name,
-                     "inputs" => dirs.values.compact,
+                     "inputs" => kinds.flat_map { |kind|
+                       kind == "ablation" ? by_kind[kind] : [dirs[kind]]
+                     }.compact,
                      "source_columns" => columns,
                      "files" => paths.flat_map { |svg| [svg, to_pdf(svg)] }
                                      .compact.map { |p| File.basename(p) } }
@@ -723,7 +727,9 @@ module RPyYARVEvaluation
     end
 
     def ablations(dirs, out_dir)
-      rows = read_csv(File.join(dirs["ablation"], "ablation-measurements.csv"))
+      rows = dirs["ablation_dirs"].flat_map do |dir|
+        read_csv(File.join(dir, "ablation-measurements.csv"))
+      end
       return nil if rows.empty?
 
       table = Hash.new { |hash, key| hash[key] = {} }
@@ -752,16 +758,14 @@ module RPyYARVEvaluation
           end
           next nil if ratios.empty?
 
-          [(geomean(ratios) - 1) * 100,
-           (percentile(ratios, 0.1) - 1) * 100,
-           (percentile(ratios, 0.9) - 1) * 100]
+          [geomean(ratios), percentile(ratios, 0.1), percentile(ratios, 0.9)]
         end
         { name: "#{suite} geomean", color: SERIES[index], values: values }
       end
       body = categorical_svg(
-        "Runtime ablations: slowdown relative to the unablated baseline",
+        "Runtime ablations: time relative to the unablated baseline",
         "Ablation (whiskers: 10th to 90th percentile benchmark)",
-        "Slowdown versus baseline", cats, series, log: false, unit: "%"
+        "Time / baseline (log scale)", cats, series
       )
       [[write_svg(out_dir, "ablations.svg", body)],
        %w[ablation-measurements.csv:ablation suite benchmark engine
