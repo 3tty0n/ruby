@@ -149,7 +149,7 @@ module RPyYARVEvaluation
       comparisons = comparison_rows(rows)
       write_comparisons(File.join(out_dir, "comparisons.csv"), comparisons)
       warmup = warmup_rows(raw)
-      write_warmup(File.join(out_dir, "warmup.csv"), warmup)
+      write_warmup_files(out_dir, warmup)
       summary = summarize(ratios, rows)
       summary = attach_status_counts(summary, rows)
       write_summary(File.join(out_dir, "summary.csv"), summary)
@@ -240,10 +240,83 @@ module RPyYARVEvaluation
             "stable_iteration" => stable,
             "time_to_stable_ms" =>
               stable && samples[0..stable].sum,
-            "steady_median_ms" => center
+            "steady_median_ms" => center,
+            "classification" => classify_process(samples, center, stable)
           }
         end
       end
+    end
+
+    # Barrett et al. (OOPSLA 2017) categories, decided by stable_iteration and
+    # the median of the iterations before it.
+    def classify_process(samples, center, stable)
+      return "no steady state" unless stable
+      return "flat" if stable.zero?
+
+      early = median_value(samples[0...stable])
+      early && early > center ? "warmup" : "slowdown"
+    end
+
+    CLASSIFICATIONS = ["flat", "warmup", "slowdown",
+                       "no steady state"].freeze
+
+    def warmup_summary_rows(warmup)
+      groups = warmup.group_by { |row| [row["suite"], row["engine"]] }
+      warmup.group_by { |row| ["all", row["engine"]] }.each do |key, rows|
+        groups[key] = rows
+      end
+      groups.sort_by { |(suite, engine), _| [suite, engine] }
+            .map { |(suite, engine), rows| warmup_group(suite, engine, rows) }
+    end
+
+    def warmup_group(suite, engine, rows)
+      stable = rows.map { |row| row["stable_iteration"] }.compact
+      times = rows.map { |row| row["time_to_stable_ms"] }.compact
+      row = { "suite" => suite, "engine" => engine,
+              "processes" => rows.size, "processes_stable" => stable.size,
+              "median_stable_iteration" => median_value(stable),
+              "p90_stable_iteration" => percentile_value(stable, 0.9),
+              "median_time_to_stable_ms" => median_value(times),
+              "p90_time_to_stable_ms" => percentile_value(times, 0.9) }
+      CLASSIFICATIONS.each do |name|
+        row[name.tr(" ", "_")] =
+          rows.count { |entry| entry["classification"] == name }
+      end
+      row
+    end
+
+    def warmup_comparison_rows(warmup, engine = "rpyyarv-jit",
+                               reference = "cruby+yjit")
+      by_benchmark = warmup.group_by { |row| row["benchmark"] }
+      by_benchmark.keys.sort.map do |benchmark|
+        rows = by_benchmark[benchmark].group_by { |row| row["engine"] }
+        jit = warmup_medians(rows[engine])
+        ref = warmup_medians(rows[reference])
+        { "benchmark" => benchmark,
+          "rpyyarv_jit_time_to_stable_ms" => jit[0],
+          "cruby_yjit_time_to_stable_ms" => ref[0],
+          "time_to_stable_ratio" => ratio_of(jit[0], ref[0]),
+          "rpyyarv_jit_stable_iteration" => jit[1],
+          "cruby_yjit_stable_iteration" => ref[1],
+          "stable_iteration_ratio" => ratio_of(jit[1], ref[1]) }
+      end
+    end
+
+    def warmup_medians(rows)
+      rows ||= []
+      [median_value(rows.map { |row| row["time_to_stable_ms"] }),
+       median_value(rows.map { |row| row["stable_iteration"] })]
+    end
+
+    def ratio_of(value, reference)
+      value && reference && reference.positive? ? value / reference : nil
+    end
+
+    def percentile_value(values, fraction)
+      sorted = values.compact.sort
+      return nil if sorted.empty?
+
+      sorted[[(sorted.size - 1) * fraction, 0].max.round]
     end
 
     def median_value(values)
@@ -349,8 +422,34 @@ module RPyYARVEvaluation
 
     def write_warmup(path, rows)
       headers = %w[suite benchmark engine process harness_warmed_at
-                   stable_iteration time_to_stable_ms steady_median_ms]
+                   stable_iteration time_to_stable_ms steady_median_ms
+                   classification]
       write_csv(path, headers, rows)
+    end
+
+    def write_warmup_files(out_dir, warmup)
+      FileUtils.mkdir_p(out_dir)
+      write_warmup(File.join(out_dir, "warmup.csv"), warmup)
+      headers = %w[suite engine processes processes_stable
+                   median_stable_iteration p90_stable_iteration
+                   median_time_to_stable_ms p90_time_to_stable_ms] +
+                CLASSIFICATIONS.map { |name| name.tr(" ", "_") }
+      write_csv(File.join(out_dir, "warmup-summary.csv"), headers,
+                warmup_summary_rows(warmup))
+      write_csv(File.join(out_dir, "warmup-comparison.csv"),
+                %w[benchmark rpyyarv_jit_time_to_stable_ms
+                   cruby_yjit_time_to_stable_ms time_to_stable_ratio
+                   rpyyarv_jit_stable_iteration cruby_yjit_stable_iteration
+                   stable_iteration_ratio],
+                warmup_comparison_rows(warmup))
+    end
+
+    # Recompute the warm-up CSVs from a finished results directory.
+    def warmup_only(dir)
+      raw = JSON.parse(File.read(File.join(dir, "raw.json")))
+      rows = warmup_rows(raw)
+      write_warmup_files(dir, rows)
+      rows.size
     end
 
     def write_csv(path, headers, rows)
@@ -932,6 +1031,7 @@ module RPyYARVEvaluation
         analyze RAW [OUT-DIR]    convert bench.rb JSON to tidy CSV
         plot RAW [OUT-DIR]       render ratio and log-log scatter SVGs
         report DIR [OUT.org]     turn a results directory's CSVs into org tables
+        warmup DIR               recompute the warm-up CSVs from DIR/raw.json
         figures DIR ... [--out D] render the paper figures from results dirs
         loc [LOC-ARGS]           count implementation and host-patch lines
 
@@ -962,6 +1062,10 @@ module RPyYARVEvaluation
     when "report"
       dir = argv.shift or abort usage
       puts Org.write(dir, argv.shift || File.join(dir, "tables.org"))
+      0
+    when "warmup"
+      dir = argv.shift or abort usage
+      puts "warmup processes: #{Analyzer.warmup_only(dir)}"
       0
     when "analyze"
       raw = argv.shift or abort usage

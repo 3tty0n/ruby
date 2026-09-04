@@ -55,6 +55,20 @@ The raw file retains every process's complete iteration sequence and the
 harness warm-up boundary.  =warmup.csv= reports the first five-iteration window
 within 10% of the steady median and its cumulative time.
 
+Each process is also classified in the style of Barrett et al., "Virtual
+Machine Warmup Blows Hot and Cold" (OOPSLA 2017), from that same stable
+iteration: /flat/ when it is iteration 0, /no steady state/ when no such
+window exists in the run, and otherwise /warmup/ or /slowdown/ according to
+whether the median of the iterations before it is above or below the steady
+median.  The classifier is deliberately cruder than Barrett's changepoint
+analysis: it uses one threshold and reports no confidence interval, so it
+separates the four shapes but does not certify a process as truly steady.
+=warmup-summary.csv= aggregates the classification and the stable iteration
+and time-to-stable distributions per engine and per suite and engine, and
+=warmup-comparison.csv= puts the per-benchmark medians of =rpyyarv-jit= and
+=cruby+yjit= side by side with their ratio.  =run.rb warmup DIR= recomputes
+all three from an existing =raw.json= without rerunning any benchmark.
+
 VALUE-direct ablations use the existing extra-engine protocol.  A variant
 binary passed as =--engine NAME=PATH= is added to =comparisons.csv= and gets
 its own ratio and scatter plots; the VM under active development needs no

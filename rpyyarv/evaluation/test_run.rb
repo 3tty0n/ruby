@@ -47,6 +47,42 @@ Dir.mktmpdir("rpyyarv-evaluation-test") do |dir|
   assert(count == 1, "boundary row count")
 end
 
+Dir.mktmpdir("rpyyarv-warmup-test") do |dir|
+  steady = [4.0] * 6
+  raw = {
+    # flat, warmup, slowdown, and never stable, one process each.
+    "awfy/a/rpyyarv-jit" => { "raw_iterations" => [steady],
+                              "warmed_at" => [0] },
+    "awfy/b/rpyyarv-jit" => { "raw_iterations" => [[40.0] + steady],
+                              "warmed_at" => [1] },
+    "awfy/c/rpyyarv-jit" => { "raw_iterations" => [[1.0] + steady],
+                              "warmed_at" => [1] },
+    "awfy/d/rpyyarv-jit" => {
+      "raw_iterations" => [[1.0, 9.0, 1.0, 9.0, 1.0, 9.0]],
+      "warmed_at" => [0]
+    },
+    "awfy/b/cruby+yjit" => { "raw_iterations" => [[10.0] + [2.0] * 6],
+                             "warmed_at" => [1] }
+  }
+  File.write(File.join(dir, "raw.json"), JSON.generate(raw))
+  assert(RPyYARVEvaluation::Analyzer.warmup_only(dir) == 5, "warmup rows")
+  rows = File.readlines(File.join(dir, "warmup-summary.csv"), chomp: true)
+  head = rows.first.split(",")
+  jit = rows.find { |line| line.start_with?("all,rpyyarv-jit") }.split(",")
+  cell = ->(name) { jit[head.index(name)] }
+  assert(cell.call("processes") == "4", "process count")
+  assert(cell.call("processes_stable") == "3", "stable process count")
+  assert(cell.call("flat") == "1" && cell.call("warmup") == "1" &&
+         cell.call("slowdown") == "1" && cell.call("no_steady_state") == "1",
+         "Barrett categories")
+  assert(cell.call("median_time_to_stable_ms") == "5.0", "median time")
+  comparison = File.readlines(File.join(dir, "warmup-comparison.csv"),
+                              chomp: true)
+  b = comparison.find { |line| line.start_with?("b,") }.split(",")
+  assert(b[1] == "44.0" && b[2] == "12.0", "per-benchmark medians")
+  assert(b[3].to_f.round(4) == (44.0 / 12.0).round(4), "time ratio")
+end
+
 summary = <<~TEXT
   Tracing:         10       4.0
   Backend:         8        1.0

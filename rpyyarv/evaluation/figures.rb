@@ -222,7 +222,8 @@ module RPyYARVEvaluation
     end
 
     def format_tick(value, unit)
-      text = if unit.nil? && value.abs >= 8192
+      binary = (value % 1024).zero?
+      text = if unit.nil? && value.abs >= 8192 && binary
                scale = [[1 << 30, "G"], [1 << 20, "M"], [1 << 10, "K"]]
                        .find { |size, _| value.abs >= size }
                format("%g%s", value / scale[0], scale[1])
@@ -319,9 +320,15 @@ module RPyYARVEvaluation
       end
     end
 
+    # Too many distinct values to label one tick each: fall back to decades.
+    def wide?(values)
+      values.uniq.size > 8
+    end
+
     def axis_bounds(values, log, ratio = false)
       positives = values.select(&:positive?)
       return Plotter.log_bounds(positives) if log && ratio
+      return Plotter.decade_bounds(positives) if log && wide?(positives)
       return [positives.min / 1.7, positives.max * 1.7] if log
 
       low = [values.min, 0.0].min
@@ -334,7 +341,11 @@ module RPyYARVEvaluation
       if log && ratio
         return Plotter.power_ticks(*axis_bounds(values, log, true))
       end
-      return values.uniq.sort if log
+      if log
+        return Plotter.decade_ticks(*axis_bounds(values, true)) if wide?(values)
+
+        return values.uniq.sort
+      end
 
       low, high = axis_bounds(values, false)
       ticks = (0..4).map { |index| low + (high - low) * index / 4.0 }
@@ -452,7 +463,90 @@ module RPyYARVEvaluation
         )
         body && write_svg(out_dir, "warmup-#{bench}.svg", body)
       end
+      rows = Analyzer.warmup_rows(raw)
+      paths += [time_to_stable_svg(rows, out_dir),
+                classification_svg(rows, out_dir)].compact
       [paths, %w[raw.json:raw_iterations warmed_at]]
+    end
+
+    # Sorted curve of every process's time to a steady state, per engine.
+    def time_to_stable_svg(rows, out_dir)
+      curves = WARMUP_ENGINES.each_with_index.filter_map do |engine, index|
+        times = rows.select { |row| row["engine"] == engine }
+                    .filter_map { |row| positive(row["time_to_stable_ms"]) }
+        next if times.size < 2
+
+        points = (0..40).map do |step|
+          [percentile(times, step / 40.0), step / 40.0 * 100.0]
+        end
+        { name: engine, color: engine_color(engine, index), points: points }
+      end
+      return nil if curves.empty?
+
+      body = lines_svg("Time to a steady state across all benchmarks",
+                       "Cumulative time to the steady state (ms, log scale)",
+                       "Processes at or below that time (%)", curves,
+                       x_log: true, y_log: false)
+      body && write_svg(out_dir, "warmup-time-to-stable.svg", body)
+    end
+
+    def classification_svg(rows, out_dir)
+      counts = WARMUP_ENGINES.map do |engine|
+        group = rows.select { |row| row["engine"] == engine }
+        [engine, Analyzer::CLASSIFICATIONS.map do |name|
+          group.count { |row| row["classification"] == name }
+        end]
+      end
+      return nil if counts.all? { |_, values| values.sum.zero? }
+
+      body = stacked_bars_svg(
+        "Warm-up classification per engine (Barrett et al. categories)",
+        "Engine", "Processes", counts, Analyzer::CLASSIFICATIONS
+      )
+      body && write_svg(out_dir, "warmup-classification.svg", body)
+    end
+
+    # bars: [[label, [count per category]]]
+    def stacked_bars_svg(title, x_label, y_label, bars, categories)
+      width = 860
+      height = 480
+      left = 92
+      top = 58
+      pw = width - left - 26
+      ph = height - top - 76
+      total = bars.map { |_, values| values.sum }.max
+      return nil unless total&.positive?
+
+      y = ->(v) { top + ph * (1.0 - v.to_f / total) }
+      step = pw.to_f / [bars.size, 1].max
+      body = [Plotter.svg_header(width, height, title),
+              Plotter.frame(left, top, pw, ph)]
+      (0..4).map { |i| total * i / 4.0 }.each do |tick|
+        body << Plotter.line(left, y.call(tick), left + pw, y.call(tick),
+                             Plotter::GRID, 1)
+        body << Plotter.text(left - 10, y.call(tick) + 4,
+                             format("%.0f", tick), anchor: "end")
+      end
+      bars.each_with_index do |(label, values), index|
+        base = 0
+        xx = left + (index + 0.5) * step
+        values.each_with_index do |value, ci|
+          next if value.zero?
+
+          body << Plotter.line(xx, y.call(base), xx, y.call(base + value),
+                               SERIES[ci % SERIES.size], [step / 3, 40].min)
+          base += value
+        end
+        body << Plotter.text(xx, top + ph + 20, label, anchor: "middle")
+      end
+      series = categories.each_with_index.map do |name, ci|
+        { name: name, color: SERIES[ci % SERIES.size] }
+      end
+      body << Plotter.axis_title(left + pw / 2, height - 14, x_label)
+      body << Plotter.rotated_axis_title(20, top + ph / 2, y_label)
+      body << series_legend(series, left + 6, 44)
+      body << "</svg>\n"
+      body.join("\n")
     end
 
     def warmup_points(entry)
