@@ -93,6 +93,37 @@ Dir.mktmpdir("rpyyarv-mechanism-plot-test") do |dir|
   assert(plots.size == 3, "mechanism plot count")
 end
 
+Dir.mktmpdir("rpyyarv-figures-test") do |dir|
+  source = File.join(dir, "20260101T000000Z-performance-1")
+  FileUtils.mkdir_p(source)
+  File.write(File.join(source, "manifest.json"),
+             JSON.generate("kind" => "performance", "git" => { "commit" => "a" },
+                           "engine_binaries" => { "rpyyarv-jit" =>
+                                                    { "sha256" => "b" } }))
+  File.write(File.join(source, "measurements.csv"), <<~CSV)
+    suite,benchmark,engine,median_ms,files_native,files_delegated
+    awfy,bounce,cruby,10.0,1,0
+    awfy,bounce,cruby+yjit,5.0,1,0
+    awfy,bounce,rpyyarv,20.0,1,0
+    awfy,bounce,rpyyarv-jit,4.0,1,0
+  CSV
+  File.write(File.join(source, "raw.json"), JSON.generate(
+    "awfy/bounce/cruby" => { "raw_iterations" => [[3.0, 2.0, 2.0]],
+                             "warmed_at" => [1] },
+    "awfy/bounce/rpyyarv-jit" => { "raw_iterations" => [[9.0, 4.0, 4.0]],
+                                   "warmed_at" => [1] }
+  ))
+  out = File.join(dir, "figures")
+  rendered = RPyYARVEvaluation::Figures.render([source], out)
+  names = rendered.map { |figure| figure["name"] }
+  assert(names.include?("peak-performance"), "peak figure rendered")
+  assert(File.read(File.join(out, "peak-vs-cruby.svg")).include?("bounce"),
+         "peak figure benchmark label")
+  manifest = JSON.parse(File.read(File.join(out, "manifest.json")))
+  assert(manifest["inputs"][0]["git_commit"] == "a", "input commit recorded")
+  assert(manifest["skipped"].key?("memory"), "absent kind is skipped")
+end
+
 require_relative "../scripts/bench_viz"
 
 Dir.mktmpdir("rpyyarv-jsonl-viz-test") do |dir|

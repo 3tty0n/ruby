@@ -11,6 +11,7 @@ require "time"
 
 require_relative "experiments"
 require_relative "plots"
+require_relative "figures"
 
 module RPyYARVEvaluation
   ROOT = File.expand_path("..", __dir__)
@@ -934,6 +935,27 @@ module RPyYARVEvaluation
     0
   end
 
+  # Paper figures: read-only over any mix of results directories.
+  def figures(args)
+    out = File.join(__dir__, "figures")
+    dirs = []
+    while (arg = args.shift)
+      case arg
+      when "--out" then out = args.shift
+      when /\A--out=/ then out = arg.split("=", 2).last
+      else dirs << arg
+      end
+    end
+    abort usage if dirs.empty?
+
+    rendered = Figures.render(dirs, File.expand_path(out))
+    rendered.each do |figure|
+      puts "#{figure['name']}: #{figure['files'].join(' ')}"
+    end
+    puts "figures: #{File.expand_path(out)}"
+    0
+  end
+
   def usage
     <<~TEXT
       usage: evaluation/run.rb [--results DIR] COMMAND [ARGS]
@@ -953,6 +975,7 @@ module RPyYARVEvaluation
         analyze RAW [OUT-DIR]    convert bench.rb JSON to tidy CSV
         plot RAW [OUT-DIR]       render ratio and log-log scatter SVGs
         report DIR [OUT.org]     turn a results directory's CSVs into org tables
+        figures DIR ... [--out D] render the paper figures from results dirs
         loc [OUT.csv]            count the categorized implementation surface
 
       BENCH-ARGS are passed unchanged to scripts/bench.rb. Examples include
@@ -993,6 +1016,7 @@ module RPyYARVEvaluation
       out = argv.shift || File.dirname(File.expand_path(raw))
       puts Plotter.plot(raw, out)
       0
+    when "figures" then figures(argv)
     when "loc"
       loc(argv.shift || File.join(DEFAULT_RESULTS, "implementation-loc.csv"))
     else
