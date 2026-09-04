@@ -148,6 +148,10 @@ def run_once(argv, script, env, timeout)
     return [nil, "FAIL", info.merge("why" => "no DONE line",
                                     "err_tail" => err[-1500..-1] || err)]
   end
+  # A 0 ms iteration did no work; it would also put Infinity in the raw JSON.
+  if times.any? { |t| t <= 0 }
+    return [nil, "FAIL", info.merge("why" => "iteration took 0 ms")]
+  end
   [times, nil, info]
 end
 
