@@ -151,13 +151,14 @@ module RPyYARVEvaluation
     # cats: [{ label:, group: }]; series: [{ name:, color:, values: }] where a
     # value is a number, [value, low, high], or nil.
     def categorical_svg(title, x_label, y_label, cats, series, log: true,
-                        unit: nil)
+                        unit: nil, cap: nil)
       count = [cats.size, 1].max
       width = [900, 190 + count * 22].max
       left = 92
-      right = 26
-      top = 58
-      bottom = cats.map { |c| c[:label].to_s.size }.max.to_i > 6 ? 210 : 130
+      right = 70
+      top = 78
+      # Room for the 60-degree labels: 13px type, ~6.5px of drop per char.
+      bottom = 60 + cats.map { |c| c[:label].to_s.size }.max.to_i * 6.5
       height = 420 + bottom
       pw = width - left - right
       ph = height - top - bottom
@@ -172,9 +173,7 @@ module RPyYARVEvaluation
         y = ->(v) { top + (Math.log2(high) - Math.log2(v)) / span * ph }
         base = 1.0
       else
-        low = [flat.min, 0.0].min
-        high = [flat.max * 1.08, low + 1e-9].max
-        ticks = (0..4).map { |i| low + (high - low) * i / 4.0 }
+        low, high, ticks = Plotter.linear_axis(flat, cap: cap)
         y = ->(v) { top + ph * (1.0 - (v - low) / (high - low)) }
         base = 0.0
       end
@@ -214,13 +213,13 @@ module RPyYARVEvaluation
             body << Plotter.line(xx - 2.5, y.call(hi), xx + 2.5, y.call(hi),
                                  serie[:color], 1)
           end
-          body << Plotter.circle(xx, y.call(value), 3.2, serie[:color])
+          body << Plotter.marker(xx, y.call(value), 3.5, serie[:color], si)
         end
         body << rotated_tick(x0, top + ph + 12, cat[:label])
       end
       body << Plotter.axis_title(left + pw / 2, height - 14, x_label)
       body << Plotter.rotated_axis_title(20, top + ph / 2, y_label)
-      body << series_legend(series, left + 6, 44)
+      body << series_legend(series, left + 6, 56)
       body << "</svg>\n"
       body.join("\n")
     end
@@ -242,26 +241,28 @@ module RPyYARVEvaluation
     def rotated_tick(x, y, label)
       %(<text x="#{Plotter.fmt(x)}" y="#{y}" ) +
         %(transform="rotate(60 #{Plotter.fmt(x)} #{y})" ) +
-        %(fill="#{Plotter::INK}" font-family="sans-serif" font-size="10" ) +
+        %(fill="#{Plotter::INK}" font-family="sans-serif" font-size="13" ) +
         %(text-anchor="start">#{Plotter.escape(label)}</text>)
     end
 
     def series_legend(series, x, y)
+      xx = x
       series.each_with_index.map do |serie, index|
-        xx = x + index * 180
-        Plotter.circle(xx, y, 4, serie[:color]) +
-          Plotter.text(xx + 9, y + 4, serie[:name])
+        entry = Plotter.marker(xx, y, 4.5, serie[:color], index) +
+                Plotter.text(xx + 11, y + 5, serie[:name])
+        xx += 36 + serie[:name].to_s.size * 8.5
+        entry
       end.join("\n")
     end
 
     # curves: [{ name:, color:, points: [[x, y, label]] }]
     def lines_svg(title, x_label, y_label, curves, x_log: false, y_log: true,
-                  unit: nil)
+                  unit: nil, cap: nil)
       width = 860
       height = 560
       left = 92
       right = 26
-      top = 58
+      top = 78
       bottom = 76
       pw = width - left - right
       ph = height - top - bottom
@@ -270,11 +271,11 @@ module RPyYARVEvaluation
       return nil if ys.empty?
 
       x = axis_mapper(xs, left, pw, x_log, false)
-      y = axis_mapper(ys, top, ph, y_log, true)
+      y = axis_mapper(ys, top, ph, y_log, true, cap)
       # A y axis of ratios keeps 1x; an x axis of sizes keeps its own values.
       body = [Plotter.svg_header(width, height, title),
               Plotter.frame(left, top, pw, ph)]
-      axis_ticks(ys, y_log, true).each do |tick|
+      axis_ticks(ys, y_log, true, cap).each do |tick|
         yy = y.call(tick)
         weight = y_log && tick == 1 ? 2 : 1
         body << Plotter.line(left, yy, left + pw, yy, Plotter::GRID, weight)
@@ -287,14 +288,15 @@ module RPyYARVEvaluation
         body << Plotter.text(xx, top + ph + 20, format_tick(tick, nil),
                              anchor: "middle")
       end
-      curves.each do |curve|
+      curves.each_with_index do |curve, ci|
         points = curve[:points].map do |px, py, _label|
           "#{Plotter.fmt(x.call(px))},#{Plotter.fmt(y.call(py))}"
         end.join(" ")
         body << %(<polyline points="#{points}" fill="none" ) +
                 %(stroke="#{curve[:color]}" stroke-width="2"/>)
         curve[:points].each do |px, py, label|
-          body << Plotter.circle(x.call(px), y.call(py), 3.2, curve[:color])
+          body << Plotter.marker(x.call(px), y.call(py), 3.5, curve[:color],
+                                 ci)
           next unless label
 
           body << Plotter.text(x.call(px), y.call(py) - 10, label,
@@ -303,12 +305,12 @@ module RPyYARVEvaluation
       end
       body << Plotter.axis_title(left + pw / 2, height - 16, x_label)
       body << Plotter.rotated_axis_title(20, top + ph / 2, y_label)
-      body << series_legend(curves, left + 6, 44)
+      body << series_legend(curves, left + 6, 56)
       body << "</svg>\n"
       body.join("\n")
     end
 
-    def axis_mapper(values, offset, length, log, invert)
+    def axis_mapper(values, offset, length, log, invert, cap = nil)
       if log
         low, high = axis_bounds(values, true, invert)
         span = Math.log(high) - Math.log(low)
@@ -317,7 +319,7 @@ module RPyYARVEvaluation
           offset + (invert ? length - pos : pos)
         end
       end
-      low, high = axis_bounds(values, false, invert)
+      low, high = axis_bounds(values, false, invert, cap)
       lambda do |v|
         pos = (v - low) / (high - low) * length
         offset + (invert ? length - pos : pos)
@@ -329,19 +331,16 @@ module RPyYARVEvaluation
       values.uniq.size > 8
     end
 
-    def axis_bounds(values, log, ratio = false)
+    def axis_bounds(values, log, ratio = false, cap = nil)
       positives = values.select(&:positive?)
       return Plotter.log_bounds(positives) if log && ratio
       return Plotter.decade_bounds(positives) if log && wide?(positives)
       return [positives.min / 1.7, positives.max * 1.7] if log
 
-      low = [values.min, 0.0].min
-      high = values.max
-      high = low + 1.0 if high <= low
-      [low, high + (high - low) * 0.08]
+      linear_axis(values, cap)[0, 2]
     end
 
-    def axis_ticks(values, log, ratio = false)
+    def axis_ticks(values, log, ratio = false, cap = nil)
       if log && ratio
         return Plotter.power_ticks(*axis_bounds(values, log, true))
       end
@@ -351,10 +350,12 @@ module RPyYARVEvaluation
         return values.uniq.sort
       end
 
-      low, high = axis_bounds(values, false)
-      ticks = (0..4).map { |index| low + (high - low) * index / 4.0 }
+      linear_axis(values, cap)[2]
+    end
+
+    def linear_axis(values, cap)
       integral = values.all? { |value| value == value.round }
-      integral ? ticks.map(&:round).uniq : ticks
+      Plotter.linear_axis(values, cap: cap, integral: integral)
     end
 
     # --- figure builders --------------------------------------------------
@@ -490,7 +491,7 @@ module RPyYARVEvaluation
       body = lines_svg("Time to a steady state across all benchmarks",
                        "Cumulative time to the steady state (ms, log scale)",
                        "Processes at or below that time (%)", curves,
-                       x_log: true, y_log: false)
+                       x_log: true, y_log: false, cap: 100)
       body && write_svg(out_dir, "warmup-time-to-stable.svg", body)
     end
 
@@ -515,17 +516,18 @@ module RPyYARVEvaluation
       width = 860
       height = 480
       left = 92
-      top = 58
+      top = 78
       pw = width - left - 26
       ph = height - top - 76
       total = bars.map { |_, values| values.sum }.max
       return nil unless total&.positive?
 
+      _low, total, ticks = Plotter.linear_axis([0, total], integral: true)
       y = ->(v) { top + ph * (1.0 - v.to_f / total) }
       step = pw.to_f / [bars.size, 1].max
       body = [Plotter.svg_header(width, height, title),
               Plotter.frame(left, top, pw, ph)]
-      (0..4).map { |i| total * i / 4.0 }.each do |tick|
+      ticks.each do |tick|
         body << Plotter.line(left, y.call(tick), left + pw, y.call(tick),
                              Plotter::GRID, 1)
         body << Plotter.text(left - 10, y.call(tick) + 4,
@@ -548,7 +550,7 @@ module RPyYARVEvaluation
       end
       body << Plotter.axis_title(left + pw / 2, height - 14, x_label)
       body << Plotter.rotated_axis_title(20, top + ph / 2, y_label)
-      body << series_legend(series, left + 6, 44)
+      body << series_legend(series, left + 6, 56)
       body << "</svg>\n"
       body.join("\n")
     end
@@ -595,7 +597,7 @@ module RPyYARVEvaluation
       body = categorical_svg(
         "Compatibility coverage: share of each benchmark run natively",
         "Benchmark (grouped by harness status)", "Percent of the benchmark",
-        cats, series, log: false, unit: "%"
+        cats, series, log: false, unit: "%", cap: 100
       )
       [[write_svg(out_dir, "coverage.svg", body)],
        %w[coverage.csv:benchmark status iseqs
@@ -629,7 +631,7 @@ module RPyYARVEvaluation
         body = categorical_svg(
           "Residual delegation: share of sends that reach CRuby",
           "Benchmark", "CRuby sends / all sends", cats, series,
-          log: false, unit: "%"
+          log: false, unit: "%", cap: 100
         )
         paths << write_svg(out_dir, "boundary.svg", body) if body
       end
