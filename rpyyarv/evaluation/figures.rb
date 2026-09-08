@@ -149,79 +149,122 @@ module RPyYARVEvaluation
     # --- generic renderers ------------------------------------------------
 
     # cats: [{ label:, group: }]; series: [{ name:, color:, values: }] where a
-    # value is a number, [value, low, high], or nil.
+    # value is a number, [value, low, high], or nil.  Long category lists are
+    # broken into stacked rows that share one y scale.
     def categorical_svg(title, x_label, y_label, cats, series, log: true,
-                        unit: nil, cap: nil)
-      count = [cats.size, 1].max
-      width = [900, 190 + count * 22].max
-      left = 92
-      right = 70
-      top = 78
-      # Room for the 60-degree labels: 13px type, ~6.5px of drop per char.
-      bottom = 60 + cats.map { |c| c[:label].to_s.size }.max.to_i * 6.5
-      height = 420 + bottom
-      pw = width - left - right
-      ph = height - top - bottom
+                        unit: nil, cap: nil, width: Plotter::FULL)
       flat = series.flat_map { |s| s[:values] }.flatten.compact
       flat = flat.select(&:positive?) if log
       return nil if flat.empty?
 
+      top = legend_top(series, width)
       if log
         low, high = Plotter.log_bounds(flat)
         ticks = Plotter.power_ticks(low, high)
-        span = Math.log2(high) - Math.log2(low)
-        y = ->(v) { top + (Math.log2(high) - Math.log2(v)) / span * ph }
+        labels = ticks.map { |tick| Plotter.format_ratio(tick) }
         base = 1.0
       else
         low, high, ticks = Plotter.linear_axis(flat, cap: cap)
-        y = ->(v) { top + ph * (1.0 - (v - low) / (high - low)) }
+        labels = ticks.map { |tick| format_tick(tick, unit) }
         base = 0.0
       end
-      step = pw.to_f / count
-      offset = [step / (series.size + 1), 7.0].min
-      body = [Plotter.svg_header(width, height, title),
-              Plotter.frame(left, top, pw, ph)]
-      ticks.each do |tick|
-        yy = y.call(tick)
-        weight = log && tick == 1 ? 2 : 1
-        body << Plotter.line(left, yy, left + pw, yy, Plotter::GRID, weight)
-        label = log ? Plotter.format_ratio(tick) : format_tick(tick, unit)
-        body << Plotter.text(left - 10, yy + 4, label, anchor: "end")
+      left = 12 + labels.map(&:size).max * Plotter::CHAR
+      # 60-degree labels lean down-right, so the last ones need the margin.
+      longest = cats.map { |cat| cat[:label].to_s.size }.max.to_i
+      right = [[longest * Plotter::CHAR * 0.5, 6.0].max, width * 0.25].min
+      pw = width - left - right
+      rows = facet_rows(cats, (pw / 9.0).floor)
+      step = pw.to_f / rows.map(&:size).max
+      ph = rows.size > 1 ? 46.0 : 104.0
+      # Upright labels when they fit the column, else the 60-degree fallback.
+      flat_ticks = rows.all? do |row|
+        row.all? { |i| cats[i][:label].to_s.size * Plotter::CHAR < step - 2 }
       end
-      cats.each_with_index do |cat, index|
-        x0 = left + (index + 0.5) * step
-        if index.positive? && cat[:group] != cats[index - 1][:group]
-          edge = left + index * step
-          body << Plotter.line(edge, top, edge, top + ph, Plotter::MUTED, 1,
-                               "4 4")
+      drops = rows.map do |row|
+        next 14.0 if flat_ticks
+
+        Plotter.tick_drop(row.map { |i| cats[i][:label] })
+      end
+      height = top + rows.size * ph + drops.sum + 14
+      scale = if log
+                span = Math.log2(high) - Math.log2(low)
+                ->(v) { (Math.log2(high) - Math.log2(v)) / span * ph }
+              else
+                ->(v) { ph * (1.0 - (v - low) / (high - low)) }
+              end
+      shown = thin_ticks(ticks, labels, ph, base)
+      offset = [step / (series.size + 1), 3.0].min
+      body = [Plotter.svg_header(width, height, title)]
+      row_top = top.to_f
+      rows.each_with_index do |row, ri|
+        y = ->(v) { row_top + scale.call(v) }
+        body << Plotter.frame(left, row_top, pw, ph)
+        shown.each do |tick, label|
+          yy = y.call(tick)
+          weight = log && tick == 1 ? 1 : 0.5
+          body << Plotter.line(left, yy, left + pw, yy, Plotter::GRID, weight)
+          body << Plotter.text(left - 3, yy + 2.5, label, anchor: "end")
         end
-        series.each_with_index do |serie, si|
-          entry = serie[:values][index]
-          next if entry.nil?
-
-          value, lo, hi = Array(entry)
-          next if value.nil? || (log && !value.positive?)
-
-          xx = x0 + (si - (series.size - 1) / 2.0) * offset
-          body << Plotter.line(xx, y.call(base), xx, y.call(value),
-                               serie[:color], 1)
-          if lo && hi && (!log || (lo.positive? && hi.positive?))
-            body << Plotter.line(xx, y.call(lo), xx, y.call(hi),
-                                 serie[:color], 1)
-            body << Plotter.line(xx - 2.5, y.call(lo), xx + 2.5, y.call(lo),
-                                 serie[:color], 1)
-            body << Plotter.line(xx - 2.5, y.call(hi), xx + 2.5, y.call(hi),
-                                 serie[:color], 1)
+        row.each_with_index do |index, column|
+          x0 = left + (column + 0.5) * step
+          if column.positive? &&
+             cats[index][:group] != cats[row[column - 1]][:group]
+            edge = left + column * step
+            body << Plotter.line(edge, row_top, edge, row_top + ph,
+                                 Plotter::MUTED, 0.5, "2 2")
           end
-          body << Plotter.marker(xx, y.call(value), 3.5, serie[:color], si)
+          body << category_marks(series, index, x0, offset, y, base, log)
+          body << if flat_ticks
+                    Plotter.text(x0, row_top + ph + 9, cats[index][:label],
+                                 anchor: "middle")
+                  else
+                    Plotter.rotated_tick(x0, row_top + ph + 6,
+                                         cats[index][:label])
+                  end
         end
-        body << rotated_tick(x0, top + ph + 12, cat[:label])
+        row_top += ph + drops[ri]
       end
-      body << Plotter.axis_title(left + pw / 2, height - 14, x_label)
-      body << Plotter.rotated_axis_title(20, top + ph / 2, y_label)
-      body << series_legend(series, left + 6, 56)
+      body << Plotter.axis_title(left + pw / 2, height - 4, x_label)
+      body << Plotter.rotated_axis_title(6, (top + row_top) / 2, y_label)
+      body << series_legend(series, width)
       body << "</svg>\n"
       body.join("\n")
+    end
+
+    def category_marks(series, index, x0, offset, y, base, log)
+      series.each_with_index.filter_map do |serie, si|
+        value, lo, hi = Array(serie[:values][index])
+        next if value.nil? || (log && !value.positive?)
+
+        xx = x0 + (si - (series.size - 1) / 2.0) * offset
+        marks = Plotter.line(xx, y.call(base), xx, y.call(value),
+                             serie[:color], 0.8)
+        if lo && hi && (!log || (lo.positive? && hi.positive?))
+          marks += Plotter.line(xx, y.call(lo), xx, y.call(hi),
+                                serie[:color], 0.8) +
+                   Plotter.line(xx - 1.2, y.call(lo), xx + 1.2, y.call(lo),
+                                serie[:color], 0.8) +
+                   Plotter.line(xx - 1.2, y.call(hi), xx + 1.2, y.call(hi),
+                                serie[:color], 0.8)
+        end
+        marks + Plotter.marker(xx, y.call(value), 1.8, serie[:color], si)
+      end.join("\n")
+    end
+
+    # Keep only the ticks whose labels clear one line of type on a short row.
+    def thin_ticks(ticks, labels, ph, base)
+      keep = ((ticks.size - 1) * (Plotter::TICK_FONT + 1) / ph).ceil
+      anchor = [ticks.index(base) || 0, 0].max
+      ticks.zip(labels).select.with_index do |_pair, index|
+        keep < 2 || ((index - anchor) % keep).zero?
+      end
+    end
+
+    # Category indices split into equal rows of at most per_row; group changes
+    # stay visible as the dashed rule inside a row.
+    def facet_rows(cats, per_row)
+      needed = (cats.size / per_row.to_f).ceil
+      cats.each_index.each_slice((cats.size / needed.to_f).ceil).to_a
     end
 
     def format_tick(value, unit)
@@ -238,32 +281,42 @@ module RPyYARVEvaluation
       unit ? "#{text}#{unit}" : text
     end
 
-    def rotated_tick(x, y, label)
-      %(<text x="#{Plotter.fmt(x)}" y="#{y}" ) +
-        %(transform="rotate(60 #{Plotter.fmt(x)} #{y})" ) +
-        %(fill="#{Plotter::INK}" font-family="sans-serif" font-size="13" ) +
-        %(text-anchor="start">#{Plotter.escape(label)}</text>)
+    # Legend entries flow left to right and wrap inside the canvas width.
+    def legend_layout(series, width)
+      xx = 4.0
+      line = 0
+      series.each_with_index.map do |serie, index|
+        span = 11 + serie[:name].to_s.size * Plotter::CHAR
+        if xx > 4.0 && xx + span > width - 2
+          xx = 4.0
+          line += 1
+        end
+        placed = [serie, index, xx, line]
+        xx += span
+        placed
+      end
     end
 
-    def series_legend(series, x, y)
-      xx = x
-      series.each_with_index.map do |serie, index|
-        entry = Plotter.marker(xx, y, 4.5, serie[:color], index) +
-                Plotter.text(xx + 11, y + 5, serie[:name])
-        xx += 36 + serie[:name].to_s.size * 8.5
-        entry
+    def series_legend(series, width)
+      legend_layout(series, width).map do |serie, index, xx, line|
+        yy = 8 + line * 9
+        Plotter.marker(xx, yy, 2.2, serie[:color], index) +
+          Plotter.text(xx + 5, yy + 2.5, serie[:name])
       end.join("\n")
     end
 
-    # curves: [{ name:, color:, points: [[x, y, label]] }]
+    def legend_top(series, width)
+      16 + legend_layout(series, width).last[3] * 9
+    end
+
+    # curves: [{ name:, color:, points: [[x, y]] }]
     def lines_svg(title, x_label, y_label, curves, x_log: false, y_log: true,
-                  unit: nil, cap: nil)
-      width = 860
-      height = 560
-      left = 92
-      right = 26
-      top = 78
-      bottom = 76
+                  unit: nil, cap: nil, width: Plotter::FULL)
+      height = width > Plotter::HALF ? 200 : 150
+      left = 24
+      right = 12
+      top = legend_top(curves, width)
+      bottom = 26
       pw = width - left - right
       ph = height - top - bottom
       xs = curves.flat_map { |c| c[:points].map { |p| p[0] } }
@@ -277,15 +330,15 @@ module RPyYARVEvaluation
               Plotter.frame(left, top, pw, ph)]
       axis_ticks(ys, y_log, true, cap).each do |tick|
         yy = y.call(tick)
-        weight = y_log && tick == 1 ? 2 : 1
+        weight = y_log && tick == 1 ? 1 : 0.5
         body << Plotter.line(left, yy, left + pw, yy, Plotter::GRID, weight)
         label = y_log ? Plotter.format_ratio(tick) : format_tick(tick, unit)
-        body << Plotter.text(left - 10, yy + 4, label, anchor: "end")
+        body << Plotter.text(left - 3, yy + 2.5, label, anchor: "end")
       end
       axis_ticks(xs, x_log, false).each do |tick|
         xx = x.call(tick)
-        body << Plotter.line(xx, top, xx, top + ph, Plotter::GRID, 1)
-        body << Plotter.text(xx, top + ph + 20, format_tick(tick, nil),
+        body << Plotter.line(xx, top, xx, top + ph, Plotter::GRID, 0.5)
+        body << Plotter.text(xx, top + ph + 9, format_tick(tick, nil),
                              anchor: "middle")
       end
       curves.each_with_index do |curve, ci|
@@ -293,19 +346,15 @@ module RPyYARVEvaluation
           "#{Plotter.fmt(x.call(px))},#{Plotter.fmt(y.call(py))}"
         end.join(" ")
         body << %(<polyline points="#{points}" fill="none" ) +
-                %(stroke="#{curve[:color]}" stroke-width="2"/>)
-        curve[:points].each do |px, py, label|
-          body << Plotter.marker(x.call(px), y.call(py), 3.5, curve[:color],
+                %(stroke="#{curve[:color]}" stroke-width="1"/>)
+        curve[:points].each do |px, py|
+          body << Plotter.marker(x.call(px), y.call(py), 1.8, curve[:color],
                                  ci)
-          next unless label
-
-          body << Plotter.text(x.call(px), y.call(py) - 10, label,
-                               anchor: "middle", color: Plotter::MUTED)
         end
       end
-      body << Plotter.axis_title(left + pw / 2, height - 16, x_label)
-      body << Plotter.rotated_axis_title(20, top + ph / 2, y_label)
-      body << series_legend(curves, left + 6, 56)
+      body << Plotter.axis_title(left + pw / 2, height - 5, x_label)
+      body << Plotter.rotated_axis_title(7, top + ph / 2, y_label)
+      body << series_legend(curves, width)
       body << "</svg>\n"
       body.join("\n")
     end
@@ -489,9 +538,10 @@ module RPyYARVEvaluation
       return nil if curves.empty?
 
       body = lines_svg("Time to a steady state across all benchmarks",
-                       "Cumulative time to the steady state (ms, log scale)",
-                       "Processes at or below that time (%)", curves,
-                       x_log: true, y_log: false, cap: 100)
+                       "Time to the steady state (ms)",
+                       "Share of processes (%)", curves,
+                       x_log: true, y_log: false, cap: 100,
+                       width: Plotter::HALF)
       body && write_svg(out_dir, "warmup-time-to-stable.svg", body)
     end
 
@@ -513,12 +563,14 @@ module RPyYARVEvaluation
 
     # bars: [[label, [count per category]]]
     def stacked_bars_svg(title, x_label, y_label, bars, categories)
-      width = 860
-      height = 480
-      left = 92
-      top = 78
-      pw = width - left - 26
-      ph = height - top - 76
+      width = Plotter::FULL
+      height = 190
+      left = 24
+      top = legend_top(categories.each_with_index.map { |name, ci|
+        { name: name, color: SERIES[ci % SERIES.size] }
+      }, width)
+      pw = width - left - 7
+      ph = height - top - 26
       total = bars.map { |_, values| values.sum }.max
       return nil unless total&.positive?
 
@@ -529,8 +581,8 @@ module RPyYARVEvaluation
               Plotter.frame(left, top, pw, ph)]
       ticks.each do |tick|
         body << Plotter.line(left, y.call(tick), left + pw, y.call(tick),
-                             Plotter::GRID, 1)
-        body << Plotter.text(left - 10, y.call(tick) + 4,
+                             Plotter::GRID, 0.5)
+        body << Plotter.text(left - 3, y.call(tick) + 2.5,
                              format("%.0f", tick), anchor: "end")
       end
       bars.each_with_index do |(label, values), index|
@@ -540,17 +592,17 @@ module RPyYARVEvaluation
           next if value.zero?
 
           body << Plotter.line(xx, y.call(base), xx, y.call(base + value),
-                               SERIES[ci % SERIES.size], [step / 3, 40].min)
+                               SERIES[ci % SERIES.size], [step / 3, 18].min)
           base += value
         end
-        body << Plotter.text(xx, top + ph + 20, label, anchor: "middle")
+        body << Plotter.text(xx, top + ph + 9, label, anchor: "middle")
       end
       series = categories.each_with_index.map do |name, ci|
         { name: name, color: SERIES[ci % SERIES.size] }
       end
-      body << Plotter.axis_title(left + pw / 2, height - 14, x_label)
-      body << Plotter.rotated_axis_title(20, top + ph / 2, y_label)
-      body << series_legend(series, left + 6, 56)
+      body << Plotter.axis_title(left + pw / 2, height - 4, x_label)
+      body << Plotter.rotated_axis_title(7, top + ph / 2, y_label)
+      body << series_legend(series, width)
       body << "</svg>\n"
       body.join("\n")
     end
@@ -697,30 +749,29 @@ module RPyYARVEvaluation
           seconds = positive(by_size.dig(row["nursery_bytes"], "median_ms"))
           next unless seconds
 
-          [num(row["nursery_bytes"]), seconds / 1000.0,
-           "#{row['failures']}/#{row['trials']} failed"]
+          [num(row["nursery_bytes"]), seconds / 1000.0]
         end
         body = points.size > 1 && lines_svg(
-          "Nursery dose-response: run time and failures versus nursery size",
-          "PYPY_GC_NURSERY (bytes, log scale)", "Median run time (seconds)",
+          "Nursery dose-response: run time versus nursery size",
+          "PYPY_GC_NURSERY (bytes)", "Median run time (seconds)",
           [{ name: "hexapdf under rpyyarv-jit", color: SERIES[0],
-             points: points }], x_log: true, y_log: false, unit: " s"
+             points: points }], x_log: true, y_log: false, unit: " s",
+          width: Plotter::HALF
         )
         paths << write_svg(out_dir, "nursery.svg", body) if body
       end
       gc = dirs["gc"] ? read_csv(File.join(dirs["gc"], "gc.csv")) : []
       unless gc.empty?
         sorted = gc.sort_by { |row| -num(row["malloc_limit"]).to_f }
-        cats = sorted.map do |row|
-          { label: "malloc limit #{row['malloc_limit']}", group: "gc" }
-        end
+        cats = sorted.map { |row| { label: row["malloc_limit"], group: "gc" } }
         series = %w[ok skipped failed].each_with_index.map do |field, index|
           { name: "#{field} cases", color: SERIES[index],
             values: sorted.map { |row| num(row[field]) } }
         end
         body = categorical_svg(
           "GC stress: correctness cases per RUBY_GC_MALLOC_LIMIT",
-          "CRuby malloc limit", "Test cases", cats, series, log: false
+          "RUBY_GC_MALLOC_LIMIT", "Test cases", cats, series, log: false,
+          width: Plotter::HALF
         )
         paths << write_svg(out_dir, "gc-stress.svg", body) if body
       end

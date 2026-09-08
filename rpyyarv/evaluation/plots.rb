@@ -14,6 +14,13 @@ module RPyYARVEvaluation
     GRID = "#d0d7de"
     INK = "#24292f"
     MUTED = "#57606a"
+    # One SVG pixel is one printed point: canvases match \linewidth.
+    FULL = 396
+    HALF = 192
+    TICK_FONT = 7
+    AXIS_FONT = 8
+    # Advance width of one tick-label character, used for label boxes.
+    CHAR = TICK_FONT * 0.52
 
     module_function
 
@@ -88,12 +95,12 @@ module RPyYARVEvaluation
     end
 
     def warmup_svg(curves)
-      width = 820
-      height = 560
-      left = 78
-      right = 24
-      top = 54
-      bottom = 76
+      width = FULL
+      height = 200
+      left = 26
+      right = 8
+      top = 16
+      bottom = 26
       plot_width = width - left - right
       plot_height = height - top - bottom
       count = curves.values.map(&:size).max
@@ -113,21 +120,21 @@ module RPyYARVEvaluation
       power_ticks(low, high).each do |tick|
         yy = y.call(tick)
         body << line(left, yy, left + plot_width, yy, GRID,
-                     tick == 1 ? 2 : 1)
-        body << text(left - 10, yy + 4, format_ratio(tick), anchor: "end")
+                     tick == 1 ? 1 : 0.5)
+        body << text(left - 3, yy + 2.5, format_ratio(tick), anchor: "end")
       end
       curves.each_with_index do |(engine, curve), series|
         points = curve.each_with_index.map do |value, index|
           "#{fmt(x.call(index))},#{fmt(y.call(value))}"
         end.join(" ")
         body << %(<polyline points="#{points}" fill="none" ) +
-                %(stroke="#{engine_color(series)}" stroke-width="2"/>)
+                %(stroke="#{engine_color(series)}" stroke-width="1"/>)
       end
-      body << axis_title(left + plot_width / 2, height - 18,
+      body << axis_title(left + plot_width / 2, height - 5,
                          "Iteration within a fresh process")
-      body << rotated_axis_title(18, top + plot_height / 2,
+      body << rotated_axis_title(8, top + plot_height / 2,
                                   "Time / steady median (log scale)")
-      body << engine_legend(curves.keys, width - 520, 24)
+      body << engine_legend(curves.keys, left + 4, 8)
       body << "</svg>\n"
       body.join("\n")
     end
@@ -137,10 +144,12 @@ module RPyYARVEvaluation
     end
 
     def engine_legend(engines, x, y)
+      xx = x
       engines.each_with_index.map do |engine, index|
-        xx = x + index * 125
-        circle(xx, y, 4, engine_color(index)) +
-          text(xx + 8, y + 4, engine)
+        entry = circle(xx, y, 2, engine_color(index)) +
+                text(xx + 5, y + 2.5, engine)
+        xx += 12 + engine.to_s.size * CHAR
+        entry
       end.join("\n")
     end
 
@@ -153,10 +162,10 @@ module RPyYARVEvaluation
       FileUtils.mkdir_p(out_dir)
       specs = [
         ["bridges_per_loop", "fragmentation-vs-yjit-gap.svg",
-         "Trace fragmentation versus YJIT gap", "Compiled bridges per loop"],
+         "Trace fragmentation versus YJIT gap", "Bridges per loop"],
         ["cruby_sends_per_iteration", "boundary-vs-yjit-gap.svg",
          "CRuby boundary traffic versus YJIT gap",
-         "CRuby sends per benchmark iteration"]
+         "CRuby sends per iteration"]
       ]
       paths = specs.each_with_object([]) do |(key, filename, title, x_label), all|
         points = mechanism_points(rows, key)
@@ -191,12 +200,12 @@ module RPyYARVEvaluation
     end
 
     def mechanism_scatter_svg(points, title, x_label)
-      width = 820
-      height = 650
-      left = 86
-      right = 30
-      top = 54
-      bottom = 76
+      width = HALF
+      height = 176
+      left = 30
+      right = 13
+      top = 16
+      bottom = 30
       plot_width = width - left - right
       plot_height = height - top - bottom
       max_x = 10.0**Math.log10([points.map { |pt| pt[:x] }.max, 1.0].max).ceil
@@ -210,31 +219,34 @@ module RPyYARVEvaluation
       body = []
       body << svg_header(width, height, title)
       body << frame(left, top, plot_width, plot_height)
+      drawn = -1e9
       mechanism_x_ticks(max_x).each do |tick|
         xx = x.call(tick)
-        body << line(xx, top, xx, top + plot_height, GRID, 1)
-        body << text(xx, top + plot_height + 22, format_si(tick),
+        next if xx - drawn < 15
+
+        drawn = xx
+        body << line(xx, top, xx, top + plot_height, GRID, 0.5)
+        body << text(xx, top + plot_height + 9, format_si(tick),
                      anchor: "middle")
       end
       power_ticks(low_y, high_y).each do |tick|
         yy = y.call(tick)
         body << line(left, yy, left + plot_width, yy, GRID,
-                     tick == 1 ? 2 : 1)
-        body << text(left - 10, yy + 4, format_ratio(tick), anchor: "end")
+                     tick == 1 ? 1 : 0.5)
+        body << text(left - 3, yy + 2.5, format_ratio(tick), anchor: "end")
       end
       points.each do |point|
         label = escape("#{point[:suite]}/#{point[:benchmark]}")
         body << %(<g fill-opacity="0.78"><title>#{label}: ) +
                 "x=#{fmt(point[:x])}, RPyYARV/YJIT=#{fmt(point[:y])}</title>" +
-                marker(x.call(point[:x]), y.call(point[:y]), 5,
+                marker(x.call(point[:x]), y.call(point[:y]), 2.2,
                        suite_color(point[:suite]), suite_shape(point[:suite])) +
                 "</g>"
       end
-      body << axis_title(left + plot_width / 2, height - 18,
-                         "#{x_label} (log1p scale)")
-      body << rotated_axis_title(20, top + plot_height / 2,
+      body << axis_title(left + plot_width / 2, height - 5, x_label)
+      body << rotated_axis_title(6, top + plot_height / 2,
                                   "RPyYARV JIT / YJIT time")
-      body << legend(width - 260, 24)
+      body << legend(width - 76, 8)
       body << "</svg>\n"
       body.join("\n")
     end
@@ -257,12 +269,12 @@ module RPyYARVEvaluation
     end
 
     def compile_tax_svg(rows)
-      width = [960, 150 + rows.size * 20].max
-      height = 560
-      left = 78
-      right = 24
-      top = 54
-      bottom = 190
+      width = FULL
+      height = 220
+      left = 26
+      right = 8
+      top = 16
+      bottom = 108
       plot_width = width - left - right
       plot_height = height - top - bottom
       _low, maximum, ticks =
@@ -275,25 +287,20 @@ module RPyYARVEvaluation
       body << frame(left, top, plot_width, plot_height)
       ticks.each do |tick|
         yy = y.call(tick)
-        body << line(left, yy, left + plot_width, yy, GRID, 1)
-        body << text(left - 10, yy + 4, format("%.0f%%", tick * 100),
+        body << line(left, yy, left + plot_width, yy, GRID, 0.5)
+        body << text(left - 3, yy + 2.5, format("%.0f%%", tick * 100),
                      anchor: "end")
       end
       rows.each_with_index do |row, index|
         xx = left + (index + 0.5) * x_step
-        value = row["compile_fraction"]
-        body << line(xx, y.call(0), xx, y.call(value),
-                     suite_color(row["suite"]), 3)
-        label = escape(row["benchmark"])
-        body << %(<text x="#{fmt(xx)}" y="#{top + plot_height + 12}" ) +
-                %(transform="rotate(60 #{fmt(xx)} #{top + plot_height + 12})" ) +
-                %(fill="#{INK}" font-size="13" text-anchor="start">) +
-                "#{label}</text>"
+        body << line(xx, y.call(0), xx, y.call(row["compile_fraction"]),
+                     suite_color(row["suite"]), 1)
+        body << rotated_tick(xx, top + plot_height + 6, row["benchmark"])
       end
-      body << axis_title(width / 2, height - 12, "Benchmark")
-      body << rotated_axis_title(18, top + plot_height / 2,
+      body << axis_title(width / 2, height - 4, "Benchmark")
+      body << rotated_axis_title(8, top + plot_height / 2,
                                   "(Tracing + Backend) / total process time")
-      body << legend(width - 260, 24)
+      body << legend(left + 4, 8)
       body << "</svg>\n"
       body.join("\n")
     end
@@ -320,12 +327,12 @@ module RPyYARVEvaluation
     end
 
     def ratio_svg(points, reference_label)
-      width = [960, 150 + points.size * 20].max
-      height = 650
-      left = 78
-      right = 24
-      top = 54
-      bottom = 205
+      width = FULL
+      height = 230
+      left = 26
+      right = 8
+      top = 16
+      bottom = 116
       plot_width = width - left - right
       plot_height = height - top - bottom
       low, high = log_bounds(points.map { |point| point[:ratio] })
@@ -342,36 +349,32 @@ module RPyYARVEvaluation
       body << frame(left, top, plot_width, plot_height)
       ticks.each do |tick|
         yy = y.call(tick)
-        body << line(left, yy, left + plot_width, yy, GRID, tick == 1 ? 2 : 1)
-        body << text(left - 10, yy + 4, format_ratio(tick), anchor: "end")
+        body << line(left, yy, left + plot_width, yy, GRID, tick == 1 ? 1 : 0.5)
+        body << text(left - 3, yy + 2.5, format_ratio(tick), anchor: "end")
       end
       points.each_with_index do |point, index|
         x = left + (index + 0.5) * x_step
         color = suite_color(point[:suite])
-        body << line(x, y.call(1), x, y.call(point[:ratio]), color, 1)
-        body << marker(x, y.call(point[:ratio]), 3.5, color,
+        body << line(x, y.call(1), x, y.call(point[:ratio]), color, 0.8)
+        body << marker(x, y.call(point[:ratio]), 1.6, color,
                        suite_shape(point[:suite]))
-        label = escape(point[:benchmark])
-        body << %(<text x="#{fmt(x)}" y="#{top + plot_height + 12}" ) +
-                %(transform="rotate(60 #{fmt(x)} #{top + plot_height + 12})" ) +
-                %(fill="#{INK}" font-size="13" text-anchor="start">) +
-                "#{label}</text>"
+        body << rotated_tick(x, top + plot_height + 6, point[:benchmark])
       end
-      body << axis_title(width / 2, height - 12, "Benchmark")
-      body << rotated_axis_title(18, top + plot_height / 2,
+      body << axis_title(width / 2, height - 4, "Benchmark")
+      body << rotated_axis_title(8, top + plot_height / 2,
                                   "Execution time / #{reference_name} time")
-      body << legend(width - 260, 24)
+      body << legend(left + 4, 8)
       body << "</svg>\n"
       body.join("\n")
     end
 
     def scatter_svg(points, reference_label)
-      width = 820
-      height = 720
-      left = 86
-      right = 30
-      top = 54
-      bottom = 76
+      width = HALF
+      height = 176
+      left = 26
+      right = 7
+      top = 16
+      bottom = 30
       plot_width = width - left - right
       plot_height = height - top - bottom
       values = points.flat_map { |point| [point[:jit], point[:reference]] }
@@ -389,30 +392,30 @@ module RPyYARVEvaluation
       ticks.each do |tick|
         xx = x.call(tick)
         yy = y.call(tick)
-        body << line(xx, top, xx, top + plot_height, GRID, 1)
-        body << line(left, yy, left + plot_width, yy, GRID, 1)
-        body << text(xx, top + plot_height + 22, format_ms(tick),
+        body << line(xx, top, xx, top + plot_height, GRID, 0.5)
+        body << line(left, yy, left + plot_width, yy, GRID, 0.5)
+        body << text(xx, top + plot_height + 9, format_ms(tick),
                      anchor: "middle")
-        body << text(left - 10, yy + 4, format_ms(tick), anchor: "end")
+        body << text(left - 3, yy + 2.5, format_ms(tick), anchor: "end")
       end
       body << line(x.call(low), y.call(low), x.call(high), y.call(high),
-                   MUTED, 2, "6 5")
+                   MUTED, 1, "3 2")
       points.each do |point|
         label = escape("#{point[:suite]}/#{point[:benchmark]}")
         body << %(<g fill-opacity="0.76"><title>#{label}: ) +
                 "RPyYARV #{fmt(point[:jit])} ms, " +
                 "#{reference_name} #{fmt(point[:reference])} ms</title>" +
-                marker(x.call(point[:reference]), y.call(point[:jit]), 5,
+                marker(x.call(point[:reference]), y.call(point[:jit]), 2.2,
                        suite_color(point[:suite]), suite_shape(point[:suite])) +
                 "</g>"
       end
-      body << axis_title(left + plot_width / 2, height - 18,
+      body << axis_title(left + plot_width / 2, height - 5,
                          "#{reference_name} median time (ms, log scale)")
-      body << rotated_axis_title(20, top + plot_height / 2,
+      body << rotated_axis_title(8, top + plot_height / 2,
                                   "RPyYARV JIT median time (ms, log scale)")
-      body << text(x.call(high) - 8, y.call(high) + 18, "equal time",
+      body << text(x.call(high) - 4, y.call(high) + 9, "equal time",
                    anchor: "end", color: MUTED)
-      body << legend(width - 260, 24)
+      body << legend(width - 76, 8)
       body << "</svg>\n"
       body.join("\n")
     end
@@ -424,9 +427,7 @@ module RPyYARVEvaluation
         %(role="img" aria-labelledby="title desc">\n) +
         %(<title id="title">#{escape(title)}</title>\n) +
         %(<desc id="desc">Lower values indicate faster execution.</desc>\n) +
-        %(<rect width="100%" height="100%" fill="white"/>\n) +
-        %(<text x="24" y="31" fill="#{INK}" font-family="sans-serif" ) +
-        %(font-size="22" font-weight="600">#{escape(title)}</text>)
+        %(<rect width="100%" height="100%" fill="white"/>)
     end
 
     def frame(x, y, width, height)
@@ -466,28 +467,47 @@ module RPyYARVEvaluation
 
     def text(x, y, value, anchor: "start", color: INK)
       %(<text x="#{fmt(x)}" y="#{fmt(y)}" fill="#{color}" ) +
-        %(font-family="sans-serif" font-size="15" ) +
+        %(font-family="sans-serif" font-size="#{TICK_FONT}" ) +
         %(text-anchor="#{anchor}">#{escape(value)}</text>)
+    end
+
+    # Category label rotated 60 degrees, growing down-left from (x, y).
+    def rotated_tick(x, y, label)
+      %(<text x="#{fmt(x)}" y="#{fmt(y)}" ) +
+        %(transform="rotate(60 #{fmt(x)} #{fmt(y)})" ) +
+        %(fill="#{INK}" font-family="sans-serif" ) +
+        %(font-size="#{TICK_FONT}" text-anchor="start">) +
+        "#{escape(label)}</text>"
+    end
+
+    # Vertical space a 60-degree label needs below the axis.
+    def tick_drop(labels)
+      longest = labels.map { |label| label.to_s.size }.max.to_i
+      longest * CHAR * Math.sin(Math::PI / 3) + 6
     end
 
     def axis_title(x, y, value)
       %(<text x="#{fmt(x)}" y="#{fmt(y)}" fill="#{INK}" ) +
-        %(font-family="sans-serif" font-size="16" text-anchor="middle">) +
+        %(font-family="sans-serif" font-size="#{AXIS_FONT}" ) +
+        %(text-anchor="middle">) +
         "#{escape(value)}</text>"
     end
 
     def rotated_axis_title(x, y, value)
       %(<text x="#{fmt(x)}" y="#{fmt(y)}" fill="#{INK}" ) +
-        %(font-family="sans-serif" font-size="16" text-anchor="middle" ) +
+        %(font-family="sans-serif" font-size="#{AXIS_FONT}" ) +
+        %(text-anchor="middle" ) +
         %(transform="rotate(-90 #{fmt(x)} #{fmt(y)})">) +
         "#{escape(value)}</text>"
     end
 
     def legend(x, y)
-      [%w[ruby-bench], %w[awfy]].flatten.each_with_index.map do |suite, index|
-        xx = x + index * 125
-        marker(xx, y, 4.5, suite_color(suite), suite_shape(suite)) +
-          text(xx + 11, y + 5, suite)
+      xx = x
+      %w[ruby-bench awfy].map do |suite|
+        entry = marker(xx, y, 2.2, suite_color(suite), suite_shape(suite)) +
+                text(xx + 5, y + 2.5, suite)
+        xx += 12 + suite.size * CHAR
+        entry
       end.join("\n")
     end
 
