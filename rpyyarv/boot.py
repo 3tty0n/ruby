@@ -184,3 +184,6 @@ def boot(argv):
 
 def cleanup(status):
     return rffi.cast(lltype.Signed, rb_cleanup(rffi.cast(rffi.INT, status)))
+
+def iseqw_as_int(iseqw):
+    return rffi.cast(lltype.Signed, iseqw)
