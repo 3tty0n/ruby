@@ -103,7 +103,9 @@ module RPyYARVEvaluation
       return nil unless File.executable?(RSVG)
 
       pdf = svg_path.sub(/\.svg\z/, ".pdf")
-      system(RSVG, "-f", "pdf", "-o", pdf, svg_path) ? pdf : nil
+      # 72 dpi keeps one SVG unit at one PDF point, so \linewidth is exact
+      args = ["--dpi-x", "72", "--dpi-y", "72", "-f", "pdf", "-o", pdf]
+      system(RSVG, *args, svg_path) ? pdf : nil
     end
 
     def read_csv(path)

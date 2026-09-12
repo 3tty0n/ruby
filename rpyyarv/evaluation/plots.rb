@@ -20,7 +20,7 @@ module RPyYARVEvaluation
     TICK_FONT = 7
     AXIS_FONT = 8
     # Advance width of one tick-label character, used for label boxes.
-    CHAR = TICK_FONT * 0.52
+    CHAR = TICK_FONT * 0.58
 
     module_function
 
