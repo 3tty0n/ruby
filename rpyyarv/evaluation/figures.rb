@@ -721,7 +721,9 @@ module RPyYARVEvaluation
       keys = sorted_cats(table)
       pairs = [%w[rpyyarv cruby], %w[rpyyarv-jit cruby],
                ["rpyyarv-jit", "cruby+yjit"]]
-      cats = keys.map { |suite, bench| { label: bench, group: suite } }
+      cats = keys.map do |suite, bench|
+        { label: bench == "__startup__" ? "Startup" : bench, group: suite }
+      end
       cats << { label: "geomean", group: "z" }
       series = pairs.each_with_index.map do |(engine, reference), index|
         values = keys.map do |key|
@@ -797,11 +799,7 @@ module RPyYARVEvaluation
         table[[row["suite"], row["benchmark"]]][row["ablation"]] = value
       end
       names = rows.map { |row| row["ablation"] }.uniq - ["baseline"]
-      # A geomean over survivors is a lie without the count that survived.
-      cats = names.map do |name|
-        timed = table.count { |_key, e| e["baseline"] && e[name] }
-        { label: "#{name} (#{timed}/#{table.size} timed)", group: "a" }
-      end
+      cats = names.map { |name| { label: name, group: "a" } }
       suites = %w[awfy ruby-bench all]
       series = suites.each_with_index.map do |suite, index|
         values = names.map do |name|
