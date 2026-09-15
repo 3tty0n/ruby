@@ -155,6 +155,10 @@ def execute(iseq, frame):
             idx = code[pc]
             pc += 1
             frame.push(iseq.consts[idx])
+        elif opcode == insns.PUTCHILLEDSTRING:
+            idx = code[pc]
+            pc += 1
+            frame.push(W_String(iseq.consts[idx].str_w())) 
         elif opcode == insns.GETLOCAL:
             idx = code[pc]
             pc += 1
