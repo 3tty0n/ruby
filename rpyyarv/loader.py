@@ -9,6 +9,7 @@ from error import LoadError, UnsupportedOperation
 from iseq import W_CallInfo, W_ISeq, NO_BLOCK_ISEQ
 from objects.array import W_Array
 from objects.string import W_String
+from objects.regexp import W_Regexp
 from objects.transparent import W_Fixnum, w_nil, w_true, w_false
 
 
@@ -230,11 +231,18 @@ class Loader(object):
             return w_false
         if kind == rawiseq.OP_STR:
             return W_String(operand.strval)
+        if kind == rawiseq.OP_OTHER:
+            s = operand.strval
+            if s and s[0] == '/':
+              last_slash = s.rfind('/')
+              if last_slash > 0:
+                  return W_Regexp(s[1:last_slash])
         if kind == rawiseq.OP_ARRAY:
             items_w = []
             for item in operand.items:
                 items_w.append(self.literal_value(item, op, raw))
             return W_Array(items_w)
+        
         raise UnsupportedOperation(
             "%s of %s in '%s': RPyYARV has no such object yet"
             % (insns.NAMES[op], operand.describe(), raw.name))
