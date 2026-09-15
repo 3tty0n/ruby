@@ -35,7 +35,7 @@ def entry_point(argv):
 
 
 def target(driver, args):
-    driver.exe_name = 'rpyyarv'
+    driver.exe_name = 'rpyyarv-vm'
     return entry_point, None
 
 

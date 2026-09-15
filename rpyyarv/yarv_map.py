@@ -18,6 +18,7 @@ EMIT = {
     'putnil': [],
     'putself': [],
     'putobject': [0],
+    'putchilledstring': [0],
     'getlocal': [0],        # level is checked against MAX_LOCAL_LEVEL
     'setlocal': [0],        # likewise
     'dup': [],
