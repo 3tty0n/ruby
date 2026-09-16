@@ -1,6 +1,8 @@
+import symbols
+from methods import W_CFunc
 from objects.base import W_Root
 from objects.klass import w_string_class
-
+from objects.transparent import W_Fixnum
 
 class W_String(W_Root):
     # Immutable: nothing mutates a string yet, so frozen, chilled and
@@ -19,3 +21,12 @@ class W_String(W_Root):
 
     def repr(self):
         return '"%s"' % self.strval
+
+class W_ToI(W_CFunc):
+    def call(self, w_recv, args_w):
+        assert isinstance(w_recv, W_String)
+        return W_Fixnum(int(w_recv.strval))
+
+def install(w_class):
+    mid = symbols.intern('to_i')
+    w_class.add_method(mid, W_ToI(mid, 0))  # arity=0

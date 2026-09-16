@@ -3,8 +3,8 @@
 import classlib
 import kernel
 from objects.base import W_Root
-from objects.klass import w_class_class, w_object_class
-
+from objects.klass import w_class_class, w_object_class, w_string_class
+import objects.string as stringlib
 
 class W_Main(W_Root):
     def getclass(self):
@@ -24,5 +24,6 @@ class W_Main(W_Root):
 
 kernel.install(w_object_class)
 classlib.install(w_class_class)
+stringlib.install(w_string_class)
 
 w_main = W_Main()
