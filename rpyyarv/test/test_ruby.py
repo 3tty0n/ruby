@@ -32,3 +32,8 @@ def expected_output(path):
 def test_ruby_program(path, compile_rb, out):
     run_dump(compile_rb(path))
     assert out.text == expected_output(path)
+
+
+def test_one_off_program(ruby_program):
+    """Ruby source in, printed output out -- a whole test in two lines."""
+    assert ruby_program('puts 1 + 2') == '3\n'

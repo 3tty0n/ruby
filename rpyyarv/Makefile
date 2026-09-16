@@ -41,10 +41,11 @@ SHIM    := librpyyarv_boot.$(SOEXT)
 PYPY    ?= ./pypy
 PYTHON  ?= python3
 PYTEST  ?= $(PYTHON) -m pytest
+PYTHON2 ?= python2
 RPYTHON ?= python2 $(PYPY)/rpython/bin/rpython
 RUBY    ?= $(BUILD)/ruby
 
-.PHONY: all test build-interp build-jit link clean
+.PHONY: all test test-llinterp build-interp build-jit link clean
 
 link: $(SHIM)
 
@@ -61,6 +62,10 @@ $(PROBE): test/probe.c
 # Tests needing a built CRuby or shim skip themselves when it is missing.
 test: $(SHIM)
 	RPYYARV_BUILD=$(BUILD) $(PYTEST) $(PYTEST_ARGS)
+
+# llinterp needs Python 2 and the pypy checkout, which pytest 9 cannot host.
+test-llinterp: | $(PYPY)
+	RPYYARV_BUILD=$(BUILD) $(PYTHON2) test/test_llinterp.py
 
 build-interp: | $(PYPY)
 	RPYYARV_BUILD=$(BUILD) $(RPYTHON) --output=rpyyarv targetrpyyarv.py
