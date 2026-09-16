@@ -42,14 +42,12 @@ else
   ng "instruction tables drifted; run: make -C rpyvmgen check"
 fi
 
-hdr "Interpreter and loader unit tests"
-for t in test_interp test_debug test_loader; do
-  if RPYYARV_BUILD=$BUILD "$PYTHON" "$PROJ/test/$t.py" >/dev/null 2>&1; then
-    ok "$t"
-  else
-    ng "$t (run: $PYTHON $PROJ/test/$t.py)"
-  fi
-done
+hdr "Unit tests"
+if RPYYARV_BUILD=$BUILD "$PYTHON" -m pytest "$PROJ" -q >/dev/null 2>&1; then
+  ok "pytest"
+else
+  ng "pytest (run: cd $PROJ && $PYTHON -m pytest)"
+fi
 
 require_file "$PROBE"
 require_file "$SHIM"
@@ -85,8 +83,8 @@ else
 fi
 
 hdr "ctypes path"
-if RPYYARV_BUILD=$BUILD "$PYTHON" "$PROJ/test/test_boot_ctypes.py" "$SCRIPT" 2>&1 \
-     | grep -q 'front-end helpers: ok'; then
+if RPYYARV_BUILD=$BUILD "$PYTHON" -m pytest "$PROJ/test/test_boot_ctypes.py" \
+     -q >/dev/null 2>&1; then
   ok "rffi shim works through ctypes"
 else
   ng "ctypes path failed"

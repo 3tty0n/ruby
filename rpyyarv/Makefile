@@ -40,6 +40,7 @@ PROBE   := test/probe
 SHIM    := librpyyarv_boot.$(SOEXT)
 PYPY    ?= ./pypy
 PYTHON  ?= python3
+PYTEST  ?= $(PYTHON) -m pytest
 RPYTHON ?= python2 $(PYPY)/rpython/bin/rpython
 RUBY    ?= $(BUILD)/ruby
 
@@ -57,11 +58,9 @@ $(PROBE): test/probe.c
 	$(CC) $(CFLAGS) $(CPPFLAGS) -o $@ $< $(LDFLAGS) $(LDLIBS)
 	$(call fix_install_name,$@)
 
+# Tests needing a built CRuby or shim skip themselves when it is missing.
 test: $(SHIM)
-	RPYYARV_BUILD=$(BUILD) $(PYTHON) test/test_boot_ctypes.py $(SCRIPT)
-	$(PYTHON) test/test_interp.py
-	$(PYTHON) test/test_debug.py
-	RPYYARV_BUILD=$(BUILD) $(PYTHON) test/test_loader.py
+	RPYYARV_BUILD=$(BUILD) $(PYTEST) $(PYTEST_ARGS)
 
 build-interp: | $(PYPY)
 	RPYYARV_BUILD=$(BUILD) $(RPYTHON) --output=rpyyarv targetrpyyarv.py
@@ -76,4 +75,5 @@ $(PYPY):
 
 clean:
 	rm -f $(PROBE) $(SHIM) rpyyarv rpyyarv-jit
-	rm -rf $(PROBE).dSYM $(SHIM).dSYM *.pyc
+	rm -rf $(PROBE).dSYM $(SHIM).dSYM *.pyc .pytest_cache
+	find . -name __pycache__ -prune -exec rm -rf {} +

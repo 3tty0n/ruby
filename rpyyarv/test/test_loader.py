@@ -1,61 +1,15 @@
 """Loader tests; the .iseq fixtures are real InstructionSequence output."""
 
 import os
-import subprocess
-import sys
-
-_HERE = os.path.dirname(os.path.abspath(__file__))
-_ROOT = os.path.dirname(_HERE)
-for _p in (_HERE, _ROOT):
-    if _p not in sys.path:
-        sys.path.insert(0, _p)
 
 import insns
-import interp
 import iseqdump
-import kernel
 import loader
 from error import LoadError, UnsupportedOperation
-from frame import Frame
 from iseq import W_CallInfo, W_ISeq, NO_BLOCK_ISEQ
 from objects.string import W_String
-from objects.main import W_Main
 from objects.transparent import W_Fixnum, w_nil
-
-DUMPER = os.path.join(_ROOT, 'scripts', 'dump_iseq.rb')
-_BUILD = os.environ.get('RPYYARV_BUILD',
-                        os.path.join(os.path.dirname(_ROOT), 'build'))
-
-
-def build_ruby():
-    """Only this tree's ruby emits instructions that match insns.py."""
-    exe = os.environ.get('RUBY', os.path.join(_BUILD, 'ruby'))
-    if not os.path.exists(exe):
-        return None, None
-    env = dict(os.environ)
-    # The build tree's libruby is tagged with its install prefix, not its path
-    for var in ('DYLD_LIBRARY_PATH', 'LD_LIBRARY_PATH'):
-        env[var] = os.pathsep.join([_BUILD] + [p for p in [env.get(var)] if p])
-    return exe, env
-
-
-def fixture(name):
-    f = open(os.path.join(_HERE, name))
-    try:
-        return f.read()
-    finally:
-        f.close()
-
-
-def run(text):
-    """Runs on a self of its own, so tests cannot see each other."""
-    w_iseq = loader.load_dump(text)
-    return interp.execute(w_iseq, Frame(w_iseq, W_Main()))
-
-
-def run_iseq(w_iseq):
-    return interp.execute(w_iseq, Frame(w_iseq, W_Main()))
-
+from support import HERE, fixture, run, run_dump
 
 def expect(exc_class, text, msg):
     try:
@@ -75,36 +29,19 @@ def patched(text, old, new):
 
 
 def test_fib_rec_end_to_end():
-    assert run(fixture('fib_rec.iseq')).int_w() == 6765
+    assert run_dump(fixture('fib_rec.iseq')).int_w() == 6765
 
 
-def test_fib_rec_from_source():
-    """.rb in, value out, when a ruby is around."""
-    exe, env = build_ruby()
-    if exe is None:
-        print('   (no ruby in %s: fixture only)' % _BUILD)
-        return
-    try:
-        text = subprocess.check_output(
-            [exe, DUMPER, os.path.join(_HERE, 'fib_rec.rb')], env=env)
-    except (OSError, subprocess.CalledProcessError):
-        print('   (build ruby will not run: fixture only)')
-        return
-    if not isinstance(text, str):
-        text = text.decode('utf-8')
-    assert run(text).int_w() == 6765
+def test_fib_rec_from_source(compile_rb):
+    """.rb in, value out, straight through this tree's compiler."""
+    assert run_dump(compile_rb(os.path.join(HERE, 'fib_rec.rb'))).int_w() \
+        == 6765
 
 
-def test_fib_iterative_end_to_end():
+def test_fib_iterative_end_to_end(out):
     # test/fib.rb, the interception fixture: interpolation, puts and all
-    out = []
-    saved = kernel.write
-    kernel.write = lambda s: out.append(s)
-    try:
-        w_ret = run(fixture('fib.iseq'))
-    finally:
-        kernel.write = saved
-    assert ''.join(out) == 'EXECUTED:832040\n'
+    w_ret = run_dump(fixture('fib.iseq'))
+    assert out.text == 'EXECUTED:832040\n'
     assert w_ret is w_nil
 
 
@@ -117,7 +54,7 @@ def test_string_literal_loaded():
 def test_locals_end_to_end():
     # f(9, 4)
     w_iseq = loader.load_dump(fixture('locals.iseq'))
-    assert run_iseq(w_iseq).int_w() == 5
+    assert run(w_iseq).int_w() == 5
     w_body = w_iseq.consts[0]
     assert isinstance(w_body, W_ISeq)
     # locals are [a, b, c]
@@ -240,25 +177,3 @@ def test_malformed_dump():
     expect(LoadError, 'dump\t1\t3.3.8\tx.rb\n', 'dump contains no iseq')
     text = patched(fixture('fib_rec.iseq'), 'insn\tputself', 'insn\tputself\ti')
     expect(LoadError, text, 'malformed operand: i')
-
-
-def _main():
-    tests = []
-    for name in globals().keys():
-        if name.startswith('test_'):
-            func = globals()[name]
-            tests.append((func.__code__.co_firstlineno, name, func))
-    tests.sort()
-    for lineno, name, func in tests:
-        func()
-        print('ok %s' % name)
-    print('%d passed' % len(tests))
-
-
-if __name__ == '__main__':
-    import traceback
-    try:
-        _main()
-    except Exception:
-        traceback.print_exc()
-        sys.exit(1)
