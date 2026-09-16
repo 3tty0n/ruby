@@ -1,16 +1,10 @@
-import os
-import sys
+"""Unit tests for the debug channels: tracing, iseq dumps, the summary."""
 
-_HERE = os.path.dirname(os.path.abspath(__file__))
-_ROOT = os.path.dirname(_HERE)
-for _p in (_HERE, _ROOT):
-    if _p not in sys.path:
-        sys.path.insert(0, _p)
+import os
 
 import debug
 import insns
 import interp
-import kernel
 import loader
 import symbols
 from frame import Frame
@@ -18,32 +12,7 @@ from iseq import W_CallInfo, W_ISeq, NO_BLOCK_ISEQ
 from objects.main import W_Main
 from objects.string import W_String
 from objects.transparent import W_Fixnum
-
-
-def fixture(name):
-    f = open(os.path.join(_HERE, name))
-    try:
-        return f.read()
-    finally:
-        f.close()
-
-
-def traced(channels, thunk):
-    """Runs thunk with the channels on, returning what debug wrote."""
-    out = []
-    saved_write = debug.write
-    saved_puts = kernel.write
-    debug.reset()
-    debug.configure(channels)
-    debug.write = lambda s: out.append(s)
-    kernel.write = lambda s: None
-    try:
-        thunk()
-    finally:
-        debug.write = saved_write
-        kernel.write = saved_puts
-        debug.reset()
-    return ''.join(out)
+from support import fixture, traced
 
 
 def run_fixture(name):
@@ -188,25 +157,3 @@ def test_note_writes_unconditionally():
     finally:
         debug.write = saved
     assert out == ['[rpyyarv] hello\n'], out
-
-
-def _main():
-    tests = []
-    for name in globals().keys():
-        if name.startswith('test_'):
-            func = globals()[name]
-            tests.append((func.__code__.co_firstlineno, name, func))
-    tests.sort()
-    for lineno, name, func in tests:
-        func()
-        print('ok %s' % name)
-    print('%d passed' % len(tests))
-
-
-if __name__ == '__main__':
-    import traceback
-    try:
-        _main()
-    except Exception:
-        traceback.print_exc()
-        sys.exit(1)

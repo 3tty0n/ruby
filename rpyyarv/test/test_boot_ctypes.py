@@ -1,20 +1,19 @@
-"""ctypes check of the same boot_shim.c that boot.py drives through rffi."""
+"""ctypes check of the same boot_shim.c that boot.py drives through rffi.
 
-from __future__ import print_function
+Runs only when `make link` has built the shim. rpyyarv_boot() starts an
+embedded CRuby that cannot be torn down and restarted, so this module boots
+exactly once, for one test.
+"""
 
 import ctypes
 import os
-import sys
+
+import pytest
+
+import to_a_layout
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 PROJ = os.path.dirname(HERE)
-TOP = os.path.dirname(PROJ)
-BUILD = os.environ.get("RPYYARV_BUILD", os.path.join(TOP, "build"))
-
-if PROJ not in sys.path:
-    sys.path.insert(0, PROJ)
-
-import to_a_layout
 
 VALUE = ctypes.c_size_t
 INTP = ctypes.POINTER(ctypes.c_int)
@@ -49,11 +48,15 @@ def load_shim():
         if os.path.exists(path):
             lib = ctypes.CDLL(path)
             for name, (argtypes, restype) in SIGNATURES.items():
-                fn = getattr(lib, name)
+                try:
+                    fn = getattr(lib, name)
+                except AttributeError:
+                    pytest.skip("%s has no %s; rerun `make link`"
+                                % (os.path.basename(path), name))
                 fn.argtypes = argtypes
                 fn.restype = restype
             return lib
-    sys.exit("librpyyarv_boot not found; run `make shim` first")
+    pytest.skip("librpyyarv_boot not built; run `make link` first")
 
 
 def sym(lib, v):
@@ -126,7 +129,6 @@ def dumped_params(path):
 def check_frontend_helpers(lib, call0, ary, script):
     """The shim calls bootiseq.py makes, exercised without RPython."""
     check_layout(lib, ary, "<main>")
-
     misc = lib.rpyyarv_ary_entry(ary, to_a_layout.I_MISC)
     assert lib.rpyyarv_num2long(
         lib.rpyyarv_hash_aref(misc, b"stack_max")) > 0, "misc[:stack_max]"
@@ -167,72 +169,41 @@ def check_frontend_helpers(lib, call0, ary, script):
         assert booted == dumped_params(dump), \
             "params disagree: booted %r, dumped %r" % (booted,
                                                        dumped_params(dump))
-    print("[rpyyarv] front-end helpers: ok")
 
 
-def main(argv):
-    script = argv[1] if len(argv) > 1 else os.path.join(HERE, "fib.rb")
+@pytest.fixture(scope='module')
+def booted():
+    """(lib, call0, iseq_to_a, script) for the <main> ISeq of fib.rb."""
+    script = os.path.join(HERE, 'fib.rb')
     lib = load_shim()
-
-    args = [b"rpyyarv", script.encode() if str is not bytes else script]
+    args = [b"rpyyarv", script.encode()]
     argv_arr = (ctypes.c_char_p * (len(args) + 1))(*(args + [None]))
     status = ctypes.c_int(0)
 
-    n = lib.rpyyarv_boot(len(args), argv_arr, ctypes.byref(status))
-    if not n:
-        print("[rpyyarv] no executable node (status=%d)" % status.value)
-        return status.value
+    node = lib.rpyyarv_boot(len(args), argv_arr, ctypes.byref(status))
+    assert node, "no executable node (status=%d)" % status.value
 
-    print("[rpyyarv] === Success: intercepted main ISeq ===")
-    iseqw = lib.rpyyarv_iseqw_new(n)
+    iseqw = lib.rpyyarv_iseqw_new(node)
     state = ctypes.c_int(0)
 
     def call0(recv, mid):
         v = lib.rpyyarv_call0(recv, mid.encode(), ctypes.byref(state))
-        if state.value:
-            raise RuntimeError("Ruby exception in %s" % mid)
+        assert not state.value, "Ruby exception in %s" % mid
         return v
 
-    def show(v):
-        s = lib.rpyyarv_inspect_cstr(v)
-        return s.decode("utf-8", "replace") if s else "<inspect failed>"
+    yield lib, call0, call0(iseqw, "to_a"), script
+    lib.rpyyarv_cleanup(0)
 
-    print("[rpyyarv] label         : %s" % show(call0(iseqw, "label")))
-    print("[rpyyarv] absolute_path : %s" % show(call0(iseqw, "absolute_path")))
 
-    ary = call0(iseqw, "to_a")
-    print("[rpyyarv] to_a.size     : %d" % lib.rpyyarv_ary_len(ary))
+def test_boot_intercepts_the_main_iseq(booted):
+    lib, _, ary, _ = booted
+    assert lib.rpyyarv_is_array(ary)
+    # ruby_options yields ISEQ_TYPE_MAIN where compile_file yields :top
+    assert sym(lib, lib.rpyyarv_ary_entry(ary, to_a_layout.I_TYPE)) \
+        in ("top", "main")
 
-    insns = lib.rpyyarv_ary_entry(ary, lib.rpyyarv_ary_len(ary) - 1)
-    n_elem = lib.rpyyarv_ary_len(insns)
-    n_insn = n_label = n_lineno = 0
-    for i in range(n_elem):
-        e = lib.rpyyarv_ary_entry(insns, i)
-        if lib.rpyyarv_is_array(e):
-            n_insn += 1
-        elif lib.rpyyarv_is_symbol(e):
-            n_label += 1
-        elif lib.rpyyarv_is_fixnum(e):
-            n_lineno += 1
-    print("[rpyyarv] elements: %d (insn %d / label %d / lineno %d)"
-          % (n_elem, n_insn, n_label, n_lineno))
 
-    shown = 0
-    for i in range(n_elem):
-        if shown >= 6:
-            break
-        e = lib.rpyyarv_ary_entry(insns, i)
-        if not lib.rpyyarv_is_array(e):
-            continue
-        s = show(e)
-        print("[rpyyarv]   %s" % (s[:100] + ("..." if len(s) > 100 else "")))
-        shown += 1
-
+def test_front_end_helpers(booted):
+    """The shim calls bootiseq.py makes, exercised without RPython."""
+    lib, call0, ary, script = booted
     check_frontend_helpers(lib, call0, ary, script)
-
-    print("[rpyyarv] ruby_run_node() was never called.")
-    return lib.rpyyarv_cleanup(0)
-
-
-if __name__ == "__main__":
-    sys.exit(main(sys.argv))

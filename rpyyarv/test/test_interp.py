@@ -1,57 +1,20 @@
-import os
-import sys
-
-_HERE = os.path.dirname(os.path.abspath(__file__))
-_ROOT = os.path.dirname(_HERE)
-for _p in (_HERE, _ROOT):
-    if _p not in sys.path:
-        sys.path.insert(0, _p)
+"""Unit tests for the interpreter loop: instructions, calls, classes."""
 
 import insns
 import interp
-import kernel
 import symbols
 from error import UnsupportedOperation
 from frame import Frame
-from iseq import W_CallInfo, W_ISeq, NO_BLOCK_ISEQ
-from methods import W_CFunc, W_ISeqMethod, W_Method
+from iseq import W_CallInfo, NO_BLOCK_ISEQ
+from methods import W_CFunc, W_ISeqMethod
 from objects.instance import W_Object
 from objects.klass import W_Class, w_class_class, w_object_class
 from objects.main import W_Main, w_main
 from objects.string import W_String
 from objects.transparent import W_Fixnum, w_nil, w_true, w_false
+from support import asm, capture, expect_unsupported
 
 
-def asm(consts, nlocals, stack_max, items, name='<test>', nparams=0,
-        simple_params=True):
-    """Tiny assembler. In items, ':name' defines a label and takes no space;
-    any other string references one and occupies a slot."""
-    labels = {}
-    pos = 0
-    for item in items:
-        if isinstance(item, str) and item.startswith(':'):
-            labels[item[1:]] = pos
-        else:
-            pos += 1
-    code = []
-    for item in items:
-        if isinstance(item, str):
-            if item.startswith(':'):
-                continue
-            code.append(labels[item])
-        else:
-            code.append(item)
-    return W_ISeq(name, code, consts, nlocals, stack_max, nparams,
-                  simple_params)
-
-
-def expect_unsupported(iseq, w_self, msg):
-    try:
-        interp.execute(iseq, Frame(iseq, w_self))
-    except UnsupportedOperation as e:
-        assert e.msg == msg, 'got %r, expected %r' % (e.msg, msg)
-    else:
-        raise AssertionError('expected UnsupportedOperation: %s' % msg)
 
 
 def test_arith():
@@ -419,17 +382,6 @@ def test_definemethod_needs_a_receiver_with_a_table():
     expect_unsupported(iseq, w_nil, 'cannot define a method on nil')
 
 
-def capture(func):
-    """Collect what the builtins print instead of writing to stdout."""
-    out = []
-    saved = kernel.write
-    kernel.write = lambda s: out.append(s)
-    try:
-        w_ret = func()
-    finally:
-        kernel.write = saved
-    return ''.join(out), w_ret
-
 
 def test_string_literal_and_concat():
     # "ab" + "c" as the compiler builds an interpolation
@@ -686,29 +638,3 @@ def _send_new(w_class, args_w):
     frame = Frame(iseq, w_main)
     frame.locals[0] = w_class
     return interp.execute(iseq, frame)
-
-
-def _main():
-    tests = []
-    for name in globals().keys():
-        if name.startswith('test_'):
-            func = globals()[name]
-            tests.append((func.__code__.co_firstlineno, name, func))
-    tests.sort()
-    # A toplevel `def` now mutates the one Object, so undo it between tests.
-    baseline = w_object_class.methods.methods.copy()
-    for lineno, name, func in tests:
-        func()
-        w_object_class.methods.methods = baseline.copy()
-        w_object_class.method_table_changed()
-        print('ok %s' % name)
-    print('%d passed' % len(tests))
-
-
-if __name__ == '__main__':
-    import traceback
-    try:
-        _main()
-    except Exception:
-        traceback.print_exc()
-        sys.exit(1)

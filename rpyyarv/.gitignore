@@ -2,6 +2,8 @@
 *.so
 *.dSYM/
 *.pyc
+__pycache__/
+.pytest_cache/
 test/probe
 docs/
 rpyyarv
@@ -11,3 +13,9 @@ rpyyarv-dump-jit
 !Makefile
 
 pypy/
+
+awfy/
+ruby-bench/
+
+.bench-gems/
+.bench-inventor.json
