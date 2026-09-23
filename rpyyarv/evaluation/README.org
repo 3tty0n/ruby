@@ -630,6 +630,50 @@ Successful performance runs produce publication-ready SVG files:
 - =scatter-ENGINE.svg=: reference time versus RPyYARV JIT time on equal log
   scales.  Points below the diagonal are RPyYARV wins.
 
+* TruffleRuby and JRuby
+
+TruffleRuby's JVM and native builds are two engines, =truffleruby= and
+=truffleruby-native=; each candidate executable is classified by its
+=--version= line, not by its path.  All three are /foreign/ engines: they bring their own stdlib, C extensions, and
+gems.  =scripts/foreign_engine.rb= unsets the uninstalled-CRuby variables
+(=RUBYLIB=, the loader path, =GEM_*=, =BUNDLE_*=) for them, in the startup
+probe, in =doctor=, and in every timed process.  Before this, the exported
+=RUBYLIB= made TruffleRuby dlopen =build/.ext= bundles linked against
+libruby, the probe failed, and the engine was dropped as "flags
+unsupported" without being timed.
+
+#+begin_src sh
+# 1. the engines, same release in both modes (rbenv/asdf installs are found
+#    too; TRUFFLERUBY_BIN / TRUFFLERUBY_NATIVE_BIN / GRAALVM_HOME override)
+rbenv install truffleruby+graalvm-34.0.1   # JVM
+rbenv install truffleruby-34.0.1           # native standalone
+make eval EVAL=doctor          # both truffleruby rows must say ok
+# 2. AWFY peak comparison: every engine under the adaptive warm-up
+make eval EVAL=performance EVALFLAGS="--suite awfy-adaptive --procs 3"
+# 3. ruby-bench, best effort: each engine gets its own gem set first
+scripts/bench-setup-foreign truffleruby \
+  ~/.rbenv/versions/truffleruby+graalvm-34.0.1/bin/ruby
+scripts/bench-setup-foreign truffleruby-native \
+  ~/.rbenv/versions/truffleruby-34.0.1/bin/ruby
+make eval EVAL=performance EVALFLAGS="--suite ruby-bench --procs 3"
+#+end_src
+
+The manifest records the engine's =--version= line next to its hash, since
+the executable is a launcher.  Foreign engines are timed in the native pass
+only; =RPYYARV_NO_REQUIRE= does not apply to them.  A benchmark whose gems do
+not install stays in the tables as a failure row.
+
+Warm-up: ruby-bench uses the shim's adaptive rule for every engine (warm
+until the last ten iterations settle, at least =WARMUP_TIME= seconds, at most
+=WARMUP_MAX=).  =--suite awfy= keeps its fixed iteration counts, which leave
+TruffleRuby short of its peak: over 120 iterations its median after the
+fixed warm-up was 1.30x its later median (geomean over AWFY, 2.59x on
+=json=).  =--suite awfy-adaptive= runs AWFY under the ruby-bench rule and
+the same =WARMUP_TIME= / =MIN_BENCH_TIME=, for every engine, and is the suite
+for comparisons that include TruffleRuby.  The existing =awfy= results stay
+comparable with earlier runs.  =warmed_at= in =raw.json= records where each
+process left warm-up; a value at =WARMUP_MAX= means the rule gave up.
+
 * Evaluation matrix
 
 | Claim | Experiment | Current collector | Required extension |

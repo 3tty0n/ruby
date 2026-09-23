@@ -14,6 +14,7 @@ require_relative "plots"
 require_relative "figures"
 require_relative "gcfreq"
 require_relative "stress"
+require_relative "../scripts/foreign_engine"
 
 module RPyYARVEvaluation
   ROOT = File.expand_path("..", __dir__)
@@ -692,25 +693,46 @@ module RPyYARVEvaluation
     nil
   end
 
-  def installed_ruby(pattern, executable)
+  # Newest first within each rbenv/asdf root.
+  def installed_rubies(pattern, executable)
     roots = []
     roots << ENV["RBENV_ROOT"] if ENV["RBENV_ROOT"]
     roots << File.join(Dir.home, ".rbenv")
     roots << File.join(Dir.home, ".asdf")
-    roots.uniq.each do |root|
+    roots.uniq.flat_map do |root|
       paths = Dir[File.join(root, "installs", "ruby", pattern, "bin",
                             executable)]
       paths += Dir[File.join(root, "versions", pattern, "bin", executable)]
-      path = paths.sort.last
-      return path if path && File.executable?(path)
+      paths.sort.reverse.select { |path| File.executable?(path) }
     end
-    nil
+  end
+
+  def installed_ruby(pattern, executable)
+    installed_rubies(pattern, executable).first
+  end
+
+  # TruffleRuby's JVM and native builds are separate engines.  A path does
+  # not say which one it is, so each candidate is classified by --version.
+  def truffleruby_engines
+    graal = ENV["GRAALVM_HOME"] && File.join(ENV["GRAALVM_HOME"], "bin", "ruby")
+    candidates = [ENV["TRUFFLERUBY_BIN"], ENV["TRUFFLERUBY_NATIVE_BIN"], graal,
+                  find_command("truffleruby")] +
+                 installed_rubies("truffleruby*", "ruby")
+    candidates.compact.uniq.each_with_object({}) do |path, found|
+      next unless usable_engine(path)
+
+      version, = capture(ForeignEngine.clean_env, path, "--version")
+      name = if version.match?(/\bJVM\b/) then "truffleruby"
+             elsif version.match?(/\bNative\b/) then "truffleruby-native"
+             end
+      found[name] ||= path if name
+    end
   end
 
   def usable_engine(path)
     return nil unless path && File.executable?(path)
 
-    _output, ok = capture(path, "-e", "", chdir: ROOT)
+    _output, ok = capture(ForeignEngine.clean_env, path, "-e", "", chdir: ROOT)
     ok ? path : nil
   end
 
@@ -718,16 +740,6 @@ module RPyYARVEvaluation
     return @optional_engines if defined?(@optional_engines)
     # Reruns of a protocol that had no optional engine must not gain one.
     return @optional_engines = {} if ENV["EVAL_OPTIONAL_ENGINES"] == "0"
-
-    truffle = ENV["TRUFFLERUBY_BIN"]
-    if !truffle && ENV["GRAALVM_HOME"]
-      truffle = File.join(ENV["GRAALVM_HOME"], "bin", "ruby")
-    end
-    truffle = usable_engine(truffle)
-    truffle ||= find_command("truffleruby")
-    truffle = usable_engine(truffle)
-    truffle ||= installed_ruby("truffleruby*", "ruby")
-    truffle = usable_engine(truffle)
 
     jruby = ENV["JRUBY_BIN"]
     jruby ||= File.join(ENV["JRUBY_HOME"], "bin", "jruby") if ENV["JRUBY_HOME"]
@@ -737,10 +749,7 @@ module RPyYARVEvaluation
     jruby ||= installed_ruby("jruby*", "jruby")
     jruby = usable_engine(jruby)
 
-    @optional_engines = {
-      "truffleruby" => truffle,
-      "jruby" => jruby
-    }.compact
+    @optional_engines = truffleruby_engines.merge("jruby" => jruby).compact
   end
 
   def optional_engine_args
@@ -771,14 +780,20 @@ module RPyYARVEvaluation
     paths
   end
 
+  # A foreign engine's executable is a launcher, so its hash alone does not
+  # identify the runtime; its --version line does.
   def binary_metadata(paths)
-    paths.transform_values do |path|
-      next { "path" => path, "missing" => true } unless File.file?(path)
+    paths.to_h do |name, path|
+      next [name, { "path" => path, "missing" => true }] unless File.file?(path)
 
       stat = File.stat(path)
-      { "path" => path, "bytes" => stat.size,
-        "mtime" => stat.mtime.utc.iso8601,
-        "sha256" => Digest::SHA256.file(path).hexdigest }
+      meta = { "path" => path, "bytes" => stat.size,
+               "mtime" => stat.mtime.utc.iso8601,
+               "sha256" => Digest::SHA256.file(path).hexdigest }
+      if ForeignEngine.foreign?(name)
+        meta["version"] = capture(ForeignEngine.clean_env, path, "--version").first
+      end
+      [name, meta]
     end
   end
 
@@ -791,9 +806,10 @@ module RPyYARVEvaluation
     delegated_raw = File.join(run.dir, "raw-delegated.json")
     argv = [driver_ruby, File.join(ROOT, "scripts", "bench.rb"),
             "--raw", raw, "--gem-require"] + optional_engine_args + args
+    # RPYYARV_NO_REQUIRE means nothing to a foreign engine: time it once.
     delegated_argv = [driver_ruby, File.join(ROOT, "scripts", "bench.rb"),
                       "--raw", delegated_raw, "--no-gem-require", "--no-jsonl"] +
-                     optional_engine_args + args
+                     args
     run.manifest["optional_engines"] = optional_engines
     run.manifest["engine_binaries"] = binary_metadata(engine_paths(args))
     ok = run.execute("performance", base_env, argv)
@@ -1099,8 +1115,11 @@ module RPyYARVEvaluation
       "rpyyarv" => [File.join(ROOT, "rpyyarv"), :engine],
       "rpyyarv-jit" => [File.join(ROOT, "rpyyarv-jit"), :engine],
       "truffleruby (optional)" => [optional_engines["truffleruby"],
-                                   :engine],
-      "jruby (optional)" => [optional_engines["jruby"], :engine],
+                                   :foreign_engine],
+      "truffleruby-native (optional)" => [
+        optional_engines["truffleruby-native"], :foreign_engine
+      ],
+      "jruby (optional)" => [optional_engines["jruby"], :foreign_engine],
       "rebench (optional)" => [
         ENV.fetch("PATH", "").split(File::PATH_SEPARATOR)
            .map { |dir| File.join(dir, "rebench") }
@@ -1126,9 +1145,10 @@ module RPyYARVEvaluation
               else File.executable?(path)
               end
     return "missing" unless present
-    return "ok" unless kind == :engine
+    return "ok" unless %i[engine foreign_engine].include?(kind)
 
-    _output, ok = capture(base_env, path, "-e", "")
+    env = kind == :foreign_engine ? ForeignEngine.clean_env : base_env
+    _output, ok = capture(env, path, "-e", "")
     ok ? "ok" : "broken"
   end
 

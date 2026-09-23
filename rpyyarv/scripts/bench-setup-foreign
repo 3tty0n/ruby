@@ -1,0 +1,42 @@
+#!/bin/sh
+# bundle install every ruby-bench benchmark with a foreign engine into its own
+# gem set, which scripts/bench.rb hands to that engine only.
+#
+#   scripts/bench-setup-foreign truffleruby /path/to/truffleruby/bin/ruby [BENCH]
+#
+# The CRuby gem set cannot be shared: its C extensions link against libruby.
+# A benchmark whose gems fail to install still runs and is reported as a
+# failure row, so the log directory is part of the result.
+
+set -e
+[ $# -ge 2 ] || { echo "usage: $0 NAME RUBY [BENCH]" >&2; exit 1; }
+NAME=$1
+RUBY=$2
+ONLY=${3:-}
+HERE=`cd "\`dirname "$0"\`/.." && pwd`
+BENCH=${RUBY_BENCH:-$HERE/ruby-bench}
+GEMS=${BENCH_GEMS:-$HERE/.bench-gems}-$NAME
+
+[ -x "$RUBY" ] || { echo "no executable $RUBY" >&2; exit 1; }
+[ -d "$BENCH/benchmarks" ] || { echo "no ruby-bench checkout at $BENCH" >&2; exit 1; }
+
+unset RUBYLIB RUBYOPT DYLD_LIBRARY_PATH LD_LIBRARY_PATH
+export GEM_HOME=$GEMS GEM_PATH=$GEMS
+export BUNDLE_PATH=$GEMS BUNDLE_APP_CONFIG=$GEMS/.bundle
+mkdir -p "$GEMS/log"
+"$RUBY" --version > "$GEMS/log/engine-version.txt"
+
+ok=0; failed=0
+for gf in "$BENCH"/benchmarks/*/Gemfile; do
+    d=`dirname "$gf"`
+    name=`basename "$d"`
+    if [ -n "$ONLY" ] && [ "$ONLY" != "$name" ]; then continue; fi
+    if ( cd "$d" && "$RUBY" -S bundle install ) >"$GEMS/log/$name.log" 2>&1; then
+        echo "installed $name"
+        ok=`expr $ok + 1`
+    else
+        echo "FAILED    $name (see $GEMS/log/$name.log)"
+        failed=`expr $failed + 1`
+    fi
+done
+echo "$NAME gems: $ok installed, $failed failed, into $GEMS"

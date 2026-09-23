@@ -512,17 +512,18 @@ module RPyYARVEvaluation
     end
 
     def suite_color(suite)
-      suite == "awfy" ? ORANGE : BLUE
+      suite.start_with?("awfy") ? ORANGE : BLUE
     end
 
     def suite_shape(suite)
-      suite == "awfy" ? 1 : 0
+      suite.start_with?("awfy") ? 1 : 0
     end
 
     def display_name(label)
       { "cruby" => "CRuby", "yjit" => "YJIT", "zjit" => "ZJIT",
-        "truffleruby" => "TruffleRuby", "jruby" => "JRuby" }.fetch(label,
-                                                                      label)
+        "truffleruby" => "TruffleRuby",
+        "truffleruby_native" => "TruffleRuby (native)",
+        "jruby" => "JRuby" }.fetch(label, label)
     end
 
     def log_bounds(values)

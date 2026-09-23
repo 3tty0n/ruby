@@ -7,6 +7,7 @@ module EvaluationConfig
     "yjit" => "cruby+yjit",
     "zjit" => "cruby+zjit",
     "truffleruby" => "truffleruby",
+    "truffleruby_native" => "truffleruby-native",
     "jruby" => "jruby"
   }.freeze
   GC_LIMITS = [16_384, 4096, 1024].freeze

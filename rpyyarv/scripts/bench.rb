@@ -8,6 +8,7 @@
 require "open3"
 require "json"
 require "fileutils"
+require_relative "foreign_engine"
 
 HERE = File.dirname(File.expand_path(__FILE__))
 ROOT = File.dirname(HERE)
@@ -48,6 +49,10 @@ AWFY_BENCHMARKS = {
 }.freeze
 
 BIMODAL_RATIO = 1.15
+
+# The shim's adaptive warm-up (scripts/ruby-bench/harness.rb), as ruby-bench
+# runs it: wall-clock floors on top of the iteration minimums.
+ADAPTIVE_ENV = { "WARMUP_TIME" => "5", "MIN_BENCH_TIME" => "5" }.freeze
 DRV_PREFIX = "bench_tmp_drv_"
 
 # --- shared machinery -------------------------------------------------------
@@ -107,6 +112,10 @@ end
 
 def fmt(v)
   v ? format("%.2f", v) : "-"
+end
+
+def engine_env(name, env)
+  ForeignEngine.foreign?(name) ? env.merge(ForeignEngine.env(name, BENCH_GEMS)) : env
 end
 
 # perl's alarm is what the rest of this repo uses to bound a child run.
@@ -221,11 +230,14 @@ end
 # --- suites -----------------------------------------------------------------
 
 # AWFY: a generated driver next to the benchmark so require_relative resolves.
+# awfy-adaptive swaps the fixed iteration counts for the shim's adaptive
+# warm-up, so engines that need more iterations (TruffleRuby) reach peak.
 class AwfySuite
   attr_reader :name
 
-  def initialize(_opts)
-    @name = "awfy"
+  def initialize(opts)
+    @adaptive = opts[:awfy_adaptive]
+    @name = @adaptive ? "awfy-adaptive" : "awfy"
   end
 
   def available? = File.directory?(AWFY_DIR)
@@ -241,22 +253,36 @@ class AwfySuite
   # A probe runs one iteration at the real inner count: enough to load the file.
   def with_script(bench, probe: false)
     klass, inner, warm, meas = AWFY_BENCHMARKS[bench]
-    src = <<~RUBY
-      require_relative '#{bench}'
-      b = #{klass}.new
-      ok = true
-      #{probe ? 1 : warm + meas}.times do |i|
-        t0 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-        r = b.inner_benchmark_loop(#{inner})
-        t1 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-        ok = false unless r == true
-        puts "ITER " + i.to_s + " " + ((t1 - t0) * 1000.0).to_s + " " + r.to_s
-      end
-      puts "DONE " + ok.to_s
-    RUBY
+    src = if @adaptive && !probe
+            File.read(File.join(SHIM_DIR, "harness.rb")) + <<~RUBY
+              require_relative '#{bench}'
+              b = #{klass}.new
+              run_benchmark(nil) do
+                raise "verification failed" unless b.inner_benchmark_loop(#{inner}) == true
+              end
+            RUBY
+          else
+            <<~RUBY
+              require_relative '#{bench}'
+              b = #{klass}.new
+              ok = true
+              #{probe ? 1 : warm + meas}.times do |i|
+                t0 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+                r = b.inner_benchmark_loop(#{inner})
+                t1 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+                ok = false unless r == true
+                puts "ITER " + i.to_s + " " + ((t1 - t0) * 1000.0).to_s + " " + r.to_s
+              end
+              puts "DONE " + ok.to_s
+            RUBY
+          end
     path = File.join(AWFY_DIR, "awfy_tmp_drv_#{bench}_#{Process.pid}.rb")
     File.write(path, src)
     env = base_env
+    if @adaptive
+      env.merge!(ADAPTIVE_ENV, "WARMUP_ITRS" => warm.to_s,
+                 "MIN_BENCH_ITRS" => meas.to_s)
+    end
     lib = rubylib
     env["RUBYLIB"] = lib unless lib.empty?
     yield path, env, warm
@@ -353,12 +379,11 @@ class RubyBenchSuite
     path = File.join(File.dirname(paths[bench]), "#{DRV_PREFIX}#{bench}_#{Process.pid}.rb")
     File.write(path, File.read(File.join(SHIM_DIR, "harness.rb")) + "\n" + src)
     env = base_env.merge("WARMUP_ITRS" => warm.to_s,
-                         # Wall-clock warmup floor: a tracing JIT needs it.
-                         "WARMUP_TIME" => probe ? "0" : "5",
                          "MIN_BENCH_ITRS" => meas.to_s,
-                         # Long enough that ~300 ms stalls land in every window.
-                         "MIN_BENCH_TIME" => probe ? "0" : "5",
                          "RUBYLIB" => uninstalled_rubylib).merge(bench_gems_env)
+    # Wall-clock floors: a tracing JIT needs the warm-up one, and ~300 ms
+    # stalls must land in every measured window.
+    env.merge!(probe ? { "WARMUP_TIME" => "0", "MIN_BENCH_TIME" => "0" } : ADAPTIVE_ENV)
     # RPyYARV must not re-load RubyGems' tree: it redefines Gem and crashes.
     env["RPYYARV_NO_REQUIRE"] = "1" if no_require
     yield path, env, warm
@@ -442,7 +467,7 @@ def resolve_engines(extra, env, only)
     if !File.executable?(argv[0])
       puts format("note: skipping %s (%s not found)", name, argv[0])
       false
-    elsif !system(env, *argv, "-e", "", out: File::NULL, err: File::NULL)
+    elsif !system(engine_env(name, env), *argv, "-e", "", out: File::NULL, err: File::NULL)
       puts format("note: skipping %s (flags unsupported by this build)", name)
       false
     else
@@ -465,14 +490,15 @@ def run_suite(suite, names, engines, procs, raw)
     probes = {}
     suite.with_script(bench, probe: true) do |script, env, _warm|
       engines.each do |ename, eargv|
-        _t, err, info = run_once(eargv, script, env.merge(COVERAGE_ENV), suite.timeout)
+        _t, err, info = run_once(eargv, script, engine_env(ename, env.merge(COVERAGE_ENV)), suite.timeout)
         probes[ename] = [err, info]
       end
     end
     suite.with_script(bench) do |script, env, warm|
       engines.each do |ename, eargv|
         perr, pinfo = probes[ename]
-        r = perr ? { status: perr, info: pinfo } : time_engine(eargv, script, env, warm, procs, suite.timeout)
+        r = perr ? { status: perr, info: pinfo } :
+              time_engine(eargv, script, engine_env(ename, env), warm, procs, suite.timeout)
         r[:info] = pinfo
         result[ename] = r
         raw["#{suite.name}/#{bench}/#{ename}"] = r
@@ -622,7 +648,7 @@ def main(argv)
     when "--refresh-inventory" then refresh = true
     when "-h", "--help"
       puts <<~USAGE
-        usage: bench.rb [--suite awfy|ruby-bench|all] [--procs N] [--filter SUBSTRING]...
+        usage: bench.rb [--suite awfy|awfy-adaptive|ruby-bench|all] [--procs N] [--filter SUBSTRING]...
                         [--ruby-bench DIR] [--warmup N] [--iters N] [--raw FILE]
                         [--jsonl FILE] [--no-jsonl]
                         [--engine NAME=PATH]... [--compare BIN] [--inventory] [--refresh-inventory]
@@ -646,6 +672,7 @@ def main(argv)
 
   wanted = case (suites || "all")
            when "awfy" then ["awfy"]
+           when "awfy-adaptive" then ["awfy-adaptive"]
            when "yjit", "yjit-bench", "ruby-bench" then ["ruby-bench"]
            when "all" then ["awfy", "ruby-bench"]
            else warn "unknown suite: #{suites}"; return 2
@@ -658,7 +685,11 @@ def main(argv)
   all_rows = []
   raw = {}
   wanted.each do |sname|
-    suite = sname == "awfy" ? AwfySuite.new(opts) : RubyBenchSuite.new(opts)
+    suite = if sname.start_with?("awfy")
+              AwfySuite.new(opts.merge(awfy_adaptive: sname == "awfy-adaptive"))
+            else
+              RubyBenchSuite.new(opts)
+            end
     unless suite.available?
       warn suite.missing_message
       next
