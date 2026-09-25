@@ -20,7 +20,6 @@ class Registry(object):
         self.held = []          # exception VALUEs parked outside any frame
         self.forever = []       # VALUEs rooted for the life of the process
         self.blocks = None      # interp's handle table, once it exists
-        self.fibers = None      # fibers.mark_suspended, once installed
         # ponytail: leaks redefined blocks, bounded by define_method count.
         self.bmethods = []
 
@@ -31,11 +30,6 @@ state = Registry()
 def register_blocks(blocks):
     """Handle-reachable blocks: nothing else keeps their locals marked."""
     state.blocks = blocks
-
-
-def register_fibers(fn):
-    """Passed as a function to keep this module below fibers.py."""
-    state.fibers = fn
 
 
 def register_bmethod(w_block):
@@ -302,13 +296,24 @@ def _mark_all():
         i += 1
     # Not the handle table: mark_handle does it, so dead Procs can die.
     # A compiled frame is not forced; mark_word walks its jitframe words.
-    f = state.top
+    _mark_chain(state.top)
+
+
+def _mark_chain(f):
     while f is not None:
         _mark_frame(f)
         f = f.prev_frame
-    # A suspended fiber's frames are on no chain of ours.
-    if state.fibers is not None:
-        state.fibers()
+
+
+def mark_suspended(f):
+    """A new generation: an incremental remark must see stores since pass 1."""
+    prev = gc_mark_state.marking
+    gc_mark_state.generation += 1
+    gc_mark_state.marking = True
+    try:
+        _mark_chain(f)
+    finally:
+        gc_mark_state.marking = prev
 
 
 def root_inventory():

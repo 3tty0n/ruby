@@ -12,8 +12,9 @@ from rpyyarv import gcroots
 from rpyyarv import interp
 from rpyyarv import requires
 from rpyyarv import rubycall
-from rpyyarv.rlib import (raw_word, set_raw_word, unchecked_stack_start,
-                          unchecked_stack_stop)
+from rpyyarv import threading
+from rpyyarv.rlib import (dont_look_inside, raw_word, set_raw_word,
+                          unchecked_stack_start, unchecked_stack_stop)
 
 SIZEADDR = llmemory.sizeof(llmemory.Address)
 
@@ -63,7 +64,6 @@ class FiberState(object):
 class _Registry(object):
     def __init__(self):
         self.states = {}        # rb_fiber_t* -> FiberState
-        self.live = []          # the same states, walkable without allocating
         self.dead = 0
 
 
@@ -75,11 +75,6 @@ def _reap():
     if registry.dead == 0:
         return
     registry.dead = 0
-    live = []
-    for st in registry.live:
-        if not st.dead:
-            live.append(st)
-    registry.live = live
     for key in registry.states.keys():
         if registry.states[key].dead:
             del registry.states[key]
@@ -94,7 +89,6 @@ def _state_for(key):
         _reap()
     st = FiberState()
     registry.states[key] = st
-    registry.live.append(st)
     return st
 
 
@@ -183,22 +177,20 @@ def died(key):
     registry.dead += 1
 
 
-def mark_suspended():
-    """Every suspended fiber's frames; this adds no lifetime."""
-    live = registry.live
-    i = 0
-    while i < len(live):
-        st = live[i]
-        f = st.top
-        while f is not None:
-            gcroots._mark_frame(f)
-            f = f.prev_frame
-        i += 1
+@dont_look_inside
+def mark(key):
+    """From the Fiber's mark function: its frames live exactly as long."""
+    acquired = threading.enter_callback()
+    try:
+        st = registry.states.get(key, None)
+        if st is not None and st.top is not None:
+            gcroots.mark_suspended(st.top)
+    finally:
+        threading.leave_callback(acquired)
 
 
 def install():
     rgc.register_custom_trace_hook(STACKLET, lambda_customtrace)
-    gcroots.register_fibers(mark_suspended)
     # Capture the window as-is; writing length would undo the 4MB limit.
     anchors.end_adr = rstack._stack_get_end_adr()
     anchors.length_adr = rstack._stack_get_length_adr()
@@ -211,4 +203,4 @@ def install():
     top_slot = rffi.cast(rffi.VOIDP,
                          llop.gc_adr_of_root_stack_top(llmemory.Address))
     # Plain functions, so rffi builds the enter-RPython-from-C wrappers.
-    boot.set_fiber_hooks(park, unpark, born, died, base_slot, top_slot)
+    boot.set_fiber_hooks(park, unpark, born, died, mark, base_slot, top_slot)

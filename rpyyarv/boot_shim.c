@@ -2151,6 +2151,7 @@ fiber_unpark(long key, long stack_base, long stack_size)
 void
 rpyyarv_set_fiber_hooks(rpyyarv_fiber_save_fn park, rpyyarv_fiber_arrive_fn unpark,
                         rpyyarv_fiber_born_fn born, rpyyarv_fiber_key_fn died,
+                        rpyyarv_fiber_key_fn mark,
                         void **base_slot, void **top_slot)
 {
     static rb_rpyyarv_fiber_hooks_t hooks;
@@ -2162,6 +2163,7 @@ rpyyarv_set_fiber_hooks(rpyyarv_fiber_save_fn park, rpyyarv_fiber_arrive_fn unpa
     hooks.unpark = fiber_unpark;
     hooks.born = born;
     hooks.died = died;
+    hooks.mark = mark;
     rb_rpyyarv_set_fiber_hooks(&hooks);
 }
 

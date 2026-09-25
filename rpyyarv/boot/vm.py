@@ -93,7 +93,8 @@ rb_rethrow_if_fiber_kill = _ext('rpyyarv_rethrow_if_fiber_kill', [VALUE],
 
 rb_set_fiber_hooks = _ext('rpyyarv_set_fiber_hooks',
                           [FIBER_SAVE_HOOK, FIBER_ARRIVE_HOOK, FIBER_BORN_HOOK,
-                           FIBER_KEY_HOOK, VOIDP, VOIDP], lltype.Void,
+                           FIBER_KEY_HOOK, FIBER_KEY_HOOK, VOIDP, VOIDP],
+                          lltype.Void,
 reenters=False)
 
 
@@ -226,8 +227,8 @@ def rethrow_if_fiber_kill(v):
     rb_rethrow_if_fiber_kill(_v(v))
 
 
-def set_fiber_hooks(park, unpark, born, died, base_slot, top_slot):
-    rb_set_fiber_hooks(park, unpark, born, died, base_slot, top_slot)
+def set_fiber_hooks(park, unpark, born, died, mark, base_slot, top_slot):
+    rb_set_fiber_hooks(park, unpark, born, died, mark, base_slot, top_slot)
 
 
 def set_const_hook(fn):
