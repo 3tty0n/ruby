@@ -1229,6 +1229,7 @@ rb_fiber_mark_self(const rb_fiber_t *fiber)
         rb_gc_mark_movable(fiber->cont.self);
     }
     else {
+        if (rpyyarv_fiber_hooks) rpyyarv_fiber_hooks->mark((long)fiber);
         rb_execution_context_mark(&fiber->cont.saved_ec);
     }
 }
@@ -1253,6 +1254,7 @@ fiber_mark(void *ptr)
     fiber_verify(fiber);
     rb_gc_mark_movable(fiber->first_proc);
     if (fiber->prev) rb_fiber_mark_self(fiber->prev);
+    if (rpyyarv_fiber_hooks) rpyyarv_fiber_hooks->mark((long)fiber);
     cont_mark(&fiber->cont);
     RUBY_MARK_LEAVE("cont");
 }

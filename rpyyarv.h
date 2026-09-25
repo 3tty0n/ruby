@@ -18,6 +18,7 @@ typedef struct rb_rpyyarv_fiber_hooks {
     void (*unpark)(long key, long stack_base, long stack_size);
     void (*born)(long key, long stack_base, long stack_size);
     void (*died)(long key);
+    void (*mark)(long key);
 } rb_rpyyarv_fiber_hooks_t;
 
 RBIMPL_SYMBOL_EXPORT_BEGIN()
