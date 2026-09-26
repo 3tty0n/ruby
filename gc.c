@@ -3768,6 +3768,7 @@ update_classext(rb_classext_t *ext, bool is_prime, VALUE box_value, void *arg)
     }
 
     update_m_tbl(objspace, RCLASSEXT_M_TBL(ext));
+    update_m_tbl(objspace, RCLASSEXT_CALLABLE_M_TBL(ext));
 
     UPDATE_IF_MOVED(objspace, ext->fields_obj);
     if (!RCLASSEXT_SHARED_CONST_TBL(ext)) {
