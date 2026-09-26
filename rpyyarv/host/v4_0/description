@@ -1,0 +1,3 @@
+# CRuby 4.0 (evaluated host): v4.0.6 plus host.patch
+base v4.0.6
+patch host.patch

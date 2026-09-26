@@ -20,6 +20,8 @@ class Registry(object):
         self.held = []          # exception VALUEs parked outside any frame
         self.forever = []       # VALUEs rooted for the life of the process
         self.blocks = None      # interp's handle table, once it exists
+        self.fibers = None      # fibers' registry, once it exists
+        self.const_cache = None # dispatch.consts, whose entries hold VALUEs
         # ponytail: leaks redefined blocks, bounded by define_method count.
         self.bmethods = []
 
@@ -30,6 +32,11 @@ state = Registry()
 def register_blocks(blocks):
     """Handle-reachable blocks: nothing else keeps their locals marked."""
     state.blocks = blocks
+
+
+def register_fibers(registry):
+    """fibers.registry, for R1 stats: gcroots must not import fibers."""
+    state.fibers = registry
 
 
 def register_bmethod(w_block):
@@ -294,6 +301,17 @@ def _mark_all():
     while i < len(bmethods):
         _mark_block_deep(bmethods[i])
         i += 1
+    # Cached constant values: the host marks them movable, so the walk
+    # pins them while a cache or a trace can still read the address.
+    cache = state.const_cache
+    if cache is not None:
+        entries = cache.entries
+        i = 0
+        while i < len(entries):
+            e = entries[i]
+            if e.live and not value.is_immediate(e.value):
+                _mark(e.value, 'const-cache')
+            i += 1
     # Not the handle table: mark_handle does it, so dead Procs can die.
     # A compiled frame is not forced; mark_word walks its jitframe words.
     _mark_chain(state.top)
@@ -323,11 +341,14 @@ def root_inventory():
     while i < len(state.consts):
         pools += len(state.consts[i])
         i += 1
+    cached = 0
+    if state.const_cache is not None:
+        cached = len(state.const_cache.entries) - state.const_cache.dead
     return ('classes %d, const pools %d (%d values), pinned %d, held %d, '
-            'forever %d, bmethods %d'
+            'forever %d, bmethods %d, const cache %d'
             % (len(state.classes), len(state.consts), pools,
                len(state.pinned), len(state.held), len(state.forever),
-               len(state.bmethods)))
+               len(state.bmethods), cached))
 
 
 def install():

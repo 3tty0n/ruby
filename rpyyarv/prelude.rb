@@ -445,6 +445,17 @@ module RPyYARV
     end
     out
   end
+
+  # RPYYARV_COVERAGE=1 only; else raises NoMethodError. [live handles,
+  # handle-table length, dead-handle queue length, live fiber states,
+  # RPython heap bytes].
+  def self.r1_stats
+    __rpyyarv_r1_stats__
+  end
+
+  def self.r1_collect!
+    __rpyyarv_r1_collect__
+  end
 end
 
 module Kernel

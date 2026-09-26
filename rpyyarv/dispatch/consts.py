@@ -8,25 +8,34 @@ from rpyyarv.rlib import elidable, dont_look_inside
 from rpyyarv.dispatch.core import Version
 
 
-class ConstEntry(object):
-    # A box, not the VALUE: Qfalse is 0, so none is free for "not cached".
+class CachedValue(object):
+    """A box, not the VALUE: Qfalse is 0, so none is free for "not cached".
+    Marked (and so pinned) by the root walk until an invalidation retires
+    it: the host marks constant values movable, so a cached or trace-folded
+    copy would go stale under compaction."""
     _immutable_fields_ = ['value']
 
     def __init__(self, v):
         self.value = v
+        self.live = True
 
 
-class SiteEntry(object):
+class ConstEntry(CachedValue):
+    pass
+
+
+class SiteEntry(CachedValue):
     """What one opt_getconstant_path site resolved, and its cbase."""
-    _immutable_fields_ = ['base', 'value']
+    _immutable_fields_ = ['base']
 
     def __init__(self, base, v):
+        CachedValue.__init__(self, v)
         self.base = base
-        self.value = v
 
 
 # A second cbase parks the site here: no cbase is 0, so the guard never hits.
 SITE_POLY = SiteEntry(0, 0)
+SITE_POLY.live = False
 
 
 class ConstSite(object):
@@ -47,9 +56,32 @@ class _Consts(object):
         self.ftab = {}
         self.rooted = {}    # cbase VALUEs already handed to gcroots
         self.by_name = {}   # mid -> the ConstSites whose path names it
+        self.entries = []   # every entry above, for the root walk
+        self.dead = 0       # entries dropped since the list was last pruned
 
 
 consts = _Consts()
+gcroots.state.const_cache = consts
+
+
+def _retire(entry):
+    if entry.live:
+        entry.live = False
+        consts.dead += 1
+
+
+def _prune_entries():
+    """Once half the list is dead, rebuild it outside any mark walk."""
+    if consts.dead * 2 < len(consts.entries):
+        return
+    live = []
+    i = 0
+    while i < len(consts.entries):
+        if consts.entries[i].live:
+            live.append(consts.entries[i])
+        i += 1
+    consts.entries = live
+    consts.dead = 0
 
 
 # One quasi-immutable per bucket of constant names, so a const_set of one
@@ -119,6 +151,10 @@ const_invalidation_scope = _ConstScope()
 
 def _invalidate_all_consts():
     """The behaviour before names were tracked: one write kills every trace."""
+    i = 0
+    while i < len(consts.entries):
+        _retire(consts.entries[i])
+        i += 1
     consts.tab = {}
     consts.attab = {}
     consts.ftab = {}
@@ -128,6 +164,7 @@ def _invalidate_all_consts():
             if sites[i].entry is not None:
                 sites[i].entry = None
             i += 1
+    _prune_entries()
     i = 0
     while i < CONST_BUCKETS:
         const_names.cells[i].version = Version()
@@ -142,6 +179,7 @@ def _drop_named(tab, mid):
             dead.append(key)
     i = 0
     while i < len(dead):
+        _retire(tab[dead[i]])
         del tab[dead[i]]
         i += 1
 
@@ -165,9 +203,11 @@ def invalidate_consts(rid):
         while i < len(sites):
             # Guarded: a same-value write still kills every folding trace.
             if sites[i].entry is not None:
+                _retire(sites[i].entry)
                 sites[i].entry = None
             i += 1
     const_names.cells[mid & (CONST_BUCKETS - 1)].version = Version()
+    _prune_entries()
     const_invalidations.count += 1
 
 
@@ -182,7 +222,9 @@ def const_site_fill(site, base, v):
     if entry is None:
         root_base(base)
         site.entry = SiteEntry(base, v)
+        consts.entries.append(site.entry)
     elif entry is not SITE_POLY:
+        _retire(entry)
         site.entry = SITE_POLY
 
 
@@ -226,6 +268,7 @@ def _const_from_fill(klass, mid):
     entry = ConstEntry(boot.const_get_from(klass, rubycall.const_rid(mid)))
     root_base(klass)
     consts.ftab[(klass, mid)] = entry
+    consts.entries.append(entry)
     return entry
 
 
@@ -251,6 +294,7 @@ def _const_at_fill(klass, mid):
     entry = ConstEntry(boot.const_at(klass, rubycall.const_rid(mid)))
     root_base(klass)
     consts.attab[(klass, mid)] = entry
+    consts.entries.append(entry)
     return entry
 
 
@@ -262,6 +306,7 @@ def _const_fill(klass, mid):
     entry = ConstEntry(boot.const_get(klass, rubycall.const_rid(mid)))
     root_base(klass)
     consts.tab[(klass, mid)] = entry
+    consts.entries.append(entry)
     return entry
 
 

@@ -2,6 +2,7 @@
 from __future__ import absolute_import
 
 from rpyyarv import boot
+from rpyyarv import gcroots
 from rpyyarv import value
 from rpyyarv import rubycall
 from rpyyarv.rlib import dont_look_inside, intmask
@@ -104,6 +105,7 @@ def bmethod_identity(owner, mid, w_block):
     key = (owner, mid)
     entry = _bmethod_idents.get(key, None)
     if entry is None or entry.w_block is not w_block:
+        gcroots.register_class(owner)
         entry = MethodEntry(None, False, owner, mid, 0, KIND_BMETHOD, 0,
                             None, w_block)
         _bmethod_idents[key] = entry
@@ -124,6 +126,7 @@ def lookup_from_trampoline(rid, klass):
         return _tc_mids[idx], _tc_entries[idx]
     mid = rubycall.mid_of_rid(rid)
     entry = lookup_from_cruby(klass, mid) if mid != rubycall.NO_MID else None
+    gcroots.register_class(klass)
     _tc_rids[idx] = rid
     _tc_klasses[idx] = klass
     _tc_mids[idx] = mid

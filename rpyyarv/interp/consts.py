@@ -15,28 +15,9 @@ from rpyyarv.rlib import dont_look_inside, promote
 from rpyyarv.interp.consts_ids import EQQ, NEW, ROOT_CBASE
 from rpyyarv.interp.cref import _cref_klass, _cref_of, _push_cref
 
-DEFINED_IVAR = 2
-
-
-DEFINED_GVAR = 4
-
-
-DEFINED_CVAR = 5
-
-
-DEFINED_CONST = 6
-
-
-DEFINED_METHOD = 7
-
-
-DEFINED_YIELD = 8
-
-
-DEFINED_FUNC = 16
-
-
-DEFINED_CONST_FROM = 17
+from rpyyarv.hostconsts import (DEFINED_CONST, DEFINED_CONST_FROM, DEFINED_CVAR,
+                                DEFINED_FUNC, DEFINED_GVAR, DEFINED_IVAR,
+                                DEFINED_METHOD, DEFINED_YIELD)
 
 
 def _const_path(frame, iseq, idx):

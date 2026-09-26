@@ -1,5 +1,22 @@
 """Anything absent from EMIT is unsupported; the loader fails loudly."""
 
+# vm_core.h and vm_callinfo.h values, generated per host (host/hostconsts.c).
+from rpyyarv.hostconsts import (
+    ENV_DATA_SIZE, CALL_FLAG_ARGS_SPLAT, CALL_FLAG_ARGS_BLOCKARG,
+    CALL_FLAG_KWARG, CALL_FLAG_KW_SPLAT, CALL_FLAG_OPT_SEND,
+    CALL_FLAG_KW_SPLAT_MUT, CALL_FLAG_ARGS_SPLAT_MUT, CALL_FLAG_FORWARDING,
+    CALL_FLAG_FCALL, CALL_FLAG_VCALL, CALL_FLAG_ARGS_SIMPLE,
+    CALL_FLAG_TAILCALL, CALL_FLAG_SUPER, CALL_FLAG_ZSUPER,
+    KW_SPECIFIED_BITS_MAX, DEFINECLASS_TYPE_MASK, DEFINECLASS_TYPE_CLASS,
+    DEFINECLASS_TYPE_SINGLETON_CLASS, DEFINECLASS_TYPE_MODULE,
+    DEFINECLASS_FLAG_SCOPED, DEFINECLASS_FLAG_HAS_SUPERCLASS,
+    SPECIAL_OBJECT_VMCORE, SPECIAL_OBJECT_CBASE, SPECIAL_OBJECT_CONST_BASE,
+    CHECKMATCH_TYPE_MASK, CHECKMATCH_ARRAY, CHECKMATCH_TYPE_WHEN,
+    CHECKMATCH_TYPE_CASE, CHECKMATCH_TYPE_RESCUE, TAG_MASK, TAG_NONE,
+    TAG_RETURN, TAG_BREAK, TAG_NEXT, TAG_RETRY, TAG_REDO, NEWARRAY_SEND_MAX,
+    NEWARRAY_SEND_MIN, NEWARRAY_SEND_HASH, NEWARRAY_SEND_PACK,
+    NEWARRAY_SEND_PACK_BUFFER, NEWARRAY_SEND_INCLUDE_P)
+
 # YARV name -> operand positions emitted as ints; the rest go to the pool.
 EMIT = {
     'nop': [],
@@ -128,19 +145,6 @@ MAX_LOCAL_LEVEL = 16
 LOCAL_LEVEL_SHIFT = 20
 LOCAL_SLOT_MASK = (1 << LOCAL_LEVEL_SHIFT) - 1
 
-# vm_core.h: slot = nlocals - operand + ENV_DATA_SIZE - 1
-ENV_DATA_SIZE = 3
-
-# vm_callinfo.h enum vm_call_flag_bits; non-SIMPLE args arrive otherwise.
-CALL_FLAG_ARGS_SPLAT = 0x01
-CALL_FLAG_ARGS_BLOCKARG = 0x02
-CALL_FLAG_KWARG = 0x20
-CALL_FLAG_KW_SPLAT = 0x40
-CALL_FLAG_OPT_SEND = 0x400
-CALL_FLAG_KW_SPLAT_MUT = 0x800
-CALL_FLAG_ARGS_SPLAT_MUT = 0x1000
-CALL_FLAG_FORWARDING = 0x2000
-
 # Which unsupported flag a call site carries, most informative first.
 CALL_FLAG_NAMES = [
     (CALL_FLAG_FORWARDING, '...'),
@@ -151,14 +155,8 @@ CALL_FLAG_NAMES = [
     (CALL_FLAG_OPT_SEND, 'send'),
 ]
 
-CALL_FLAG_FCALL = 0x04
-CALL_FLAG_VCALL = 0x08
-CALL_FLAG_ARGS_SIMPLE = 0x10
-CALL_FLAG_TAILCALL = 0x80
-# invokesuper only; a bare `super` (ZSUPER) pushes the parameters the same way.
-CALL_FLAG_SUPER = 0x100
-CALL_FLAG_ZSUPER = 0x200
-# ARGS_BLOCKARG: the args below it arrive plainly, the block rides on top.
+# Non-SIMPLE args arrive otherwise; SUPER/ZSUPER push the parameters the same
+# way, and ARGS_BLOCKARG args arrive plainly with the block on top.
 SIMPLE_CALL_FLAGS = (CALL_FLAG_FCALL | CALL_FLAG_VCALL |
                      CALL_FLAG_ARGS_SIMPLE | CALL_FLAG_TAILCALL |
                      CALL_FLAG_SUPER | CALL_FLAG_ZSUPER |
@@ -172,37 +170,10 @@ KWARG_CALL_FLAGS = (SIMPLE_CALL_FLAGS | CALL_FLAG_KWARG |
 SPLAT_CALL_FLAGS = (KWARG_CALL_FLAGS | CALL_FLAG_ARGS_SPLAT |
                     CALL_FLAG_ARGS_SPLAT_MUT)
 
-# vm_core.h VM_KW_SPECIFIED_BITS_MAX: past this the kwbits local is a Hash.
-KW_SPECIFIED_BITS_MAX = 31
-
-# vm_core.h. A plain `class Foo` or `module Foo`: no singleton class or A::B.
-DEFINECLASS_TYPE_MASK = 0x07
-DEFINECLASS_TYPE_CLASS = 0x00
-DEFINECLASS_TYPE_SINGLETON_CLASS = 0x01
-DEFINECLASS_TYPE_MODULE = 0x02
-DEFINECLASS_FLAG_SCOPED = 0x08
-DEFINECLASS_FLAG_HAS_SUPERCLASS = 0x10
-
 # vm_core.h vm_opt_newarray_send_type: argc by method-1, -1 = no PACK_BUFFER.
-NEWARRAY_SEND_ARGC = [0, 0, 0, 1, 2, 1]
-
-# vm_core.h, enum vm_special_object_type.
-SPECIAL_OBJECT_VMCORE = 1
-SPECIAL_OBJECT_CBASE = 2
-SPECIAL_OBJECT_CONST_BASE = 3
-
-# vm_core.h vm_check_match_type: CASE/RESCUE run ===, ARRAY is a list.
-CHECKMATCH_TYPE_MASK = 0x03
-CHECKMATCH_TYPE_WHEN = 1
-CHECKMATCH_TYPE_CASE = 2
-CHECKMATCH_TYPE_RESCUE = 3
-CHECKMATCH_ARRAY = 0x04
-
-# vm_core.h, enum ruby_tag_type. Tag 0 continues the throw already in flight.
-TAG_MASK = 0xf
-TAG_NONE = 0
-TAG_RETURN = 1
-TAG_BREAK = 2
-TAG_NEXT = 3
-TAG_RETRY = 4
-TAG_REDO = 5
+NEWARRAY_SEND_ARGC = [0] * 6
+for _m, _argc in [(NEWARRAY_SEND_MAX, 0), (NEWARRAY_SEND_MIN, 0),
+                  (NEWARRAY_SEND_HASH, 0), (NEWARRAY_SEND_PACK, 1),
+                  (NEWARRAY_SEND_PACK_BUFFER, 2),
+                  (NEWARRAY_SEND_INCLUDE_P, 1)]:
+    NEWARRAY_SEND_ARGC[_m - 1] = _argc

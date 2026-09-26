@@ -10,6 +10,8 @@
 #include <ruby/re.h>
 #include <ruby/thread.h>
 
+/* internal.h first, as CRuby's own files do: later headers rely on it. */
+#include "internal.h"
 /* In-tree: the object-shape API libruby does not export stays reachable. */
 #include "shape.h"
 #include "internal/array.h"
@@ -30,6 +32,7 @@
 /* rb_hrtime_t, for a Regexp's onigmo timelimit and the global one. */
 #include "hrtime.h"
 #include "rpyyarv.h"
+#include "host/compat.h"
 
 #include "boot_shim.h"
 #include "builtin.h"
@@ -939,7 +942,10 @@ rpyyarv_iseqw_new(void *iseq)
 void *
 rpyyarv_iseqw_ptr(uintptr_t iseqw)
 {
-    return *(rb_iseq_t **)RTYPEDDATA_DATA((VALUE)iseqw);
+    rb_iseq_t *iseq = *(rb_iseq_t **)RTYPEDDATA_DATA((VALUE)iseqw);
+    /* The wrapper marks its ISeq movable; RPyYARV keeps the raw address. */
+    rb_gc_register_mark_object((VALUE)iseq);
+    return iseq;
 }
 
 uintptr_t
@@ -1762,14 +1768,14 @@ rpyyarv_shape_iv_index(unsigned int shape_id, uintptr_t id, int *index)
 
     rb_shape_t *shape = RSHAPE((shape_id_t)shape_id);
     int depth = 0;
-    while (shape->parent_id != INVALID_SHAPE_ID) {
+    while (RPYYARV_SHAPE_PARENT(shape) != INVALID_SHAPE_ID) {
         if (++depth > RPYYARV_SHAPE_MAX_DEPTH) return -1;
         if (shape->type == SHAPE_IVAR && shape->edge_name == (ID)id) {
             if (shape->next_field_index == 0) return -1;
             *index = (int)(shape->next_field_index - 1);
             return 1;
         }
-        shape = RSHAPE(shape->parent_id);
+        shape = RSHAPE(RPYYARV_SHAPE_PARENT(shape));
     }
     return 0;
 }
@@ -1793,11 +1799,11 @@ rpyyarv_wb_direct(void)
 }
 
 void
-rpyyarv_object_layout(int *out)
+rpyyarv_object_layout(long *out)
 {
     out[0] = (int)SHAPE_FLAG_SHIFT;
     out[1] = (int)SHAPE_ID_NUM_BITS;
-    out[2] = (int)ROBJECT_HEAP;
+    out[2] = (long)RPYYARV_IV_HEAP_MASK;
     out[3] = (int)(offsetof(struct RObject, as.ary) / SIZEOF_VALUE);
     out[4] = (int)RUBY_T_MASK;
     out[5] = (int)RUBY_T_OBJECT;
@@ -1805,7 +1811,7 @@ rpyyarv_object_layout(int *out)
     /* Nonzero puts the shape id in its own word, not in the flags read here. */
     out[7] = (int)RBASIC_SHAPE_ID_FIELD;
     out[8] = (int)RUBY_T_DATA;
-    out[9] = (int)RUBY_TYPED_FL_IS_TYPED_DATA;
+    out[9] = (int)RPYYARV_FL_TYPED_DATA;
     /* Where a typed T_DATA keeps imemo/fields; RData puts a pointer here. */
     out[10] = (int)(offsetof(struct RTypedData, fields_obj) / SIZEOF_VALUE);
     /* Set on the objects ivar_ractor_check (variable.c:1220) may raise for. */
@@ -1814,6 +1820,9 @@ rpyyarv_object_layout(int *out)
     out[12] = (int)(offsetof(struct RClass_and_rb_classext_t, classext.fields_obj) / SIZEOF_VALUE);
     /* Only a boxable class holds another classext (internal/class.h:314). */
     out[13] = (int)RCLASS_BOXABLE;
+    out[14] = (long)RPYYARV_IV_HEAP_BITS;
+    out[15] = (int)RPYYARV_IV_HEAP_BASE;
+    out[16] = (int)RPYYARV_IV_HEAP_IS_OBJECT;
 }
 
 /* Neither allocates nor raises, so boot.py may declare it without reenters. */
@@ -1825,6 +1834,7 @@ rpyyarv_shape_add_ivar_fits(unsigned int before, unsigned int after,
     if (before == INVALID_SHAPE_ID || after == INVALID_SHAPE_ID) return 0;
     if (rb_shape_too_complex_p((shape_id_t)before)) return 0;
     if (rb_shape_too_complex_p((shape_id_t)after)) return 0;
+    if (!RPYYARV_IV_RAW_ADD_P((shape_id_t)before)) return 0;
     /* Same flags and parent, so the shape id write changes only the offset. */
     if (!RSHAPE_DIRECT_CHILD_P((shape_id_t)before, (shape_id_t)after)) return 0;
 
@@ -2120,6 +2130,9 @@ handle_owner_dfree(void *p)
 /* Swapped here, not in RPython: the copy needs none of our frames on stack. */
 static rpyyarv_fiber_save_fn fiber_park_callback;
 static rpyyarv_fiber_arrive_fn fiber_unpark_callback;
+static rpyyarv_fiber_key_fn fiber_died_callback;
+static long *foreign_dead_fibers;
+static int n_foreign_dead, cap_foreign_dead;
 static void **fiber_ss_base;
 static void **fiber_ss_top;
 
@@ -2148,6 +2161,41 @@ fiber_unpark(long key, long stack_base, long stack_size)
     *(long *)buf = 0;             /* the copy is live again; trace nothing */
 }
 
+/* 4.1 frees a retiring Ractor's fibers on its own thread, which must not
+ * run RPython: queue those keys for the main thread's next death notice. */
+static void
+fiber_died(long key)
+{
+    int n, i;
+    long *keys = NULL;
+    pthread_mutex_lock(&rpyyarv_foreign_lock);
+    if (rpyyarv_main_thread_known &&
+            !pthread_equal(pthread_self(), rpyyarv_main_thread)) {
+        if (n_foreign_dead == cap_foreign_dead) {
+            int cap = cap_foreign_dead ? cap_foreign_dead * 2 : 16;
+            long *grown = realloc(foreign_dead_fibers, cap * sizeof(long));
+            if (grown) {
+                foreign_dead_fibers = grown;
+                cap_foreign_dead = cap;
+            }
+        }
+        if (n_foreign_dead < cap_foreign_dead)
+            foreign_dead_fibers[n_foreign_dead++] = key;
+        pthread_mutex_unlock(&rpyyarv_foreign_lock);
+        return;
+    }
+    n = n_foreign_dead;
+    if (n) {
+        keys = foreign_dead_fibers;
+        foreign_dead_fibers = NULL;
+        n_foreign_dead = cap_foreign_dead = 0;
+    }
+    pthread_mutex_unlock(&rpyyarv_foreign_lock);
+    for (i = 0; i < n; i++) fiber_died_callback(keys[i]);
+    free(keys);
+    fiber_died_callback(key);
+}
+
 void
 rpyyarv_set_fiber_hooks(rpyyarv_fiber_save_fn park, rpyyarv_fiber_arrive_fn unpark,
                         rpyyarv_fiber_born_fn born, rpyyarv_fiber_key_fn died,
@@ -2162,7 +2210,8 @@ rpyyarv_set_fiber_hooks(rpyyarv_fiber_save_fn park, rpyyarv_fiber_arrive_fn unpa
     hooks.park = fiber_park;
     hooks.unpark = fiber_unpark;
     hooks.born = born;
-    hooks.died = died;
+    fiber_died_callback = died;
+    hooks.died = fiber_died;
     hooks.mark = mark;
     rb_rpyyarv_set_fiber_hooks(&hooks);
 }
@@ -2194,6 +2243,12 @@ long
 rpyyarv_pop_dead_handle(void)
 {
     return n_dead ? dead_handles[--n_dead] : -1;
+}
+
+long
+rpyyarv_dead_handle_count(void)
+{
+    return n_dead;
 }
 
 /* Handle procs capture this self: a rebind test that no receiver collides. */
@@ -3042,12 +3097,12 @@ rpyyarv_str_upcase(uintptr_t s) { return str_change_case(s, 1, 0); }
 uintptr_t
 rpyyarv_str_upcase_bang(uintptr_t s) { return str_change_case(s, 1, 1); }
 
-/* Symbol#to_s: a fresh mutable copy of the fstring. */
+/* Symbol#to_s itself: chilled on 4.0, the frozen name on 4.1. */
 uintptr_t
 rpyyarv_sym_to_s(uintptr_t v)
 {
     if (!SYMBOL_P((VALUE)v)) return (uintptr_t)Qundef;
-    return (uintptr_t)rb_str_dup(rb_sym2str((VALUE)v));
+    return (uintptr_t)rb_sym_to_s((VALUE)v);
 }
 
 /* String#dup on the exact class, whose initialize_copy is C. */
@@ -3198,6 +3253,16 @@ uintptr_t
 rpyyarv_vm_core(void)
 {
     return (uintptr_t)rb_mRubyVMFrozenCore;
+}
+
+/* 4.0's core#hash_merge_ptr merges into its argument; f01bf185f6 made it
+   copy and moved the in-place merge to core#hash_merge_bang_ptr. */
+int
+rpyyarv_vmcore_merge_ptr_in_place(void)
+{
+    VALUE args[3] = { rb_hash_new(), ID2SYM(rb_intern("k")), Qnil };
+    return rb_funcallv(rb_mRubyVMFrozenCore, rb_intern("core#hash_merge_ptr"),
+                       3, args) == args[0];
 }
 
 struct arity_args {
@@ -4084,7 +4149,8 @@ ss_of(VALUE v)
             return NULL;
         ss_type = RTYPEDDATA_TYPE(v);
     }
-    p = RTYPEDDATA_DATA(v);
+    /* 4.1 embeds strscan's struct: RTYPEDDATA_DATA is external only. */
+    p = RTYPEDDATA_GET_DATA(v);
     if (!p || !RB_TYPE_P(p->str, T_STRING)) return NULL;
     return p;
 }

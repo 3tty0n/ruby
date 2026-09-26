@@ -13,7 +13,7 @@ from rpyyarv.error import UnsupportedOperation
 from rpyyarv.frame import Frame
 from rpyyarv.rlib import always_inline, dont_look_inside, promote, raw_word, unroll_safe, we_are_jitted
 
-from rpyyarv.interp.consts_ids import ABS, ALIAS_METHOD, ALLOCATE, ARITY, ATTR_ACCESSOR, ATTR_READER, ATTR_WRITER, BACKTRACE_PRIM, BINDING, BLOCK_GIVEN, BUFFER, CALLEE_UNDERSCORE, CGI_CONST, CLASS_EVAL, CORE_ALIAS, CORE_GVAR_ALIAS, CORE_LAMBDA, CORE_UNDEF, DEFINE, DEFINE_METHOD, DEFINE_SINGLETON_METHOD, DIR_UNDERSCORE, EACH_SLICE, EACH_WITH_INDEX, ENC_FIND, EVAL, FIRST, FORCE_ENCODING, FREEZE, GETBYTE, HASH_MERGE_KWD, HASH_MERGE_PTR, HASH_PAIRS_PRIM, INDEX, INITIALIZE, INSTANCE_EVAL, INSTANCE_EXEC, ITSELF, KERNEL_PROC, LAMBDA_P, LAST, MATCH, METHOD_UNDERSCORE, MODULE_EVAL, MODULE_FUNCTION, NEGATIVE_P, NEW, OFFSET, ORD, OWNER, PARAMETERS, PRIVATE, PRIVATE_CLASS_METHOD, PROTECTED, PUBLIC, PUBLIC_SEND, REMOVE_METHOD, REQUIRE_PRIM, REVERSE_EACH, RUBY2_KEYWORDS, SEND, SEND2, SETBYTE, SLICE, SOURCE_LOCATION, STEP, TO_A, TO_I, TO_INT, TO_SYM, UNDEF_METHOD, UNPACK1
+from rpyyarv.interp.consts_ids import ABS, ALIAS_METHOD, ALLOCATE, ARITY, ATTR_ACCESSOR, ATTR_READER, ATTR_WRITER, BACKTRACE_PRIM, BINDING, BLOCK_GIVEN, BUFFER, CALLEE_UNDERSCORE, CGI_CONST, CLASS_EVAL, CORE_ALIAS, CORE_GVAR_ALIAS, CORE_LAMBDA, CORE_UNDEF, DEFINE, DEFINE_METHOD, DEFINE_SINGLETON_METHOD, DIR_UNDERSCORE, EACH_SLICE, EACH_WITH_INDEX, ENC_FIND, EVAL, FIRST, FORCE_ENCODING, FREEZE, GETBYTE, HASH_COERCE, HASH_MERGE_BANG_KWD, HASH_MERGE_BANG_PTR, HASH_MERGE_KWD, HASH_MERGE_PTR, HASH_PAIRS_PRIM, INDEX, INITIALIZE, INSTANCE_EVAL, INSTANCE_EXEC, ITSELF, KERNEL_PROC, LAMBDA_P, LAST, MATCH, METHOD_UNDERSCORE, MODULE_EVAL, MODULE_FUNCTION, NEGATIVE_P, NEW, OFFSET, ORD, OWNER, PARAMETERS, PRIVATE, PRIVATE_CLASS_METHOD, PROTECTED, PUBLIC, PUBLIC_SEND, R1_COLLECT_PRIM, R1_STATS_PRIM, REMOVE_METHOD, REQUIRE_PRIM, REVERSE_EACH, RUBY2_KEYWORDS, SEND, SEND2, SETBYTE, SLICE, SOURCE_LOCATION, STEP, TO_A, TO_I, TO_INT, TO_SYM, UNDEF_METHOD, UNPACK1
 from rpyyarv.interp.args import NO_KEYWORDS, _arity_error, _kw_to_positional, _refuse_iseq, setup_params
 
 
@@ -425,6 +425,12 @@ def invoke(frame, w_ci, w_block=None):
         _drop(frame, recv_at)
         debug.count_native()
         return v
+    if mid == R1_STATS_PRIM and fcall and argc == 0 and debug.coverage.enabled:
+        _drop(frame, recv_at)
+        return _r1_stats()
+    if mid == R1_COLLECT_PRIM and fcall and argc == 0 and debug.coverage.enabled:
+        _drop(frame, recv_at)
+        return _r1_collect()
     if mid == DIR_UNDERSCORE and fcall and argc == 0:
         # f_dir: the running file is this frame's ISeq, not a CRuby frame's.
         v = _dir_of(frame)
@@ -597,11 +603,16 @@ def invoke(frame, w_ci, w_block=None):
             value.core_class(value.C_MODULE):
         return _alias_method(frame, recv, recv_at)
     # core_hash_merge: one aset per pair, so a big literal never hits MAX_ARGC.
-    if vm_core.value != 0 and recv == vm_core.value and mid == HASH_MERGE_PTR \
+    if vm_core.value != 0 and recv == vm_core.value \
+            and (mid == vm_core.merge_in_place or mid == HASH_MERGE_PTR) \
             and argc >= 1 and (argc & 1) == 1 \
             and not value.is_immediate(frame.slots[recv_at + 1]) \
             and raw_word(frame.slots[recv_at + 1], value.KLASS_WORD) == \
             value.core_class(value.C_HASH):
+        if mid != vm_core.merge_in_place:
+            # The copying merge (4.1): the host copies, the pairs go in here.
+            frame.slots[recv_at + 1] = rubycall.call1(
+                recv, HASH_MERGE_PTR, frame.slots[recv_at + 1])
         h = frame.slots[recv_at + 1]
         i = 0
         while i < argc - 1:
@@ -612,7 +623,9 @@ def invoke(frame, w_ci, w_block=None):
         debug.count_native()
         return h
     if vm_core.value != 0 and recv == vm_core.value \
-            and mid != HASH_MERGE_PTR and mid != HASH_MERGE_KWD:
+            and mid != HASH_MERGE_PTR and mid != HASH_MERGE_KWD \
+            and mid != HASH_MERGE_BANG_PTR and mid != HASH_MERGE_BANG_KWD \
+            and mid != HASH_COERCE:
         if mid == CORE_GVAR_ALIAS and argc == 2:
             boot.alias_variable(frame.slots[recv_at + 1],
                                 frame.slots[recv_at + 2])
@@ -1406,7 +1419,7 @@ def _opt_send(frame, mid, argc):
 # Bottom import: breaks the cycle. By the time a sibling's
 # own bottom import asks this module for a name, everything
 # above is already bound.
-from rpyyarv.interp.builtins import _iseq_parameters, _array_each_slice, _array_each_with_index, _integer_step, _array_new, _array_new_block, _backtrace, _comparable_op, _dir_of, _encoding_find, _running_method, encodings, proxy, regexp_class, vm_core
+from rpyyarv.interp.builtins import _iseq_parameters, _array_each_slice, _array_each_with_index, _integer_step, _array_new, _array_new_block, _backtrace, _comparable_op, _dir_of, _encoding_find, _r1_collect, _r1_stats, _running_method, encodings, proxy, regexp_class, vm_core
 from rpyyarv.interp.supers import _ruby2_keywords
 from rpyyarv.interp.defs import _class_new_block, _exec_on_made, _alias_method, _attr_name, _is_class_or_module, _core_method, _define_attrs, _define_bmethod, _define_bmethod_modfunc, _define_singleton_bmethod, _in_body_of, _instance_eval, _module_eval_block, _module_function, _private_class_method, _remove_or_undef, _visibility_names, _visibility_pragma
 from rpyyarv.interp.evalsrc import _binding_rpy, _eval_receiver, _eval_rpy, _module_eval_rpy

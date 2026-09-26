@@ -79,6 +79,9 @@ try:
     def rpython_heap_bytes():
         return rgc.get_stats(rgc.TOTAL_MEMORY)
 
+    def rpython_gc_collect():
+        rgc.collect()
+
 except ImportError:
     import struct
     import sys
@@ -159,6 +162,9 @@ except ImportError:
 
     def rpython_heap_bytes():
         return 0
+
+    def rpython_gc_collect():
+        pass
 
     def always_inline(func):
         return func

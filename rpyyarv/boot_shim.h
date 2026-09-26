@@ -276,7 +276,7 @@ int rpyyarv_wb_direct(void);
 
 #define RPYYARV_LAYOUT_N 12
 int rpyyarv_shape_iv_index(unsigned int shape_id, uintptr_t id, int *index);
-void rpyyarv_object_layout(int *out);
+void rpyyarv_object_layout(long *out);
 
 /* 1 when a raw store to *index plus a raw write of `after` can add `id`. */
 int rpyyarv_shape_add_ivar_fits(unsigned int before, unsigned int after,
@@ -352,6 +352,8 @@ uintptr_t rpyyarv_proc_new(long handle, int *state);
 
 /* One handle whose GC owner died, or -1 when none are pending. */
 long rpyyarv_pop_dead_handle(void);
+/* How many handles rpyyarv_pop_dead_handle has not drained yet. */
+long rpyyarv_dead_handle_count(void);
 uintptr_t rpyyarv_block_sentinel(void);
 long rpyyarv_proc_handle(uintptr_t v);
 const char *rpyyarv_id_name(uintptr_t id);
@@ -407,6 +409,7 @@ uintptr_t rpyyarv_concat_array(uintptr_t ary1, uintptr_t ary2, int to,
 
 /* rb_mRubyVMFrozenCore, the receiver putspecialobject 1 pushes. */
 uintptr_t rpyyarv_vm_core(void);
+int rpyyarv_vmcore_merge_ptr_in_place(void);
 
 /* Pin a VALUE for the process lifetime; used for the classes RPyYARV made. */
 void rpyyarv_gc_register_mark_object(uintptr_t v);

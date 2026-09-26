@@ -311,6 +311,8 @@ class Loader(object):
     VMCORE_SENDS = ['core#set_method_alias', 'core#undef_method',
                     'core#set_variable_alias',
                     'core#hash_merge_ptr', 'core#hash_merge_kwd',
+                    'core#hash_merge_bang_ptr', 'core#hash_merge_bang_kwd',
+                    'core#hash_coerce',
                     'lambda']
 
     def check_vmcore(self, opcodes, operands, raw):

@@ -1,0 +1,6 @@
+# CRuby 4.1-dev: ruby/ruby master plus host.patch
+base 6bf7f7f4679d3393c8f0509b06710c246424957e
+patch host.patch
+# 072a6a4a10 renamed putstring and putchilledstring
+rename dupstring putstring
+rename dupchilledstring putchilledstring
