@@ -190,6 +190,7 @@ def mark(key):
 
 
 def install():
+    gcroots.register_fibers(registry)
     rgc.register_custom_trace_hook(STACKLET, lambda_customtrace)
     # Capture the window as-is; writing length would undo the 4MB limit.
     anchors.end_adr = rstack._stack_get_end_adr()

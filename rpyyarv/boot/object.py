@@ -68,7 +68,7 @@ rb_shape_add_ivar_fits = _ext('rpyyarv_shape_add_ivar_fits',
 reenters=False)
 
 
-rb_object_layout = _ext('rpyyarv_object_layout', [INTP], lltype.Void,
+rb_object_layout = _ext('rpyyarv_object_layout', [rffi.LONGP], lltype.Void,
                         reenters=False)
 
 
@@ -241,12 +241,12 @@ def struct_layout():
     return out
 
 
-LAYOUT_N = 14
+LAYOUT_N = 17
 
 
 def object_layout():
     out = [0] * LAYOUT_N
-    with lltype.scoped_alloc(INTP.TO, LAYOUT_N) as buf:
+    with lltype.scoped_alloc(rffi.LONGP.TO, LAYOUT_N) as buf:
         rb_object_layout(buf)
         for i in range(LAYOUT_N):
             out[i] = rffi.cast(lltype.Signed, buf[i])

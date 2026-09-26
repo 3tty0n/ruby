@@ -4,12 +4,12 @@
 
 require 'pathname'
 
-TOP = Pathname.new(__dir__).parent.expand_path
+require_relative 'host'
 $LOAD_PATH.unshift((TOP + 'tool').to_s)
 require 'ruby_vm/models/instructions'
 
-MAP = TOP + 'rpyyarv' + 'yarv_map.py'
-GENERATED = TOP + 'rpyyarv' + 'insns.py'
+MAP = HERE + 'rpyyarv' + 'yarv_map.py'
+GENERATED = HOST_DIR + 'insns.py'
 
 $problems = []
 def problem(msg)
@@ -49,7 +49,7 @@ if map.nil? || map[:emit].empty?
   abort "verify: could not parse EMIT out of #{MAP}"
 end
 
-known = bare.map(&:name)
+known = bare.map { |i| canon(i.name) }
 specialized = unified.map(&:name)
 transformable = map[:supported] + map[:discarded]
 
@@ -65,7 +65,7 @@ map[:emit].each do |name, positions|
     next
   end
 
-  insn = bare.find { |i| i.name == name }
+  insn = bare.find { |i| canon(i.name) == name }
 
   # every operand is either transformable or explicitly discarded
   insn.operands.each do |o|
@@ -100,7 +100,7 @@ if GENERATED.exist?
             "regenerate"
   end
 else
-  problem "#{GENERATED.relative_path_from(TOP)} missing; run `make -C rpyvmgen`"
+  problem "#{GENERATED.relative_path_from(HERE)} missing; run `make -C rpyyarv host`"
 end
 
 # Coverage is reported, not enforced

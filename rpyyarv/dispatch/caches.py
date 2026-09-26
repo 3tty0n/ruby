@@ -300,6 +300,7 @@ def _fill_owner(klass, mid):
     owner = boot.method_owner(klass, rubycall.rid(mid))
     # Kept alive: a recycled class VALUE would otherwise read as a hit.
     gcroots.register_class(klass)
+    gcroots.register_class(owner)
     owners.tab[(klass, mid)] = owner
     _note_key(owners.by_mid, mid, klass)
     return owner
@@ -330,6 +331,7 @@ def _fill_responds(klass, sym):
         return got
     got = boot.responds(klass, sym)
     gcroots.register_class(klass)
+    gcroots.register_class(sym)
     owners.rtab[(klass, sym)] = got
     _note_key(owners.by_sym, sym, klass)
     return got
@@ -424,6 +426,7 @@ def _fill_struct_index(klass, mid):
     if name.endswith('='):
         name = name[:-1]
     got = boot.struct_member_index(klass, boot.intern(name))
+    gcroots.register_class(klass)
     struct_slots.tab[(klass, mid)] = got
     _note_key(owners.by_mid, mid, klass)
     return got
@@ -449,6 +452,8 @@ def _fill_super_owner(klass, owner, mid):
         return got
     found = boot.super_owner(klass, owner, rubycall.rid(mid))
     gcroots.register_class(klass)
+    gcroots.register_class(owner)
+    gcroots.register_class(found)
     owners.stab[(klass, owner, mid)] = found
     if mid in owners.by_sup:
         owners.by_sup[mid].append((klass, owner))

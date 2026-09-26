@@ -16,7 +16,9 @@ module MemoryHarness
 
   CSV_FIELDS = %w[
     suite benchmark engine peak_rss_bytes peak_rss_mb startup_rss_bytes
-    rss_over_startup_mb cruby_heap_live_slots rpython_heap_bytes
+    rss_over_startup_mb cruby_heap_live_slots cruby_heap_pages_bytes
+    cruby_memsize_all_bytes cruby_jit_code_bytes rpython_heap_bytes
+    rpython_peak_bytes rpython_arena_bytes jit_code_bytes
     root_mark_walks root_mark_ns status
   ].freeze
 
@@ -51,10 +53,23 @@ module MemoryHarness
     return @gcstat_prelude.path if @gcstat_prelude
 
     @gcstat_prelude = Tempfile.new(["memory_gcstat", ".rb"])
-    @gcstat_prelude.write(
-      'at_exit { $stderr.puts("GCSTAT #{GC.stat[:heap_live_slots]} ' \
-      '#{GC.stat[:malloc_increase_bytes]}") }'
-    )
+    # The host heap as the host sees it, in every engine: rpyyarv delegates
+    # GC.stat and ObjectSpace to CRuby, so the same probe measures the host
+    # component under both runtimes. YJIT/ZJIT report their code size.
+    @gcstat_prelude.write(<<~'RUBY')
+      require "objspace"
+      at_exit do
+        st = GC.stat
+        pages = st[:heap_allocated_pages] * GC::INTERNAL_CONSTANTS[:HEAP_PAGE_SIZE]
+        code = 0
+        if defined?(RubyVM::YJIT) && RubyVM::YJIT.enabled?
+          code = RubyVM::YJIT.runtime_stats[:code_region_size].to_i
+        elsif defined?(RubyVM::ZJIT) && RubyVM::ZJIT.respond_to?(:enabled?) && RubyVM::ZJIT.enabled?
+          code = (RubyVM::ZJIT.stats[:code_region_size] rescue 0).to_i
+        end
+        $stderr.puts("GCSTAT #{st[:heap_live_slots]} #{st[:malloc_increase_bytes]} "                      "#{pages} #{ObjectSpace.memsize_of_all} #{code}")
+      end
+    RUBY
     @gcstat_prelude.flush
     @gcstat_prelude.path
   end
@@ -66,11 +81,19 @@ module MemoryHarness
 
   def run_heap(argv, script, env, timeout)
     full = timeout_argv(timeout, argv + ["-r", gcstat_prelude, script])
+    # objspace is a built extension: the uninstalled build needs its path.
+    env = env.merge("RUBYLIB" => [uninstalled_rubylib, env["RUBYLIB"]].compact
+                                   .join(File::PATH_SEPARATOR))
     _out, err, status = Open3.capture3(env, *full)
-    return nil unless status.success?
+    return {} unless status.success?
 
-    match = err[/^GCSTAT (\d+)/, 1]
-    match&.to_i
+    m = err.match(/^GCSTAT (\d+) (\d+) (\d+) (\d+) (\d+)/)
+    return {} unless m
+
+    { "cruby_heap_live_slots" => m[1].to_i,
+      "cruby_heap_pages_bytes" => m[3].to_i,
+      "cruby_memsize_all_bytes" => m[4].to_i,
+      "cruby_jit_code_bytes" => m[5].to_i }
   end
 
   def fill_measurements(row, argv, script, env, timeout, time_missing)
@@ -83,19 +106,19 @@ module MemoryHarness
     row["peak_rss_bytes"] = peak
     row["peak_rss_mb"] = peak ? (peak / 1_048_576.0).round(2) : nil
     row["status"] = peak && status.success? ? nil : "UNAVAILABLE"
-    if cruby_engine?(argv)
-      row["cruby_heap_live_slots"] = run_heap(argv, script, env, timeout)
-    else
-      row.merge!(run_rpython_report(argv, script, env, timeout))
-    end
+    row.merge!(run_heap(argv, script, env, timeout))
+    row.merge!(run_rpython_report(argv, script, env, timeout)) unless cruby_engine?(argv)
     row
   end
 
   # The coverage report is a probe, never the timed run it sits beside.
   def run_rpython_report(argv, script, env, timeout)
     full = timeout_argv(timeout, argv + [script])
+    log = Tempfile.new(["memory_pypylog", ".log"])
     out, err, status = Open3.capture3(
-      env.merge("RPYYARV_COVERAGE" => "1"), *full
+      env.merge("RPYYARV_COVERAGE" => "1",
+                "PYPYLOG" => "gc-minor,gc-collect-done,jit-backend-addr:#{log.path}"),
+      *full
     )
     return {} unless status.success?
 
@@ -103,6 +126,21 @@ module MemoryHarness
     { "rpython_heap_bytes" => text[/heap footprint: rpython (\d+)/, 1]&.to_i,
       "root_mark_walks" => text[/root marking: (\d+) walk/, 1]&.to_i,
       "root_mark_ns" => text[/root marking: \d+ walk\(s\), (\d+) ns/, 1]&.to_i }
+      .merge(parse_pypylog(File.read(log.path)))
+  ensure
+    log&.close!
+  end
+
+  # Peak of the framework heap over every collection, the arena bytes after
+  # the last major, and the machine code the JIT backend emitted.
+  def parse_pypylog(text)
+    used = text.scan(/total memory used: (\d+)/).flatten.map(&:to_i)
+    arenas = text.scan(/bytes used in arenas:\s+\d+ => (\d+)/).flatten.map(&:to_i)
+    code = text.scan(/has address (0x[0-9a-f]+) to (0x[0-9a-f]+)/)
+               .sum { |a, b| b.hex - a.hex }
+    { "rpython_peak_bytes" => used.max,
+      "rpython_arena_bytes" => arenas.last,
+      "jit_code_bytes" => code }
   end
 
   def startup_row(ename, eargv, env, time_missing)

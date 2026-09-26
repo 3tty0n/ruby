@@ -9,9 +9,11 @@ from rpyyarv import rubycall
 from rpyyarv import symbols
 from rpyyarv import value
 from rpyyarv.iseq import W_CallInfo
-from rpyyarv.rlib import dont_look_inside, unroll_safe
+from rpyyarv.rlib import (dont_look_inside, rpython_gc_collect,
+                          rpython_heap_bytes, unroll_safe)
 
-from rpyyarv.interp.consts_ids import ENC_FIND
+from rpyyarv.interp.consts_ids import (ENC_FIND, HASH_MERGE_BANG_PTR,
+                                       HASH_MERGE_PTR)
 
 # Above this, back to CRuby: the loop is traced, not a jitdriver.
 ARY_NEW_BLOCK_MAX = 64
@@ -221,6 +223,43 @@ def _dir_of(frame):
     return boot.dir_of(boot.str_new(path))
 
 
+@dont_look_inside
+def _r1_stats():
+    """[live handles, handle-table length, dead-handle queue length,
+    live fiber states, RPython heap bytes]. Table length vs. live handles
+    across rounds shows whether freed slots are reused, not left to grow."""
+    live_handles = 0
+    i = 0
+    while i < len(block_table.table):
+        if block_table.table[i] is not None:
+            live_handles += 1
+        i += 1
+    live_fibers = 0
+    registry = gcroots.state.fibers
+    if registry is not None:
+        for st in registry.states.values():
+            if not st.dead:
+                live_fibers += 1
+    ary = rubycall.ary_new([])
+    gcroots.hold(ary)
+    try:
+        rubycall.ary_store(ary, 0, value.int2fix(live_handles))
+        rubycall.ary_store(ary, 1, value.int2fix(len(block_table.table)))
+        rubycall.ary_store(ary, 2, value.int2fix(boot.dead_handle_count()))
+        rubycall.ary_store(ary, 3, value.int2fix(live_fibers))
+        rubycall.ary_store(ary, 4, value.int2fix(rpython_heap_bytes()))
+    finally:
+        gcroots.release(ary)
+    return ary
+
+
+@dont_look_inside
+def _r1_collect():
+    """rgc.collect(): the framework collector R1 says reclaims dead state."""
+    rpython_gc_collect()
+    return value.Q_NIL
+
+
 class _Proxy(object):
     # Quasi-immutable: the compare folds away; prebuilt, so not plain.
     _immutable_fields_ = ['value?']
@@ -308,16 +347,18 @@ def _encoding_find(frame, recv, recv_at):
         return enc_cache[name]
     _drop(frame, recv_at)
     v = rubycall.call(recv, ENC_FIND, [name_v])
+    gcroots.pin_forever(v)
     enc_cache[name] = v
     return v
 
 
 class _VMCore(object):
     # Quasi-immutable: a prebuilt plain field would fold to its pre-boot 0.
-    _immutable_fields_ = ['value?']
+    _immutable_fields_ = ['value?', 'merge_in_place?']
 
     def __init__(self):
         self.value = 0
+        self.merge_in_place = 0
 
 
 vm_core = _VMCore()
@@ -329,6 +370,9 @@ def _vm_core():
     if vm_core.value == 0:
         v = boot.vm_core()
         boot.gc_register(v)
+        # The core# send that grows its Hash argument, asked of the host.
+        vm_core.merge_in_place = HASH_MERGE_PTR \
+            if boot.vmcore_merge_ptr_in_place() else HASH_MERGE_BANG_PTR
         vm_core.value = v
     return vm_core.value
 
@@ -337,6 +381,6 @@ def _vm_core():
 # own bottom import asks this module for a name, everything
 # above is already bound.
 from rpyyarv.interp.sends import invoke
-from rpyyarv.interp.blocks import call_block
+from rpyyarv.interp.blocks import call_block, blocks as block_table
 from rpyyarv.interp.throws import MAX_SCOPES
 from rpyyarv.interp.stackops import _drop

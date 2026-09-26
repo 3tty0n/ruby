@@ -8,14 +8,16 @@ from rpython.rlib.objectmodel import not_rpython
 from rpython.rlib.rthread import ThreadLocalReference
 from rpython.translator.tool.cbuild import ExternalCompilationInfo
 
+from rpyyarv import host
 from rpyyarv import symbols
 from rpyyarv.error import RubyException
 from rpyyarv.value import Q_NIL
 
 
 _HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-_TOP = os.path.dirname(_HERE)
-_BUILD = os.environ.get('RPYYARV_BUILD', os.path.join(_TOP, 'build'))
+# The host tree whose internal headers the shim compiles against.
+_TOP = host.SRC
+_BUILD = host.BUILD
 
 
 def _arch_include_dir():

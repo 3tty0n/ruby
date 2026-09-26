@@ -61,6 +61,12 @@ HASH_PAIRS_PRIM = symbols.intern('__rpyyarv_hash_pairs__')
 REQUIRE_PRIM = symbols.intern('__rpyyarv_require__')
 
 
+R1_STATS_PRIM = symbols.intern('__rpyyarv_r1_stats__')
+
+
+R1_COLLECT_PRIM = symbols.intern('__rpyyarv_r1_collect__')
+
+
 METHOD_UNDERSCORE = symbols.intern('__method__')
 
 
@@ -196,6 +202,16 @@ HASH_MERGE_PTR = symbols.intern('core#hash_merge_ptr')
 
 
 HASH_MERGE_KWD = symbols.intern('core#hash_merge_kwd')
+
+
+# 4.1's owned-Hash merges (f01bf185f6); plain sends like the two above.
+HASH_MERGE_BANG_PTR = symbols.intern('core#hash_merge_bang_ptr')
+
+
+HASH_MERGE_BANG_KWD = symbols.intern('core#hash_merge_bang_kwd')
+
+
+HASH_COERCE = symbols.intern('core#hash_coerce')
 
 
 MODULE_FUNCTION = symbols.intern('module_function')

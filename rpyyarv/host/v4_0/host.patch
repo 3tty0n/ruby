@@ -1,0 +1,755 @@
+diff --git a/class.c b/class.c
+index 807899e804..12fdfe343d 100644
+--- a/class.c
++++ b/class.c
+@@ -33,6 +33,7 @@
+ #include "ruby/ractor.h"
+ #include "yjit.h"
+ #include "zjit.h"
++#include "rpyyarv.h"
+ 
+ /* Flags of T_CLASS
+  *
+@@ -1808,6 +1809,8 @@ do_include_modules_at(const VALUE klass, VALUE c, VALUE module, int search_super
+         // invalidate inline method cache
+         RB_DEBUG_COUNTER_INC(cvar_include_invalidate);
+         ruby_vm_global_cvar_state++;
++        // The chain moved even when the module has no method to clear a cache for.
++        rb_rpyyarv_chain_moved(klass);
+         tbl = RCLASS_M_TBL(module);
+         if (tbl && rb_id_table_size(tbl)) {
+             if (search_super) { // include
+diff --git a/cont.c b/cont.c
+index 56fa073698..7952091710 100644
+--- a/cont.c
++++ b/cont.c
+@@ -41,9 +41,28 @@ extern int madvise(caddr_t, size_t, int);
+ #include "vm_sync.h"
+ #include "id_table.h"
+ #include "ractor_core.h"
++#include "rpyyarv.h"
+ 
+ static const int DEBUG = 0;
+ 
++// NULL until rpyyarv registers; a plain ruby pays one predicted branch.
++static const rb_rpyyarv_fiber_hooks_t *rpyyarv_fiber_hooks;
++
++void
++rb_rpyyarv_set_fiber_hooks(const rb_rpyyarv_fiber_hooks_t *hooks)
++{
++    rpyyarv_fiber_hooks = hooks;
++}
++
++// rpyyarv raises a fiber kill so ensures run; here it is fatal again.
++void
++rb_rpyyarv_fiber_kill_rethrow(void)
++{
++    rb_execution_context_t *ec = GET_EC();
++    ec->errinfo = RUBY_FATAL_FIBER_KILLED;
++    EC_JUMP_TAG(ec, TAG_FATAL);
++}
++
+ #define RB_PAGE_SIZE (pagesize)
+ #define RB_PAGE_MASK (~(RB_PAGE_SIZE - 1))
+ static long pagesize;
+@@ -932,6 +951,9 @@ fiber_entry(struct coroutine_context * from, struct coroutine_context * to)
+ 
+     fiber_restore_thread(thread, fiber);
+ 
++    /* a new fiber arrives here instead of returning from coroutine_transfer */
++    if (rpyyarv_fiber_hooks) rpyyarv_fiber_hooks->born((long)fiber, (long)fiber->stack.base, (long)fiber->stack.size);
++
+     rb_fiber_start(fiber);
+ 
+ #ifndef COROUTINE_PTHREAD_CONTEXT
+@@ -1207,6 +1229,7 @@ rb_fiber_mark_self(const rb_fiber_t *fiber)
+         rb_gc_mark_movable(fiber->cont.self);
+     }
+     else {
++        if (rpyyarv_fiber_hooks) rpyyarv_fiber_hooks->mark((long)fiber);
+         rb_execution_context_mark(&fiber->cont.saved_ec);
+     }
+ }
+@@ -1231,6 +1254,7 @@ fiber_mark(void *ptr)
+     fiber_verify(fiber);
+     rb_gc_mark_movable(fiber->first_proc);
+     if (fiber->prev) rb_fiber_mark_self(fiber->prev);
++    if (rpyyarv_fiber_hooks) rpyyarv_fiber_hooks->mark((long)fiber);
+     cont_mark(&fiber->cont);
+     RUBY_MARK_LEAVE("cont");
+ }
+@@ -1241,6 +1265,9 @@ fiber_free(void *ptr)
+     rb_fiber_t *fiber = ptr;
+     RUBY_FREE_ENTER("fiber");
+ 
++    /* GC-reaped fibers pass here too, so this is the one death notice */
++    if (rpyyarv_fiber_hooks) rpyyarv_fiber_hooks->died((long)fiber);
++
+     if (DEBUG) fprintf(stderr, "fiber_free: %p[%p]\n", (void *)fiber, fiber->stack.base);
+ 
+     if (fiber->cont.saved_ec.local_storage) {
+@@ -1701,8 +1728,13 @@ fiber_setcontext(rb_fiber_t *new_fiber, rb_fiber_t *old_fiber)
+ #endif
+ 
+     /* swap machine context */
++    if (rpyyarv_fiber_hooks) rpyyarv_fiber_hooks->park((long)old_fiber);
++
+     struct coroutine_context * from = coroutine_transfer(&old_fiber->context, &new_fiber->context);
+ 
++    /* back here means old_fiber is running again */
++    if (rpyyarv_fiber_hooks) rpyyarv_fiber_hooks->unpark((long)old_fiber, (long)old_fiber->stack.base, (long)old_fiber->stack.size);
++
+ #if defined(COROUTINE_SANITIZE_ADDRESS)
+     __sanitizer_finish_switch_fiber(old_fiber->context.fake_stack, NULL, NULL);
+ #endif
+diff --git a/depend b/depend
+index 092ead0147..70cec5bc13 100644
+--- a/depend
++++ b/depend
+@@ -18828,6 +18828,7 @@ vm.$(OBJEXT): {$(VPATH)}probes.h
+ vm.$(OBJEXT): {$(VPATH)}probes_helper.h
+ vm.$(OBJEXT): {$(VPATH)}ractor.h
+ vm.$(OBJEXT): {$(VPATH)}ractor_core.h
++vm.$(OBJEXT): {$(VPATH)}rpyyarv.h
+ vm.$(OBJEXT): {$(VPATH)}ruby_assert.h
+ vm.$(OBJEXT): {$(VPATH)}ruby_atomic.h
+ vm.$(OBJEXT): {$(VPATH)}rubyparser.h
+diff --git a/gc.c b/gc.c
+index 9075f218c6..495f605565 100644
+--- a/gc.c
++++ b/gc.c
+@@ -3768,6 +3768,10 @@ update_classext(rb_classext_t *ext, bool is_prime, VALUE box_value, void *arg)
+     }
+ 
+     update_m_tbl(objspace, RCLASSEXT_M_TBL(ext));
++    /* Marked above in gc_mark_classext_module, so it must move with them:
++     * rb_callable_method_entry on a module fills it with complemented
++     * entries, and a stale one is a T_NONE at the next mark. */
++    update_m_tbl(objspace, RCLASSEXT_CALLABLE_M_TBL(ext));
+ 
+     UPDATE_IF_MOVED(objspace, ext->fields_obj);
+     if (!RCLASSEXT_SHARED_CONST_TBL(ext)) {
+diff --git a/imemo.c b/imemo.c
+index b638cba42c..484683c982 100644
+--- a/imemo.c
++++ b/imemo.c
+@@ -451,6 +451,10 @@ rb_imemo_mark_and_move(VALUE obj, bool reference_updating)
+ 
+         if (!reference_updating) {
+             rb_gc_mark_maybe((VALUE)ifunc->data);
++            // An ifunc kept past its frame outlives the env svar_lep points at.
++            if (ifunc->svar_lep && VM_ENV_ESCAPED_P(ifunc->svar_lep)) {
++                rb_gc_mark_maybe(VM_ENV_ENVVAL(ifunc->svar_lep));
++            }
+         }
+ 
+         break;
+diff --git a/proc.c b/proc.c
+index b1417a4729..c0702f9140 100644
+--- a/proc.c
++++ b/proc.c
+@@ -24,6 +24,7 @@
+ #include "vm_core.h"
+ #include "ractor_core.h"
+ #include "yjit.h"
++#include "rpyyarv.h"
+ 
+ const rb_cref_t *rb_vm_cref_in_context(VALUE self, VALUE cbase);
+ 
+@@ -2939,12 +2940,15 @@ method_def_min_max_arity(const rb_method_definition_t *def, int *max)
+   again:
+     if (!def) return *max = 0;
+     switch (def->type) {
+-      case VM_METHOD_TYPE_CFUNC:
++      case VM_METHOD_TYPE_CFUNC: {
++        const rb_iseq_t *tramp = rb_rpyyarv_def_iseq(def);
++        if (tramp) return rb_iseq_min_max_arity(tramp, max);
+         if (def->body.cfunc.argc < 0) {
+             *max = UNLIMITED_ARGUMENTS;
+             return 0;
+         }
+         return *max = check_argc(def->body.cfunc.argc);
++      }
+       case VM_METHOD_TYPE_ZSUPER:
+         *max = UNLIMITED_ARGUMENTS;
+         return 0;
+@@ -3108,7 +3112,22 @@ VALUE
+ rb_callable_receiver(VALUE callable)
+ {
+     if (rb_obj_is_proc(callable)) {
+-        VALUE binding = proc_binding(callable);
++        VALUE binding;
++        rb_proc_t *proc;
++        const struct rb_block *block;
++        GetProcPtr(callable, proc);
++        block = &proc->block;
++        while (vm_block_type(block) == block_type_proc) {
++            GetProcPtr(block->as.proc, proc);
++            block = &proc->block;
++        }
++        /* No binding to ask: a C-level proc names no receiver to warn on. */
++        if (vm_block_type(block) == block_type_symbol ||
++            (vm_block_type(block) == block_type_ifunc &&
++             !IS_METHOD_PROC_IFUNC(block->as.captured.code.ifunc))) {
++            return Qundef;
++        }
++        binding = proc_binding(callable);
+         return rb_funcall(binding, rb_intern("receiver"), 0);
+     }
+     else if (rb_obj_is_method(callable)) {
+@@ -3139,6 +3158,7 @@ method_def_iseq(const rb_method_definition_t *def)
+       case VM_METHOD_TYPE_ALIAS:
+         return method_def_iseq(def->body.alias.original_me->def);
+       case VM_METHOD_TYPE_CFUNC:
++        return (const rb_iseq_t *)rb_rpyyarv_def_iseq(def);
+       case VM_METHOD_TYPE_ATTRSET:
+       case VM_METHOD_TYPE_IVAR:
+       case VM_METHOD_TYPE_ZSUPER:
+@@ -3263,6 +3283,11 @@ method_def_parameters(const rb_method_definition_t *def)
+         break;
+ 
+       case VM_METHOD_TYPE_CFUNC:
++        if ((iseq = method_def_iseq(def)) != NULL) {
++            return rb_iseq_parameters(iseq, 0);
++        }
++        break;
++
+       case VM_METHOD_TYPE_ATTRSET:
+       case VM_METHOD_TYPE_IVAR:
+       case VM_METHOD_TYPE_ZSUPER:
+@@ -3550,6 +3575,48 @@ rb_proc_new(
+     return procval;
+ }
+ 
++// The ifunc data when the proc wraps the given C function; Qundef otherwise.
++VALUE
++rb_rpyyarv_ifunc_data(VALUE procval, rb_block_call_func_t func)
++{
++    rb_proc_t *proc;
++    const struct rb_block *block;
++    const struct vm_ifunc *ifunc;
++    if (!rb_obj_is_proc(procval)) return Qundef;
++    GetProcPtr(procval, proc);
++    block = &proc->block;
++    while (vm_block_type(block) == block_type_proc) {
++        GetProcPtr(block->as.proc, proc);
++        block = &proc->block;
++    }
++    if (vm_block_type(block) != block_type_ifunc) return Qundef;
++    ifunc = block->as.captured.code.ifunc;
++    if ((rb_block_call_func_t)ifunc->func != func) return Qundef;
++    return (VALUE)ifunc->data;
++}
++
++static rb_block_call_func_t rpyyarv_block_func;
++
++// True for a Proc whose body is an rpyyarv block, not a CRuby iseq.
++int
++rb_rpyyarv_handle_proc_p(VALUE procval)
++{
++    return rpyyarv_block_func != NULL &&
++           !UNDEF_P(rb_rpyyarv_ifunc_data(procval, rpyyarv_block_func));
++}
++
++// rb_proc_new with a chosen captured self, so a caller can plant a sentinel.
++VALUE
++rb_rpyyarv_proc_new(rb_block_call_func_t func, VALUE data, VALUE self_v)
++{
++    VALUE procval = rb_proc_new(func, data);
++    rpyyarv_block_func = func;
++    rb_proc_t *proc;
++    GetProcPtr(procval, proc);
++    RB_OBJ_WRITE(procval, &proc->block.as.captured.self, self_v);
++    return procval;
++}
++
+ /*
+  *  call-seq:
+  *     meth.to_proc    -> proc
+diff --git a/ractor.rb b/ractor.rb
+index 6679ad1588..831ff97878 100644
+--- a/ractor.rb
++++ b/ractor.rb
+@@ -234,7 +234,7 @@ def self.new(*args, name: nil, &block)
+                   uplevel: 0, category: :experimental)
+     end
+     loc = caller_locations(1, 1).first
+-    loc = "#{loc.path}:#{loc.lineno}"
++    loc = loc ? "#{loc.path}:#{loc.lineno}" : '<unknown>:0'
+     __builtin_ractor_create(loc, name, args, b)
+   end
+ 
+diff --git a/rpyyarv.h b/rpyyarv.h
+new file mode 100644
+index 0000000000..029424b338
+--- /dev/null
++++ b/rpyyarv.h
+@@ -0,0 +1,57 @@
++#ifndef RPYYARV_H
++#define RPYYARV_H 1
++// Definitions rpyyarv exposes to the CRuby codebase.
++
++#include "ruby/internal/config.h"
++#include "ruby/internal/dllexport.h"
++#include "ruby/internal/value.h"
++#include "ruby/internal/iterator.h"
++
++void rb_rpyyarv_constant_state_changed(ID id);
++void rb_rpyyarv_method_state_changed(VALUE klass, ID mid);
++void rb_rpyyarv_chain_moved(VALUE klass);
++
++// A switch brackets coroutine_transfer, keyed by the rb_fiber_t address.
++// unpark/born carry the arriving stack so the JIT depth window follows it.
++typedef struct rb_rpyyarv_fiber_hooks {
++    void (*park)(long key);
++    void (*unpark)(long key, long stack_base, long stack_size);
++    void (*born)(long key, long stack_base, long stack_size);
++    void (*died)(long key);
++    void (*mark)(long key);
++} rb_rpyyarv_fiber_hooks_t;
++
++RBIMPL_SYMBOL_EXPORT_BEGIN()
++// rpyyarv links libruby from outside the tree, so it registers at runtime.
++void rb_rpyyarv_set_constant_hook(void (*fn)(ID id));
++void rb_rpyyarv_set_method_hook(void (*fn)(VALUE, VALUE));
++void rb_rpyyarv_set_iseq_hook(const void *(*fn)(const void *));
++const void *rb_rpyyarv_def_iseq(const void *def);
++void rb_rpyyarv_set_fiber_hooks(const rb_rpyyarv_fiber_hooks_t *hooks);
++void rb_rpyyarv_fiber_kill_rethrow(void);
++VALUE rb_rpyyarv_frame_owner(void);
++const void *rb_rpyyarv_frame_method_def(void);
++int rb_rpyyarv_frame_bmethod(VALUE *owner_out, ID *mid_out, VALUE *proc_out);
++const void *rb_rpyyarv_method_def(VALUE klass, ID mid);
++VALUE rb_rpyyarv_method_owner(VALUE klass, ID mid);
++VALUE rb_rpyyarv_gvar_defined(ID id);
++VALUE rb_rpyyarv_proc_new(rb_block_call_func_t func, VALUE data, VALUE self_v);
++VALUE rb_rpyyarv_ifunc_data(VALUE procval, rb_block_call_func_t func);
++int rb_rpyyarv_handle_proc_p(VALUE procval);
++VALUE rb_rpyyarv_block_call_kw(VALUE obj, ID mid, int argc, const VALUE *argv,
++                               rb_block_call_func_t bl_proc, VALUE data2,
++                               int kw_splat, VALUE block_self);
++VALUE rb_rpyyarv_call_with_proc_kw(VALUE obj, ID mid, int argc,
++                                   const VALUE *argv, VALUE proc,
++                                   int kw_splat);
++VALUE rb_rpyyarv_proc_from_iseq(const void *iseq, const void *cref);
++const void *rb_rpyyarv_add_cfunc(VALUE klass, ID mid, VALUE (*func)(ANYARGS),
++                                 int visi);
++const void *rb_rpyyarv_method_iseq(VALUE klass, ID mid, const void *iseq,
++                                    const void *cref);
++VALUE rb_rpyyarv_call_method_iseq(VALUE self, const void *me, int argc,
++                                  const VALUE *argv, VALUE block, int kw);
++void *rb_rpyyarv_cref_new(const void *outer, VALUE klass, int by_eval);
++RBIMPL_SYMBOL_EXPORT_END()
++
++#endif // #ifndef RPYYARV_H
+diff --git a/variable.c b/variable.c
+index 4397ae339b..9e1fa6e827 100644
+--- a/variable.c
++++ b/variable.c
+@@ -21,6 +21,7 @@
+ #include "id_table.h"
+ #include "internal.h"
+ #include "internal/box.h"
++#include "rpyyarv.h"
+ #include "internal/class.h"
+ #include "internal/compilers.h"
+ #include "internal/error.h"
+@@ -1107,6 +1108,13 @@ rb_gvar_defined(ID id)
+     return RBOOL(entry->var->getter != rb_gvar_undef_getter);
+ }
+ 
++/* defined?($x) from RPyYARV, which links against the public API only. */
++VALUE
++rb_rpyyarv_gvar_defined(ID id)
++{
++    return rb_gvar_defined(id);
++}
++
+ rb_gvar_getter_t *
+ rb_gvar_getter_function_of(ID id)
+ {
+diff --git a/vm.c b/vm.c
+index b4ad304429..573768e180 100644
+--- a/vm.c
++++ b/vm.c
+@@ -45,6 +45,7 @@
+ #include "vm_exec.h"
+ #include "vm_insnhelper.h"
+ #include "ractor_core.h"
++#include "rpyyarv.h"
+ #include "vm_sync.h"
+ #include "shape.h"
+ 
+@@ -1566,6 +1567,61 @@ rb_proc_isolate(VALUE self)
+     return dst;
+ }
+ 
++VALUE
++rb_rpyyarv_proc_from_iseq(const void *iseq_ptr, const void *cref_ptr)
++{
++    const rb_iseq_t *iseq = iseq_ptr;
++    const rb_iseq_t *parent = ISEQ_BODY(iseq)->parent_iseq;
++    unsigned int locals = parent ? ISEQ_BODY(parent)->local_table_size : 0;
++    unsigned int env_size = locals + VM_ENV_DATA_SIZE + 1;
++    VALUE *env_body = ZALLOC_N(VALUE, env_size);
++    VALUE *ep = &env_body[locals + VM_ENV_DATA_SIZE - 1];
++    const rb_env_t *env = vm_env_new(ep, env_body, env_size, parent);
++    struct rb_captured_block captured;
++
++    rb_cref_t *cref = (rb_cref_t *)cref_ptr;
++    if (!cref) cref = rb_vm_cref_new_toplevel();
++    RB_OBJ_WRITE((VALUE)env, &ep[VM_ENV_DATA_INDEX_ME_CREF], (VALUE)cref);
++    ep[VM_ENV_DATA_INDEX_SPECVAL] = VM_BLOCK_HANDLER_NONE;
++    ep[VM_ENV_DATA_INDEX_FLAGS] = VM_ENV_FLAG_LOCAL | VM_ENV_FLAG_ESCAPED |
++                                  VM_ENV_FLAG_WB_REQUIRED;
++    captured.self = Qnil;
++    captured.ep = ep;
++    captured.code.iseq = iseq;
++    return rb_proc_isolate_bang(
++        rb_vm_make_proc(GET_EC(), &captured, rb_cProc), Qundef);
++}
++
++void *
++rb_rpyyarv_cref_new(const void *outer_ptr, VALUE klass, int by_eval)
++{
++    rb_cref_t *outer = (rb_cref_t *)outer_ptr;
++    if (!outer) outer = rb_vm_cref_new_toplevel();
++    if (klass) {
++        outer = vm_cref_new(klass, METHOD_VISI_PUBLIC, FALSE, outer,
++                            by_eval != 0, FALSE);
++    }
++    rb_gc_register_mark_object((VALUE)outer);
++    return outer;
++}
++
++VALUE
++rb_rpyyarv_call_method_iseq(VALUE self, const void *me_ptr, int argc,
++                            const VALUE *argv, VALUE block, int kw)
++{
++    rb_execution_context_t *ec = GET_EC();
++    const rb_callable_method_entry_t *me = me_ptr;
++    VALUE previous = vm_passed_block_handler(ec);
++    VALUE handler = NIL_P(block) ? VM_BLOCK_HANDLER_NONE :
++                    vm_proc_to_block_handler(block);
++    VALUE result;
++
++    vm_passed_block_handler_set(ec, handler);
++    result = rb_vm_call0(ec, self, me->called_id, argc, argv, me, kw);
++    vm_passed_block_handler_set(ec, previous);
++    return result;
++}
++
+ VALUE
+ rb_proc_ractor_make_shareable(VALUE self, VALUE replace_self)
+ {
+@@ -1596,7 +1652,8 @@ rb_proc_ractor_make_shareable(VALUE self, VALUE replace_self)
+         proc_isolate_env(self, proc, read_only_variables);
+         proc->is_isolated = TRUE;
+     }
+-    else {
++    /* An rpyyarv block keeps its closure outside CRuby: freeze, do not isolate. */
++    else if (!rb_rpyyarv_handle_proc_p(self)) {
+         const struct rb_block *block = vm_proc_block(self);
+         if (block->type != block_type_symbol) rb_raise(rb_eRuntimeError, "not supported yet");
+ 
+diff --git a/vm_eval.c b/vm_eval.c
+index 34560d704a..c21c5b896b 100644
+--- a/vm_eval.c
++++ b/vm_eval.c
+@@ -29,7 +29,7 @@ static VALUE rb_eUncaughtThrow;
+ static ID id_result, id_tag, id_value;
+ #define id_mesg idMesg
+ 
+-static VALUE send_internal(int argc, const VALUE *argv, VALUE recv, call_type scope);
++static VALUE send_internal(int argc, const VALUE *argv, VALUE recv, call_type scope, VALUE block_handler);
+ static VALUE vm_call0_body(rb_execution_context_t* ec, struct rb_calling_info *calling, const VALUE *argv);
+ 
+ static VALUE *
+@@ -284,7 +284,8 @@ vm_call0_body(rb_execution_context_t *ec, struct rb_calling_info *calling, const
+       case VM_METHOD_TYPE_OPTIMIZED:
+         switch (vm_cc_cme(cc)->def->body.optimized.type) {
+           case OPTIMIZED_METHOD_TYPE_SEND:
+-            ret = send_internal(calling->argc, argv, calling->recv, calling->kw_splat ? CALL_FCALL_KW : CALL_FCALL);
++            ret = send_internal(calling->argc, argv, calling->recv, calling->kw_splat ? CALL_FCALL_KW : CALL_FCALL,
++                                calling->block_handler);
+             goto success;
+           case OPTIMIZED_METHOD_TYPE_CALL:
+             {
+@@ -1220,7 +1221,7 @@ current_vm_stack_arg(const rb_execution_context_t *ec, const VALUE *argv)
+ }
+ 
+ static VALUE
+-send_internal(int argc, const VALUE *argv, VALUE recv, call_type scope)
++send_internal(int argc, const VALUE *argv, VALUE recv, call_type scope, VALUE block_handler)
+ {
+     ID id;
+     VALUE vid;
+@@ -1272,7 +1273,13 @@ send_internal(int argc, const VALUE *argv, VALUE recv, call_type scope)
+     else {
+         argv++; argc--;
+     }
+-    PASS_PASSED_BLOCK_HANDLER_EC(ec);
++    /* Qundef: no caller-supplied handler, so inherit the frame's own block. */
++    if (UNDEF_P(block_handler)) {
++        PASS_PASSED_BLOCK_HANDLER_EC(ec);
++    }
++    else {
++        vm_passed_block_handler_set(ec, block_handler);
++    }
+     ret = rb_call0(ec, recv, id, argc, argv, scope, self);
+     ALLOCV_END(vargv);
+     return ret;
+@@ -1293,7 +1300,7 @@ send_internal_kw(int argc, const VALUE *argv, VALUE recv, call_type scope)
+             break;
+         }
+     }
+-    return send_internal(argc, argv, recv, scope);
++    return send_internal(argc, argv, recv, scope, Qundef);
+ }
+ 
+ /*
+@@ -1566,6 +1573,29 @@ rb_block_call(VALUE obj, ID mid, int argc, const VALUE * argv,
+     return rb_block_call_kw(obj, mid, argc, argv, bl_proc, data2, RB_NO_KEYWORDS);
+ }
+ 
++// rb_block_call_kw passing a proc handler whose captured self is chosen, so
++// a reified block keeps a self a caller can use as a rebind sentinel.
++VALUE
++rb_rpyyarv_block_call_kw(VALUE obj, ID mid, int argc, const VALUE *argv,
++                         rb_block_call_func_t bl_proc, VALUE data2,
++                         int kw_splat, VALUE block_self)
++{
++    VALUE proc = rb_rpyyarv_proc_new(bl_proc, data2, block_self);
++    vm_passed_block_handler_set(GET_EC(), proc);
++    return rb_call(obj, mid, argc, argv, kw_splat ? CALL_FCALL_KW : CALL_FCALL);
++}
++
++// Like the above with an existing proc: private-allowed, as rb_funcallv is.
++VALUE
++rb_rpyyarv_call_with_proc_kw(VALUE obj, ID mid, int argc, const VALUE *argv,
++                             VALUE proc, int kw_splat)
++{
++    if (!NIL_P(proc)) {
++        vm_passed_block_handler_set(GET_EC(), proc);
++    }
++    return rb_call(obj, mid, argc, argv, kw_splat ? CALL_FCALL_KW : CALL_FCALL);
++}
++
+ VALUE
+ rb_block_call_kw(VALUE obj, ID mid, int argc, const VALUE * argv,
+               rb_block_call_func_t bl_proc, VALUE data2, int kw_splat)
+diff --git a/vm_method.c b/vm_method.c
+index f8635664ae..8d91dcce50 100644
+--- a/vm_method.c
++++ b/vm_method.c
+@@ -3,6 +3,7 @@
+  */
+ 
+ #include "id_table.h"
++#include "rpyyarv.h"
+ #include "yjit.h"
+ 
+ #define METHOD_DEBUG 0
+@@ -328,6 +329,135 @@ rb_clear_constant_cache_for_id_i(st_data_t ic, st_data_t arg)
+ // Here for backward compat.
+ void rb_clear_constant_cache(void) {}
+ 
++static void (*rpyyarv_constant_hook)(ID id);
++
++void
++rb_rpyyarv_set_constant_hook(void (*fn)(ID id))
++{
++    rpyyarv_constant_hook = fn;
++}
++
++void
++rb_rpyyarv_constant_state_changed(ID id)
++{
++    if (rpyyarv_constant_hook) rpyyarv_constant_hook(id);
++}
++
++static void (*rpyyarv_method_hook)(VALUE, VALUE);
++
++void
++rb_rpyyarv_set_method_hook(void (*fn)(VALUE, VALUE))
++{
++    rpyyarv_method_hook = fn;
++}
++
++static const void *(*rpyyarv_iseq_hook)(const void *);
++
++void
++rb_rpyyarv_set_iseq_hook(const void *(*fn)(const void *))
++{
++    rpyyarv_iseq_hook = fn;
++}
++
++/* rpyyarv installs a Ruby def as a cfunc trampoline; this is the ISeq behind
++ * one, so introspection reports the Ruby definition and not a native method. */
++const void *
++rb_rpyyarv_def_iseq(const void *def)
++{
++    return rpyyarv_iseq_hook ? rpyyarv_iseq_hook(def) : NULL;
++}
++
++/* mid 0 when the change is a chain move with no single name behind it. */
++void
++rb_rpyyarv_method_state_changed(VALUE klass, ID mid)
++{
++    if (rpyyarv_method_hook) rpyyarv_method_hook(klass, (VALUE)mid);
++}
++
++/* rpyyarv caches a lookup per receiver class, so a chain move under klass
++ * stales klass and everything that inherits from it, and nothing else. */
++#define RPYYARV_CHAIN_BUDGET 512
++
++static void
++rpyyarv_chain_moved_i(VALUE sub, VALUE arg)
++{
++    int *budget = (int *)arg;
++    if (*budget <= 0) return;
++    --*budget;
++    /* An iclass is no receiver's class, but real subclasses hang under it. */
++    if (!RB_TYPE_P(sub, T_ICLASS)) rpyyarv_method_hook(sub, 0);
++    rb_class_foreach_subclass(sub, rpyyarv_chain_moved_i, arg);
++}
++
++void
++rb_rpyyarv_chain_moved(VALUE klass)
++{
++    int budget = RPYYARV_CHAIN_BUDGET;
++    if (!rpyyarv_method_hook) return;
++    rpyyarv_method_hook(klass, 0);
++    rb_class_foreach_subclass(klass, rpyyarv_chain_moved_i, (VALUE)&budget);
++    /* Too wide to name: fall back to the clear that stales everything. */
++    if (budget <= 0) rpyyarv_method_hook(0, 0);
++}
++
++// The owner CRuby's dispatch chose, so a trampoline can honor super/bind_call.
++VALUE
++rb_rpyyarv_frame_owner(void)
++{
++    const rb_callable_method_entry_t *me =
++        rb_vm_frame_method_entry(GET_EC()->cfp);
++    return me ? me->owner : Qnil;
++}
++
++// The def identity; shared by aliases, define_method(Method) and bind_call.
++const void *
++rb_rpyyarv_frame_method_def(void)
++{
++    const rb_callable_method_entry_t *me =
++        rb_vm_frame_method_entry(GET_EC()->cfp);
++    return me ? (const void *)me->def : NULL;
++}
++
++// A bmethod frame's identity, so a proc run as a method supers correctly.
++int
++rb_rpyyarv_frame_bmethod(VALUE *owner_out, ID *mid_out, VALUE *proc_out)
++{
++    const rb_callable_method_entry_t *me =
++        rb_vm_frame_method_entry(GET_EC()->cfp);
++    if (!me || me->def->type != VM_METHOD_TYPE_BMETHOD) return 0;
++    *owner_out = me->owner;
++    *mid_out = me->def->original_id;
++    *proc_out = me->def->body.bmethod.proc;
++    return 1;
++}
++
++const void *
++rb_rpyyarv_method_def(VALUE klass, ID mid)
++{
++    // Own table only (behind any prepend origin), never the chain: a
++    // shadowing method's def must not poison the identity map, and every
++    // fresh define must overwrite a recycled def address.
++    const rb_method_entry_t *me =
++        lookup_method_table(RCLASS_ORIGIN(klass), mid);
++    if (!me) me = lookup_method_table(klass, mid);
++    return me ? (const void *)me->def : NULL;
++}
++
++/* The module a lookup lands in, without dispatching Module#instance_method:
++   a class may override it (delegate.rb does) and a probe must not run that. */
++VALUE
++rb_rpyyarv_method_owner(VALUE klass, ID mid)
++{
++    const rb_method_entry_t *me;
++    if (!RB_TYPE_P(klass, T_CLASS) && !RB_TYPE_P(klass, T_MODULE) &&
++        !RB_TYPE_P(klass, T_ICLASS)) {
++        return Qnil;
++    }
++    me = rb_method_entry(klass, mid);
++    if (!me || UNDEFINED_METHOD_ENTRY_P(me)) return Qnil;
++    return me->owner;
++}
++
+ void
+ rb_clear_constant_cache_for_id(ID id)
+ {
+@@ -342,6 +472,7 @@ rb_clear_constant_cache_for_id(ID id)
+ 
+     rb_yjit_constant_state_changed(id);
+     rb_zjit_constant_state_changed(id);
++    rb_rpyyarv_constant_state_changed(id);
+ }
+ 
+ static void
+@@ -598,6 +729,8 @@ clear_iclass_method_cache_by_id_for_refinements(VALUE klass, VALUE d)
+ void
+ rb_clear_method_cache(VALUE klass_or_module, ID mid)
+ {
++    rb_rpyyarv_method_state_changed(klass_or_module, mid);
++
+     if (RB_TYPE_P(klass_or_module, T_MODULE)) {
+         VALUE module = klass_or_module; // alias
+ 
+@@ -1671,6 +1804,49 @@ rb_add_method_iseq(VALUE klass, ID mid, const rb_iseq_t *iseq, rb_cref_t *cref,
+     rb_add_method(klass, mid, VM_METHOD_TYPE_ISEQ, &iseq_body, visi);
+ }
+ 
++/* rb_add_method_cfunc, but the def is read before method_added runs: a hook
++ * may replace the method, and the def would then name someone else's entry. */
++const void *
++rb_rpyyarv_add_cfunc(VALUE klass, ID mid, VALUE (*func)(ANYARGS), int visi)
++{
++    rb_method_cfunc_t opt;
++    rb_method_entry_t *me;
++    const void *def;
++
++    opt.func = func;
++    opt.argc = -1;
++    RB_VM_LOCKING() {
++        me = rb_method_entry_make(klass, mid, klass,
++                                  (rb_method_visibility_t)visi,
++                                  VM_METHOD_TYPE_CFUNC, NULL, mid, &opt);
++    }
++    def = (const void *)me->def;
++    method_added(klass, mid);
++    return def;
++}
++
++const void *
++rb_rpyyarv_method_iseq(VALUE klass, ID mid, const void *iseq,
++                        const void *cref)
++{
++    rb_method_entry_t *me;
++    struct {
++        const rb_iseq_t *iseqptr;
++        rb_cref_t *cref;
++    } iseq_body;
++
++    iseq_body.iseqptr = iseq;
++    iseq_body.cref = cref ? (rb_cref_t *)cref : rb_vm_cref_new_toplevel();
++    me = rb_method_entry_alloc(mid, klass, filter_defined_class(klass),
++                               NULL, false);
++    METHOD_ENTRY_FLAGS_SET(me, METHOD_VISI_PRIVATE, FALSE);
++    rb_method_definition_t *def = rb_method_definition_create(
++        VM_METHOD_TYPE_ISEQ, mid);
++    rb_method_definition_set(me, def, &iseq_body);
++    rb_gc_register_mark_object((VALUE)me);
++    return me;
++}
++
+ static rb_method_entry_t *
+ method_entry_set(VALUE klass, ID mid, const rb_method_entry_t *me,
+                  rb_method_visibility_t visi, VALUE defined_class)

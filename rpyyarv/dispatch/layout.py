@@ -49,8 +49,9 @@ def ivar_get(obj, mid):
             shape_id = (hdr >> value.SHAPE_SHIFT) & value.SHAPE_MASK
             slot = iv_slot(shape_id, rubycall.const_rid(mid))
             if slot >= 0:
-                if hdr & value.ROBJECT_HEAP:
-                    got = raw_word(raw_word(fields, value.FIELDS_WORD), slot)
+                if (hdr & value.IV_HEAP_MASK) == value.IV_HEAP_BITS:
+                    got = raw_word(raw_word(fields, value.FIELDS_WORD),
+                                   value.IV_HEAP_BASE + slot)
                 else:
                     got = raw_word(fields, value.FIELDS_WORD + slot)
                 # Unshareable read off the main ractor raises (variable.c:1457).
@@ -132,9 +133,12 @@ def ivar_set(obj, mid, v):
                             after = entry.after
                             slot = entry.slot
                     if slot >= 0:
-                        if hdr & value.ROBJECT_HEAP:
-                            set_raw_word(raw_word(fields, value.FIELDS_WORD),
-                                         slot, v)
+                        if (hdr & value.IV_HEAP_MASK) == value.IV_HEAP_BITS:
+                            store = raw_word(fields, value.FIELDS_WORD)
+                            set_raw_word(store, value.IV_HEAP_BASE + slot, v)
+                            # An out-of-line GC object takes the barrier.
+                            if value.IV_HEAP_IS_OBJECT:
+                                fields = store
                         else:
                             set_raw_word(fields, value.FIELDS_WORD + slot, v)
                         if after != shape_id:
@@ -176,11 +180,12 @@ def _ivar_set_slow(obj, mid, v):
 def check_object_layout():
     """The ivar fast path reads RObject by hand; refuse a bad CRuby."""
     got = boot.object_layout()
-    want = [value.SHAPE_SHIFT, value.SHAPE_ID_BITS, value.ROBJECT_HEAP,
+    want = [value.SHAPE_SHIFT, value.SHAPE_ID_BITS, value.IV_HEAP_MASK,
             value.FIELDS_WORD, value.T_MASK, value.T_OBJECT,
             value.FL_FREEZE, value.SHAPE_ID_IN_FLAGS, value.T_DATA,
             value.FL_TYPED_DATA, value.FIELDS_WORD, value.FL_SHAREABLE,
-            value.CLASS_FIELDS_WORD, value.RCLASS_BOXABLE]
+            value.CLASS_FIELDS_WORD, value.RCLASS_BOXABLE,
+            value.IV_HEAP_BITS, value.IV_HEAP_BASE, value.IV_HEAP_IS_OBJECT]
     return got == want
 
 

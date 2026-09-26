@@ -3,71 +3,34 @@
 from rpyyarv.rlib import (LONG_BIT, bits2float, elidable, float2bits, intmask,
                   r_uint, raw_word, set_raw_word)
 
-Q_FALSE = 0x00
-Q_NIL = 0x04
-Q_TRUE = 0x14
-Q_UNDEF = 0x24
-FIXNUM_FLAG = 0x01
-IMMEDIATE_MASK = 0x07
-FLONUM_MASK = 0x03
-FLONUM_FLAG = 0x02
-SYMBOL_MASK = 0xff
-SYMBOL_FLAG = 0x0c
+# Header constants and struct offsets of the host CRuby, generated per
+# version (host/hostconsts.c); the boot checks re-read them from libruby.
+from rpyyarv.hostconsts import (
+    Q_FALSE, Q_NIL, Q_TRUE, Q_UNDEF, FIXNUM_FLAG, IMMEDIATE_MASK,
+    FLONUM_MASK, FLONUM_FLAG, SYMBOL_MASK, SYMBOL_FLAG,
+    FLAGS_WORD, KLASS_WORD, FLOAT_VALUE_WORD,
+    T_MASK, T_OBJECT, T_CLASS, T_MODULE, T_ARRAY, T_STRUCT, T_DATA,
+    FL_FREEZE, FL_SINGLETON, FL_SHAREABLE, FL_TYPED_DATA,
+    SHAPE_SHIFT, SHAPE_ID_BITS, SHAPE_ID_IN_FLAGS, FIELDS_WORD,
+    IV_HEAP_MASK, IV_HEAP_BITS, IV_HEAP_BASE, IV_HEAP_IS_OBJECT,
+    CLASS_FIELDS_WORD, RCLASS_BOXABLE,
+    ARY_EMBED_FLAG, ARY_EMBED_LEN_SHIFT, ARY_EMBED_LEN_MASK,
+    ARY_HEAP_LEN_WORD, ARY_HEAP_CAPA_WORD, ARY_HEAP_PTR_WORD,
+    ARY_EMBED_WORD, ARY_SHARED_FLAG, ARY_SHARED_ROOT_FLAG,
+    STRUCT_EMBED_LEN_SHIFT, STRUCT_EMBED_LEN_MASK, STRUCT_HEAP_LEN_WORD,
+    STRUCT_HEAP_PTR_WORD, STRUCT_EMBED_WORD)
 
 # The flonum encoding of internal/numeric.h, which rotates rather than shifts.
 FLONUM_ZERO = -0x7ffffffffffffffe    # 0x8000000000000002, DBL2NUM(+0.0)
 FLONUM_RESERVED = 0x3000000000000000  # rotates onto FLONUM_ZERO: heap only
 FLONUM_ROT = 3
-FLOAT_VALUE_WORD = 2                # struct RFloat: float_value after RBasic
 
-# rbasic.h: flags then klass, one word each (SIZEOF_VALUE == 8 only).
-KLASS_WORD = 1
-FLAGS_WORD = 0
-
-# RObject layout for the ivar fast path, checked against rpyyarv_object_layout.
-SHAPE_SHIFT = 32                # shape.h: SHAPE_FLAG_SHIFT on 64-bit
-SHAPE_ID_BITS = 32
 SHAPE_MASK = (1 << SHAPE_ID_BITS) - 1
 SHAPE_FLAG_MASK = SHAPE_MASK    # shape.h: the flags bits a shape id write keeps
-SHAPE_ID_IN_FLAGS = 0           # rbasic.h: RBASIC_SHAPE_ID_FIELD, 0 on 64-bit
-ROBJECT_HEAP = 1 << 16          # RUBY_FL_USER4: ivars spilled to a heap buffer
-FIELDS_WORD = 2                 # struct RObject: as.ary / as.heap.fields
-T_MASK = 0x1f
-T_OBJECT = 0x01
-T_CLASS = 0x02
-T_MODULE = 0x03
-T_ARRAY = 0x07
-T_STRUCT = 0x09
-FL_FREEZE = 1 << 11             # RUBY_FL_FREEZE, the bit rb_check_frozen reads
-FL_SINGLETON = 1 << 13          # RUBY_FL_SINGLETON (== FL_USER1) on a T_CLASS
-T_DATA = 0x0c
-FL_TYPED_DATA = 1 << 6          # RUBY_TYPED_FL_IS_TYPED_DATA: no fields_obj
-FL_SHAREABLE = 1 << 8           # RUBY_FL_SHAREABLE: ivar_ractor_check raises
-# RClass_and_rb_classext_t: ivars in the prime classext's fields_obj.
-CLASS_FIELDS_WORD = 5
-RCLASS_BOXABLE = 1 << 16        # internal/class.h: FL_USER4, ROBJECT_HEAP's bit
 
 # Every header bit an ivar access decides on, so one guard covers all.
-IV_HEADER_MASK = -(1 << SHAPE_SHIFT) | ROBJECT_HEAP | T_MASK
+IV_HEADER_MASK = -(1 << SHAPE_SHIFT) | IV_HEAP_MASK | T_MASK
 IV_SET_HEADER_MASK = IV_HEADER_MASK | FL_FREEZE
-
-# RArray layout, checked against rpyyarv_array_layout.
-ARY_EMBED_FLAG = 1 << 13         # RUBY_FL_USER1
-ARY_EMBED_LEN_SHIFT = 15         # RUBY_FL_USHIFT + 3
-ARY_EMBED_LEN_MASK = 0x7f << ARY_EMBED_LEN_SHIFT
-ARY_HEAP_LEN_WORD = 2
-ARY_HEAP_CAPA_WORD = 3
-ARY_HEAP_PTR_WORD = 4
-ARY_EMBED_WORD = 2
-ARY_SHARED_FLAG = 1 << 12        # RUBY_ELTS_SHARED: elements owned by a root
-ARY_SHARED_ROOT_FLAG = 1 << 24   # RUBY_FL_USER12: other arrays read these
-
-# RStruct layout, checked against rpyyarv_struct_layout.
-STRUCT_EMBED_LEN_SHIFT = 13      # RUBY_FL_USHIFT + 1
-STRUCT_EMBED_LEN_MASK = 0x7f << STRUCT_EMBED_LEN_SHIFT
-STRUCT_HEAP_LEN_WORD = 2
-STRUCT_HEAP_PTR_WORD = 3
-STRUCT_EMBED_WORD = 2
 
 
 def struct_len(v):

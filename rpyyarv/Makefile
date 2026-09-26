@@ -3,12 +3,18 @@ BUILD   := $(TOP)/build
 ARCHDIR := $(patsubst %/ruby/config.h,%,\
              $(firstword $(wildcard $(BUILD)/.ext/include/*/ruby/config.h)))
 OS      := $(shell uname -s)
+# The host CRuby is BUILD's srcdir; host/$(HOST_TAG)/ describes it.
+HOST_SRC := $(or $(shell cd "$(BUILD)" 2>/dev/null && \
+              cd "`sed -n 's/^srcdir *= *//p' Makefile`" 2>/dev/null && pwd),$(TOP))
+HOST_TAG := $(shell awk '/define RUBY_API_VERSION_MAJOR/ { a = $$3 } \
+              /define RUBY_API_VERSION_MINOR/ { b = $$3 } END { print "v" a "_" b }' \
+              "$(HOST_SRC)/include/ruby/version.h")
 # The cruby reference needs this to find lib/ and the built extensions; rpyyarv derives the same set from RPYYARV_BUILD.
-UNINSTALLED_RUBYLIB := $(TOP)/lib:$(BUILD)/.ext/common:$(BUILD):$(BUILD)/.ext/$(notdir $(ARCHDIR))
+UNINSTALLED_RUBYLIB := $(HOST_SRC)/lib:$(BUILD)/.ext/common:$(BUILD):$(BUILD)/.ext/$(notdir $(ARCHDIR))
 
 CFLAGS  += -Wall -Wextra -g -O0
-# $(TOP) and $(BUILD) are on the path for shape.h and the generated id.h.
-CPPFLAGS+= -I$(TOP)/include -I$(ARCHDIR) -I$(CURDIR) -I$(TOP) -I$(BUILD)
+# $(HOST_SRC) and $(BUILD) are on the path for shape.h and the generated id.h.
+CPPFLAGS+= -I$(HOST_SRC)/include -I$(ARCHDIR) -I$(CURDIR) -I$(HOST_SRC) -I$(BUILD)
 LDFLAGS += -L$(BUILD) -Wl,-rpath,$(BUILD)
 
 ifeq ($(OS),Darwin)
@@ -42,7 +48,7 @@ SHIM    := librpyyarv_boot.$(SOEXT)
 PYPY    ?= ./pypy
 RUBY_BENCH ?= $(CURDIR)/ruby-bench
 # AWFY needs set/subclass_compatible.rb from the source tree, or deltablue dies.
-AWFY_RUBYLIB ?= $(TOP)/lib
+AWFY_RUBYLIB ?= $(HOST_SRC)/lib
 PYTHON  ?= python3
 PYTHONPATH ?= $(TOP)
 # RPython needs a Python 2; Linux distributions now ship pypy2, not python2.
@@ -61,11 +67,13 @@ export PATH := $(HOME)/.cargo/bin:$(PATH)
 # it escapes the vable and aborts tracing.
 GCLIMIT   ?= 16384
 GCTIMEOUT ?= 60
+# Where gccheck finds rpyyarv and rpyyarv-jit.
+BIN       ?= .
 
 .PHONY: all test microbench awfy bench bench-viz eval eval-test setup setup-gems
 .PHONY: bench-bootstrap bench-setup
 .PHONY: gccheck ractorcheck build build-cruby build-interp build-jit link clean
-.PHONY: pypy-patch
+.PHONY: pypy-patch host
 
 build: build-cruby build-interp build-jit
 
@@ -81,6 +89,19 @@ build-cruby:
 	$(MAKE) -C "$(BUILD)"
 
 link: $(SHIM)
+
+# The per-version description of the host CRuby: instruction facts from its
+# insns.def, and header constants from its headers.
+BASERUBY ?= ruby
+host:
+	@test -n "$(ARCHDIR)" || { echo "ERROR: build CRuby first"; exit 1; }
+	mkdir -p host/$(HOST_TAG)
+	touch host/$(HOST_TAG)/__init__.py
+	RPYYARV_HOST_SRC=$(HOST_SRC) $(BASERUBY) ../rpyvmgen/generate.rb
+	$(CC) -w $(CPPFLAGS) -o host/hostconsts host/hostconsts.c
+	host/hostconsts > host/$(HOST_TAG)/consts.py
+	rm -f host/hostconsts
+	RPYYARV_HOST_SRC=$(HOST_SRC) $(BASERUBY) ../rpyvmgen/verify.rb
 
 $(SHIM): boot_shim.c boot_shim.h
 	@test -n "$(ARCHDIR)" || { echo "ERROR: build CRuby first (--enable-shared)"; exit 1; }
@@ -182,7 +203,7 @@ gccheck:
 	          test/defaultgems.rb test/modevalproc.rb \
 	          test/strevallocals.rb test/refinements.rb test/superblock.rb \
 	          test/bmethod.rb test/visibility.rb test/fiberblock.rb \
-	          test/fibercycle.rb \
+	          test/fibercycle.rb test/compaction.rb test/invalmatrix.rb \
 	          test/allocfast.rb test/strwire.rb test/evalcref.rb \
 	          test/superchain.rb test/blockself.rb test/fcallproc.rb \
 	          test/splatkw.rb test/r2kwargs.rb test/fwdargs.rb \
@@ -217,19 +238,19 @@ gccheck:
 	          test/blockraise.rb test/defmethodsuper.rb \
 	          test/includelate.rb test/threads.rb \
 	          test/methodintro.rb \
-	          $(TOP)/benchmark/app_*.rb $(TOP)/benchmark/so_*.rb; do \
+	          $(HOST_SRC)/benchmark/app_*.rb $(HOST_SRC)/benchmark/so_*.rb; do \
 	   n=`basename $$s`; \
 	   case $$s in test/*) \
-	     if ./rpyyarv $$s 2>&1 >/dev/null | grep -q 'running under CRuby instead'; then \
+	     if $(BIN)/rpyyarv $$s 2>&1 >/dev/null | grep -q 'running under CRuby instead'; then \
 	       echo "FAIL  $$n DELEGATED to cruby, so it compares cruby against cruby"; \
 	       failed=`expr $$failed + 1`; continue; \
 	     fi;; \
 	   esac; \
-	   jo=`lim ./rpyyarv-jit $$s`; jrc=$$?; \
-	   io=`lim ./rpyyarv $$s`; irc=$$?; \
+	   jo=`lim $(BIN)/rpyyarv-jit $$s`; jrc=$$?; \
+	   io=`lim $(BIN)/rpyyarv $$s`; irc=$$?; \
 	   jpre=0; ipre=0; \
-	   [ $$jrc -eq 0 ] || { nolim ./rpyyarv-jit $$s || jpre=1; }; \
-	   [ $$irc -eq 0 ] || { nolim ./rpyyarv $$s || ipre=1; }; \
+	   [ $$jrc -eq 0 ] || { nolim $(BIN)/rpyyarv-jit $$s || jpre=1; }; \
+	   [ $$irc -eq 0 ] || { nolim $(BIN)/rpyyarv $$s || ipre=1; }; \
 	   if [ $$jrc -ne 0 ] && [ $$irc -ne 0 ] && [ $$jpre -eq 1 ] && [ $$ipre -eq 1 ]; then \
 	     echo "SKIP  $$n (does not run without the GC limit either)"; \
 	     skipped=`expr $$skipped + 1`; continue; \
@@ -259,8 +280,8 @@ ractorcheck:
 	@export $(LIBPATH); \
 	 export RPYYARV_BUILD=$(BUILD) RUBYLIB=$(UNINSTALLED_RUBYLIB); \
 	 co=`$(RUBY) --disable-gems test/ractors.rb`; \
-	 io=`./rpyyarv test/ractors.rb`; \
-	 jo=`./rpyyarv-jit test/ractors.rb`; \
+	 io=`$(BIN)/rpyyarv test/ractors.rb`; \
+	 jo=`$(BIN)/rpyyarv-jit test/ractors.rb`; \
 	 [ "$$io" = "$$co" ] && [ "$$jo" = "$$co" ] && echo "ok ractors"
 
 build-interp: pypy-patch

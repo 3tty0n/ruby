@@ -118,8 +118,14 @@ def entry_point(argv):
     if os.environ.get('RPYYARV_GC_NO_HOOK') != '1':
         gcroots.install()
         fibers.install()
-    if os.environ.get('RPYYARV_GC_STRESS') == '1':
+    gc_stress = os.environ.get('RPYYARV_GC_STRESS')
+    if gc_stress == '1' or gc_stress == 'compact':
         rubycall.stress.flag = True
+        rubycall.stress.compact = gc_stress == 'compact'
+        every = os.environ.get('RPYYARV_GC_STRESS_EVERY')
+        if every is not None and every.isdigit() and int(every) > 1:
+            rubycall.stress.every = int(every)
+            rubycall.stress.countdown = int(every)
     # Names the root set a swept slot came from, instead of crashing on it.
     if os.environ.get('RPYYARV_MARK_TAG') == '1':
         gcroots.tags.on = True

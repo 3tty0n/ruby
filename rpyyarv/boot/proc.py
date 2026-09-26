@@ -74,6 +74,10 @@ rb_pop_dead_handle = _ext('rpyyarv_pop_dead_handle', [], rffi.LONG,
                           reenters=False)
 
 
+rb_dead_handle_count = _ext('rpyyarv_dead_handle_count', [], rffi.LONG,
+                            reenters=False)
+
+
 rb_is_proc = _ext('rpyyarv_is_proc', [VALUE], rffi.INT, reenters=False)
 
 
@@ -393,6 +397,10 @@ def proc_new(handle):
 
 def pop_dead_handle():
     return rffi.cast(lltype.Signed, rb_pop_dead_handle())
+
+
+def dead_handle_count():
+    return rffi.cast(lltype.Signed, rb_dead_handle_count())
 
 
 def is_proc(v):

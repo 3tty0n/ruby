@@ -105,6 +105,10 @@ rb_set_method_hook = _ext('rpyyarv_set_method_hook', [METHOD_HOOK],
 rb_vm_core = _ext('rpyyarv_vm_core', [], VALUE, reenters=True)
 
 
+rb_vmcore_merge_ptr_in_place = _ext('rpyyarv_vmcore_merge_ptr_in_place', [],
+                                    rffi.INT, reenters=True)
+
+
 rb_set_block_unwind = _ext('rpyyarv_set_block_unwind', [], lltype.Void,
                            reenters=False)
 
@@ -165,6 +169,10 @@ def current_receiver():
 
 def vm_core():
     return rffi.cast(lltype.Signed, rb_vm_core())
+
+
+def vmcore_merge_ptr_in_place():
+    return rffi.cast(lltype.Signed, rb_vmcore_merge_ptr_in_place()) != 0
 
 
 def set_block_unwind():

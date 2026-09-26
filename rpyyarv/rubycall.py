@@ -27,6 +27,9 @@ class _Stress(object):
 
     def __init__(self):
         self.flag = False
+        self.compact = False    # GC.compact instead of a plain full GC
+        self.every = 1          # dispatches between collections
+        self.countdown = 1
 
 
 stress = _Stress()
@@ -38,6 +41,7 @@ REQUIRE_RELATIVE = symbols.intern('require_relative')
 NEW = symbols.intern('new')
 RACTOR_VALUE = symbols.intern('value')
 RACTOR_TAKE = symbols.intern('take')
+COMPACT = symbols.intern('compact')
 
 # No VALUE is negative, so this cannot collide with a Ruby answer.
 NOT_HANDLED = -1
@@ -387,10 +391,23 @@ def const_rid(mid):
 
 @dont_look_inside
 def _gc_start():
-    boot.gc_start()
+    if stress.every > 1:
+        stress.countdown -= 1
+        if stress.countdown > 0:
+            return
+        stress.countdown = stress.every
+    if stress.compact:
+        # GC.compact through the host: a full mark, then every unpinned
+        # object may move, so a stale copy held by RPyYARV is found here.
+        gc_mod = boot.const_get(value.core_class(value.C_OBJECT),
+                                boot.intern('GC'))
+        boot.funcallv(gc_mod, rid(COMPACT), [], COMPACT)
+    else:
+        boot.gc_start()
 
 
 def gc_stress_point():
-    """RPYYARV_GC_STRESS=1: a full GC at every dispatch."""
+    """RPYYARV_GC_STRESS=1: a full GC at every dispatch; =compact: GC.compact.
+    RPYYARV_GC_STRESS_EVERY=n spaces them out to one in n dispatches."""
     if stress.flag:
         _gc_start()
