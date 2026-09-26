@@ -61,10 +61,13 @@ export PATH := $(HOME)/.cargo/bin:$(PATH)
 # it escapes the vable and aborts tracing.
 GCLIMIT   ?= 16384
 GCTIMEOUT ?= 60
+# Extra env for every limited run; compactcheck compacts on each major GC.
+GCENV ?=
 
 .PHONY: all test microbench awfy bench bench-viz eval eval-test setup setup-gems
 .PHONY: bench-bootstrap bench-setup
-.PHONY: gccheck ractorcheck build build-cruby build-interp build-jit link clean
+.PHONY: gccheck compactcheck ractorcheck
+.PHONY: build build-cruby build-interp build-jit link clean
 .PHONY: pypy-patch
 
 build: build-cruby build-interp build-jit
@@ -150,7 +153,7 @@ bench-setup bench-bootstrap: setup-gems
 gccheck:
 	@export $(LIBPATH); \
 	 export RPYYARV_BUILD=$(BUILD) RUBYLIB=$(UNINSTALLED_RUBYLIB); \
-	 lim() { RUBY_GC_MALLOC_LIMIT=$(GCLIMIT) perl -e 'alarm shift; exec @ARGV' $(GCTIMEOUT) "$$@" 2>/dev/null; }; \
+	 lim() { env $(GCENV) RUBY_GC_MALLOC_LIMIT=$(GCLIMIT) perl -e 'alarm shift; exec @ARGV' $(GCTIMEOUT) "$$@" 2>/dev/null; }; \
 	 nolim() { ( perl -e 'alarm shift; exec @ARGV' $(GCTIMEOUT) "$$@" >/dev/null 2>&1 ) 2>/dev/null; }; \
 	 ok=0; skipped=0; failed=0; \
 	 for s in benchmark/*.rb test/exceptions.rb test/coverage.rb \
@@ -254,6 +257,11 @@ gccheck:
 	 done; \
 	 echo; echo "gccheck: $$ok ok, $$skipped skipped, $$failed failed (RUBY_GC_MALLOC_LIMIT=$(GCLIMIT))"; \
 	 [ $$failed -eq 0 ] || { echo "GCCHECK FAILED"; exit 1; }
+
+# gccheck with GC.auto_compact on and every GC a major one.
+compactcheck:
+	$(MAKE) gccheck GCENV='RUBYOPT=-r$(CURDIR)/test/autocompact.rb \
+	  RUBY_GC_HEAP_OLDOBJECT_LIMIT_FACTOR=0.01'
 
 ractorcheck:
 	@export $(LIBPATH); \
