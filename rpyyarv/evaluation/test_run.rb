@@ -202,4 +202,64 @@ assert(corr[["cruby_sends_per_iteration", "pearson"]]["r"].round(9) == 1.0,
 assert(corr[["bridges_per_loop", "spearman"]]["r"].round(9) == -1.0,
        "spearman ranks")
 
+require_relative "footprint"
+require_relative "retention"
+
+Dir.mktmpdir("rpyyarv-footprint-test") do |dir|
+  row = ->(t, a, b, d, detail = "") do
+    format("%-26s %x-%x [ 1M 1M %s 0K] rw-/rwx SM=PRV  %s\n", t, a, b, d,
+           detail)
+  end
+  vm = Footprint.parse_vmmap(
+    "Physical footprint:         7.5M\n" +
+    row["MALLOC_LARGE", 0x1000, 0x2000, "4096K"] +
+    row["VM_ALLOCATE", 0x3000, 0x4000, "2048K"] +
+    row["VM_ALLOCATE", 0x5000, 0x6000, "1024K"] +
+    row["__DATA", 0x7000, 0x8000, "512K", "/x/rpyyarv-jit"])
+  st = { "heap_page_bytes" => 1_048_576, "yjit_code_region_size" => 0,
+         "yjit_alloc_size" => 0 }
+  py = Footprint.parse_pypylog(
+    "nursery size: 1048576\nminor collect, total memory used: 524288\n" \
+    "Loop 1 has address 0x5100 to 0x5200\n")
+  c = Footprint.attribute(vm, st, py, "/x/rpyyarv-jit")
+  assert(c.values.sum == vm[:footprint], "components sum to the footprint")
+  assert(c["jit_code"] == 1_048_576 && c["cruby_heap"] == 1_048_576,
+         "jit region and host pages")
+  assert(c["rpython_heap"] == 1_572_864 && c["image_self"] == 524_288,
+         "framework heap and binary data")
+  File.write(File.join(dir, "t.msl"), <<~TREE)
+        9 (3.00M) << TOTAL >>
+          5 (2.00M) malloc  (in libsystem_malloc.dylib) + 0
+          + 3 (1.50M) pypy_g_ArenaCollection_x  (in rpyyarv-jit) + 1
+          + ! 3 (1.50M) rb_foo  (in libruby.4.0.dylib) + 1
+          + 2 (512K) objspace_xmalloc0  (in libruby.4.0.dylib) + 1
+          4 (1.00M) pypy_g_alloc_1  (in rpyyarv-jit) + 1
+  TREE
+  m = Footprint.msl_classes(File.join(dir, "t.msl"))
+  assert(m == { "rpython_heap" => 1_572_864, "cruby_malloc" => 524_288,
+                "jit_code" => 1_048_576 }, "allocation sites by image")
+
+  dump = File.join(dir, "heap.json")
+  objs = [
+    { "type" => "ROOT", "root" => "vm", "references" => %w[0x1 0x2] },
+    { "address" => "0x1", "type" => "DATA",
+      "struct" => "rpyyarv/gc_mark_hook", "references" => %w[0x3 0x5] },
+    { "address" => "0x2", "type" => "OBJECT", "memsize" => 40 },
+    { "address" => "0x3", "type" => "CLASS", "singleton" => true,
+      "references" => %w[0x4], "memsize" => 100 },
+    { "address" => "0x4", "type" => "OBJECT", "memsize" => 40 },
+    { "address" => "0x5", "type" => "OBJECT", "references" => %w[0x2],
+      "memsize" => 40 }
+  ]
+  File.write(dump, objs.map { JSON.generate(_1) }.join("\n"))
+  r = Retention.analyse(dump, { pinned: "0", classes: "1", held: "0",
+                                forever: "0" })
+  sets = r["sets"]
+  assert(sets["hook:classes/singleton"]["retained_bytes"] == 140,
+         "singleton class and its attached object")
+  assert(sets["hook:pools+caches+frames"]["retained"] == 1,
+         "an object a CRuby root also reaches is not retained")
+  assert(r["rpyyarv_only"] == 3, "rpyyarv-only objects")
+end
+
 puts "evaluation tests: ok"
