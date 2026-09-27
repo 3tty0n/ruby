@@ -74,7 +74,7 @@ BIN       ?= .
 
 .PHONY: all test microbench awfy bench bench-viz eval eval-test setup setup-gems
 .PHONY: bench-bootstrap bench-setup
-.PHONY: gccheck compactcheck ractorcheck
+.PHONY: gccheck gcscripts compactcheck ractorcheck
 .PHONY: build build-cruby build-interp build-jit link clean
 .PHONY: pypy-patch host
 
@@ -170,6 +170,50 @@ setup: setup-gems
 # Compatibility names. setup-gems already bootstraps CRuby when necessary.
 bench-setup bench-bootstrap: setup-gems
 
+# The GC check suite; gcscripts lists it for evaluation/gcfreq.rb.
+GCSCRIPTS = benchmark/*.rb test/exceptions.rb test/coverage.rb \
+            test/requires.rb test/trampoline.rb test/definesmethod.rb \
+            test/nonlocal_return.rb test/attrs.rb test/fastops.rb \
+            test/floats.rb test/ivars.rb test/classivar.rb test/benchpaths.rb \
+            test/aset.rb test/consts.rb test/arynew.rb test/recursion.rb \
+            test/intabs.rb test/intbits.rb test/mixins.rb test/floatops.rb \
+            test/equality.rb test/nulstr.rb test/opcodes4.rb \
+            test/moduledefs.rb test/kwargs.rb test/strops.rb test/splatargs.rb \
+            test/pushtoarray.rb test/modulefunction.rb test/regexpmatch.rb \
+            test/regexbackref.rb test/sendblock.rb test/crefconsts.rb \
+            test/respondto.rb test/fastsends.rb test/supercruby.rb \
+            test/supersplat.rb test/gvaralias.rb test/expandsplat.rb \
+            test/faststr.rb test/fastfmt.rb test/fastctx.rb test/scanner.rb \
+            test/instanceeval.rb test/enumerators.rb test/loopiter.rb \
+            test/classvars.rb test/scopedclass.rb test/trampolinekw.rb \
+            test/moduleattrs.rb test/once.rb test/ranges.rb test/hasharef.rb \
+            test/kindof.rb test/redefcache.rb test/lambdas.rb test/objops.rb \
+            test/aliasnest.rb test/enumops.rb test/defaultgems.rb \
+            test/modevalproc.rb test/strevallocals.rb test/refinements.rb \
+            test/superblock.rb test/bmethod.rb test/visibility.rb \
+            test/fiberblock.rb test/fibercycle.rb test/compaction.rb \
+            test/invalmatrix.rb test/allocfast.rb test/strwire.rb \
+            test/evalcref.rb test/superchain.rb test/blockself.rb \
+            test/fcallproc.rb test/splatkw.rb test/r2kwargs.rb test/fwdargs.rb \
+            test/delegators.rb test/bmethodblockarg.rb test/throwacross.rb \
+            test/procrecycle.rb test/aryslice.rb test/intstep.rb \
+            test/classnewblock.rb test/constpath.rb test/bighash.rb \
+            test/rangeinc.rb test/intpow.rb test/structnew.rb \
+            test/parameters.rb test/protected.rb test/rangeeach.rb \
+            test/foreignbreak.rb test/symblock.rb test/pubsend.rb \
+            test/aliasinherit.rb test/bmethodreturn.rb test/bmethodcref.rb \
+            test/bindinglocals.rb test/makeshareable.rb test/coreops.rb \
+            test/threadmark.rb test/superdup.rb test/redefinealias.rb \
+            test/errinfokeep.rb test/hashmerge.rb test/proccallblock.rb \
+            test/bmethodkw.rb test/emptykwsplat.rb test/delegatemm.rb \
+            test/nestedrescue.rb test/errinfoprobe.rb test/bmethodkwreturn.rb \
+            test/definedgvar.rb test/blockraise.rb test/defmethodsuper.rb \
+            test/includelate.rb test/threads.rb test/methodintro.rb \
+            $(HOST_SRC)/benchmark/app_*.rb $(HOST_SRC)/benchmark/so_*.rb
+
+gcscripts:
+	@echo $(GCSCRIPTS)
+
 # Compare stdout of both rpyyarv binaries against CRuby under a tight GC limit.
 gccheck:
 	@export $(LIBPATH); \
@@ -177,71 +221,7 @@ gccheck:
 	 lim() { env $(GCENV) RUBY_GC_MALLOC_LIMIT=$(GCLIMIT) perl -e 'alarm shift; exec @ARGV' $(GCTIMEOUT) "$$@" 2>/dev/null; }; \
 	 nolim() { ( perl -e 'alarm shift; exec @ARGV' $(GCTIMEOUT) "$$@" >/dev/null 2>&1 ) 2>/dev/null; }; \
 	 ok=0; skipped=0; failed=0; \
-	 for s in benchmark/*.rb test/exceptions.rb test/coverage.rb \
-	          test/requires.rb test/trampoline.rb \
-	          test/definesmethod.rb test/nonlocal_return.rb \
-	          test/attrs.rb test/fastops.rb test/floats.rb test/ivars.rb \
-	          test/classivar.rb \
-	          test/benchpaths.rb \
-	          test/aset.rb \
-	          test/consts.rb test/arynew.rb \
-	          test/recursion.rb test/intabs.rb test/intbits.rb test/mixins.rb \
-	          test/floatops.rb \
-	          test/equality.rb \
-	          test/nulstr.rb test/opcodes4.rb test/moduledefs.rb \
-	          test/kwargs.rb test/strops.rb \
-	          test/splatargs.rb test/pushtoarray.rb test/modulefunction.rb \
-	          test/regexpmatch.rb test/regexbackref.rb \
-	          test/sendblock.rb test/crefconsts.rb test/respondto.rb \
-	          test/fastsends.rb test/supercruby.rb test/supersplat.rb \
-	          test/gvaralias.rb test/expandsplat.rb test/faststr.rb \
-	          test/fastfmt.rb \
-	          test/fastctx.rb \
-	          test/scanner.rb test/instanceeval.rb \
-	          test/enumerators.rb test/loopiter.rb test/classvars.rb \
-	          test/scopedclass.rb test/trampolinekw.rb test/moduleattrs.rb \
-	          test/once.rb test/ranges.rb test/hasharef.rb test/kindof.rb \
-	          test/redefcache.rb \
-          test/lambdas.rb test/objops.rb test/aliasnest.rb test/enumops.rb \
-	          test/defaultgems.rb test/modevalproc.rb \
-	          test/strevallocals.rb test/refinements.rb test/superblock.rb \
-	          test/bmethod.rb test/visibility.rb test/fiberblock.rb \
-	          test/fibercycle.rb test/compaction.rb test/invalmatrix.rb \
-	          test/allocfast.rb test/strwire.rb test/evalcref.rb \
-	          test/superchain.rb test/blockself.rb test/fcallproc.rb \
-	          test/splatkw.rb test/r2kwargs.rb test/fwdargs.rb \
-	          test/delegators.rb \
-	          test/bmethodblockarg.rb test/throwacross.rb \
-	          test/procrecycle.rb \
-	          test/aryslice.rb \
-	          test/intstep.rb \
-	          test/classnewblock.rb \
-	          test/constpath.rb \
-	          test/bighash.rb \
-	          test/rangeinc.rb test/intpow.rb \
-	          test/structnew.rb \
-	          test/parameters.rb \
-	          test/protected.rb \
-	          test/rangeeach.rb \
-	          test/foreignbreak.rb \
-	          test/symblock.rb \
-	          test/pubsend.rb \
-	          test/aliasinherit.rb \
-	          test/bmethodreturn.rb \
-	          test/bmethodcref.rb \
-	          test/bindinglocals.rb \
-	          test/makeshareable.rb \
-	          test/coreops.rb \
-	          test/threadmark.rb test/superdup.rb test/redefinealias.rb \
-	          test/errinfokeep.rb test/hashmerge.rb test/proccallblock.rb \
-	          test/bmethodkw.rb test/emptykwsplat.rb test/delegatemm.rb \
-	          test/nestedrescue.rb test/errinfoprobe.rb \
-	          test/bmethodkwreturn.rb \
-	          test/definedgvar.rb \
-	          test/blockraise.rb test/defmethodsuper.rb \
-	          test/includelate.rb test/threads.rb \
-	          test/methodintro.rb \
-	          $(HOST_SRC)/benchmark/app_*.rb $(HOST_SRC)/benchmark/so_*.rb; do \
+	 for s in $(GCSCRIPTS); do \
 	   n=`basename $$s`; \
 	   case $$s in test/*) \
 	     if $(BIN)/rpyyarv $$s 2>&1 >/dev/null | grep -q 'running under CRuby instead'; then \

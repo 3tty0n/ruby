@@ -183,4 +183,23 @@ Dir.mktmpdir("rpyyarv-jsonl-viz-test") do |dir|
          "latest ratio plot")
 end
 
+boot = RPyYARVEvaluation::Bootstrap
+lo, hi = boot.geomean_ci([[[4.0, 4.0], [8.0, 8.0]]], resamples: 100)
+assert(lo == 0.5 && hi == 0.5, "constant samples give a point interval")
+lo, hi = boot.geomean_ci([[[1.0, 2.0, 3.0], [2.0]], [[8.0], [2.0]]],
+                         resamples: 1000)
+assert(lo < 1.0 && hi > 2.0 && hi <= 4.0, "interval spans both benchmarks")
+
+require_relative "correlations"
+rows = (1..6).map do |i|
+  { "cruby_sends_per_iteration" => i * i, "bridges_per_loop" => 7 - i,
+    "performance_jit_over_yjit" => Math.exp(Math.log1p(i * i)) }
+end
+corr = Correlations.analyze(rows)
+                   .to_h { |r| [[r["predictor"], r["method"]], r] }
+assert(corr[["cruby_sends_per_iteration", "pearson"]]["r"].round(9) == 1.0,
+       "log-log pearson")
+assert(corr[["bridges_per_loop", "spearman"]]["r"].round(9) == -1.0,
+       "spearman ranks")
+
 puts "evaluation tests: ok"

@@ -131,7 +131,9 @@ def run_once(argv, script, env, timeout)
     return [nil, status.exitstatus == 142 ? "TIMEOUT" : "FAIL",
             info.merge("why" => why(err, status),
                        "err_head" => err[0, 1500],
-                       "err_tail" => err[-1500..-1] || err)]
+                       "err_tail" => err[-1500..-1] || err,
+                       "out_tail" => out[-1500..-1] || out,
+                       "termsig" => status.termsig)]
   end
   times = []
   done = nil

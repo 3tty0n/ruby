@@ -12,6 +12,7 @@ require "time"
 require_relative "experiments"
 require_relative "plots"
 require_relative "figures"
+require_relative "gcfreq"
 
 module RPyYARVEvaluation
   ROOT = File.expand_path("..", __dir__)
@@ -37,6 +38,26 @@ module RPyYARVEvaluation
     { "ruby" => RUBY_DESCRIPTION, "platform" => RUBY_PLATFORM,
       "uname" => uname }
   end
+
+  # What the launcher hashes miss: libruby, the RPython tree and its patches.
+  def build_provenance
+    libs = Dir[File.join(build_dir, "libruby.*.{dylib,so}"),
+               File.join(build_dir, "libruby.so")]
+    libs = libs.reject { |path| File.symlink?(path) }.sort
+    pypy = File.join(ROOT, "pypy")
+    base, = capture("git", "rev-parse", "HEAD", chdir: pypy) if Dir.exist?(pypy)
+    patches = Dir[File.join(ROOT, "pypy-patches", "*.patch")].sort
+    makefile = File.read(File.join(ROOT, "Makefile")) rescue ""
+    options = makefile.scan(/\$\(RPYTHON\)(.*?)--output=(\S+)/)
+    { "libruby" => libs.to_h { |path| [path, sha256(path)] },
+      "rpython_base" => base,
+      "pypy_patches" => patches.to_h { |p| [File.basename(p), sha256(p)] },
+      "translation" => options.to_h do |opts, out|
+        [out, opts.strip.empty? ? "default" : opts.strip]
+      end }
+  end
+
+  def sha256(path) = Digest::SHA256.file(path).hexdigest
 
   def run_id(kind)
     stamp = Time.now.utc.strftime("%Y%m%dT%H%M%SZ")
@@ -85,6 +106,7 @@ module RPyYARVEvaluation
         "started_at" => Time.now.utc.iso8601,
         "git" => RPyYARVEvaluation.git_metadata,
         "host" => RPyYARVEvaluation.host_metadata,
+        "build" => RPyYARVEvaluation.build_provenance,
         "commands" => []
       }
       save
@@ -131,6 +153,39 @@ module RPyYARVEvaluation
     end
   end
 
+  # Hierarchical percentile bootstrap: benchmarks, then per-process medians.
+  module Bootstrap
+    RESAMPLES = 10_000
+    SEED = 20_260_927
+
+    module_function
+
+    # pairs: [[numerator per_proc, denominator per_proc], ...]; [lo, hi].
+    def geomean_ci(pairs, resamples: RESAMPLES, seed: SEED)
+      pairs = pairs.select { |n, d| usable?(n) && usable?(d) }
+      return [nil, nil] if pairs.empty?
+
+      rng = Random.new(seed)
+      means = Array.new(resamples) do
+        pairs.size.times.sum do
+          num, den = pairs[rng.rand(pairs.size)]
+          Math.log(resample_median(num, rng) / resample_median(den, rng))
+        end / pairs.size
+      end.sort
+      [0.025, 0.975].map { |q| Math.exp(means[(q * (resamples - 1)).round]) }
+    end
+
+    def usable?(samples)
+      samples.is_a?(Array) && !samples.empty? &&
+        samples.all? { |v| v.is_a?(Numeric) && v.positive? }
+    end
+
+    def resample_median(samples, rng)
+      n = samples.size
+      Analyzer.median_value(Array.new(n) { samples[rng.rand(n)] })
+    end
+  end
+
   module Analyzer
     module_function
 
@@ -170,7 +225,9 @@ module RPyYARVEvaluation
         "files_delegated" => info["files_delegated"],
         "native_ms" => value["median"],
         "delegated_ms" => delegated_value && delegated_value["median"],
-        "native_iseq_pct" => iseq_pct(info["iseqs"])
+        "native_iseq_pct" => iseq_pct(info["iseqs"]),
+        "per_proc" => value["per_proc"],
+        "delegated_per_proc" => delegated_value && delegated_value["per_proc"]
       }
     end
 
@@ -193,6 +250,12 @@ module RPyYARVEvaluation
         EvaluationConfig::REFERENCES.each do |label, engine|
           reference = numeric(by_engine.dig(engine, "median_ms"))
           row["rpyyarv_jit_over_#{label}"] = reference && jit / reference
+          pair = [by_engine.dig("rpyyarv-jit", "per_proc"),
+                  by_engine.dig(engine, "per_proc")]
+          row["pairs_#{label}"] = pair if reference
+          lo, hi = reference ? Bootstrap.geomean_ci([pair]) : [nil, nil]
+          row["rpyyarv_jit_over_#{label}_lo"] = lo
+          row["rpyyarv_jit_over_#{label}_hi"] = hi
         end
         result << row
       end
@@ -360,6 +423,9 @@ module RPyYARVEvaluation
           end.compact
           row["n_#{label}"] = values.size
           row["geomean_jit_over_#{label}"] = geomean(values)
+          pairs = group.filter_map { |r| r["pairs_#{label}"] }
+          row["geomean_jit_over_#{label}_lo"],
+            row["geomean_jit_over_#{label}_hi"] = Bootstrap.geomean_ci(pairs)
         end
         scoped = suite == "all" ? jit_rows : jit_rows.select { |r| r["suite"] == suite }
         delegated_ratios = scoped.filter_map do |r|
@@ -369,6 +435,11 @@ module RPyYARVEvaluation
         end
         row["n_delegated_pairs"] = delegated_ratios.size
         row["geomean_native_over_delegated"] = geomean(delegated_ratios)
+        pairs = scoped.filter_map do |r|
+          [r["per_proc"], r["delegated_per_proc"]] if numeric(r["delegated_ms"])
+        end
+        row["geomean_native_over_delegated_lo"],
+          row["geomean_native_over_delegated_hi"] = Bootstrap.geomean_ci(pairs)
         row
       end
     end
@@ -398,9 +469,12 @@ module RPyYARVEvaluation
     end
 
     def write_ratios(path, rows)
-      headers = %w[suite benchmark] + EvaluationConfig::REFERENCES.keys.map do |label|
-        "rpyyarv_jit_over_#{label}"
-      end
+      labels = EvaluationConfig::REFERENCES.keys
+      headers = %w[suite benchmark] +
+                labels.map { |label| "rpyyarv_jit_over_#{label}" } +
+                labels.flat_map do |label|
+                  %w[lo hi].map { |end_| "rpyyarv_jit_over_#{label}_#{end_}" }
+                end
       write_csv(path, headers, rows)
     end
 
@@ -412,6 +486,11 @@ module RPyYARVEvaluation
       end
       headers += %w[n_delegated_pairs geomean_native_over_delegated
                     n_benchmarks n_ok n_delegated n_failed]
+      EvaluationConfig::REFERENCES.each_key do |label|
+        headers += %W[geomean_jit_over_#{label}_lo geomean_jit_over_#{label}_hi]
+      end
+      headers += %w[geomean_native_over_delegated_lo
+                    geomean_native_over_delegated_hi]
       write_csv(path, headers, rows)
     end
 
@@ -622,6 +701,8 @@ module RPyYARVEvaluation
 
   def optional_engines
     return @optional_engines if defined?(@optional_engines)
+    # Reruns of a protocol that had no optional engine must not gain one.
+    return @optional_engines = {} if ENV["EVAL_OPTIONAL_ENGINES"] == "0"
 
     truffle = ENV["TRUFFLERUBY_BIN"]
     if !truffle && ENV["GRAALVM_HOME"]
@@ -898,6 +979,13 @@ module RPyYARVEvaluation
     Csv.write(File.join(run.dir, "gc.csv"),
               %w[malloc_limit ok skipped failed passed root_mark_walks
                  root_mark_ns rpython_heap_bytes], rows)
+    freq = GcFreq.collect(ROOT, build_dir, base_env, limits)
+    Csv.write(File.join(run.dir, "gcfreq.csv"),
+              %w[script malloc_limit engine exit] + GcFreq::FIELDS +
+              %w[root_walks root_walk_ns], freq)
+    summary = GcFreq.summarize(freq)
+    Csv.write(File.join(run.dir, "gcfreq-summary.csv"),
+              (summary[0] || {}).keys, summary)
     run.manifest["gc_limits"] = limits
     run.finish(ok)
     puts "artifacts: #{run.dir}"
