@@ -33,6 +33,8 @@ module Breakdown
   COMPILE = /\Apypy_g_(MetaInterp_|MIFrame_|Trace_|TraceIterator_|Optimiz|
                        Opt[A-Z]|IntBound|HeapCache|Regalloc|RegisterManager|
                        \w*Assembler\w*_|AbstractAarch64Builder_|\w*ResOp\w*_|
+                       RegAlloc_|X86\w*RegisterManager_|\w*X86\w*CodeBuilder_|
+                       LocationCodeBuilder_|MachineCodeBlockWrapper_|
                        ResOperation|ResumeDataLoopMemo|ResumeDataBoxReader|
                        compile_and_run_once|send_(loop|bridge)_to_backend|
                        compile_|rpython_jit_metainterp_(pyjitpl|optimizeopt|
