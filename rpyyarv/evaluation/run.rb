@@ -43,7 +43,8 @@ module RPyYARVEvaluation
   # What the launcher hashes miss: libruby, the RPython tree and its patches.
   def build_provenance
     libs = Dir[File.join(build_dir, "libruby.*.{dylib,so}"),
-               File.join(build_dir, "libruby.so")]
+               File.join(build_dir, "libruby.so"),
+               File.join(build_dir, "libruby.so.*")]
     libs = libs.reject { |path| File.symlink?(path) }.sort
     pypy = File.join(ROOT, "pypy")
     base, = capture("git", "rev-parse", "HEAD", chdir: pypy) if Dir.exist?(pypy)
