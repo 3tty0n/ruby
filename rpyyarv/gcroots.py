@@ -164,7 +164,14 @@ def _mark_frame_now(f):
         _mark_array(s.values, 'frame-shared')
     if not value.is_immediate(f.self_val):
         _mark(f.self_val, 'frame-self')
-    # f.cref needs no mark: dispatch.root_base roots every Cref class.
+    # Its lexical classes: a weakly held singleton must outlive the frame.
+    c = f.cref
+    if c is None and f.entry is not None:
+        c = f.entry.lexical
+    while c is not None:
+        if not value.is_immediate(c.klass):
+            _mark(c.klass, 'frame-cref')
+        c = c.outer
     if not value.is_immediate(f.pending_value):
         _mark(f.pending_value, 'frame-pending')
     splat = f.splat_args
