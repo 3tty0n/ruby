@@ -73,7 +73,12 @@ module Retention
     seen
   end
 
-  def bytes(nodes, addrs) = addrs.sum { nodes[_1]["memsize"].to_i }
+  # An ISeq wrapper reports its ISeq's size: count the wrapper's slot only.
+  def size(o)
+    o["struct"] == "T_IMEMO/iseq" ? o["slot_size"].to_i : o["memsize"].to_i
+  end
+
+  def bytes(nodes, addrs) = addrs.sum { size(nodes[_1]) }
 
   def kind(o)
     o["type"] == "IMEMO" ? "IMEMO/#{o['imemo_type']}" : o["type"]
@@ -109,7 +114,7 @@ module Retention
     only = owner.select { |_, v| v.all? { rpy.key?(_1) } }.keys
     out = { "live" => live.size, "live_bytes" => bytes(nodes, live),
             "host_malloc" => live.sum do
-              nodes[_1]["memsize"].to_i - nodes[_1]["slot_size"].to_i
+              size(nodes[_1]) - nodes[_1]["slot_size"].to_i
             end,
             "unreached" => (live - owner.keys).size,
             "rpyyarv_only" => only.size,

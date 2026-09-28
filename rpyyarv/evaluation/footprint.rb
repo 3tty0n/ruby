@@ -175,6 +175,8 @@ module Footprint
                                          File.exist?("#{raw}.stats")
 
     vm = parse_vmmap(File.read("#{raw}.vmmap"))
+    return { "status" => "FAIL" } unless vm[:footprint]
+
     st = parse_stats(File.read("#{raw}.stats"))
     log = "#{raw}.pypylog"
     py = parse_pypylog(File.exist?(log) ? File.read(log) : "")
@@ -295,7 +297,8 @@ module Footprint
                     opts[:filters].any? { |x| bench == x }
 
         eng.each do |ename, eargv|
-          raw = File.join(rawdir, "#{bench}.#{ename}")
+          # nbody is in both suites: the suite keeps their files apart.
+          raw = File.join(rawdir, "#{suite.name}.#{bench}.#{ename}")
           row = { "suite" => suite.name, "benchmark" => bench }
           suite.with_script(bench) do |script, env, _|
             row.merge!(measure(ename, eargv, script, env, raw, suite.timeout))
@@ -323,7 +326,8 @@ module Footprint
     rows = File.readlines(path).map { JSON.parse(_1) }
                 .select { _1["status"] == "ok" }
                 .map { _1.merge(analyse(_1)) }
-    by = rows.group_by { _1["benchmark"] }
+                .select { _1["status"] == "ok" }
+    by = rows.group_by { "#{_1['suite']}/#{_1['benchmark']}" }
              .transform_values { |a| a.to_h { [_1["engine"], _1] } }
     puts (%w[benchmark engine maxrss peak_fp fp region_sum] + COMPONENTS +
           %w[residual]).join(",")

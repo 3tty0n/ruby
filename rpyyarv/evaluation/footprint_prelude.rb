@@ -3,7 +3,11 @@
 # both under $FOOTPRINT_OUT; with $FOOTPRINT_DUMP, a full GC and a heap dump;
 # with MallocStackLogging, live allocations by allocating function.
 require "objspace"
+footprint_pid = Process.pid
 at_exit do
+  # A forked worker runs this hook too; only the measured process reports.
+  next unless Process.pid == footprint_pid
+
   out = ENV.fetch("FOOTPRINT_OUT")
   st = GC.stat
   slot_bytes = GC.stat_heap.values.sum do |h|
