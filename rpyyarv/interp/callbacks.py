@@ -16,6 +16,7 @@ from rpyyarv.rlib import (StackOverflow, check_stack_overflow,
                           dont_look_inside, unchecked_stack_start,
                           unchecked_stack_stop)
 
+from rpyyarv.interp.consts_ids import NEW
 from rpyyarv.interp.args import NO_KEYWORDS, _arity_error, _refuse_iseq, setup_params
 
 def _sub_self(handle, cruby_self):
@@ -328,18 +329,21 @@ def _call_with_block(recv, mid, args, w_block, kw=False):
     handle = _alloc_handle(w_block)
     # No release: the handle's owner dies with the ifunc, freeing the slot.
     try:
-        # A &:sym block has neither ISeq nor frame; the shim takes a null one.
-        written = None
+        # Only Ractor.new uses these, and a native cref is rooted forever.
         native = 0
-        if w_block.frame is not None:
-            written = w_block.frame.cref
-            if written is None and w_block.frame.entry is not None:
-                written = w_block.frame.entry.lexical
-        if w_block.w_iseq is not None:
+        native_cref = 0
+        if mid == NEW and w_block.w_iseq is not None \
+                and boot.ractor_class_p(recv):
+            # A &:sym block has neither ISeq nor frame; the shim takes null.
+            written = None
+            if w_block.frame is not None:
+                written = w_block.frame.cref
+                if written is None and w_block.frame.entry is not None:
+                    written = w_block.frame.entry.lexical
             native = w_block.w_iseq.native
+            native_cref = boot.native_cref(written)
         ret = rubycall.call_with_block(
-            recv, mid, args, handle, native,
-            boot.native_cref(written), kw)
+            recv, mid, args, handle, native, native_cref, kw)
     except RubyException:
         # Whatever the block parked is the reason, and takes precedence.
         _check_block_error()

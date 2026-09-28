@@ -16,7 +16,8 @@ class Registry(object):
         self.consts = []        # every loaded ISeq's constant pool
         self.pinned = []        # VALUEs built during load, before their pool
         self.classes = []       # classes RPyYARV defined, keys of the registry
-        self.class_seen = {}    # the same, as a set: a root is never dropped
+        # The same as a set, with the singleton classes the shim holds weakly.
+        self.class_seen = {}
         self.held = []          # exception VALUEs parked outside any frame
         self.forever = []       # VALUEs rooted for the life of the process
         self.blocks = None      # interp's handle table, once it exists
@@ -45,11 +46,19 @@ def register_bmethod(w_block):
 
 
 def register_class(v):
-    """Deduplicated: a cache fill asks per (klass, mid), not per class."""
+    """Deduplicated; a singleton class of a plain object is held weakly."""
     if value.is_immediate(v) or v in state.class_seen:
         return
     state.class_seen[v] = None
-    state.classes.append(v)
+    if boot.weak_class_p(v):
+        boot.weak_class_add(v)
+    else:
+        state.classes.append(v)
+
+
+def forget_class(v):
+    if v in state.class_seen:
+        del state.class_seen[v]
 
 
 def seen_class(v):
@@ -345,10 +354,11 @@ def root_inventory():
     if state.const_cache is not None:
         cached = len(state.const_cache.entries) - state.const_cache.dead
     return ('classes %d, const pools %d (%d values), pinned %d, held %d, '
-            'forever %d, bmethods %d, const cache %d'
+            'forever %d, bmethods %d, const cache %d, weak classes %d'
             % (len(state.classes), len(state.consts), pools,
                len(state.pinned), len(state.held), len(state.forever),
-               len(state.bmethods), cached))
+               len(state.bmethods), cached,
+               len(state.class_seen) - len(state.classes)))
 
 
 def install():

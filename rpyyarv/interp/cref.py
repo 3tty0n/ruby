@@ -1,7 +1,7 @@
 """Lexical scope chain (CREF)."""
 from __future__ import absolute_import
 
-from rpyyarv import dispatch
+from rpyyarv import gcroots
 from rpyyarv import value
 
 class Cref(object):
@@ -31,7 +31,7 @@ def _push_cref(outer, klass, by_eval=False):
     table = outer.eval_inner if by_eval else outer.inner
     node = table.get(klass, None)
     if node is None:
-        dispatch.root_base(klass)
+        gcroots.register_class(klass)
         node = Cref(klass, outer, by_eval)
         table[klass] = node
     return node

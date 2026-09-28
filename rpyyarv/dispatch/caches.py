@@ -6,10 +6,12 @@ from rpyyarv import debug
 from rpyyarv import gcroots
 from rpyyarv import symbols
 from rpyyarv import rubycall
+from rpyyarv import threading
 from rpyyarv.rlib import elidable, dont_look_inside
 from rpyyarv.dispatch.core import (lookup, registry, MethodEntry, Version,
                                    bump_name, name_version,
-                                   bump_class, class_version)
+                                   bump_class, class_version, class_cell,
+                                   singleton_cells)
 
 
 class _Owners(object):
@@ -170,16 +172,17 @@ def site_lookup(site, klass, mid):
     Off-trace only: inside one the lookup folds into the class guard."""
     if site.ic_klass == klass and site.ic_version is registry.version \
             and site.ic_name is name_version(mid) \
-            and site.ic_cls is class_version(klass):
+            and site.ic_cls is site.ic_cell.version:
         got = site.ic_entry
         return None if got is LOOKUP_MISS else got
     entry = lookup(klass, mid)
-    # Registered by keep_resolved, so the class cannot die under the cache.
+    # A dead class bumps its cell, so its recycled address misses here.
     site.ic_entry = LOOKUP_MISS if entry is None else entry
     site.ic_klass = klass
     site.ic_version = registry.version
     site.ic_name = name_version(mid)
-    site.ic_cls = class_version(klass)
+    site.ic_cell = class_cell(klass)
+    site.ic_cls = site.ic_cell.version
     return entry
 
 
@@ -413,7 +416,7 @@ struct_slots = _StructSlots()
 
 
 @elidable
-def _struct_index(klass, mid, version, nversion):
+def _struct_index(klass, mid, version, nversion, cversion):
     return struct_slots.tab.get((klass, mid), IV_UNKNOWN)
 
 
@@ -434,7 +437,8 @@ def _fill_struct_index(klass, mid):
 
 def struct_member_index(klass, mid):
     """A Struct-generated reader/writer's slot, or -1 for another method."""
-    got = _struct_index(klass, mid, registry.version, name_version(mid))
+    got = _struct_index(klass, mid, registry.version, name_version(mid),
+                        class_version(klass))
     if got == IV_UNKNOWN:
         got = _fill_struct_index(klass, mid)
     return got
@@ -482,7 +486,7 @@ STRUCT_UNKNOWN = -2
 
 
 @elidable
-def _struct_arity(klass, version):
+def _struct_arity(klass, version, cversion):
     return struct_arities.tab.get(klass, STRUCT_UNKNOWN)
 
 
@@ -499,7 +503,7 @@ def _fill_struct_arity(klass):
 
 def struct_arity(klass):
     """Members of a positional Struct class; -1 for anything else."""
-    got = _struct_arity(klass, registry.version)
+    got = _struct_arity(klass, registry.version, class_version(klass))
     if got == STRUCT_UNKNOWN:
         got = _fill_struct_arity(klass)
     return got
@@ -526,6 +530,99 @@ def iv_slot(shape_id, rid):
     return got
 
 
+@dont_look_inside
+def classes_gone(n):
+    """n held singleton classes a GC found dead, before their sweep."""
+    acquired = threading.enter_callback()
+    try:
+        _forget_classes(n)
+    finally:
+        threading.leave_callback(acquired)
+
+
+def _drop_pairs(tab, dead):
+    keys = []
+    for key in tab:
+        if key[0] in dead or key[1] in dead:
+            keys.append(key)
+    for key in keys:
+        del tab[key]
+
+
+def _drop_listed(index, dead):
+    names = []
+    for name in index:
+        names.append(name)
+    for name in names:
+        index[name] = [k for k in index[name] if k not in dead]
+
+
+def _forget_classes(n):
+    dead = {}
+    dropped = {}
+    i = 0
+    while i < n:
+        k = boot.gone_class(i)
+        dead[k] = None
+        gcroots.forget_class(k)
+        cell = singleton_cells.tab.get(k, None)
+        if cell is not None:
+            del singleton_cells.tab[k]
+            # Kills exactly the traces that folded an answer about k.
+            cell.version = Version()
+        table = registry.methods.get(k, None)
+        if table is not None:
+            del registry.methods[k]
+            for entry in table.values():
+                dropped[entry] = None
+        if k in registry.supers:
+            del registry.supers[k]
+        if k in owners.res:
+            del owners.res[k]
+        if k in owners.cres:
+            del owners.cres[k]
+        if k in struct_arities.tab:
+            del struct_arities.tab[k]
+        forget_const_base(k)
+        i += 1
+    if len(dropped) > 0:
+        # Its method definitions are freed with it, and malloc reuses them.
+        keys = []
+        for key, entry in registry.defs.items():
+            if entry in dropped:
+                keys.append(key)
+        for key in keys:
+            del registry.defs[key]
+    # Only their keys: a trace recorded after a purge keeps its slow fills.
+    _drop_pairs(owners.tab, dead)
+    _drop_pairs(owners.rtab, dead)
+    _drop_pairs(owners.ktab, dead)
+    _drop_pairs(struct_slots.tab, dead)
+    skeys = []
+    for skey in owners.stab:
+        if skey[0] in dead:
+            skeys.append(skey)
+    for skey in skeys:
+        del owners.stab[skey]
+    _drop_listed(owners.by_mid, dead)
+    _drop_listed(owners.by_sym, dead)
+    _drop_listed(owners.res_by_mid, dead)
+    _drop_listed(owners.cres_by_mid, dead)
+    mids = []
+    for mid in owners.by_sup:
+        mids.append(mid)
+    for mid in mids:
+        owners.by_sup[mid] = [p for p in owners.by_sup[mid]
+                              if p[0] not in dead]
+    i = 0
+    while i < _TC_SIZE:
+        if _tc_klasses[i] in dead:
+            _tc_klasses[i] = 0
+        i += 1
+
+
 # Imported at the bottom: trampoline's own bottom import needs owner_of,
 # defined above, so caches must finish loading before trampoline does.
-from rpyyarv.dispatch.trampoline import flush_trampoline_cache
+from rpyyarv.dispatch.trampoline import (flush_trampoline_cache, _TC_SIZE,
+                                         _tc_klasses)
+from rpyyarv.dispatch.consts import forget_const_base

@@ -5,7 +5,7 @@ from rpyyarv import boot
 from rpyyarv import gcroots
 from rpyyarv import value
 from rpyyarv.error import UnsupportedOperation
-from rpyyarv.rlib import elidable, dont_look_inside, we_are_jitted
+from rpyyarv.rlib import elidable, dont_look_inside, raw_word, we_are_jitted
 
 
 # Cycle guard: a superclass chain longer than this is a corrupt map.
@@ -77,13 +77,46 @@ def _class_bucket(klass):
     return ((klass >> 3) ^ (klass >> 13)) & (CLASS_BUCKETS - 1)
 
 
+class _SingletonCells(object):
+    def __init__(self):
+        self.tab = {}       # singleton class VALUE -> its own _ClassCell
+
+
+singleton_cells = _SingletonCells()
+
+
+@elidable
+def _is_weak(klass):
+    # The flag first: most classes are not singletons, and it needs no call.
+    return (not value.is_immediate(klass) and raw_word(klass, value.FLAGS_WORD)
+            & (value.T_MASK | value.FL_SINGLETON)
+            == value.T_CLASS | value.FL_SINGLETON and boot.weak_class_p(klass))
+
+
+# Its own cell, not a bucket: its death then kills only its own traces.
+@elidable
+def _singleton_cell(klass):
+    cell = singleton_cells.tab.get(klass, None)
+    if cell is None:
+        cell = _ClassCell()
+        singleton_cells.tab[klass] = cell
+        gcroots.register_class(klass)
+    return cell
+
+
+def class_cell(klass):
+    if _is_weak(klass):
+        return _singleton_cell(klass)
+    return klasses.cells[_class_bucket(klass)]
+
+
 def class_version(klass):
     """The version a lookup on klass depends on; folds, klass being green."""
-    return klasses.cells[_class_bucket(klass)].version
+    return class_cell(klass).version
 
 
 def bump_class(klass):
-    klasses.cells[_class_bucket(klass)].version = Version()
+    class_cell(klass).version = Version()
 
 
 KIND_ISEQ = 0
@@ -249,13 +282,13 @@ def record_class(klass, superklass):
 
 
 @elidable
-def _is_known_class(klass, version):
+def _is_known_class(klass, version, cversion):
     return klass in registry.supers
 
 
 def is_known_class(klass):
     """Elidable on the method version, so a promoted klass folds it away."""
-    return _is_known_class(klass, registry.version)
+    return _is_known_class(klass, registry.version, class_version(klass))
 
 
 @elidable
@@ -352,7 +385,7 @@ def lookup(klass, mid):
 
 
 @elidable
-def _own_lookup(klass, mid, version, nversion):
+def _own_lookup(klass, mid, version, nversion, cversion):
     table = registry.methods.get(klass, None)
     if table is None:
         return None
@@ -361,11 +394,12 @@ def _own_lookup(klass, mid, version, nversion):
 
 def lookup_owned(klass, mid):
     """own_lookup, but elidable on the method version."""
-    return _own_lookup(klass, mid, registry.version, name_version(mid))
+    return _own_lookup(klass, mid, registry.version, name_version(mid),
+                       class_version(klass))
 
 
 @elidable
-def _lookup_core(klass, mid, version, nversion):
+def _lookup_core(klass, mid, version, nversion, cversion):
     """No Object fallback, so a toplevel `def +` is no Integer#+ redefine."""
     methods = registry.methods
     supers = registry.supers
@@ -386,11 +420,13 @@ def lookup_core(klass, mid):
     """Every core operator asks this first, so off-trace it answers from a
     cache: the walk it replaces is a dozen table reads per arithmetic op."""
     if we_are_jitted():
-        return _lookup_core(klass, mid, registry.version, name_version(mid))
+        return _lookup_core(klass, mid, registry.version, name_version(mid),
+                            class_version(klass))
     got = core_resolved(klass, mid, registry.version, name_version(mid))
     if got is not LOOKUP_PENDING:
         return None if got is LOOKUP_MISS else got
-    entry = _lookup_core(klass, mid, registry.version, name_version(mid))
+    entry = _lookup_core(klass, mid, registry.version, name_version(mid),
+                         class_version(klass))
     keep_core(klass, mid, entry)
     return entry
 

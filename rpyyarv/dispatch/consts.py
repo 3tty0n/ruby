@@ -235,6 +235,34 @@ def root_base(v):
         gcroots.register_class(v)
 
 
+def _drop_base(tab, base):
+    dead = []
+    for key in tab:
+        if key[0] == base:
+            dead.append(key)
+    for key in dead:
+        _retire(tab[key])
+        del tab[key]
+        const_names.cells[key[1] & (CONST_BUCKETS - 1)].version = Version()
+
+
+def forget_const_base(base):
+    """A dead singleton cbase: a new class at its address must not hit."""
+    if base not in consts.rooted:
+        return
+    del consts.rooted[base]
+    _drop_base(consts.tab, base)
+    _drop_base(consts.attab, base)
+    _drop_base(consts.ftab, base)
+    for sites in consts.by_name.values():
+        for site in sites:
+            entry = site.entry
+            if entry is not None and entry.base == base:
+                _retire(entry)
+                site.entry = None
+    _prune_entries()
+
+
 @elidable
 def _const_cached(klass, mid, version):
     return consts.tab.get((klass, mid), None)

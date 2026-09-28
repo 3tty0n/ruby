@@ -153,6 +153,7 @@ class W_CallInfo(object):
         self.ic_version = None
         self.ic_name = None
         self.ic_cls = None
+        self.ic_cell = None
         self.ic_entry = None
 
     def repr(self):

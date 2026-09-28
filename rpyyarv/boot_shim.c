@@ -6,6 +6,7 @@
 #include <locale.h>
 #include <pthread.h>
 #include <ruby.h>
+#include <ruby/debug.h>
 #include <ruby/ractor.h>
 #include <ruby/re.h>
 #include <ruby/thread.h>
@@ -15,6 +16,7 @@
 /* In-tree: the object-shape API libruby does not export stays reachable. */
 #include "shape.h"
 #include "internal/array.h"
+#include "internal/gc.h"
 /* RCLASS_SINGLETON_P/RCLASS_INITIALIZED_P: raises alloc_fast must rule out. */
 #include "internal/class.h"
 /* RHASH_PASS_AS_KEYWORDS: the ruby2_keywords forwarding flag on a Hash. */
@@ -176,7 +178,7 @@ native_me_for(uintptr_t defkey)
     pthread_mutex_lock(&rpyyarv_native_lock);
     for (struct rpyyarv_native_method *it = rpyyarv_native_methods;
             it != NULL; it = it->next) {
-        if (it->def == (const void *)defkey) {
+        if (it->def == (const void *)defkey && it->klass != Qfalse) {
             if (!it->me) {
                 it->me = rb_rpyyarv_method_iseq(it->klass, it->mid,
                                                 it->iseq, it->cref);
@@ -403,7 +405,7 @@ prepare_native_ractors(void)
     pthread_mutex_lock(&rpyyarv_native_lock);
     for (struct rpyyarv_native_method *entry = rpyyarv_native_methods;
             entry; entry = entry->next) {
-        if (!entry->me) {
+        if (!entry->me && entry->klass != Qfalse) {
             entry->me = rb_rpyyarv_method_iseq(
                 entry->klass, entry->mid, entry->iseq, entry->cref);
         }
@@ -1148,12 +1150,158 @@ rpyyarv_sym_cstr(uintptr_t sym)
 
 static void (*gc_mark_hook)(void);
 
+/* Singleton classes held weakly; a dead one is reported before sweeping. */
+static VALUE *weak_classes;
+static long weak_len, weak_capa;
+static VALUE *gone_classes;
+static long gone_len, gone_capa;
+static void (*classes_gone_hook)(long);
+static VALUE pin_probe = Qnil;
+static VALUE sym_major_by;
+static ID id_marked, id_pinned;
+
+static void
+push_value(VALUE **buf, long *len, long *capa, VALUE v)
+{
+    if (*len == *capa) {
+        long n = *capa ? *capa * 2 : 256;
+        VALUE *p = realloc(*buf, n * sizeof(VALUE));
+        if (!p) rb_bug("rpyyarv: out of memory for weak classes");
+        *buf = p;
+        *capa = n;
+    }
+    (*buf)[(*len)++] = v;
+}
+
+/* A singleton class of a plain object; a class's own lives with it. */
+int
+rpyyarv_weak_class_p(uintptr_t v)
+{
+    VALUE k = (VALUE)v, o;
+    if (SPECIAL_CONST_P(k) || !RB_TYPE_P(k, T_CLASS) ||
+            !FL_TEST_RAW(k, FL_SINGLETON)) return 0;
+    o = RCLASS_ATTACHED_OBJECT(k);
+    return !RB_TYPE_P(o, T_CLASS) && !RB_TYPE_P(o, T_MODULE);
+}
+
+void
+rpyyarv_weak_class_add(uintptr_t v)
+{
+    /* Without the hook a death would go unreported: never hold one weakly. */
+    if (!classes_gone_hook) rb_bug("rpyyarv: weak class before its hook");
+    push_value(&weak_classes, &weak_len, &weak_capa, (VALUE)v);
+}
+
+static int
+gc_flag_p(VALUE obj, ID name)
+{
+    struct rb_gc_object_metadata_entry *e = rb_gc_object_metadata(obj);
+    for (; e->name; e++) {
+        if (e->name == name) return RTEST(e->val);
+    }
+    return 0;
+}
+
+static int
+gc_major_p(void)
+{
+    return !NIL_P(rb_gc_latest_gc_info(sym_major_by));
+}
+
+/* Kept, and pinned, in a minor GC (forgetting flushes caches) or a move. */
+static int
+weak_classes_held_p(void)
+{
+    if (!gc_major_p()) return 1;
+    rb_gc_mark(pin_probe);
+    return gc_flag_p(pin_probe, id_pinned);
+}
+
+static void
+weak_classes_mark(void)
+{
+    long i;
+    if (weak_len == 0 || !weak_classes_held_p()) return;
+    for (i = 0; i < weak_len; i++) rb_gc_mark(weak_classes[i]);
+}
+
+static int
+value_cmp(const void *a, const void *b)
+{
+    VALUE x = *(const VALUE *)a, y = *(const VALUE *)b;
+    return x < y ? -1 : x > y;
+}
+
+/* No lock or unlink: the world is stopped, and its holder may be us. */
+static void
+forget_native_methods(void)
+{
+    struct rpyyarv_native_method *entry;
+    qsort(gone_classes, gone_len, sizeof(VALUE), value_cmp);
+    for (entry = rpyyarv_native_methods; entry; entry = entry->next) {
+        st_data_t key = (st_data_t)entry->def;
+        if (!bsearch(&entry->klass, gone_classes, gone_len, sizeof(VALUE),
+                     value_cmp)) continue;
+        entry->klass = Qfalse;
+        if (rpyyarv_native_by_def) {
+            st_delete(rpyyarv_native_by_def, &key, NULL);
+        }
+    }
+}
+
+/* Marking is complete and nothing is swept yet: unmarked means dead. */
+static void
+weak_classes_sweep(VALUE tpval, void *data)
+{
+    long i, kept = 0;
+    (void)tpval;
+    (void)data;
+    gone_len = 0;
+    if (!gc_major_p()) return;
+    for (i = 0; i < weak_len; i++) {
+        VALUE k = weak_classes[i];
+        if (gc_flag_p(k, id_marked)) weak_classes[kept++] = k;
+        else push_value(&gone_classes, &gone_len, &gone_capa, k);
+    }
+    weak_len = kept;
+    if (gone_len == 0) return;
+    forget_native_methods();
+    if (classes_gone_hook) classes_gone_hook(gone_len);
+}
+
+uintptr_t
+rpyyarv_gone_class(long i)
+{
+    return (uintptr_t)gone_classes[i];
+}
+
+void
+rpyyarv_set_classes_gone_hook(void (*fn)(long))
+{
+    VALUE tp;
+    classes_gone_hook = fn;
+    if (!NIL_P(pin_probe)) return;
+    pin_probe = rb_obj_alloc(rb_cObject);
+    rb_gc_register_mark_object(pin_probe);
+    sym_major_by = ID2SYM(rb_intern("major_by"));
+    id_marked = rb_intern("marked");
+    id_pinned = rb_intern("pinned");
+    /* Outside any GC: the first call interns its names. */
+    (void)rb_gc_object_metadata(pin_probe);
+    (void)rb_gc_latest_gc_info(sym_major_by);
+    tp = rb_tracepoint_new(0, RUBY_INTERNAL_EVENT_GC_END_MARK,
+                           weak_classes_sweep, NULL);
+    rb_gc_register_mark_object(tp);
+    rb_tracepoint_enable(tp);
+}
+
 /* dmark runs with the data pointer; the hook itself needs no state. */
 static void
 gc_hook_dmark(void *unused)
 {
     (void)unused;
     if (gc_mark_hook) gc_mark_hook();
+    weak_classes_mark();
 }
 
 static size_t

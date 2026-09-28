@@ -117,6 +117,12 @@ void rpyyarv_gc_mark_value(uintptr_t v);
 /* rb_gc_mark_maybe on a word that may not be a VALUE; jitframes use it. */
 void rpyyarv_gc_mark_maybe(uintptr_t v);
 
+/* A singleton class held weakly; fn(n) reports the ones a GC found dead. */
+int rpyyarv_weak_class_p(uintptr_t v);
+void rpyyarv_weak_class_add(uintptr_t v);
+void rpyyarv_set_classes_gone_hook(void (*fn)(long));
+uintptr_t rpyyarv_gone_class(long i);
+
 uintptr_t rpyyarv_int_to_s(uintptr_t v);
 uintptr_t rpyyarv_str_gsub2(uintptr_t str, uintptr_t pat, uintptr_t rep,
                             uintptr_t mid, int *state);
