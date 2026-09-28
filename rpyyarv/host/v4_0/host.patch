@@ -287,7 +287,7 @@ new file mode 100644
 index 0000000000..029424b338
 --- /dev/null
 +++ b/rpyyarv.h
-@@ -0,0 +1,57 @@
+@@ -0,0 +1,58 @@
 +#ifndef RPYYARV_H
 +#define RPYYARV_H 1
 +// Definitions rpyyarv exposes to the CRuby codebase.
@@ -342,6 +342,7 @@ index 0000000000..029424b338
 +VALUE rb_rpyyarv_call_method_iseq(VALUE self, const void *me, int argc,
 +                                  const VALUE *argv, VALUE block, int kw);
 +void *rb_rpyyarv_cref_new(const void *outer, VALUE klass, int by_eval);
++int rb_rpyyarv_gc_hooks_run_p(void);
 +RBIMPL_SYMBOL_EXPORT_END()
 +
 +#endif // #ifndef RPYYARV_H
@@ -383,7 +384,7 @@ index b4ad304429..573768e180 100644
  #include "vm_sync.h"
  #include "shape.h"
  
-@@ -1566,6 +1567,61 @@ rb_proc_isolate(VALUE self)
+@@ -1566,6 +1567,70 @@ rb_proc_isolate(VALUE self)
      return dst;
  }
  
@@ -425,6 +426,15 @@ index b4ad304429..573768e180 100644
 +    return outer;
 +}
 +
++/* Whether a GC run now reaches its objspace hooks (gc.c, vm_trace.c). */
++int
++rb_rpyyarv_gc_hooks_run_p(void)
++{
++    const rb_execution_context_t *ec = GET_EC();
++    return ec->cfp && !(ec->trace_arg && (ec->trace_arg->event &
++                                          RUBY_INTERNAL_EVENT_OBJSPACE_MASK));
++}
++
 +VALUE
 +rb_rpyyarv_call_method_iseq(VALUE self, const void *me_ptr, int argc,
 +                            const VALUE *argv, VALUE block, int kw)
@@ -445,7 +455,7 @@ index b4ad304429..573768e180 100644
  VALUE
  rb_proc_ractor_make_shareable(VALUE self, VALUE replace_self)
  {
-@@ -1596,7 +1652,8 @@ rb_proc_ractor_make_shareable(VALUE self, VALUE replace_self)
+@@ -1596,7 +1661,8 @@ rb_proc_ractor_make_shareable(VALUE self, VALUE replace_self)
          proc_isolate_env(self, proc, read_only_variables);
          proc->is_isolated = TRUE;
      }

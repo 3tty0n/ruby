@@ -52,6 +52,7 @@ const void *rb_rpyyarv_method_iseq(VALUE klass, ID mid, const void *iseq,
 VALUE rb_rpyyarv_call_method_iseq(VALUE self, const void *me, int argc,
                                   const VALUE *argv, VALUE block, int kw);
 void *rb_rpyyarv_cref_new(const void *outer, VALUE klass, int by_eval);
+int rb_rpyyarv_gc_hooks_run_p(void);
 RBIMPL_SYMBOL_EXPORT_END()
 
 #endif // #ifndef RPYYARV_H

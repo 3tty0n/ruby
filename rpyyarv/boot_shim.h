@@ -83,6 +83,7 @@ void *rpyyarv_iseqw_ptr(uintptr_t iseqw);
 uintptr_t rpyyarv_iseqw_children(uintptr_t iseqw);
 long rpyyarv_iseqw_child_index(uintptr_t children, uintptr_t ary, long hint);
 void *rb_rpyyarv_cref_new(const void *outer, uintptr_t klass, int by_eval);
+int rb_rpyyarv_gc_hooks_run_p(void);
 
 long      rpyyarv_str_len(uintptr_t str);
 const char *rpyyarv_str_ptr(uintptr_t str);

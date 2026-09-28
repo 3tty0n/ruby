@@ -1208,11 +1208,12 @@ gc_major_p(void)
     return !NIL_P(rb_gc_latest_gc_info(sym_major_by));
 }
 
-/* Kept, and pinned, in a minor GC (forgetting flushes caches) or a move. */
+/* Kept, and pinned, in a minor GC (forgetting flushes caches) or a move;
+ * kept too when GC_END_MARK will be skipped, as no purge would follow. */
 static int
 weak_classes_held_p(void)
 {
-    if (!gc_major_p()) return 1;
+    if (!gc_major_p() || !rb_rpyyarv_gc_hooks_run_p()) return 1;
     rb_gc_mark(pin_probe);
     return gc_flag_p(pin_probe, id_pinned);
 }

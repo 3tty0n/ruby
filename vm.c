@@ -1605,6 +1605,15 @@ rb_rpyyarv_cref_new(const void *outer_ptr, VALUE klass, int by_eval)
     return outer;
 }
 
+/* Whether a GC run now reaches its objspace hooks (gc.c, vm_trace.c). */
+int
+rb_rpyyarv_gc_hooks_run_p(void)
+{
+    const rb_execution_context_t *ec = GET_EC();
+    return ec->cfp && !(ec->trace_arg && (ec->trace_arg->event &
+                                          RUBY_INTERNAL_EVENT_OBJSPACE_MASK));
+}
+
 VALUE
 rb_rpyyarv_call_method_iseq(VALUE self, const void *me_ptr, int argc,
                             const VALUE *argv, VALUE block, int kw)
