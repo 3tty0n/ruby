@@ -51,6 +51,8 @@ class Frame(object):
     pending_value = 0
     pending_block = None
     pending_frame = None
+    # The last *splat's arguments: marked, so compaction cannot move them.
+    splat_args = None
 
     def __init__(self, iseq, self_val, cref=None, entry=None):
         self = hint(self, access_directly=True, fresh_virtualizable=True)

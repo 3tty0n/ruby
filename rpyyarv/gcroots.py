@@ -167,6 +167,11 @@ def _mark_frame_now(f):
     # f.cref needs no mark: dispatch.root_base roots every Cref class.
     if not value.is_immediate(f.pending_value):
         _mark(f.pending_value, 'frame-pending')
+    splat = f.splat_args
+    if splat is not None:
+        for v in splat:
+            if not value.is_immediate(v):
+                _mark(v, 'frame-splat')
     _mark_block_procs(f.block)
     _mark_block_procs(f.own_block)
     _mark_block_procs(f.pending_block)

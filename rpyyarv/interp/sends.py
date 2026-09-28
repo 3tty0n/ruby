@@ -1162,9 +1162,16 @@ def _splat_trailing(frame, args, at, npos, trailing):
     return args
 
 
-@unroll_safe
 def _splat_args(frame, at, npos, trailing):
-    """A *splat call's args as a list; the Array stays on the marked stack."""
+    """A *splat call's args as a list, pinned until the frame's next one."""
+    args = _splat_list(frame, at, npos, trailing)
+    if not we_are_jitted():
+        frame.splat_args = args
+    return args
+
+
+@unroll_safe
+def _splat_list(frame, at, npos, trailing):
     # Restated so the codewriter sees every stack index as non-negative.
     assert at >= 0
     args = []
