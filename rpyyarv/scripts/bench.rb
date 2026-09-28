@@ -300,8 +300,26 @@ class RubyBenchSuite
       Dir[File.join(@dir, "benchmarks", "**", "#{DRV_PREFIX}*.rb")].each { |f| File.unlink(f) }
       Dir[File.join(@dir, "benchmarks", "*.rb")].each { |f| h[File.basename(f, ".rb")] = f }
       Dir[File.join(@dir, "benchmarks", "*", "benchmark.rb")].each { |f| h[File.basename(File.dirname(f))] = f }
-      h
+      # Only upstream benchmarks: untracked stand-in drivers are not ruby-bench.
+      tracked = self.class.tracked(@dir)
+      rel = ->(f) { f.delete_prefix("#{@dir}/") }
+      tracked ? h.select { |_, f| tracked.include?(rel[f]) } : h
     end
+  end
+
+  # nil outside a git checkout, where nothing can tell a leftover apart.
+  def self.tracked(dir)
+    out, status = Open3.capture2("git", "-C", dir, "ls-files", "benchmarks")
+    status.success? ? out.lines.map(&:chomp) : nil
+  rescue SystemCallError
+    nil
+  end
+
+  # Commit and local changes of the checkout, for the manifest.
+  def self.checkout(dir)
+    commit, = Open3.capture2("git", "-C", dir, "rev-parse", "HEAD")
+    dirty, = Open3.capture2("git", "-C", dir, "status", "--porcelain")
+    { "commit" => commit.strip, "dirty" => dirty.lines.map(&:strip) }
   end
 
   def gems?(bench) = File.exist?(File.join(File.dirname(paths[bench]), "Gemfile"))
@@ -403,7 +421,8 @@ def probe(suite, bench)
 end
 
 def inventory_for(suite, names, refresh)
-  cache = load_inventory
+  # A benchmark no longer in the suite must not linger in coverage.
+  cache = load_inventory.select { |bench, _| suite.paths.key?(bench) }
   names.each do |bench|
     next if cache[bench] && !refresh
     cache[bench] = probe(suite, bench)

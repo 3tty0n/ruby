@@ -57,6 +57,18 @@ module RPyYARVEvaluation
       end }
   end
 
+  # The benchmark lists bench.rb would time, and the ruby-bench checkout.
+  def benchmark_manifest
+    load File.join(ROOT, "scripts", "bench.rb") unless defined?(RubyBenchSuite)
+    suite = RubyBenchSuite.new({})
+    { "awfy" => AwfySuite.new({}).benchmarks,
+      "ruby-bench" => suite.available? ? suite.benchmarks : [],
+      "ruby-bench-checkout" =>
+        suite.available? ? RubyBenchSuite.checkout(suite.dir) : nil }
+  rescue StandardError => error
+    { "error" => "#{error.class}: #{error.message}" }
+  end
+
   def sha256(path) = Digest::SHA256.file(path).hexdigest
 
   def run_id(kind)
@@ -107,6 +119,7 @@ module RPyYARVEvaluation
         "git" => RPyYARVEvaluation.git_metadata,
         "host" => RPyYARVEvaluation.host_metadata,
         "build" => RPyYARVEvaluation.build_provenance,
+        "benchmarks" => RPyYARVEvaluation.benchmark_manifest,
         "commands" => []
       }
       save
