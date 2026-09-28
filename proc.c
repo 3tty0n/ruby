@@ -3609,7 +3609,10 @@ rb_rpyyarv_handle_proc_p(VALUE procval)
 VALUE
 rb_rpyyarv_proc_new(rb_block_call_func_t func, VALUE data, VALUE self_v)
 {
+    // rb_iterate0 parks the ifunc in our caller's frame, which never pops.
+    rb_control_frame_t *cfp = GET_EC()->cfp;
     VALUE procval = rb_proc_new(func, data);
+    cfp->block_code = NULL;
     rpyyarv_block_func = func;
     rb_proc_t *proc;
     GetProcPtr(procval, proc);

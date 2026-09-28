@@ -217,7 +217,7 @@ index b1417a4729..c0702f9140 100644
        case VM_METHOD_TYPE_ATTRSET:
        case VM_METHOD_TYPE_IVAR:
        case VM_METHOD_TYPE_ZSUPER:
-@@ -3550,6 +3575,48 @@ rb_proc_new(
+@@ -3550,6 +3575,51 @@ rb_proc_new(
      return procval;
  }
  
@@ -255,7 +255,10 @@ index b1417a4729..c0702f9140 100644
 +VALUE
 +rb_rpyyarv_proc_new(rb_block_call_func_t func, VALUE data, VALUE self_v)
 +{
++    // rb_iterate0 parks the ifunc in our caller's frame, which never pops.
++    rb_control_frame_t *cfp = GET_EC()->cfp;
 +    VALUE procval = rb_proc_new(func, data);
++    cfp->block_code = NULL;
 +    rpyyarv_block_func = func;
 +    rb_proc_t *proc;
 +    GetProcPtr(procval, proc);
