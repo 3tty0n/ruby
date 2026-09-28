@@ -74,7 +74,8 @@ BIN       ?= .
 
 .PHONY: all test microbench awfy bench bench-viz eval eval-test setup setup-gems
 .PHONY: bench-bootstrap bench-setup
-.PHONY: gccheck gcscripts compactcheck ractorcheck
+.PHONY: gccheck gcscripts compactcheck stresscompactcheck timercompactcheck
+.PHONY: ractorcheck
 .PHONY: build build-cruby build-interp build-jit link clean
 .PHONY: pypy-patch host
 
@@ -264,6 +265,15 @@ gccheck:
 compactcheck:
 	$(MAKE) gccheck GCENV='RUBYOPT=-r$(CURDIR)/test/autocompact.rb \
 	  RUBY_GC_HEAP_OLDOBJECT_LIMIT_FACTOR=0.01'
+
+# gccheck with GC.compact at one in 4096 rpyyarv dispatches.
+stresscompactcheck:
+	$(MAKE) gccheck GCENV='RPYYARV_GC_STRESS=compact \
+	  RPYYARV_GC_STRESS_EVERY=4096'
+
+# gccheck with a timer thread running verify_compaction_references.
+timercompactcheck:
+	$(MAKE) gccheck GCENV='RUBYOPT=-r$(CURDIR)/test/compact_prelude.rb'
 
 ractorcheck:
 	@export $(LIBPATH); \

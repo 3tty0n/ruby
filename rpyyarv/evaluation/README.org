@@ -81,6 +81,23 @@ Successful performance runs produce publication-ready SVG files:
 - =scatter-ENGINE.svg=: reference time versus RPyYARV JIT time on equal log
   scales.  Points below the diagonal are RPyYARV wins.
 
+* Compaction stresses
+
+Each runs the whole =gccheck= suite (both RPyYARV binaries, output compared
+with CRuby, =RUBY_GC_MALLOC_LIMIT=16384=).  Stock CRuby is the reference for
+(a) and (c): it runs under the same stress, so a script it cannot survive is
+skipped as a host problem, not charged to RPyYARV.
+
+| Stress | What it does | Where objects move | Command |
+|--------+--------------+--------------------+---------|
+| (a) auto-compaction | =GC.auto_compact=, every GC major | any allocation inside host C code, e.g. mid method search | =make compactcheck= |
+| (b) dispatch stress | =GC.compact= at one in 4096 RPyYARV dispatches | only at RPyYARV dispatch boundaries | =make stresscompactcheck= |
+| (c) timer thread | =GC.verify_compaction_references= every 20 ms from a thread | where the main thread yields (GVL, interrupt checks), e.g. in a delegated call | =make timercompactcheck= |
+
+(b) sets =RPYYARV_GC_STRESS=compact RPYYARV_GC_STRESS_EVERY=4096=; CRuby has
+no equivalent, so its reference output is unstressed.  (c) loads
+=test/compact_prelude.rb= through =RUBYOPT=.
+
 * Running on Linux/amd64
 
 The harness selects the shared-library suffix, the loader variable
