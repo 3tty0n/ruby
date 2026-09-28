@@ -46,6 +46,9 @@ endif
 
 SHIM    := librpyyarv_boot.$(SOEXT)
 PYPY    ?= ./pypy
+# The RPython base the paper's binaries were translated from.
+PYPY_REPO   ?= https://github.com/pypy/pypy
+PYPY_COMMIT ?= 4eeb73ca9598d4743be0c8e452bf7850b7a17630
 RUBY_BENCH ?= $(CURDIR)/ruby-bench
 # AWFY needs set/subclass_compatible.rb from the source tree, or deltablue dies.
 AWFY_RUBYLIB ?= $(HOST_SRC)/lib
@@ -304,7 +307,9 @@ pypy-patch: | $(PYPY)
 	done
 
 $(PYPY):
-	git clone --depth=1 https://github.com/pypy/pypy $@
+	git init -q $@
+	cd $@ && git remote add origin $(PYPY_REPO) && \
+	  git fetch -q --depth=1 origin $(PYPY_COMMIT) && git checkout -q FETCH_HEAD
 
 clean:
 	rm -f $(PROBE) $(SHIM) rpyyarv rpyyarv-jit
