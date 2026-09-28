@@ -70,8 +70,8 @@ def load(iseqw):
     boot.gc_register(iseqw)
     program = rawiseq.RawProgram('', _path(iseqw))
     root = boot.call0(iseqw, 'to_a')
-    # An RPython list is no GC root: pinned until the pools register.
-    gcroots.keepalive(root)
+    # Every member, not just root: an array marks its elements movable.
+    boot.pin_load_tree(root)
     pending = [root]
     native_pending = [iseqw]
     owners = [-1]
@@ -95,7 +95,7 @@ def _read_iseq(program, pending, native_pending, owners, ary, iseqw, parent):
     misc = boot.ary_entry(ary, I_MISC)
     params = boot.ary_entry(ary, I_PARAMS)
     children = boot.iseqw_children(iseqw)
-    gcroots.keepalive(children)
+    boot.pin_load_tree(children)
     child_at = [0]
     raw = rawiseq.RawISeq(
         boot.str_of(boot.ary_entry(ary, I_LABEL)),

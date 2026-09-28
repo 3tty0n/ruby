@@ -45,6 +45,14 @@ rb_gone_class = _ext('rpyyarv_gone_class', [lltype.Signed], VALUE,
                      reenters=False)
 
 
+rb_pin_load_tree = _ext('rpyyarv_pin_load_tree', [VALUE], lltype.Void,
+                        reenters=False)
+
+
+rb_unpin_load_trees = _ext('rpyyarv_unpin_load_trees', [], lltype.Void,
+                           reenters=False)
+
+
 rb_gc_register = _ext('rpyyarv_gc_register_mark_object', [VALUE], lltype.Void, reenters=True)
 
 
@@ -62,6 +70,14 @@ def obj_written(a, b):
 
 def wb_direct():
     return rffi.cast(lltype.Signed, rb_wb_direct()) != 0
+
+
+def pin_load_tree(v):
+    rb_pin_load_tree(_v(v))
+
+
+def unpin_load_trees():
+    rb_unpin_load_trees()
 
 
 def gc_register(v):

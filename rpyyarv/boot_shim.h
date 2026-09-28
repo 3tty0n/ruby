@@ -123,6 +123,10 @@ void rpyyarv_weak_class_add(uintptr_t v);
 void rpyyarv_set_classes_gone_hook(void (*fn)(long));
 uintptr_t rpyyarv_gone_class(long i);
 
+/* Pin every member of a to_a tree until the loader releases it. */
+void rpyyarv_pin_load_tree(uintptr_t v);
+void rpyyarv_unpin_load_trees(void);
+
 uintptr_t rpyyarv_int_to_s(uintptr_t v);
 uintptr_t rpyyarv_str_gsub2(uintptr_t str, uintptr_t pat, uintptr_t rep,
                             uintptr_t mid, int *state);

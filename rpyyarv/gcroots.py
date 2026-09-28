@@ -89,6 +89,7 @@ def keepalive(v):
 
 def release_load_temporaries():
     state.pinned = []
+    boot.unpin_load_trees()
 
 
 def hold(v):

@@ -1295,13 +1295,56 @@ rpyyarv_set_classes_gone_hook(void (*fn)(long))
     rb_tracepoint_enable(tp);
 }
 
+/* A to_a tree being loaded: its members move freely until their pool. */
+static VALUE *load_pins;
+static long load_len, load_capa;
+
+static void pin_load_tree(VALUE v);
+
+static int
+pin_load_pair(VALUE key, VALUE val, VALUE unused)
+{
+    (void)unused;
+    pin_load_tree(key);
+    pin_load_tree(val);
+    return ST_CONTINUE;
+}
+
+static void
+pin_load_tree(VALUE v)
+{
+    long i;
+    if (SPECIAL_CONST_P(v)) return;
+    push_value(&load_pins, &load_len, &load_capa, v);
+    if (RB_TYPE_P(v, T_ARRAY)) {
+        for (i = 0; i < RARRAY_LEN(v); i++) pin_load_tree(RARRAY_AREF(v, i));
+    }
+    else if (RB_TYPE_P(v, T_HASH)) {
+        rb_hash_foreach(v, pin_load_pair, 0);
+    }
+}
+
+void
+rpyyarv_pin_load_tree(uintptr_t v)
+{
+    pin_load_tree((VALUE)v);
+}
+
+void
+rpyyarv_unpin_load_trees(void)
+{
+    load_len = 0;
+}
+
 /* dmark runs with the data pointer; the hook itself needs no state. */
 static void
 gc_hook_dmark(void *unused)
 {
+    long i;
     (void)unused;
     if (gc_mark_hook) gc_mark_hook();
     weak_classes_mark();
+    for (i = 0; i < load_len; i++) rb_gc_mark(load_pins[i]);
 }
 
 static size_t
