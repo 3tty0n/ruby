@@ -1,5 +1,387 @@
 #+TITLE: RPyYARV PLDI Evaluation Harness
 
+This file is the reproduction guide for the paper's evaluation and the
+reference for the harness.  All commands run from =rpyyarv/= unless stated
+otherwise.
+
+* The paper's build
+
+| Item                 | Value                                                  |
+|----------------------+--------------------------------------------------------|
+| Repository commit    | =65bde7599e= (branch =ruby_4_0_rpyyarv_value=)         |
+| RPython base         | pypy =4eeb73ca9598d4743be0c8e452bf7850b7a17630=        |
+| RPython patches      | =pypy-patches/0001= to =0004=, all applied             |
+| Translation          | =rpyyarv=: default options; =rpyyarv-jit=: =-Ojit=     |
+| ruby-bench           | =09b76c8b0f94c8182080cdae01e95151f0e22dd9=             |
+| are-we-fast-yet      | =74306fec151070fd07157cefeacf19e7e0bcdc89= + =scripts/awfy-som-set.patch= |
+| Reference machine    | Apple M4 Pro (14 cores, 24 GB), macOS 26.6.2, arm64    |
+| Toolchain            | Apple clang 17.0.0, rustc 1.98.0, CPython 2.7.18, autoconf 2.73, rsvg-convert 2.62.3 |
+| Driver Ruby for spec | rbenv Ruby 4.0.6 (only for =evaluation/spec.rb=)        |
+
+The CRuby host is this repository's own tree: its CRuby sources already
+carry the RPyYARV hooks (=vm.c=, =rpyyarv.h=, ...).  =host/v4_0/host.patch=
+records the same delta against stock CRuby 4.0 for porting; the build below
+does not apply it.
+
+The patch hashes, RPython base and translation options are recorded in every
+results manifest (see [[*Provenance and checking a run][Provenance]]); the binary and =libruby= hashes are
+machine-specific and only identify a build on one machine.
+
+* Prerequisites
+
+** macOS arm64 (the reference platform)
+
+- Xcode command line tools (clang, =lldb=, =vmmap=, =sample=,
+  =malloc_history=, =/usr/bin/time=)
+- Homebrew: =autoconf=, =openssl@3=, =libyaml=, =libffi=, =librsvg= (for
+  =rsvg-convert=, the SVG to PDF step of the figures)
+- rustc and cargo from rustup, for YJIT and ZJIT (the Makefile puts
+  =~/.cargo/bin= on =PATH=)
+- a Python 2 for RPython: CPython 2.7 (e.g. via pyenv) or pypy2; the
+  Makefile takes =python2=, else =pypy2=, or =PYTHON2= / =RPYTHON=
+- =python3= for =make test=, =perl= for the per-run timeouts, =git=
+- a Ruby 4.0 on =PATH= for =evaluation/spec.rb= (rbenv =4.0.6= was used)
+- optional: TruffleRuby and JRuby (see [[*Optional engines][Optional engines]]); the paper's
+  campaign runs without them
+
+** Linux x86-64 (untested on x86)
+
+Debian/Ubuntu package names:
+
+- =build-essential autoconf bison git perl=, =libssl-dev zlib1g-dev
+  libyaml-dev libffi-dev= (=make setup= installs =libyaml-dev= itself when
+  it is missing)
+- rustc and cargo from rustup, not the distribution
+- =python2= if the distribution still has it, otherwise =pypy= (the Debian
+  package is PyPy2)
+- =python3=, =time= (GNU time, for =EVAL=memory=), =librsvg2-bin= for
+  =rsvg-convert=
+- optional: =linux-perf=, =gdb=
+
+** Intel macOS (untested)
+
+As macOS arm64, with Homebrew under =/usr/local=.  The harness finds the
+arch directory (=.ext/x86_64-darwin*=) and =rsvg-convert= through globs and
+=PATH=, and =vmmap=, =sample= and =malloc_history= exist there too, so the
+macOS-only studies should run; nothing has been tried.
+
+* Build from scratch
+
+** CRuby
+
+#+begin_src sh
+git checkout 65bde7599e
+./autogen.sh                 # at the repository root
+cd rpyyarv
+make build-cruby             # --enable-shared, YJIT and ZJIT
+make link                    # librpyyarv_boot, used by make test
+#+end_src
+
+=build-cruby= configures in =../build= with =--enable-shared= plus
+=CRUBY_JIT_CONFIGURE_ARGS= (default =--enable-yjit --enable-zjit=); extra
+flags go in =CRUBY_CONFIGURE_ARGS=.  It stops early if =rustc= is missing.
+
+** RPython and its patches
+
+#+begin_src sh
+make pypy-patch              # fetches ./pypy at the pinned commit, then patches
+make build-interp            # rpyyarv       (default translation options)
+make build-jit               # rpyyarv-jit   (-Ojit)
+#+end_src
+
+=./pypy= is a shallow fetch of =PYPY_COMMIT= (=4eeb73ca9598=).
+=pypy-patch= applies every =pypy-patches/*.patch= that is not already
+applied and fails if one does not apply; running it again is a no-op.
+=PYPY_PATCH_SKIP=0002= leaves one patch out for the build-only ablations.
+Both translations depend on =pypy-patch=, so =make build= does all of this.
+On the reference machine the translations take 1 min (=rpyyarv=) and 4 min
+(=rpyyarv-jit=).
+
+Apply all four patches on every architecture: that is what the paper's
+binaries were built from, and the aarch64-only ones do nothing on x86-64.
+
+| Patch | Files | aarch64 | x86-64 |
+|-------+-------+---------+--------|
+| 0001 int-ror | =jit/backend/aarch64/*=, plus a backend-only =INT_ROR= resop in =metainterp/resoperation.py= and =executor.py= | peephole that fuses =(x >>u k) \vert (x << 64-k)= into one =ROR= (the flonum codec); also dumps =jit-backend-counts= at exit | applies; inert.  Only the aarch64 regalloc emits =INT_ROR=, and x86 already dumps the counts.  Flonum rotates stay two shifts and an or on x86, a small performance difference, not a correctness one |
+| 0002 gc-mark-reads-vables-without-forcing | =jit/metainterp/virtualizable.py=, =rlib/jit.py= | needed | needed: arch-independent |
+| 0003 save-callee-saved-vfp-regs | =jit/backend/aarch64/{assembler,registers}.py= | needed: AAPCS64 makes d8-d15 callee-saved and the backend uses d8/d15 as scratch, so C callers (CRuby) lost float values; also passes =supports_floats= through in the cond-call slow path | applies; inert.  SysV x86-64 has no callee-saved XMM register, and the x86 slow path already passes =supports_floats=.  Win64 (xmm6-15 callee-saved) is out of scope |
+| 0004 extern-forces-virtualizable-without-random-effects | =jit/codewriter/effectinfo.py=, =rtyper/lltypesystem/rffi.py=, =translator/backendopt/collectanalyze.py= | needed | needed: arch-independent |
+
+The x86-64 backend keeps the jitframe in =rbp= (aarch64: =x29=), saves only
+the SysV callee-saved general registers in its prologue, and logs
+=jit-backend-addr= in the same format, so the harness's code-size parsing is
+unchanged.  Whether the RPyYARV JIT is correct on x86-64 has not been
+checked; the verification steps below are the test.
+
+** Benchmarks and gems
+
+#+begin_src sh
+make setup                   # ruby-bench and AWFY at pinned commits, gems
+#+end_src
+
+=make setup= fetches =ruby-bench= at =RUBY_BENCH_COMMIT= and =awfy= at
+=AWFY_COMMIT= (with =scripts/awfy-som-set.patch=), then bundles every
+ruby-bench benchmark's =Gemfile.lock= into =.bench-gems= with the CRuby under
+test and runs the railsbench database setup.  Bundler 4.0.16 rewrites the
+=BUNDLED WITH= and bundler checksum lines of about 25 lockfiles; the gem
+versions stay as locked, and the manifest records the checkout as dirty.
+
+Two environment pitfalls:
+
+- =GEM_PATH=: the drivers run on =../build/ruby=, uninstalled.  If the
+  default gem path holds a native =json= (or other) gem compiled against a
+  different =libruby=, the driver dies loading it.  The reference runs set
+  =GEM_PATH= to rbenv's Ruby 4.0.6 gem directory; any directory without such
+  gems works (untested beyond that one).
+- =AWFY_RUBYLIB=: AWFY needs =set/subclass_compatible.rb= from =../lib=.
+  =make= sets it; a hand-run =scripts/bench.rb= without it fails every AWFY
+  benchmark, CRuby's too.
+
+** Verification
+
+#+begin_src sh
+make test                    # ctypes tests of the boot shim and GC hooks
+make eval-test               # the harness's own regression tests
+make eval EVAL=doctor        # binaries, checkouts and engines start
+make gccheck                 # both binaries vs CRuby, malloc limit 16384
+make gccheck GCLIMIT=1024
+make compactcheck stresscompactcheck timercompactcheck
+make ractorcheck
+#+end_src
+
+=gccheck= runs =rpyyarv= and =rpyyarv-jit= from =BIN= (default =.=) on the
+=gcscripts= list and compares their output with CRuby's.  =app_lc_fizzbuzz=
+is always skipped: it does not run without the GC limit either.  A "crash"
+with exit 142 is the 60 s alarm (=GCTIMEOUT=) firing, a timeout rather than
+a fault in the VM.
+
+* The campaign
+
+=evaluation/campaign.sh= is the driver the paper's numbers come from.  It
+runs one experiment at a time, each behind a quiet-machine gate: the 5-minute
+load average must drop below =GATE_LOAD= (3.0), polled every minute, for at
+most =GATE_TIMEOUT= (2 h), after which the step runs and the gate log says
+=GATE-TIMEOUT ... FLAG=.  It reads the load average from =/proc/loadavg= on
+Linux and =sysctl vm.loadavg= on macOS.  A watchdog kills any =rpyyarv=
+child older than 15 min (every run has a 600 s alarm, which RPyYARV does not
+always honour), and each step reaps leftovers.  =EVAL_OPTIONAL_ENGINES=0=
+keeps TruffleRuby and JRuby out, as in the paper.
+
+#+begin_src sh
+GEM_PATH=... nohup evaluation/campaign.sh &     # or STEPS="gc nursery"
+#+end_src
+
+Logs go to =evaluation/results/campaign-STAMP/= (=campaign.log=,
+=gate-log.txt=, =step-NAME.log=); results go to =evaluation/results/= as
+usual.  Run it detached (=nohup=): a session-bound background job may be
+killed with its terminal.
+
+The steps, in order, and their wall-clock time on the reference machine
+(from manifests' =seconds=):
+
+| Step | Command | Time |
+|------+---------+------|
+| gc | =make eval EVAL=gc EVALFLAGS="16384 4096 1024"= | 23 min gccheck, 55 min with the GC-frequency probes |
+| nursery | =EVAL_TRIALS=20 make eval EVAL=nursery EVALFLAGS="evaluation/nursery-hexapdf.rb 1073741824 4194304 131072"= | 21 min |
+| nohook | =make eval EVAL=ablate EVALFLAGS="gc-no-hook"= | 10 min |
+| crossing | =make eval EVAL=crossing= | 8 s |
+| boundary | =make eval EVAL=boundary EVALFLAGS="--suite all"= | 5 min |
+| coverage | =make eval EVAL=coverage EVALFLAGS="--suite all"= | 30-42 min |
+| performance | =make eval EVAL=performance EVALFLAGS="--suite all --procs 3 --refresh-inventory"= | 8.3 h |
+| mechanisms | =make eval EVAL=mechanisms EVALFLAGS="--suite all --performance RESULTS/raw.json"= (the performance run's) | 1.1 h |
+| memory | =make eval EVAL=memory EVALFLAGS="--suite all"= | 2.8 h |
+| delegation | =make eval EVAL=delegation EVALFLAGS="--suite ruby-bench --filter sequel --filter mail --filter rack --filter railsbench --filter shipit --filter lobsters --filter erubi-rails --filter activerecord --filter hexapdf --filter rubocop --filter fluentd --filter ruby-lsp"= | 1.4 h |
+| ablate | =make eval EVAL=ablate= (eight runtime ablations, all suites, 3 processes) | not timed as a whole; =fast-paths-off= alone took 3.9 h |
+| stress | =make eval EVAL=stress EVALFLAGS="--timeout 600 --jobs 4"= | not yet recorded |
+| specstress | =ruby --disable-gems evaluation/spec.rb --suite language --suite core --suite capi --timeout 120 --jobs 4 [--env K=V ...] --out DIR=, once per stress (none, a-d below) | not yet recorded |
+
+The last two are stress runs, not timings; =--jobs 4= runs benchmarks in
+parallel.  The whole campaign takes more than a day.
+
+* GC and compaction stresses
+
+Each =gccheck= variant runs the whole =gccheck= suite (both RPyYARV binaries,
+output compared with CRuby, =RUBY_GC_MALLOC_LIMIT=16384=).  Stock CRuby is
+the reference for (a) and (c): it runs under the same stress, so a script it
+cannot survive is skipped as a host problem, not charged to RPyYARV.
+
+| Stress | What it does | Where objects move | gccheck command |
+|--------+--------------+--------------------+-----------------|
+| (a) auto-compaction | =GC.auto_compact=, every GC major | any allocation inside host C code, e.g. mid method search | =make compactcheck= |
+| (b) dispatch compaction | =GC.compact= at one in 4096 RPyYARV dispatches | only at RPyYARV dispatch boundaries | =make stresscompactcheck= |
+| (c) timer thread | =GC.verify_compaction_references= every 20 ms from a thread | where the main thread yields (GVL, interrupt checks), e.g. in a delegated call | =make timercompactcheck= |
+| (d) dispatch full GC | a full, non-moving GC at one in 4096 dispatches: everything RPyYARV holds must be marked | nothing moves; unmarked objects are freed | =make gccheck GCENV='RPYYARV_GC_STRESS=1 RPYYARV_GC_STRESS_EVERY=4096'= |
+
+(b) and (d) set =RPYYARV_GC_STRESS= (=compact= or =1=) and
+=RPYYARV_GC_STRESS_EVERY=; CRuby has no equivalent, so its reference output
+is unstressed.  (a) loads =test/autocompact.rb= and (c)
+=test/compact_prelude.rb= through =RUBYOPT=.
+
+The same four stresses (and =none=) run over the benchmark corpus with
+=EVAL=stress= (=evaluation/stress.rb=: one verified process per benchmark,
+stress and engine; =stress.csv= and =stress-summary.csv=) and over ruby/spec
+with =evaluation/spec.rb --env K=V=, which passes each variable to mspec and
+the engine under test.  =RPYYARV_GC_STRESS=1= at every dispatch (the
+=gc-stress= ablation) is orders of magnitude slower and is not in the
+default ablation set.
+
+* Memory
+
+- =EVAL=memory= (=evaluation/memory.rb=): peak RSS per engine and benchmark
+  through =/usr/bin/time= (=-l= on macOS, =-v= on Linux), the host heap from
+  =GC.stat=, the RPython heap and JIT code size from =PYPYLOG=
+  (=gc-minor,gc-collect-done,jit-backend-addr=).  =evaluation/membreak.rb
+  RESULTS/memory.json= splits each peak into host heap, framework heap, JIT
+  code and remainder.
+- =evaluation/footprint.rb= (macOS only): the end-of-run physical footprint
+  split into components that sum to it, from =vmmap -wide= of the process at
+  exit (=footprint_prelude.rb=), with the host's and RPython's own accounts
+  carving the malloc and VM regions.  The paper's runs:
+
+  #+begin_src sh
+  nice -n 19 ruby evaluation/footprint.rb --out DIR --suite all
+  nice -n 19 ruby evaluation/footprint.rb --out FOCUS \
+    --filter deltablue --filter richards --filter hexapdf --filter lobsters \
+    --filter optcarrot --filter railsbench --filter rubocop \
+    --msl deltablue --msl richards --msl hexapdf --msl lobsters \
+    --msl optcarrot --msl railsbench --msl rubocop \
+    --dump deltablue --dump lobsters --dump optcarrot --dump railsbench \
+    --dump richards --dump rubocop
+  ruby evaluation/footprint.rb --report DIR/footprint.jsonl
+  #+end_src
+
+  =--msl= reruns under =MallocStackLogging=lite= and classifies live
+  mallocs with =malloc_history=; =--dump= writes a heap dump after a full GC
+  (=RPYYARV_COVERAGE=1= under rpyyarv-jit).  Like every script here it
+  derives the child environment from the checkout, as =scripts/bench.rb=
+  does.  One measured process at a time, niced; the full suite takes
+  several hours.
+- =evaluation/retention.rb HEAP.json [COVERAGE_OUTPUT] [--json]=: which host
+  objects stay alive only because RPyYARV roots them, from a =--dump= heap
+  dump and the coverage output's root inventory.
+- =evaluation/immobile.rb --out DIR [--suite ...]=: objects a compaction
+  had to leave in place, and heap density afterwards.
+
+* Time breakdown
+
+=evaluation/breakdown.rb= (macOS only) samples =rpyyarv-jit= with =sample=
+(1 ms, main thread) and puts every stack into one bucket: CRuby or RPython
+GC, compile, delegated CRuby, compiled trace, or interpreter.  JIT code is
+"<unknown binary>" in =sample='s stacks and is split into loops and bridges
+by the =jit-backend-addr= address ranges.
+
+#+begin_src sh
+ruby evaluation/breakdown.rb --out DIR --procs 3 --window 15 \
+  --filter railsbench --filter lobsters --filter shipit --filter rubocop \
+  --filter hexapdf --filter keyword_args                  # steady state
+ruby evaluation/breakdown.rb --out DIR --phase warmup ...  # launch to WARMED
+ruby evaluation/breakdown.rb --out DIR --sends ITERS ...  # sends per iteration
+ruby evaluation/breakdown.rb --report DIR/breakdown.jsonl [--phase warmup]
+#+end_src
+
+* Correlations, figures, reports
+
+- =ruby evaluation/correlations.rb MECHANISMS-DIR ...=: Pearson and Spearman
+  of log(jit/yjit) against each mechanism statistic, with benchmark-bootstrap
+  95% CIs; writes =DIR/correlations.csv=.
+- =make eval EVAL=figures EVALFLAGS="DIR ... [--out D]"=: every paper figure
+  from the given results directories (the last one of each kind; all
+  ablation directories are merged).  SVG always; PDF at 72 dpi when
+  =rsvg-convert= is found (Homebrew's, else the first on =PATH=).
+  =figures/manifest.json= lists the inputs, their commits and binary hashes,
+  and the reason for every figure skipped.
+- =make eval EVAL=report EVALFLAGS=RESULTS-DIR= turns a run's CSVs into org
+  tables; =EVAL=warmup= recomputes the warm-up CSVs from =raw.json=;
+  =EVAL=loc= counts implementation and host-patch lines.
+
+* Provenance and checking a run
+
+Every =evaluation/results/STAMP-KIND-PID/manifest.json= records:
+
+- =git=: repository commit, =dirty=, and the changed paths
+- =host=: =RUBY_DESCRIPTION=, platform and =uname -a=
+- =build=: SHA-256 of =libruby= (=.dylib=, or =libruby.so.X.Y.Z=), the
+  RPython base commit (=git rev-parse HEAD= in =./pypy=), the SHA-256 of each
+  =pypy-patches= file, and the translation options scraped from the Makefile
+- =benchmarks=: the AWFY and ruby-bench benchmark lists and the ruby-bench
+  commit and dirty state (runs from before =0176a34ebb= lack this)
+- =engine_binaries=: path and SHA-256 of each engine (most experiments)
+- =commands=: argv, environment, exit status and =seconds= of every command
+
+A run matches the paper's build when =git.commit= is =65bde7599e= (or a
+descendant that only changes =rpyyarv/evaluation/= and =rpyyarv/Makefile=),
+=build.rpython_base= is =4eeb73ca...=, =build.pypy_patches= has the four
+hashes below, =build.translation= is ={"rpyyarv": "default", "rpyyarv-jit":
+"-Ojit"}=, and =benchmarks.ruby-bench-checkout.commit= is =09b76c8b0f...=:
+
+#+begin_example
+0001-aarch64-int-ror.patch                                  0b8ab354...
+0002-gc-mark-reads-vables-without-forcing.patch             79b3c71b...
+0003-aarch64-save-callee-saved-vfp-regs.patch               e8252e75...
+0004-extern-forces-virtualizable-without-random-effects.patch fc763a69...
+#+end_example
+
+#+begin_src sh
+ruby -rjson -e 'm = JSON.parse(File.read(ARGV[0]))
+  p m["git"].values_at("commit", "dirty"), m["build"]["rpython_base"],
+    m["build"]["pypy_patches"].transform_values { _1[0, 8] },
+    m["build"]["translation"], m.dig("benchmarks", "ruby-bench-checkout")' \
+  evaluation/results/RUN/manifest.json
+#+end_src
+
+The manifest records the patch files, not whether they were applied to
+=./pypy=; =git -C pypy diff --stat= after =make pypy-patch= should list 13
+files, 237 insertions and 9 deletions.  The =libruby= and binary hashes differ
+per machine and toolchain; compare them only between runs on one machine.
+
+* Portability to Linux and x86-64
+
+Nothing below has been run on x86-64 or Linux.  The VM sources contain no
+architecture-specific code (no inline assembly or =__aarch64__= tests); the
+translated binaries link =libruby= through an absolute =RPATH= into the
+build directory, so no =LD_LIBRARY_PATH= or =patchelf= is needed after
+=make build=.
+
+| Where | Assumption | Linux / x86-64 | State |
+|-------+------------+----------------+-------|
+| =Makefile= (=pypy-patch=) | an empty =PYPY_PATCH_SKIP= made the case pattern =*=, so no patch was ever applied | same on every platform | fixed |
+| =Makefile= (=$(PYPY)=, =$(RUBY_BENCH)=) | cloned upstream HEAD | fetch the pinned commits | fixed |
+| =Makefile= (AWFY) | no rule; =awfy/= came from a hand clone | pinned fetch plus =awfy-som-set.patch= in =make setup= | fixed |
+| =Makefile:20-45=, =run.rb:library_path_var=, =scripts/*.rb= | =DYLD_LIBRARY_PATH=, =.dylib= | chooses =LD_LIBRARY_PATH=, =.so= by OS | already portable |
+| =run.rb:build_provenance= | =libruby.*.dylib= or a real =libruby.so= | Linux's =libruby.so= is a symlink to =libruby.so.X.Y.Z= and was dropped, leaving no hash | fixed |
+| =figures.rb:12= | =/opt/homebrew/bin/rsvg-convert= | first =rsvg-convert= on =PATH= | fixed (Homebrew's still wins on macOS) |
+| =campaign.sh= gate | =sysctl -n vm.loadavg= | =/proc/loadavg= field 2 | fixed |
+| arch directory | =.ext/arm64-darwin25= | every script globs =.ext/*= or =.ext/include/*= | already portable |
+| =memory.rb:33-47= | =/usr/bin/time -l= | =/usr/bin/time -v=, kB to bytes | already portable; needs GNU =time= installed |
+| =footprint.rb:158-164= | =/usr/bin/time -l=, =peak memory footprint= | GNU =time= rejects =-l=, so every measured row fails; =--dump= runs work | documented |
+| =footprint_prelude.rb:32= | =vmmap -wide= at exit | =/proc/PID/smaps= (=Private_Dirty= + =Swap= per mapping) or =smaps_rollup= | documented |
+| =footprint.rb:56-120= | vmmap region types (=MALLOC_*=, =VM_ALLOCATE=, =__TEXT=...) carve malloc from VM | glibc malloc arenas are unnamed anonymous mappings: need =mallinfo2= / =malloc_info= or an =LD_PRELOAD= allocator shim to separate malloc from mmap | documented |
+| =footprint_prelude.rb:36=, =footprint.rb:206= | =MallocStackLogging=, =malloc_history=, =libsystem_malloc.dylib= | =heaptrack= (per-callsite live bytes) and a =libc.so.6= allocator pattern | documented |
+| =breakdown.rb:224= | macOS =sample= | =perf record -F 1000 -g= and =perf script=, with a new parser for its stack format | documented |
+| =breakdown.rb:12,100= | JIT frames are ="<unknown binary>"=; unwinding stops at JIT code because the jitframe lives in =x29= | on x86-64 it lives in =rbp=, so frame-pointer unwinding stops the same way; =perf= shows JIT addresses as =[unknown]=, and RPython writes no =/tmp/perf-PID.map=, so the =jit-backend-addr= ranges would have to be turned into one.  CRuby and the RPython C need =-fno-omit-frame-pointer=, or =--call-graph dwarf= | documented |
+| =breakdown.rb:30-41= | compile-bucket symbols of the aarch64 backend | x86 backend names (=RegAlloc=, =X86*RegisterManager=, =*X86*CodeBuilder=, =MachineCodeBlockWrapper=) added | fixed (untested) |
+| =mechanisms.rb=, =memory.rb=, =breakdown.rb= | =PYPYLOG= =jit-backend-addr= lines | the x86 backend logs the same format; its second copy of the loop line is in =jit-regalloc-stats=, which the harness does not enable | already portable |
+| =scripts/optcarrot-demo:96= | =DYLD_FALLBACK_LIBRARY_PATH= to Homebrew | macOS-only branch; Linux needs SDL2 from the distribution | not a paper result |
+
+Which paper results reproduce where:
+
+- As-is on Linux/x86-64 (in principle; untested): everything in the
+  campaign (performance, warm-up, boundary, crossing, coverage, delegation,
+  mechanisms, correlations, =EVAL=memory= peak RSS, gc, nursery, ablations,
+  stress, spec stress), the =gccheck= stresses, figures, loc and retention
+  (=footprint.rb --dump= does not need vmmap).  Absolute numbers differ by
+  machine; the patches make the x86 JIT differ in one known way (no fused
+  rotate).
+- Needs the work above: the footprint decomposition (=footprint.rb=, its
+  =--msl= malloc attribution) and the wall-time breakdown (=breakdown.rb=).
+- Intel macOS: all of it, including those two, should run unchanged.
+
+Not determinable without an x86 machine: whether the RPyYARV JIT is correct
+on the x86 backend (=make test=, =gccheck= and the stresses answer that);
+whether =stacklet= fibers and the embedded CRuby's own coroutines coexist
+there as on arm64; the real symbol names in =perf= output; and whether
+=RUBY_GC_MALLOC_LIMIT=16384= fires as many collections on glibc malloc.
+
 * Choice of harness
 
 The experiment controller is Ruby because the existing AWFY and ruby-bench
@@ -24,10 +406,11 @@ ruby evaluation/run.rb crossing
 ruby evaluation/run.rb delegation --filter sequel --filter mail --filter rack
 ruby evaluation/run.rb memory --suite all
 ruby evaluation/run.rb mechanisms --suite all --performance RESULTS/raw.json
+ruby evaluation/run.rb stress [--stress NAME] [--timeout SEC] [--jobs N]
 ruby evaluation/run.rb gc 16384 4096 1024
 ruby evaluation/run.rb nursery SCRIPT 1073741824 131072
 ruby evaluation/run.rb ablate baseline gc-no-hook --suite awfy
-# no names given: runs every ablation but gc-stress (see EVAL=gc), and
+# no names given: runs every ablation but gc-stress, and
 # times only rpyyarv/rpyyarv-jit, since the env switches don't touch CRuby
 ruby evaluation/run.rb loc
 ruby evaluation/run.rb plot evaluation/results/RUN/raw.json
@@ -44,12 +427,18 @@ controller's artifact-analysis and plotting regression tests.
 
 =performance= produces =measurements.csv=, =ratios.csv=, =comparisons.csv=,
 and =summary.csv= from the raw output.  CRuby, YJIT, and ZJIT are always
-requested.  TruffleRuby and
-JRuby are added when they are found in =PATH=, or through =TRUFFLERUBY_BIN= /
-=GRAALVM_HOME= and =JRUBY_BIN= / =JRUBY_HOME=.  Installed rbenv and asdf
-versions are also searched, and each executable must pass a startup probe.
-AWFY and ruby-bench remain separate rows in =summary.csv= before the overall
-result.
+requested.  AWFY and ruby-bench remain separate rows in =summary.csv= before
+the overall result.
+
+** Optional engines
+
+TruffleRuby and JRuby are added when they are found in =PATH=, or through
+=TRUFFLERUBY_BIN= / =GRAALVM_HOME= and =JRUBY_BIN= / =JRUBY_HOME=.  Installed
+rbenv and asdf versions are also searched, and each executable must pass a
+startup probe.  =EVAL_OPTIONAL_ENGINES=0= disables the search, so a rerun of
+a protocol that had no optional engine does not gain one.
+
+** Warm-up
 
 The raw file retains every process's complete iteration sequence and the
 harness warm-up boundary.  =warmup.csv= reports the first five-iteration window
@@ -69,10 +458,13 @@ and time-to-stable distributions per engine and per suite and engine, and
 =cruby+yjit= side by side with their ratio.  =run.rb warmup DIR= recomputes
 all three from an existing =raw.json= without rerunning any benchmark.
 
+** Ablations and plots
+
 VALUE-direct ablations use the existing extra-engine protocol.  A variant
 binary passed as =--engine NAME=PATH= is added to =comparisons.csv= and gets
 its own ratio and scatter plots; the VM under active development needs no
-evaluation-only switch.
+evaluation-only switch.  The build-only ablations (=PYPY_PATCH_SKIP=0002=,
+=0004=) need their own =make build-jit=; =EVAL=ablate= prints the recipes.
 
 Successful performance runs produce publication-ready SVG files:
 
@@ -80,57 +472,6 @@ Successful performance runs produce publication-ready SVG files:
   a log-scaled y axis.  The 1x reference line separates wins from losses.
 - =scatter-ENGINE.svg=: reference time versus RPyYARV JIT time on equal log
   scales.  Points below the diagonal are RPyYARV wins.
-
-* Compaction stresses
-
-Each runs the whole =gccheck= suite (both RPyYARV binaries, output compared
-with CRuby, =RUBY_GC_MALLOC_LIMIT=16384=).  Stock CRuby is the reference for
-(a) and (c): it runs under the same stress, so a script it cannot survive is
-skipped as a host problem, not charged to RPyYARV.
-
-| Stress | What it does | Where objects move | Command |
-|--------+--------------+--------------------+---------|
-| (a) auto-compaction | =GC.auto_compact=, every GC major | any allocation inside host C code, e.g. mid method search | =make compactcheck= |
-| (b) dispatch stress | =GC.compact= at one in 4096 RPyYARV dispatches | only at RPyYARV dispatch boundaries | =make stresscompactcheck= |
-| (c) timer thread | =GC.verify_compaction_references= every 20 ms from a thread | where the main thread yields (GVL, interrupt checks), e.g. in a delegated call | =make timercompactcheck= |
-
-(b) sets =RPYYARV_GC_STRESS=compact RPYYARV_GC_STRESS_EVERY=4096=; CRuby has
-no equivalent, so its reference output is unstressed.  (c) loads
-=test/compact_prelude.rb= through =RUBYOPT=.
-
-* Running on Linux/amd64
-
-The harness selects the shared-library suffix, the loader variable
-(=DYLD_LIBRARY_PATH= or =LD_LIBRARY_PATH=), and the peak-RSS reader
-(=/usr/bin/time -l= or =-v=) from the running platform; nothing is
-architecture-specific.  The translated binaries find =libruby= through an
-absolute =RPATH= into the build directory, so no =patchelf= or
-=LD_LIBRARY_PATH= is needed after =make build=.
-
-Prerequisites beyond a normal CRuby build (Debian/Ubuntu names):
-
-- =build-essential=, =libssl-dev=, =zlib1g-dev=, =libyaml-dev=, =libffi-dev=
-  (=make setup= installs =libyaml-dev= itself when it is missing)
-- =rustc= and =cargo= for YJIT/ZJIT, from rustup rather than the distribution
-- a Python 2 for RPython translation: =python2= if the distribution still has
-  it, otherwise =pypy= (the =pypy= Debian package is PyPy2); the Makefile
-  finds either, or accepts =PYTHON2=/=RPYTHON=
-- =python3= for =make test=, =perl= for the run timeouts, =git=
-- optional: =time= for the memory experiment, =linux-perf= for external
-  profiling, TruffleRuby/JRuby for the extra engines
-
-From a fresh clone:
-
-#+begin_src sh
-cd rpyyarv
-make build          # CRuby --enable-shared, then both RPython binaries
-make setup          # clones ruby-bench and installs its pinned gems
-make eval EVAL=doctor
-make eval EVAL=performance EVALFLAGS="--suite all --procs 3"
-#+end_src
-
-=make build-cruby= alone is enough for the CRuby-only experiments.  All paths
-are derived from the checkout; no per-host environment variable is required.
 
 * Evaluation matrix
 
@@ -142,10 +483,10 @@ are derived from the checkout; no per-host environment variable is required.
 | Compatibility | native/delegated/failure coverage | =coverage= | reviewed structural/engineering classification |
 | Native versus delegated | one binary, RPYYARV_NO_REQUIRE | =delegation= | — |
 | Implementation effort | categorized physical LoC | =loc= | reviewed line-level taxonomy |
-| GC integration | malloc limits and nursery sizes | =gc=, =nursery= | root-marking time needs a VM counter |
+| GC integration | malloc limits and nursery sizes | =gc=, =nursery=, =stress= | root-marking time needs a VM counter |
 | Fiber integration | micro plus optcarrot | artifact schema only | stack-window switch |
 | Warm-up | iteration curves and JIT events | =performance= raw samples | case-study curves |
-| Memory | peak RSS and code size | =memory= | RPython heap size needs a VM hook |
+| Memory | peak RSS and code size | =memory=, =footprint.rb= | RPython heap size needs a VM hook |
 | Mechanism | four representative cases | =mechanisms= | live code size |
 
 The =mechanisms= command now collects the trace/guard, boundary, YJIT, and ZJIT
