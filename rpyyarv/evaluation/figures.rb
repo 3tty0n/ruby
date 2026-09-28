@@ -9,7 +9,11 @@ module RPyYARVEvaluation
   # Paper figures rendered from named results directories, one pass, no
   # per-figure hand edits.  Each builder returns [svg paths, source columns].
   module Figures
-    RSVG = "/opt/homebrew/bin/rsvg-convert"
+    RSVG = ["/opt/homebrew/bin",
+            *ENV.fetch("PATH", "").split(File::PATH_SEPARATOR)]
+           .map { |dir| File.join(dir, "rsvg-convert") }
+           .find { |path| File.executable?(path) } ||
+           "/opt/homebrew/bin/rsvg-convert"
     SERIES = [Plotter::BLUE, Plotter::ORANGE, Plotter::GREEN,
               Plotter::PURPLE, Plotter::RED].freeze
     # One colour per engine, shared by every figure that plots engines.
