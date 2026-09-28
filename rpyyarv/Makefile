@@ -296,11 +296,11 @@ build-jit: pypy-patch
 # one file unapplied, for a reproducible no-patch ablation build.
 pypy-patch: | $(PYPY)
 	@for p in $(CURDIR)/pypy-patches/*.patch; do \
-	  case "$$(basename $$p)" in \
+	  [ -z "$(PYPY_PATCH_SKIP)" ] || case "$$(basename $$p)" in \
 	    $(PYPY_PATCH_SKIP)*) continue;; \
 	  esac; \
 	  (cd $(PYPY) && git apply --reverse --check "$$p" >/dev/null 2>&1) \
-	    || (cd $(PYPY) && git apply "$$p"); \
+	    || (cd $(PYPY) && git apply "$$p") || exit 1; \
 	done
 
 $(PYPY):
