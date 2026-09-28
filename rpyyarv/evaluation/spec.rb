@@ -57,7 +57,7 @@ module SpecEval
       "DYLD_LIBRARY_PATH" => BUILD,
       "LD_LIBRARY_PATH" => BUILD,
       "RPYYARV_DEBUG" => "load",
-    }
+    }.merge(@extra_env || {})
   end
 
   def run_file(engine_path, file, timeout)
@@ -139,6 +139,8 @@ module SpecEval
       o.on("--jobs N", Integer) { |j| opts[:jobs] = j }
       o.on("--out DIR") { |d| opts[:out] = d }
       o.on("--filter RE") { |re| opts[:filter] = Regexp.new(re) }
+      # A GC stress, for mspec and the engine under test alike.
+      o.on("--env K=V") { |kv| (@extra_env ||= {}).store(*kv.split("=", 2)) }
     end.parse!(argv)
     opts[:suites] = %w[language core] if opts[:suites].empty?
     engines = opts[:engines].empty? ? ENGINES.reject { |k, _| k == "rpyyarv" } : opts[:engines]
@@ -146,7 +148,7 @@ module SpecEval
                                   "#{Time.now.utc.strftime('%Y%m%dT%H%M%SZ')}-spec-#{Process.pid}")
     FileUtils.mkdir_p(out)
     manifest = { started: Time.now.utc.iso8601, engines: engines, suites: opts[:suites],
-                 timeout: opts[:timeout],
+                 timeout: opts[:timeout], env: @extra_env || {},
                  commit: `git -C #{TOP} rev-parse HEAD`.strip,
                  ruby: `#{env.map { |k, v| "#{k}=#{v}" }.join(' ')} #{ENGINES['cruby']} -v`.strip }
     File.write(File.join(out, "manifest.json"), JSON.pretty_generate(manifest))

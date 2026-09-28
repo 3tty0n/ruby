@@ -13,6 +13,7 @@ require_relative "experiments"
 require_relative "plots"
 require_relative "figures"
 require_relative "gcfreq"
+require_relative "stress"
 
 module RPyYARVEvaluation
   ROOT = File.expand_path("..", __dir__)
@@ -1025,6 +1026,34 @@ module RPyYARVEvaluation
     {}
   end
 
+  # GC/compaction stresses over the corpus; not a timed measurement.
+  def stress(args, results_root)
+    names = []
+    timeout = 600
+    jobs = 4
+    OptionParser.new do |o|
+      o.on("--stress NAME") { |n| names << n }
+      o.on("--timeout SEC", Integer) { |t| timeout = t }
+      o.on("--jobs N", Integer) { |j| jobs = j }
+    end.parse!(args)
+    names = Stress::STRESSES.keys if names.empty?
+    run = Run.new("stress", results_root)
+    envs = names.to_h { |n| [n, Stress::STRESSES.fetch(n)[0]] }
+    run.manifest["stress"] = { "stresses" => envs, "timeout" => timeout,
+                               "jobs" => jobs }
+    run.manifest["engine_binaries"] = binary_metadata(
+      "rpyyarv" => File.join(ROOT, "rpyyarv"),
+      "rpyyarv-jit" => File.join(ROOT, "rpyyarv-jit"))
+    rows = Stress.run(build_dir, names, timeout, jobs,
+                      File.join(run.dir, "stress.csv"))
+    summary = Stress.summarize(rows)
+    Csv.write(File.join(run.dir, "stress-summary.csv"), (summary[0] || {}).keys,
+              summary)
+    run.finish(true)
+    puts "artifacts: #{run.dir}"
+    0
+  end
+
   def mechanisms(args, results_root)
     run = Run.new("mechanisms", results_root)
     raw = File.join(run.dir, "mechanisms.json")
@@ -1126,6 +1155,7 @@ module RPyYARVEvaluation
         delegation [BENCH-ARGS]  native versus delegated gems, same binary
         memory [MECH-ARGS]       peak RSS per engine and benchmark
         mechanisms [MECH-ARGS]  collect tracing, boundary, YJIT, and ZJIT stats
+        stress [--stress NAME]   GC/compaction stresses over the benchmarks
         gc [LIMIT ...]           run gccheck at each malloc limit
         nursery SCRIPT [SIZE...] crash rate versus PYPY_GC_NURSERY
         ablate [NAME ...] [ARGS] runtime ablations; lists the build-only ones
@@ -1159,6 +1189,7 @@ module RPyYARVEvaluation
     when "nursery" then nursery(argv, results_root)
     when "ablate" then ablate(argv, results_root)
     when "mechanisms" then mechanisms(argv, results_root)
+    when "stress" then stress(argv, results_root)
     when "gc" then gc_sweep(argv, results_root)
     when "report"
       dir = argv.shift or abort usage
