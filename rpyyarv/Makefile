@@ -50,6 +50,19 @@ PYPY    ?= ./pypy
 PYPY_REPO   ?= https://github.com/pypy/pypy
 PYPY_COMMIT ?= 4eeb73ca9598d4743be0c8e452bf7850b7a17630
 RUBY_BENCH ?= $(CURDIR)/ruby-bench
+RUBY_BENCH_REPO ?= https://github.com/ruby/ruby-bench
+RUBY_BENCH_COMMIT ?= 09b76c8b0f94c8182080cdae01e95151f0e22dd9
+# scripts/bench.rb reads AWFY from here only.
+AWFY_DIR := $(CURDIR)/awfy
+AWFY_REPO ?= https://github.com/smarr/are-we-fast-yet
+AWFY_COMMIT ?= 74306fec151070fd07157cefeacf19e7e0bcdc89
+
+# $(call fetch_pinned,DIR,REPO,COMMIT): a shallow checkout of one commit.
+define fetch_pinned
+	git init -q $(1)
+	cd $(1) && git remote add origin $(2) && \
+	  git fetch -q --depth=1 origin $(3) && git checkout -q FETCH_HEAD
+endef
 # AWFY needs set/subclass_compatible.rb from the source tree, or deltablue dies.
 AWFY_RUBYLIB ?= $(HOST_SRC)/lib
 PYTHON  ?= python3
@@ -156,7 +169,11 @@ bench-viz:
 	$(RUBY_CMD) scripts/bench_viz.rb $(VIZFLAGS)
 
 $(RUBY_BENCH):
-	git clone --depth=1 https://github.com/ruby/ruby-bench $@
+	$(call fetch_pinned,$@,$(RUBY_BENCH_REPO),$(RUBY_BENCH_COMMIT))
+
+$(AWFY_DIR):
+	$(call fetch_pinned,$@,$(AWFY_REPO),$(AWFY_COMMIT))
+	cd $@ && git apply $(CURDIR)/scripts/awfy-som-set.patch
 
 # Each benchmark's Gemfile.lock, installed by the CRuby under test into
 # $(BENCH_GEMS), so another machine resolves the same versions. The installer
@@ -167,7 +184,7 @@ setup-gems: | $(RUBY_BENCH)
 	  CRUBY_CONFIGURE_ARGS='$(CRUBY_CONFIGURE_ARGS)' \
 	  scripts/bench-setup $(BENCH)
 
-setup: setup-gems
+setup: setup-gems | $(AWFY_DIR)
 	RPYYARV_BUILD=$(BUILD) BENCH_GEMS=$(BENCH_GEMS) RUBYLIB=$(UNINSTALLED_RUBYLIB) \
 	  $(LIBPATH) $(RUBY_CMD) scripts/setup.rb
 
@@ -307,9 +324,7 @@ pypy-patch: | $(PYPY)
 	done
 
 $(PYPY):
-	git init -q $@
-	cd $@ && git remote add origin $(PYPY_REPO) && \
-	  git fetch -q --depth=1 origin $(PYPY_COMMIT) && git checkout -q FETCH_HEAD
+	$(call fetch_pinned,$@,$(PYPY_REPO),$(PYPY_COMMIT))
 
 clean:
 	rm -f $(PROBE) $(SHIM) rpyyarv rpyyarv-jit
