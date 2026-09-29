@@ -1,4 +1,4 @@
-"""KIND_PROC/KIND_SYM hold a VALUE gcroots marks; KIND_ISEQ holds none."""
+"""gcroots marks proc_value; KIND_ISEQ's is its handle's memoised Proc."""
 from __future__ import absolute_import
 
 # The one parked-tag exception: raised in the shim wrappers, caught here.

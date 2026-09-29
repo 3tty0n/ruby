@@ -1,6 +1,5 @@
 """RPython objects CRuby's stack scan misses, for the shim's mark hook."""
 
-from rpyyarv import block as block_mod
 from rpyyarv import boot
 from rpyyarv import debug
 from rpyyarv.error import errinfos
@@ -195,8 +194,8 @@ def _mark_block_procs(w_block):
 def _mark_block_deep(w_block):
     """Undeduplicated: an incremental remark must see stores since pass 1."""
     while w_block is not None:
-        if w_block.kind != block_mod.KIND_ISEQ \
-                and not value.is_immediate(w_block.proc_value):
+        # An ISEQ block's memoised Proc too: a dup may be what keeps us alive.
+        if not value.is_immediate(w_block.proc_value):
             _mark(w_block.proc_value, 'block-deep-proc')
         f = w_block.frame
         while f is not None:
