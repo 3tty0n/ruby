@@ -398,6 +398,20 @@ def test_string_literal_and_concat():
     assert w_str.is_true()
 
 
+def test_putchilledstring_copies_the_constant():          
+    # Chilled strings must be independently mutable later, so the constant
+    # pool's literal is never pushed directly -- a fresh copy is made.
+    w_lit = W_String('hi')
+    iseq = asm([w_lit], 0, 1, [
+        insns.PUTCHILLEDSTRING, 0,
+        insns.LEAVE,
+    ])
+    w_ret = interp.run(iseq)
+    assert isinstance(w_ret, W_String)
+    assert w_ret.str_w() == 'hi'
+    assert w_ret is not w_lit
+
+
 def test_concatstrings_needs_strings():
     iseq = asm([W_Fixnum(1), W_String('x')], 0, 4, [
         insns.PUTOBJECT, 0,
