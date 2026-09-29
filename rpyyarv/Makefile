@@ -91,7 +91,7 @@ BIN       ?= .
 .PHONY: all test microbench awfy bench bench-viz eval eval-test setup setup-gems
 .PHONY: bench-bootstrap bench-setup
 .PHONY: gccheck gcscripts compactcheck stresscompactcheck timercompactcheck
-.PHONY: ractorcheck
+.PHONY: ractorcheck purgecheck
 .PHONY: build build-cruby build-interp build-jit link clean
 .PHONY: pypy-patch host
 
@@ -230,7 +230,7 @@ GCSCRIPTS = benchmark/*.rb test/exceptions.rb test/coverage.rb \
             test/nestedrescue.rb test/errinfoprobe.rb test/bmethodkwreturn.rb \
             test/definedgvar.rb test/blockraise.rb test/defmethodsuper.rb \
             test/includelate.rb test/threads.rb test/methodintro.rb \
-            test/stalebh.rb test/singletongc.rb \
+            test/stalebh.rb test/singletongc.rb test/purgegc.rb \
             $(HOST_SRC)/benchmark/app_*.rb $(HOST_SRC)/benchmark/so_*.rb
 
 gcscripts:
@@ -290,6 +290,11 @@ compactcheck:
 stresscompactcheck:
 	$(MAKE) gccheck GCENV='RPYYARV_GC_STRESS=compact \
 	  RPYYARV_GC_STRESS_EVERY=4096'
+
+# gccheck with every GC a major one and an RPython minor GC in each purge.
+purgecheck:
+	$(MAKE) gccheck GCENV='RPYYARV_GC_STRESS=purge \
+	  RUBY_GC_HEAP_OLDOBJECT_LIMIT_FACTOR=0.01'
 
 # gccheck with a timer thread running verify_compaction_references.
 timercompactcheck:
