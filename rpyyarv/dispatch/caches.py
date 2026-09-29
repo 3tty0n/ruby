@@ -1,6 +1,8 @@
 """Elidable lookup caches: owner, respond_to?, kind_of?, struct, ivar slot."""
 from __future__ import absolute_import
 
+from rpython.rlib import rgc
+
 from rpyyarv import boot
 from rpyyarv import debug
 from rpyyarv import gcroots
@@ -535,6 +537,8 @@ def classes_gone(n):
     """n held singleton classes a GC found dead, before their sweep."""
     acquired = threading.enter_callback()
     try:
+        if rubycall.stress.purge:
+            rgc.collect(0)
         _forget_classes(n)
     finally:
         threading.leave_callback(acquired)

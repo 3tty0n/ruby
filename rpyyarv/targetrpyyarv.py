@@ -126,6 +126,8 @@ def entry_point(argv):
         if every is not None and every.isdigit() and int(every) > 1:
             rubycall.stress.every = int(every)
             rubycall.stress.countdown = int(every)
+    elif gc_stress == 'purge':
+        rubycall.stress.purge = True
     # Names the root set a swept slot came from, instead of crashing on it.
     if os.environ.get('RPYYARV_MARK_TAG') == '1':
         gcroots.tags.on = True

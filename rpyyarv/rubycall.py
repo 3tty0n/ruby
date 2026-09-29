@@ -28,6 +28,7 @@ class _Stress(object):
     def __init__(self):
         self.flag = False
         self.compact = False    # GC.compact instead of a plain full GC
+        self.purge = False      # an RPython minor GC in every class purge
         self.every = 1          # dispatches between collections
         self.countdown = 1
 
