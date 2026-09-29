@@ -8,6 +8,7 @@ import loader
 from error import LoadError, UnsupportedOperation
 from iseq import W_CallInfo, W_ISeq, NO_BLOCK_ISEQ
 from objects.string import W_String
+from objects.regexp import W_Regexp
 from objects.transparent import W_Fixnum, w_nil
 from support import HERE, fixture, run, run_dump
 
@@ -49,6 +50,34 @@ def test_string_literal_loaded():
     w_iseq = loader.load_dump(fixture('fib.iseq'))
     strings = [w.str_w() for w in w_iseq.consts if isinstance(w, W_String)]
     assert strings == ['EXECUTED:']
+
+
+def _regexp_const(patched_operand):
+    """Swaps fib(20)'s `putobject i:20` for a regexp literal operand and
+    returns the W_Regexp the loader produced for it."""
+    text = patched(fixture('fib_rec.iseq'), 'insn\tputobject\ti:20',
+                   'insn\tputobject\t%s' % patched_operand)
+    w_iseq = loader.load_dump(text)
+    regexps = [w for w in w_iseq.consts if isinstance(w, W_Regexp)]
+    assert len(regexps) == 1
+    return regexps[0]
+
+
+def test_regexp_literal_loaded():
+    assert _regexp_const('x:/foo/').pattern == 'foo'
+    # `//`: rfind still lands on the closing slash, not the opening one, so
+    # this does not fall through to "no such object yet".
+    assert _regexp_const('x://').pattern == ''
+
+
+def test_regexp_literal_is_a_rough_slice_of_inspect():
+    """Documents current behaviour: the loader takes everything between the
+    first and the *last* '/', so flags are dropped and an escaped in-pattern
+    '/' is kept raw. Both are known gaps in this temporary implementation
+    (see loader.py's OP_OTHER branch, added by 58c6a10c7b)."""
+    assert _regexp_const('x:/foo/i').pattern == 'foo'
+    assert _regexp_const('x:/foo/mix').pattern == 'foo'
+    assert _regexp_const('x:/a\\\\/b/').pattern == 'a\\/b'
 
 
 def test_locals_end_to_end():
