@@ -492,6 +492,21 @@ def test_puts():
     assert printed2 == '\n'
     assert w_ret2 is w_nil
 
+def test_to_i():                                          
+    to_i_id = symbols.intern('to_i')
+
+    def to_i_of(s):
+        iseq = asm([W_String(s), W_CallInfo(to_i_id, 0)], 0, 2, [
+            insns.PUTOBJECT, 0,
+            insns.OPT_SEND_WITHOUT_BLOCK, 1,
+            insns.LEAVE,
+        ])
+        return interp.run(iseq).int_w()
+
+    assert to_i_of('42') == 42
+    assert to_i_of('  42') == 42
+    assert to_i_of('-5') == -5
+
 
 def test_cfunc_arity_is_checked():
     class W_One(W_CFunc):
