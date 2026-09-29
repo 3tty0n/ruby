@@ -507,6 +507,22 @@ def test_to_i():
     assert to_i_of('  42') == 42
     assert to_i_of('-5') == -5
 
+def test_to_s():
+    to_s_id = symbols.intern('to_s')
+
+    def to_s_of(w_recv):
+        iseq = asm([w_recv, W_CallInfo(to_s_id, 0)], 0, 2, [
+            insns.PUTOBJECT, 0,
+            insns.OPT_SEND_WITHOUT_BLOCK, 1,
+            insns.LEAVE,
+        ])
+        return interp.run(iseq).str_w()
+
+    assert to_s_of(W_Fixnum(42)) == '42'
+    assert to_s_of(W_String('hi')) == 'hi'
+    assert to_s_of(w_nil) == ''
+    assert to_s_of(w_true) == 'true'
+    assert to_s_of(w_false) == 'false'
 
 def test_cfunc_arity_is_checked():
     class W_One(W_CFunc):
