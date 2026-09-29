@@ -12,7 +12,8 @@ from rpyyarv.error import UnsupportedOperation
 from rpyyarv.rlib import dont_look_inside, raw_word, unroll_safe
 
 from rpyyarv.interp.consts_ids import ALIAS_METHOD, NEW, PROTECTED, ATTR_READER, ATTR_WRITER, CORE_ALIAS, CORE_UNDEF, INSTANCE_EXEC, MODULE_FUNCTION, PRIVATE, PRIVATE_CLASS_METHOD, UNDEF_METHOD
-from rpyyarv.interp.cref import _cref_of, _push_cref
+from rpyyarv.interp.cref import (_cref_of, _materialize, _push_cref,
+                                 _push_self_cref)
 from rpyyarv.interp.args import NO_KEYWORDS
 
 def define_method(frame, mid, w_iseq):
@@ -22,9 +23,11 @@ def define_method(frame, mid, w_iseq):
         dispatch.define(value.core_class(value.C_OBJECT), mid, w_iseq, True,
                         0, _cref_of(frame))
     elif frame.module_func:
+        node = _materialize(node)
         dispatch.define(node.klass, mid, w_iseq, True, node.klass, node)
         dispatch.define_singleton(node.klass, mid, w_iseq, node.klass, node)
     else:
+        node = _materialize(node)
         dispatch.define(node.klass, mid, w_iseq, frame.private_pragma,
                         node.klass, node, 0, 0, frame.protected_pragma)
 
@@ -154,14 +157,6 @@ def _define_bmethod_modfunc(frame, mid, recv, recv_at, w_block):
     return ret
 
 
-@dont_look_inside
-def _singleton_of(recv):
-    """The singleton class instance_eval pushes as cref; 0 when it has none."""
-    if value.is_immediate(recv):
-        return 0
-    return boot.singleton_class(recv)
-
-
 @unroll_safe
 def _instance_eval(frame, mid, recv, recv_at, argc, w_block):
     """instance_eval/exec: self rebound here; CRuby keeps the written self."""
@@ -173,11 +168,10 @@ def _instance_eval(frame, mid, recv, recv_at, argc, w_block):
             i += 1
     else:
         args.append(recv)
-    sing = _singleton_of(recv)
     cref = None
-    if sing != 0:
+    if not value.is_immediate(recv):
         # Over the block's own chain (yield_under), never the caller's.
-        cref = _push_cref(_cref_of(w_block.frame), sing, True)
+        cref = _push_self_cref(_cref_of(w_block.frame), recv)
     _drop(frame, recv_at)
     return call_block(w_block, args, NO_KEYWORDS, False, recv, cref)
 
@@ -216,7 +210,7 @@ def _exec_on_made(frame, made, w_block):
 
 def _in_body_of(frame, recv):
     node = frame.cref
-    return node is not None and node.klass == recv
+    return node is not None and not node.singleton and node.klass == recv
 
 
 @unroll_safe

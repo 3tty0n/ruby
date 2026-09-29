@@ -13,7 +13,7 @@ from rpyyarv.frame import Frame
 from rpyyarv.rlib import dont_look_inside, promote
 
 from rpyyarv.interp.consts_ids import EQQ, NEW, ROOT_CBASE
-from rpyyarv.interp.cref import _cref_klass, _cref_of, _push_cref
+from rpyyarv.interp.cref import _cref_class, _cref_klass, _cref_of, _push_cref
 
 from rpyyarv.hostconsts import (DEFINED_CONST, DEFINED_CONST_FROM, DEFINED_CVAR,
                                 DEFINED_FUNC, DEFINED_GVAR, DEFINED_IVAR,
@@ -103,7 +103,7 @@ def _cbase(frame):
     """vm_get_cbase: innermost cref klass, an eval-pushed one included."""
     node = frame.cref
     if node is not None and node.klass != 0:
-        return node.klass
+        return _cref_class(node)
     return _const_base(frame)
 
 
@@ -121,7 +121,7 @@ def _const_base(frame):
 def _defined_const(cref, rid):
     node = cref
     while node.outer is not None:
-        if boot.const_defined(node.klass, rid, 0):
+        if boot.const_defined(_cref_class(node), rid, 0):
             return True
         node = node.outer
     return boot.const_defined(_cref_klass(cref), rid, 1)

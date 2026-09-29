@@ -4,6 +4,7 @@ import os
 
 from rpython.rtyper.lltypesystem import lltype, rffi
 
+from rpyyarv.boot.klass import singleton_class
 from rpyyarv.boot._core import (_ext, _v, VALUE, VOIDP, INTP, _ARCH,
                                 CONST_HOOK, METHOD_HOOK, FIBER_SAVE_HOOK,
                                 FIBER_ARRIVE_HOOK, FIBER_BORN_HOOK,
@@ -158,8 +159,11 @@ def native_cref(cref):
     if cref.native != 0:
         return cref.native
     outer = native_cref(cref.outer)
+    klass = cref.klass
+    if cref.singleton:
+        klass = singleton_class(klass)
     cref.native = rffi.cast(lltype.Signed, rb_cref_new(
-        rffi.cast(rffi.VOIDP, outer), _v(cref.klass),
+        rffi.cast(rffi.VOIDP, outer), _v(klass),
         rffi.cast(rffi.INT, 1 if cref.by_eval else 0)))
     return cref.native
 

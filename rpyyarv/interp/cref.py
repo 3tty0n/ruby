@@ -1,18 +1,23 @@
 """Lexical scope chain (CREF)."""
 from __future__ import absolute_import
 
+from rpyyarv import boot
 from rpyyarv import gcroots
 from rpyyarv import value
+from rpyyarv.rlib import dont_look_inside
 
 class Cref(object):
     """Lexical scope chained as CRuby's rb_cref_t; klass 0 is Object."""
-    _immutable_fields_ = ['klass', 'outer', 'by_eval', 'const_base']
+    _immutable_fields_ = ['klass', 'outer', 'by_eval', 'const_base',
+                          'singleton']
 
-    def __init__(self, klass, outer, by_eval=False):
+    def __init__(self, klass, outer, by_eval=False, singleton=False):
         self.klass = klass
         self.outer = outer
         # CREF_PUSHED_BY_EVAL: a def lands here, but const lookup steps over it.
         self.by_eval = by_eval
+        # CREF_SINGLETON: klass is instance_eval's self, its singleton unmade.
+        self.singleton = singleton
         self.native = 0
         # Resolved once: _const_base is on every constant read's hot path.
         if by_eval and outer is not None:
@@ -35,6 +40,31 @@ def _push_cref(outer, klass, by_eval=False):
         node = Cref(klass, outer, by_eval)
         table[klass] = node
     return node
+
+
+def _push_self_cref(outer, obj):
+    """instance_eval's scope, uninterned: obj is held only by its frames."""
+    return Cref(obj, outer, True, True)
+
+
+def _cref_class(node):
+    """CREF_CLASS_FOR_DEFINITION: makes an instance_eval self's singleton."""
+    if node.singleton:
+        return boot.singleton_class(node.klass)
+    return node.klass
+
+
+@dont_look_inside
+def _materialize(node):
+    """The chain with every singleton made, as a method's lexical scope."""
+    if node is None:
+        return None
+    outer = _materialize(node.outer)
+    if node.singleton:
+        return _push_cref(outer, _cref_class(node), True)
+    if outer is node.outer:
+        return node
+    return _push_cref(outer, node.klass, node.by_eval)
 
 
 def _cref_of(frame):
