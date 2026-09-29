@@ -8,7 +8,8 @@ from rpyyarv.boot._core import (_ext, _v, VALUE, VALUEP, INTP, MAX_ARGC,
                                 _leave_argv, _failed)
 
 
-rb_ary_len = _ext('rpyyarv_ary_len', [VALUE], rffi.LONG, reenters=False)
+rb_ary_len = _ext('rpyyarv_ary_len', [VALUE], rffi.LONG,
+                  reenters=False, gc=False)
 
 
 rb_ary_entry = _ext('rpyyarv_ary_entry', [VALUE, rffi.LONG], VALUE, reenters=True)
@@ -22,7 +23,7 @@ rb_ary_new = _ext('rpyyarv_ary_new', [rffi.INT, VALUEP], VALUE, reenters=True)
 
 
 rb_array_layout = _ext('rpyyarv_array_layout', [INTP], lltype.Void,
-                       reenters=False)
+                       reenters=False, gc=False)
 
 
 rb_ary_resurrect = _ext('rpyyarv_ary_resurrect', [VALUE, INTP], VALUE, reenters=True)

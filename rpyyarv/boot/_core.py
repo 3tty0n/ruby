@@ -6,6 +6,7 @@ import sys
 from rpython.rtyper.lltypesystem import lltype, rffi
 from rpython.rlib.objectmodel import not_rpython
 from rpython.rlib.rthread import ThreadLocalReference
+from rpython.tool.sourcetools import func_with_new_name
 from rpython.translator.tool.cbuild import ExternalCompilationInfo
 
 from rpyyarv import host
@@ -102,14 +103,32 @@ TRAMP_HOOK = lltype.Ptr(lltype.FuncType(
 MAX_ARGC = 256
 
 
-def _ext(name, args, result, reenters=True, marks=False, releasegil=False):
+# Calls compiled as unable to collect that are running now. A host GC
+# inside one must not run RPython that can: boot_shim.c then holds its
+# weak classes strongly, and so needs no purge.
+nocollect = lltype.malloc(rffi.CArray(lltype.Signed), 1, flavor='raw',
+                          zero=True, immortal=True)
+
+
+def _ext(name, args, result, reenters=True, marks=False, releasegil=False,
+         gc=True):
     # reenters is the safe default: an extern that re-enters Ruby can run
     # the RPython GC under us, and a forgotten annotation must not lie.
     # Most shim calls keep GIL to preserve CRuby/RPython lock ordering.
-    return rffi.llexternal(name, args, result, compilation_info=eci,
-                           releasegil=releasegil,
-                           random_effects_on_gcobjs=reenters,
-                           forces_virtualizable=marks)
+    # gc=False: its C side allocates nothing, so no host GC starts in it.
+    fn = rffi.llexternal(name, args, result, compilation_info=eci,
+                         releasegil=releasegil,
+                         random_effects_on_gcobjs=reenters,
+                         forces_virtualizable=marks)
+    if reenters or marks or releasegil or not gc:
+        return fn
+
+    def call(*args):
+        nocollect[0] += 1
+        res = fn(*args)
+        nocollect[0] -= 1
+        return res
+    return func_with_new_name(call, name)
 
 
 HANDLE_MARK_HOOK = lltype.Ptr(lltype.FuncType([lltype.Signed], lltype.Void))

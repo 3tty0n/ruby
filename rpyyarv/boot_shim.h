@@ -121,7 +121,7 @@ void rpyyarv_gc_mark_maybe(uintptr_t v);
 /* A singleton class held weakly; fn(n) reports the ones a GC found dead. */
 int rpyyarv_weak_class_p(uintptr_t v);
 void rpyyarv_weak_class_add(uintptr_t v);
-void rpyyarv_set_classes_gone_hook(void (*fn)(long));
+void rpyyarv_set_classes_gone_hook(void (*fn)(long), long *nocollect_count);
 uintptr_t rpyyarv_gone_class(long i);
 
 /* Pin every member of a to_a tree until the loader releases it. */

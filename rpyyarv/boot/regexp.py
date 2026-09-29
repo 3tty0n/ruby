@@ -47,18 +47,18 @@ rb_str_match_fast = _ext('rpyyarv_str_match', [VALUE, VALUE, INTP], VALUE,
                          reenters=True)
 
 
-rb_ss_pos = _ext('rpyyarv_ss_pos', [VALUE], VALUE, reenters=False)
+rb_ss_pos = _ext('rpyyarv_ss_pos', [VALUE], VALUE, reenters=False, gc=False)
 
 
 rb_ss_set_pos = _ext('rpyyarv_ss_set_pos', [VALUE, VALUE], VALUE,
-                     reenters=False)
+                     reenters=False, gc=False)
 
 
-rb_ss_eos_p = _ext('rpyyarv_ss_eos_p', [VALUE], VALUE, reenters=False)
+rb_ss_eos_p = _ext('rpyyarv_ss_eos_p', [VALUE], VALUE, reenters=False, gc=False)
 
 
 rb_ss_matched_size = _ext('rpyyarv_ss_matched_size', [VALUE], VALUE,
-                          reenters=False)
+                          reenters=False, gc=False)
 
 
 rb_ss_skip = _ext('rpyyarv_ss_skip', [VALUE, VALUE, INTP], VALUE,

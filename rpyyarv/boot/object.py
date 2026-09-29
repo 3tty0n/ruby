@@ -10,28 +10,35 @@ from rpyyarv.boot._core import (_ext, _v, VALUE, VALUEP, INTP,
 rb_inspect_cstr = _ext('rpyyarv_inspect_cstr', [VALUE], rffi.CCHARP, reenters=True)
 
 
-rb_is_array = _ext('rpyyarv_is_array', [VALUE], rffi.INT, reenters=False)
+rb_is_array = _ext('rpyyarv_is_array', [VALUE], rffi.INT,
+                   reenters=False, gc=False)
 
 
-rb_is_symbol = _ext('rpyyarv_is_symbol', [VALUE], rffi.INT, reenters=False)
+rb_is_symbol = _ext('rpyyarv_is_symbol', [VALUE], rffi.INT,
+                    reenters=False, gc=False)
 
 
-rb_is_fixnum = _ext('rpyyarv_is_fixnum', [VALUE], rffi.INT, reenters=False)
+rb_is_fixnum = _ext('rpyyarv_is_fixnum', [VALUE], rffi.INT,
+                    reenters=False, gc=False)
 
 
-rb_is_string = _ext('rpyyarv_is_string', [VALUE], rffi.INT, reenters=False)
+rb_is_string = _ext('rpyyarv_is_string', [VALUE], rffi.INT,
+                    reenters=False, gc=False)
 
 
-rb_is_hash = _ext('rpyyarv_is_hash', [VALUE], rffi.INT, reenters=False)
+rb_is_hash = _ext('rpyyarv_is_hash', [VALUE], rffi.INT,
+                  reenters=False, gc=False)
 
 
-rb_is_nil = _ext('rpyyarv_is_nil', [VALUE], rffi.INT, reenters=False)
+rb_is_nil = _ext('rpyyarv_is_nil', [VALUE], rffi.INT, reenters=False, gc=False)
 
 
-rb_is_true = _ext('rpyyarv_is_true', [VALUE], rffi.INT, reenters=False)
+rb_is_true = _ext('rpyyarv_is_true', [VALUE], rffi.INT,
+                  reenters=False, gc=False)
 
 
-rb_is_false = _ext('rpyyarv_is_false', [VALUE], rffi.INT, reenters=False)
+rb_is_false = _ext('rpyyarv_is_false', [VALUE], rffi.INT,
+                   reenters=False, gc=False)
 
 
 rb_num2long = _ext('rpyyarv_num2long', [VALUE], rffi.LONG, reenters=True)
@@ -39,11 +46,11 @@ rb_num2long = _ext('rpyyarv_num2long', [VALUE], rffi.LONG, reenters=True)
 
 rb_special_consts = _ext('rpyyarv_special_consts',
                          [VALUEP, VALUEP, VALUEP, VALUEP], lltype.Void,
-reenters=False)
+reenters=False, gc=False)
 
 
 rb_core_classes = _ext('rpyyarv_core_classes', [VALUEP], lltype.Void,
-                       reenters=False)
+                       reenters=False, gc=False)
 
 
 # marks: rb_obj_alloc runs no Ruby code; only a GC can re-enter us.
@@ -60,19 +67,21 @@ rb_alloc_default = _ext('rpyyarv_alloc_default', [VALUE], VALUE, marks=True,
 
 
 rb_shape_iv_index = _ext('rpyyarv_shape_iv_index', # no reenters: see rb_intern_
-                         [rffi.UINT, VALUE, INTP], rffi.INT, reenters=False)
+                         [rffi.UINT, VALUE, INTP], rffi.INT,
+                         reenters=False, gc=False)
 
 
 rb_shape_add_ivar_fits = _ext('rpyyarv_shape_add_ivar_fits',
                               [rffi.UINT, rffi.UINT, VALUE, INTP], rffi.INT,
-reenters=False)
+reenters=False, gc=False)
 
 
 rb_object_layout = _ext('rpyyarv_object_layout', [rffi.LONGP], lltype.Void,
-                        reenters=False)
+                        reenters=False, gc=False)
 
 
-rb_is_class = _ext('rpyyarv_is_class', [VALUE], rffi.INT, reenters=False)
+rb_is_class = _ext('rpyyarv_is_class', [VALUE], rffi.INT,
+                   reenters=False, gc=False)
 
 
 rb_obj_is_kind_of = _ext('rpyyarv_obj_is_kind_of', [VALUE, VALUE, INTP],
@@ -81,7 +90,7 @@ rb_obj_is_kind_of = _ext('rpyyarv_obj_is_kind_of', [VALUE, VALUE, INTP],
 
 # No reenters: reads two struct fields after a type test, allocating nothing.
 rb_range_part = _ext('rpyyarv_range_part', [VALUE, rffi.INT], VALUE,
-                     reenters=False)
+                     reenters=False, gc=False)
 
 
 rb_struct_member_index = _ext('rpyyarv_struct_member_index',
@@ -89,7 +98,7 @@ rb_struct_member_index = _ext('rpyyarv_struct_member_index',
 
 
 rb_struct_layout = _ext('rpyyarv_struct_layout', [INTP], lltype.Void,
-                        reenters=False)
+                        reenters=False, gc=False)
 
 
 rb_struct_arity = _ext('rpyyarv_struct_arity', [VALUE], rffi.LONG,
@@ -100,11 +109,11 @@ rb_struct_alloc_ = _ext('rpyyarv_struct_alloc', [VALUE], VALUE, reenters=True)
 
 
 rb_struct_get = _ext('rpyyarv_struct_get', [VALUE, rffi.INT], VALUE,
-                     reenters=False)
+                     reenters=False, gc=False)
 
 
 rb_struct_set = _ext('rpyyarv_struct_set', [VALUE, rffi.INT, VALUE],
-                     lltype.Void, reenters=False)
+                     lltype.Void, reenters=False, gc=False)
 
 
 NCLASS = 14

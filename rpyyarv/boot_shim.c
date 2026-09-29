@@ -1156,6 +1156,7 @@ static long weak_len, weak_capa;
 static VALUE *gone_classes;
 static long gone_len, gone_capa;
 static void (*classes_gone_hook)(long);
+static long *nocollect;
 static VALUE pin_probe = Qnil;
 static VALUE sym_major_by;
 static ID id_marked, id_pinned;
@@ -1209,11 +1210,13 @@ gc_major_p(void)
 }
 
 /* Kept, and pinned, in a minor GC (forgetting flushes caches) or a move;
- * kept too when GC_END_MARK will be skipped, as no purge would follow. */
+ * kept too when GC_END_MARK will be skipped, as no purge would follow, or
+ * when RPython sits in a call compiled as unable to collect, as a purge
+ * allocates. An incremental GC calls this again as it finishes marking. */
 static int
 weak_classes_held_p(void)
 {
-    if (!gc_major_p() || !rb_rpyyarv_gc_hooks_run_p()) return 1;
+    if (!gc_major_p() || !rb_rpyyarv_gc_hooks_run_p() || *nocollect) return 1;
     rb_gc_mark(pin_probe);
     return gc_flag_p(pin_probe, id_pinned);
 }
@@ -1266,6 +1269,7 @@ weak_classes_sweep(VALUE tpval, void *data)
     }
     weak_len = kept;
     if (gone_len == 0) return;
+    if (*nocollect) rb_bug("rpyyarv: a weak class died in a no-collect call");
     forget_native_methods();
     if (classes_gone_hook) classes_gone_hook(gone_len);
 }
@@ -1277,10 +1281,11 @@ rpyyarv_gone_class(long i)
 }
 
 void
-rpyyarv_set_classes_gone_hook(void (*fn)(long))
+rpyyarv_set_classes_gone_hook(void (*fn)(long), long *nocollect_count)
 {
     VALUE tp;
     classes_gone_hook = fn;
+    nocollect = nocollect_count;
     if (!NIL_P(pin_probe)) return;
     pin_probe = rb_obj_alloc(rb_cObject);
     rb_gc_register_mark_object(pin_probe);

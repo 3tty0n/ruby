@@ -21,18 +21,19 @@ rb_activate_threads = _ext('rpyyarv_activate_threads', [], lltype.Void,
 
 
 rb_ractor_class_p = _ext('rpyyarv_ractor_class_p', [VALUE], rffi.INT,
-                         reenters=False)
+                         reenters=False, gc=False)
 
 
-rb_ractor_p = _ext('rpyyarv_ractor_p', [VALUE], rffi.INT, reenters=False)
+rb_ractor_p = _ext('rpyyarv_ractor_p', [VALUE], rffi.INT,
+                   reenters=False, gc=False)
 
 
 rb_ractor_callback_p = _ext('rpyyarv_ractor_callback_p', [], rffi.INT,
-                            reenters=False)
+                            reenters=False, gc=False)
 
 
 rb_native_ractors_p = _ext('rpyyarv_native_ractors_p', [], rffi.INT,
-                           reenters=False)
+                           reenters=False, gc=False)
 
 
 rb_native_ractors_poll = _ext('rpyyarv_native_ractors_poll', [VALUE],
@@ -84,7 +85,7 @@ rb_set_const_hook = _ext('rpyyarv_set_const_hook', [CONST_HOOK], lltype.Void,
 
 
 rb_fiber_killed_value = _ext('rpyyarv_fiber_killed_value', [], VALUE,
-                             reenters=False)
+                             reenters=False, gc=False)
 
 
 rb_rethrow_if_fiber_kill = _ext('rpyyarv_rethrow_if_fiber_kill', [VALUE],

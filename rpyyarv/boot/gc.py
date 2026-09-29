@@ -3,7 +3,8 @@ from __future__ import absolute_import
 
 from rpython.rtyper.lltypesystem import lltype, rffi
 
-from rpyyarv.boot._core import _ext, _v, VALUE, MARK_HOOK, HANDLE_MARK_HOOK
+from rpyyarv.boot._core import (_ext, _v, VALUE, MARK_HOOK, HANDLE_MARK_HOOK,
+                                nocollect)
 
 
 rb_gc_set_mark_hook = _ext('rpyyarv_gc_set_mark_hook', [MARK_HOOK],
@@ -11,11 +12,11 @@ rb_gc_set_mark_hook = _ext('rpyyarv_gc_set_mark_hook', [MARK_HOOK],
 
 
 rb_gc_mark_value = _ext('rpyyarv_gc_mark_value', [VALUE], lltype.Void,
-                        reenters=False)
+                        reenters=False, gc=False)
 
 
 rb_gc_mark_maybe = _ext('rpyyarv_gc_mark_maybe', [VALUE], lltype.Void,
-                        reenters=False)
+                        reenters=False, gc=False)
 
 
 rb_set_handle_mark = _ext('rpyyarv_set_handle_mark_callback',
@@ -26,7 +27,7 @@ rb_gc_start = _ext('rpyyarv_gc_start', [], lltype.Void, reenters=True)
 
 
 rb_weak_class_p = _ext('rpyyarv_weak_class_p', [VALUE], rffi.INT,
-                       reenters=False)
+                       reenters=False, gc=False)
 
 
 rb_weak_class_add = _ext('rpyyarv_weak_class_add', [VALUE], lltype.Void,
@@ -37,12 +38,13 @@ CLASSES_GONE_HOOK = lltype.Ptr(lltype.FuncType([lltype.Signed], lltype.Void))
 
 
 rb_set_classes_gone_hook = _ext('rpyyarv_set_classes_gone_hook',
-                                [CLASSES_GONE_HOOK], lltype.Void,
-                                reenters=True)
+                                [CLASSES_GONE_HOOK,
+                                 lltype.Ptr(rffi.CArray(lltype.Signed))],
+                                lltype.Void, reenters=True)
 
 
 rb_gone_class = _ext('rpyyarv_gone_class', [lltype.Signed], VALUE,
-                     reenters=False)
+                     reenters=False, gc=False)
 
 
 rb_pin_load_tree = _ext('rpyyarv_pin_load_tree', [VALUE], lltype.Void,
@@ -58,10 +60,10 @@ rb_gc_register = _ext('rpyyarv_gc_register_mark_object', [VALUE], lltype.Void, r
 
 # No reenters: sets bits in preallocated bitmaps, reaching no mark callback.
 rb_obj_written = _ext('rpyyarv_obj_written', [VALUE, VALUE], lltype.Void,
-                      reenters=False)
+                      reenters=False, gc=False)
 
 
-rb_wb_direct = _ext('rpyyarv_wb_direct', [], rffi.INT, reenters=False)
+rb_wb_direct = _ext('rpyyarv_wb_direct', [], rffi.INT, reenters=False, gc=False)
 
 
 def obj_written(a, b):
@@ -110,7 +112,7 @@ def weak_class_add(v):
 
 
 def set_classes_gone_hook(fn):
-    rb_set_classes_gone_hook(fn)
+    rb_set_classes_gone_hook(fn, nocollect)
 
 
 def gone_class(i):

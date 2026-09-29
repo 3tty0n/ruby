@@ -20,7 +20,8 @@ rb_hash_aset_ = _ext('rpyyarv_hash_aset', [VALUE, VALUE, VALUE, INTP],
 rb_hash_resurrect = _ext('rpyyarv_hash_resurrect', [VALUE, INTP], VALUE, reenters=True)
 
 
-rb_hash_size = _ext('rpyyarv_hash_size', [VALUE], rffi.LONG, reenters=False)
+rb_hash_size = _ext('rpyyarv_hash_size', [VALUE], rffi.LONG,
+                    reenters=False, gc=False)
 
 
 rb_hash_lookup = _ext('rpyyarv_hash_lookup', [VALUE, VALUE, INTP], VALUE, reenters=True)
@@ -47,7 +48,8 @@ rb_hash_aset_fast = _ext('rpyyarv_hash_aset_fast', [VALUE, VALUE, VALUE],
                          VALUE, reenters=True)
 
 
-rb_hash_empty_p = _ext('rpyyarv_hash_empty_p', [VALUE], VALUE, reenters=False)
+rb_hash_empty_p = _ext('rpyyarv_hash_empty_p', [VALUE], VALUE,
+                       reenters=False, gc=False)
 
 
 rb_hash_keys_fast = _ext('rpyyarv_hash_keys_fast', [VALUE, INTP], VALUE,

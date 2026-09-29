@@ -71,21 +71,22 @@ rb_proc_new = _ext('rpyyarv_proc_new', [rffi.LONG, INTP], VALUE, reenters=True)
 
 
 rb_pop_dead_handle = _ext('rpyyarv_pop_dead_handle', [], rffi.LONG,
-                          reenters=False)
+                          reenters=False, gc=False)
 
 
 rb_dead_handle_count = _ext('rpyyarv_dead_handle_count', [], rffi.LONG,
-                            reenters=False)
+                            reenters=False, gc=False)
 
 
-rb_is_proc = _ext('rpyyarv_is_proc', [VALUE], rffi.INT, reenters=False)
+rb_is_proc = _ext('rpyyarv_is_proc', [VALUE], rffi.INT,
+                  reenters=False, gc=False)
 
 
 rb_block_sentinel = _ext('rpyyarv_block_sentinel', [], VALUE, reenters=True)
 
 
 rb_proc_handle = _ext('rpyyarv_proc_handle', [VALUE], rffi.LONG,
-                      reenters=False)
+                      reenters=False, gc=False)
 
 
 rb_yield_values = _ext('rpyyarv_yield_values',
@@ -120,7 +121,8 @@ def yield_values(args, kw):
     return rffi.cast(lltype.Signed, v), state
 
 
-rb_kw_hash_p = _ext('rpyyarv_kw_hash_p', [VALUE], rffi.INT, reenters=False)
+rb_kw_hash_p = _ext('rpyyarv_kw_hash_p', [VALUE], rffi.INT,
+                    reenters=False, gc=False)
 
 
 rb_kw_hash_dup = _ext('rpyyarv_kw_hash_dup', [VALUE, INTP], VALUE,
