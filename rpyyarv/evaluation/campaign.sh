@@ -51,13 +51,41 @@ reap() {
   done
 }
 
+# macOS crash reports: a SIGSEGV the harness mislabels still leaves one.
+REPORTS=$HOME/Library/Logs/DiagnosticReports
+reports() { ls "$REPORTS" 2>/dev/null | grep -E '^rpyyarv.*\.ips$' | sort; }
+
+# Pid, launch time and the crashed thread's top frames of one .ips file.
+describe() {
+  ruby --disable-gems -rjson -e '
+    head, body = File.read(ARGV[0]).split("\n", 2)
+    b = JSON.parse(body) rescue {}
+    t = (b["threads"] || [])[b["faultingThread"].to_i] || {}
+    names = (b["usedImages"] || []).map { |i| i["name"] }
+    noise = /\A(_?_?pthread_kill|raise|abort|_sigtramp|sig\w+|
+               ruby_default_signal|rb_bug\w*|rb_vm_bugreport)\z/x
+    top = (t["frames"] || []).map do |f|
+      f["symbol"] || "#{names[f["imageIndex"].to_i]}+#{f["imageOffset"]}"
+    end.grep_v(noise).first(6)
+    puts [b["pid"], b["parentProc"], b["procLaunch"],
+          b.dig("exception", "signal"), top.join(" < ")].join(" | ")
+  ' "$REPORTS/$1"
+}
+
 step() {
   local name=$1; shift
   gate "$name"
+  local before new
+  before=$(reports)
   echo "$(stamp) START $name: $*" >> "$T/campaign.log"
   "$@" > "$T/step-$name.log" 2>&1
   local rc=$?
-  echo "$(stamp) END $name rc=$rc" >> "$T/campaign.log"
+  new=$(comm -13 <(echo "$before") <(reports))
+  for f in $new; do
+    echo "$(stamp) $name $f $(describe "$f")" >> "$T/crash-reports.txt"
+  done
+  echo "$(stamp) END $name rc=$rc crash_reports=$(echo -n "$new" | grep -c .)" \
+    >> "$T/campaign.log"
   reap
 }
 
