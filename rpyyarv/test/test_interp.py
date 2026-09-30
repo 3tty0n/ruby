@@ -11,6 +11,8 @@ from objects.instance import W_Object
 from objects.klass import W_Class, w_class_class, w_object_class
 from objects.main import W_Main, w_main
 from objects.string import W_String
+from objects.array import W_Array
+from objects.regexp import W_Regexp
 from objects.transparent import W_Fixnum, w_nil, w_true, w_false
 from support import asm, capture, expect_unsupported
 
@@ -524,6 +526,38 @@ def test_to_s():
     assert to_s_of(w_true) == 'true'
     assert to_s_of(w_false) == 'false'
 
+def test_split_on_empty_regexp():
+    split_id = symbols.intern('split')
+
+    def split_of(s):
+        iseq = asm([W_String(s), W_Regexp(''), W_CallInfo(split_id, 1)],
+                   0, 3, [
+            insns.PUTOBJECT, 0,
+            insns.PUTOBJECT, 1,
+            insns.OPT_SEND_WITHOUT_BLOCK, 2,
+            insns.LEAVE,
+        ])
+        w_ary = interp.run(iseq)
+        assert isinstance(w_ary, W_Array)
+        return [w.str_w() for w in w_ary.items_w]
+
+    assert split_of('1021') == ['1', '0', '2', '1']
+    assert split_of('') == []
+
+
+def test_split_needs_an_empty_regexp():
+    split_id = symbols.intern('split')
+    iseq = asm([W_String('a,b'), W_Regexp(','), W_CallInfo(split_id, 1)],
+               0, 3, [
+        insns.PUTOBJECT, 0,
+        insns.PUTOBJECT, 1,
+        insns.OPT_SEND_WITHOUT_BLOCK, 2,
+        insns.LEAVE,
+    ])
+    expect_unsupported(iseq, W_Main(),
+                       "split on /,/: RPyYARV only supports split(//) so far")
+
+                       
 def test_cfunc_arity_is_checked():
     class W_One(W_CFunc):
         def call(self, w_recv, args_w):
@@ -683,3 +717,5 @@ def _send_new(w_class, args_w):
     frame = Frame(iseq, w_main)
     frame.locals[0] = w_class
     return interp.execute(iseq, frame)
+
+
