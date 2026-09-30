@@ -8,7 +8,7 @@ otherwise.
 
 | Item                 | Value                                                  |
 |----------------------+--------------------------------------------------------|
-| Repository commit    | =60f9d0d3af= (branch =ruby_4_0_rpyyarv_value=)         |
+| Repository commit    | =1313bdb9d6= (branch =ruby_4_0_rpyyarv_value=)         |
 | RPython base         | pypy =4eeb73ca9598d4743be0c8e452bf7850b7a17630=        |
 | RPython patches      | =pypy-patches/0001= to =0004=, all applied             |
 | Translation          | =rpyyarv=: default options; =rpyyarv-jit=: =-Ojit=     |
@@ -70,7 +70,7 @@ macOS-only studies should run; nothing has been tried.
 ** CRuby
 
 #+begin_src sh
-git checkout 60f9d0d3af
+git checkout 1313bdb9d6
 ./autogen.sh                 # at the repository root
 cd rpyyarv
 make build-cruby             # --enable-shared, YJIT and ZJIT
@@ -308,7 +308,7 @@ Every =evaluation/results/STAMP-KIND-PID/manifest.json= records:
 - =engine_binaries=: path and SHA-256 of each engine (most experiments)
 - =commands=: argv, environment, exit status and =seconds= of every command
 
-A run matches the paper's build when =git.commit= is =60f9d0d3af= (or a
+A run matches the paper's build when =git.commit= is =1313bdb9d6= (or a
 descendant that only changes =rpyyarv/evaluation/= and =rpyyarv/Makefile=),
 =build.rpython_base= is =4eeb73ca...=, =build.pypy_patches= has the four
 hashes below, =build.translation= is ={"rpyyarv": "default", "rpyyarv-jit":
