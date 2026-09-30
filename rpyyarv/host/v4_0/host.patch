@@ -118,7 +118,24 @@ diff --git a/gc.c b/gc.c
 index 9075f218c6..495f605565 100644
 --- a/gc.c
 +++ b/gc.c
-@@ -3768,6 +3768,10 @@ update_classext(rb_classext_t *ext, bool is_prime, VALUE box_value, void *arg)
+@@ -3431,10 +3431,12 @@ rb_gc_ractor_cache_free(void *cache)
+ void
+ rb_gc_register_mark_object(VALUE obj)
+ {
+-    if (!rb_gc_impl_pointer_to_heap_p(rb_gc_get_objspace(), (void *)obj))
+-        return;
+-
+-    rb_vm_register_global_object(obj);
++    /* Another ractor may grow heap_pages.sorted under the VM lock. */
++    RB_VM_LOCKING() {
++        if (rb_gc_impl_pointer_to_heap_p(rb_gc_get_objspace(), (void *)obj)) {
++            rb_vm_register_global_object(obj);
++        }
++    }
+ }
+ 
+ void
+@@ -3768,6 +3770,10 @@ update_classext(rb_classext_t *ext, bool is_prime, VALUE box_value, void *arg)
      }
  
      update_m_tbl(objspace, RCLASSEXT_M_TBL(ext));
