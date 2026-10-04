@@ -319,6 +319,45 @@ def test_send_with_block_unsupported():
                        "send with a block is not supported: 'add'")
 
 
+def test_a_block_runs_under_the_self_it_was_written_in():
+    class W_CallIt(W_CFunc):
+        def call(self, w_recv, args_w, w_block):
+            return interp.call_block(w_block, [])
+
+    call_id = symbols.intern('call_it')
+    w_self = W_Main()
+    w_self.define_method(call_id, W_CallIt(call_id, 0))
+    w_block = asm([], 0, 1, [insns.PUTSELF, insns.LEAVE],
+                  name='block in test')
+    # 5.call_it { self } -- the receiver is 5, the block's self is w_self
+    iseq = asm([W_Fixnum(5), W_CallInfo(call_id, 0), w_block], 0, 2, [
+        insns.PUTOBJECT, 0,
+        insns.SEND, 1, 2,
+        insns.LEAVE,
+    ])
+    assert interp.execute(iseq, Frame(iseq, w_self)) is w_self
+
+
+def test_block_arity_is_checked():
+    class W_CallIt(W_CFunc):
+        def call(self, w_recv, args_w, w_block):
+            return interp.call_block(w_block, [w_nil])
+
+    call_id = symbols.intern('call_it')
+    w_self = W_Main()
+    w_self.define_method(call_id, W_CallIt(call_id, 0))
+    w_block = asm([], 2, 2, [insns.PUTNIL, insns.LEAVE],
+                  name='block in test', nparams=2)
+    # call_it { |a, b| nil } -- but the builtin yields only one value
+    iseq = asm([W_CallInfo(call_id, 0), w_block], 0, 2, [
+        insns.PUTSELF,
+        insns.SEND, 0, 1,
+        insns.LEAVE,
+    ])
+    expect_unsupported(iseq, w_self,
+                       "block 'block in test' takes 2 argument(s), given 1")
+
+                       
 def test_wrong_argc():
     add_id = symbols.intern('add')
     iseq = asm([_add_iseq(), W_Fixnum(1), W_CallInfo(add_id, 1)], 0, 4, [

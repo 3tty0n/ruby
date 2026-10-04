@@ -116,13 +116,17 @@ def call_method(w_method, w_recv, args_w, w_block):
 
 
 def call_block(w_block, args_w):
-    callee = Frame(w_block.w_iseq, w_block.w_self)
+    w_iseq = w_block.w_iseq
+    if len(args_w) != w_iseq.nparams:
+        raise UnsupportedOperation(
+            "block '%s' takes %d argument(s), given %d"
+            % (w_iseq.name, w_iseq.nparams, len(args_w)))
+    callee = Frame(w_iseq, w_block.w_self)
     i = 0
     while i < len(args_w):
         callee.locals[i] = args_w[i]
         i += 1
-    return execute(w_block.w_iseq, callee)
-
+    return execute(w_iseq, callee)
 
 def _check_argc(mid, argc, want):
     if argc != want:
