@@ -163,6 +163,18 @@ def test_blockless_send_encoding():
     assert not w_ci.simple
 
 
+def test_a_call_with_a_block_literal_is_simple():
+    # CRuby leaves ARGS_SIMPLE off a call site that has a block literal
+    text = patched(fixture('block.iseq'), 'insn\tgetlocal_WC_1\ti:3',
+                   'insn\tputnil')
+    w_iseq = loader.load_dump(text)
+    at = w_iseq.code.index(insns.SEND)
+    w_ci = w_iseq.consts[w_iseq.code[at + 1]]
+    assert isinstance(w_ci, W_CallInfo)
+    assert w_ci.simple
+    assert w_iseq.code[at + 2] != NO_BLOCK_ISEQ
+
+    
 def test_trace_build_rejected():
     text = patched(fixture('fib_rec.iseq'), 'insn\tputself',
                    'insn\ttrace_putself')
