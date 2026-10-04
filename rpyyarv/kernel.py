@@ -13,7 +13,7 @@ def write(s):
 
 
 class W_Puts(W_CFunc):
-    def call(self, w_recv, args_w):
+    def call(self, w_recv, args_w, w_block):
         if len(args_w) == 0:
             write('\n')
         for w_arg in args_w:
@@ -21,7 +21,7 @@ class W_Puts(W_CFunc):
         return w_nil
 
 class W_ToS(W_CFunc):
-    def call(self, w_recv, args_w):
+    def call(self, w_recv, args_w, w_block):
         return W_String(w_recv.to_s_str())
 
 def install(w_class):

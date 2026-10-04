@@ -307,7 +307,7 @@ def test_send_with_block_unsupported():
     add_id = symbols.intern('add')
     w_block = asm([], 0, 1, [insns.PUTNIL, insns.LEAVE], name='block in add')
     iseq = asm([_add_iseq(), W_Fixnum(1), W_Fixnum(2),
-                W_CallInfo(add_id, 2), w_block], 0, 4, [
+                W_CallInfo(add_id, 2)], 0, 4, [
         insns.DEFINEMETHOD, add_id, 0,
         insns.PUTSELF,
         insns.PUTOBJECT, 1,
@@ -560,7 +560,7 @@ def test_split_needs_an_empty_regexp():
                        
 def test_cfunc_arity_is_checked():
     class W_One(W_CFunc):
-        def call(self, w_recv, args_w):
+        def call(self, w_recv, args_w, w_block):
             return args_w[0]
 
     one_id = symbols.intern('one')
@@ -576,6 +576,31 @@ def test_cfunc_arity_is_checked():
     expect_unsupported(
         iseq, w_self,
         "wrong number of arguments to 'one' (given 2, expected 1)")
+
+
+def test_a_block_reaches_a_cfunc():
+    class W_Twice(W_CFunc):
+        def call(self, w_recv, args_w, w_block):
+            w_once = interp.call_block(w_block, [args_w[0]])
+            return interp.call_block(w_block, [w_once])
+
+    twice_id = symbols.intern('twice')
+    w_self = W_Main()
+    w_self.define_method(twice_id, W_Twice(twice_id, 1))
+    w_block = asm([], 1, 2, [
+        insns.GETLOCAL, 0,
+        insns.GETLOCAL, 0,
+        insns.OPT_PLUS,
+        insns.LEAVE,
+    ], name='block in test', nparams=1)
+    # twice(3) { |x| x + x }
+    iseq = asm([W_Fixnum(3), W_CallInfo(twice_id, 1), w_block], 0, 4, [
+        insns.PUTSELF,
+        insns.PUTOBJECT, 0,
+        insns.SEND, 1, 2,
+        insns.LEAVE,
+    ])
+    assert interp.execute(iseq, Frame(iseq, w_self)).int_w() == 12
 
 
 def test_class_is_an_object():
@@ -614,7 +639,7 @@ def test_new_runs_initialize():
     seen = []
 
     class W_Init(W_CFunc):
-        def call(self, w_recv, args_w):
+        def call(self, w_recv, args_w, w_block):
             seen.append((w_recv, args_w[0].int_w()))
             return w_nil
 

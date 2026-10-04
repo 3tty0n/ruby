@@ -128,7 +128,7 @@ def test_method_table_is_a_plain_map():
 def test_a_cfunc_without_a_body_says_so():
     mid = symbols.intern('bodyless_probe')
     with pytest.raises(UnsupportedOperation) as e:
-        W_CFunc(mid, 0).call(w_nil, [])
+        W_CFunc(mid, 0).call(w_nil, [], None)
     assert e.value.msg == "'bodyless_probe' has no body"
 
 

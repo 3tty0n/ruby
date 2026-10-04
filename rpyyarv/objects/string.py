@@ -26,7 +26,7 @@ class W_String(W_Root):
         return '"%s"' % self.strval
 
 class W_ToI(W_CFunc):
-    def call(self, w_recv, args_w):
+    def call(self, w_recv, args_w, w_block):
         assert isinstance(w_recv, W_String)
         try:
             return W_Fixnum(int(w_recv.strval))
@@ -36,7 +36,7 @@ class W_ToI(W_CFunc):
                 "not Ruby's full parsing" % w_recv.repr())
 
 class W_Split(W_CFunc):
-    def call(self, w_recv, args_w):
+    def call(self, w_recv, args_w, w_block):
         assert isinstance(w_recv, W_String)
         w_pattern = args_w[0]
         if isinstance(w_pattern, W_Regexp) and w_pattern.pattern == '':

@@ -24,7 +24,7 @@ def _callinfo(iseq, idx):
 
 
 @unroll_safe
-def invoke(frame, w_ci):
+def invoke(frame, w_ci, w_block):
     argc = w_ci.argc
     recv_at = frame.sp - argc - 1
     if recv_at < 0:
@@ -77,18 +77,18 @@ def invoke(frame, w_ci):
         i += 1
     _drop(frame, recv_at)
     if not debug.state.enabled:
-        return w_method.call(w_recv, args_w)
+        return w_method.call(w_recv, args_w, w_block)
     debug.trace_enter(w_ci.mid, args_w)
-    w_ret = w_method.call(w_recv, args_w)
+    w_ret = w_method.call(w_recv, args_w, w_block)
     debug.trace_leave(w_ci.mid, w_ret)
     return w_ret
 
 
-def call_method(w_method, w_recv, args_w):
+def call_method(w_method, w_recv, args_w, w_block):
     if isinstance(w_method, W_CFunc):
         if w_method.arity >= 0:
             _check_argc(w_method.mid, len(args_w), w_method.arity)
-        return w_method.call(w_recv, args_w)
+        return w_method.call(w_recv, args_w, w_block)
 
     assert isinstance(w_method, W_ISeqMethod)
     callee_iseq = w_method.w_iseq
@@ -255,7 +255,7 @@ def execute(iseq, frame):
         elif opcode == insns.OPT_SEND_WITHOUT_BLOCK:
             idx = code[pc]
             pc += 1
-            frame.push(invoke(frame, _callinfo(iseq, idx)))
+            frame.push(invoke(frame, _callinfo(iseq, idx), None))
         elif opcode == insns.SEND:
             idx = code[pc]
             block = code[pc + 1]
@@ -265,7 +265,7 @@ def execute(iseq, frame):
                 raise UnsupportedOperation(
                     "send with a block is not supported: '%s'"
                     % symbols.name_of(w_ci.mid))
-            frame.push(invoke(frame, w_ci))
+            frame.push(invoke(frame, w_ci, None))
         elif opcode == insns.JUMP:
             target = code[pc]
             pc += 1
