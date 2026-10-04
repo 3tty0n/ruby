@@ -3,7 +3,9 @@
 import classlib
 import kernel
 from objects.base import W_Root
-from objects.klass import w_class_class, w_object_class, w_string_class
+from objects.klass import (w_array_class, w_class_class, w_object_class,
+                           w_string_class)
+import objects.array as arraylib
 import objects.string as stringlib
 
 class W_Main(W_Root):
@@ -25,5 +27,6 @@ class W_Main(W_Root):
 kernel.install(w_object_class)
 classlib.install(w_class_class)
 stringlib.install(w_string_class)
+arraylib.install(w_array_class)
 
 w_main = W_Main()

@@ -357,7 +357,28 @@ def test_block_arity_is_checked():
     expect_unsupported(iseq, w_self,
                        "block 'block in test' takes 2 argument(s), given 1")
 
-                       
+
+
+def test_inject_with_an_initial_value():
+    inject_id = symbols.intern('inject')
+    w_block = asm([], 2, 2, [
+        insns.GETLOCAL, 0,
+        insns.GETLOCAL, 1,
+        insns.OPT_PLUS,
+        insns.LEAVE,
+    ], name='block in test', nparams=2)
+    items = [W_Fixnum(1), W_Fixnum(2), W_Fixnum(3), W_Fixnum(4)]
+    # [1, 2, 3, 4].inject(0) { |s, x| s + x }
+    iseq = asm([W_Array(items), W_Fixnum(0), W_CallInfo(inject_id, 1), w_block],
+               0, 4, [
+        insns.PUTOBJECT, 0,
+        insns.PUTOBJECT, 1,
+        insns.SEND, 2, 3,
+        insns.LEAVE,
+    ])
+    assert interp.run(iseq).int_w() == 10
+
+    
 def test_wrong_argc():
     add_id = symbols.intern('add')
     iseq = asm([_add_iseq(), W_Fixnum(1), W_CallInfo(add_id, 1)], 0, 4, [
