@@ -1,4 +1,5 @@
 import symbols
+from error import UnsupportedOperation 
 from methods import W_CFunc
 from objects.base import W_Root
 from objects.klass import w_array_class
@@ -19,6 +20,10 @@ class W_Inject(W_CFunc):
     def call(self, w_recv, args_w, w_block):
         import interp
         assert isinstance(w_recv, W_Array)
+        if w_block is None:
+            raise UnsupportedOperation(
+                "inject without a block is not supported: RPyYARV has no "
+                "Symbol, so inject(:+) cannot work")
         w_acc = args_w[0]
         for w_item in w_recv.items_w:
             w_acc = interp.call_block(w_block, [w_acc, w_item])

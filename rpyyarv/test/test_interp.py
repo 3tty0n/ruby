@@ -378,7 +378,21 @@ def test_inject_with_an_initial_value():
     ])
     assert interp.run(iseq).int_w() == 10
 
-    
+def test_inject_needs_a_block():
+    inject_id = symbols.intern('inject')
+    # [1].inject(0) -- no block, so there is nothing to fold with
+    iseq = asm([W_Array([W_Fixnum(1)]), W_Fixnum(0),
+                W_CallInfo(inject_id, 1)], 0, 4, [
+        insns.PUTOBJECT, 0,
+        insns.PUTOBJECT, 1,
+        insns.OPT_SEND_WITHOUT_BLOCK, 2,
+        insns.LEAVE,
+    ])
+    expect_unsupported(iseq, W_Main(),
+                       "inject without a block is not supported: RPyYARV has "
+                       "no Symbol, so inject(:+) cannot work")
+
+                       
 def test_wrong_argc():
     add_id = symbols.intern('add')
     iseq = asm([_add_iseq(), W_Fixnum(1), W_CallInfo(add_id, 1)], 0, 4, [
