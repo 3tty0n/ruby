@@ -164,7 +164,7 @@ class Loader(object):
             code[at] = op
             at += 1
             for pos in optable.EMIT_POSITIONS[op]:
-                code[at] = self.operand(op, pos, ops[pos], raw, pool, labels)
+                code[at] = self.operand(op, pos, ops, raw, pool, labels)
                 at += 1
 
         w_iseq = W_ISeq(raw.name, code, [w for w in pool.consts], raw.nlocals,
@@ -188,7 +188,8 @@ class Loader(object):
                     "expandarray with a splat or post arguments in '%s' is "
                     "not supported" % raw.name)
 
-    def operand(self, op, pos, operand, raw, pool, labels):
+    def operand(self, op, pos, ops, raw, pool, labels):
+        operand = ops[pos]
         t = insns.OPERAND_TYPES[op][pos]
         if t == insns.T_VALUE:
             return self.literal(operand, op, raw, pool)
@@ -209,7 +210,7 @@ class Loader(object):
                                    operand.describe()))
             return pool.add(self.load_iseq(operand.intval))
         if t == insns.T_CALL_DATA:
-            return pool.add(self.callinfo(operand, op, raw))
+            return pool.add(self.callinfo(operand, op, raw, ops))
         raise LoadError("%s in '%s' has an operand of type %s, which "
                         "yarv_map.py supports but the loader does not"
                         % (insns.NAMES[op], raw.name, insns.TYPE_NAMES[t]))
@@ -266,14 +267,18 @@ class Loader(object):
                             % (insns.NAMES[op], raw.name, name))
         return labels[name]
 
-    def callinfo(self, operand, op, raw):
+    def callinfo(self, operand, op, raw, ops):
         if operand.kind != rawiseq.OP_CALL:
             raise LoadError("%s in '%s' wants call data, got %s"
                             % (insns.NAMES[op], raw.name, operand.describe()))
         flags = operand.flag
+        # CRuby never sets ARGS_SIMPLE on a call site with a block literal,
+        # so the literal itself stands in for it.
+        has_block = op == insns.SEND and ops[1].kind == rawiseq.OP_ISEQ
         simple = (not operand.has_kwarg
                   and (flags & ~optable.SIMPLE_CALL_FLAGS) == 0
-                  and (flags & optable.CALL_FLAG_ARGS_SIMPLE) != 0)
+                  and ((flags & optable.CALL_FLAG_ARGS_SIMPLE) != 0
+                       or has_block))
         return W_CallInfo(symbols.intern(operand.strval), operand.intval,
                           simple, (flags & optable.CALL_FLAG_FCALL) != 0)
 
