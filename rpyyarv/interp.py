@@ -4,7 +4,7 @@ import helpers
 import symbols
 from error import UnsupportedOperation
 from frame import Frame
-from iseq import W_CallInfo, W_ISeq, NO_BLOCK_ISEQ
+from iseq import W_Block, W_CallInfo, W_ISeq, NO_BLOCK_ISEQ
 from methods import W_CFunc, W_ISeqMethod
 from objects.array import W_Array
 from objects.string import W_String
@@ -43,6 +43,10 @@ def invoke(frame, w_ci, w_block):
                                    % (symbols.name_of(w_ci.mid), w_recv.repr()))
 
     if isinstance(w_method, W_ISeqMethod):
+        if w_block is not None:
+            raise UnsupportedOperation(
+                "send with a block is not supported: '%s'"
+                % symbols.name_of(w_ci.mid))
         callee_iseq = w_method.w_iseq
         if not callee_iseq.simple_params:
             raise UnsupportedOperation(
@@ -91,6 +95,12 @@ def call_method(w_method, w_recv, args_w, w_block):
         return w_method.call(w_recv, args_w, w_block)
 
     assert isinstance(w_method, W_ISeqMethod)
+
+    if w_block is not None:
+        raise UnsupportedOperation(
+            "send with a block is not supported: '%s'"
+            % symbols.name_of(w_method.mid))
+
     callee_iseq = w_method.w_iseq
     if not callee_iseq.simple_params:
         raise UnsupportedOperation(
@@ -103,6 +113,15 @@ def call_method(w_method, w_recv, args_w, w_block):
         callee.locals[i] = args_w[i]
         i += 1
     return execute(callee_iseq, callee)
+
+
+def call_block(w_block, args_w):
+    callee = Frame(w_block.w_iseq, w_block.w_self)
+    i = 0
+    while i < len(args_w):
+        callee.locals[i] = args_w[i]
+        i += 1
+    return execute(w_block.w_iseq, callee)
 
 
 def _check_argc(mid, argc, want):
@@ -261,11 +280,11 @@ def execute(iseq, frame):
             block = code[pc + 1]
             pc += 2
             w_ci = _callinfo(iseq, idx)
-            if block != NO_BLOCK_ISEQ:
-                raise UnsupportedOperation(
-                    "send with a block is not supported: '%s'"
-                    % symbols.name_of(w_ci.mid))
-            frame.push(invoke(frame, w_ci, None))
+            if block == NO_BLOCK_ISEQ:
+                w_block = None
+            else:
+                w_block = W_Block(_as_iseq(iseq.consts[block]), frame.w_self)
+            frame.push(invoke(frame, w_ci, w_block))
         elif opcode == insns.JUMP:
             target = code[pc]
             pc += 1

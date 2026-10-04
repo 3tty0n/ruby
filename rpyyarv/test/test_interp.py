@@ -307,7 +307,7 @@ def test_send_with_block_unsupported():
     add_id = symbols.intern('add')
     w_block = asm([], 0, 1, [insns.PUTNIL, insns.LEAVE], name='block in add')
     iseq = asm([_add_iseq(), W_Fixnum(1), W_Fixnum(2),
-                W_CallInfo(add_id, 2)], 0, 4, [
+                W_CallInfo(add_id, 2), w_block], 0, 4, [
         insns.DEFINEMETHOD, add_id, 0,
         insns.PUTSELF,
         insns.PUTOBJECT, 1,
