@@ -49,6 +49,10 @@ AWFY_BENCHMARKS = {
 }.freeze
 
 BIMODAL_RATIO = 1.15
+# Below this steady median an iteration is under timer resolution: elided.
+ELIDED_MS = 0.005
+# Per-process iterations kept in raw.json; elided loops ran ~10^8.
+RAW_ITER_CAP = 20_000
 
 # The shim's adaptive warm-up (scripts/ruby-bench/harness.rb), as ruby-bench
 # runs it: wall-clock floors on top of the iteration minimums.
@@ -159,9 +163,10 @@ def run_once(argv, script, env, timeout)
     return [nil, "FAIL", info.merge("why" => "no DONE line",
                                     "err_tail" => err[-1500..-1] || err)]
   end
-  # A 0 ms iteration did no work; it would also put Infinity in the raw JSON.
-  if times.any? { |t| t <= 0 }
-    return [nil, "FAIL", info.merge("why" => "iteration took 0 ms")]
+  steady = times[(info["warmed"] || 0)..]
+  steady = times if steady.nil? || steady.empty?
+  if !times.empty? && median(steady) < ELIDED_MS
+    return [nil, "FAIL", info.merge("why" => "loop elided")]
   end
   [times, nil, info]
 end
@@ -199,6 +204,7 @@ def time_engine(argv, script, env, warm, procs, timeout)
   pooled = []
   per_proc = []
   raw_iterations = []
+  totals = []
   warmed_at = []
   procs.times do
     times, err, info = run_once(argv, script, env, timeout)
@@ -208,7 +214,8 @@ def time_engine(argv, script, env, warm, procs, timeout)
     end
     # The harness says where warmup ended when WARMUP_TIME stretched it.
     w = info["warmed"] || warm
-    raw_iterations << times
+    raw_iterations << times.first(RAW_ITER_CAP)
+    totals << times.size
     warmed_at << w
     pooled.concat(times[w..] || [])
     per_proc << median(times[w..] || times)
@@ -216,7 +223,7 @@ def time_engine(argv, script, env, warm, procs, timeout)
   spread = per_proc.compact.empty? ? nil : per_proc.compact.max / per_proc.compact.min
   { median: median(pooled), min: pooled.min, n: pooled.size,
     per_proc: per_proc, spread: spread, raw_iterations: raw_iterations,
-    warmed_at: warmed_at }
+    raw_iteration_counts: totals, warmed_at: warmed_at }
 end
 
 def render_table(headers, table)
