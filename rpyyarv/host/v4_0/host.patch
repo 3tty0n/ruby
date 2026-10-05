@@ -390,7 +390,7 @@ index 4397ae339b..9e1fa6e827 100644
  rb_gvar_getter_function_of(ID id)
  {
 diff --git a/vm.c b/vm.c
-index b4ad304429..573768e180 100644
+index b4ad304429..bcba02c5e3 100644
 --- a/vm.c
 +++ b/vm.c
 @@ -45,6 +45,7 @@
@@ -401,7 +401,22 @@ index b4ad304429..573768e180 100644
  #include "vm_sync.h"
  #include "shape.h"
  
-@@ -1566,6 +1567,70 @@ rb_proc_isolate(VALUE self)
+@@ -1349,8 +1350,12 @@ rb_proc_dup(VALUE self)
+ 
+     switch (vm_block_type(&src->block)) {
+       case block_type_ifunc:
+-        procval = rb_func_proc_dup(self);
+-        break;
++        // A copied env hides ME_CREF and SPECVAL from GC: share a real env.
++        if (UNDEF_P(vm_block_ep(&src->block)[VM_ENV_DATA_INDEX_ENV])) {
++            procval = rb_func_proc_dup(self);
++            break;
++        }
++        /* fall through */
+       default:
+         procval = proc_create(rb_obj_class(self), &src->block, src->is_from_method, src->is_lambda);
+         break;
+@@ -1566,6 +1571,70 @@ rb_proc_isolate(VALUE self)
      return dst;
  }
  
@@ -472,7 +487,7 @@ index b4ad304429..573768e180 100644
  VALUE
  rb_proc_ractor_make_shareable(VALUE self, VALUE replace_self)
  {
-@@ -1596,7 +1661,8 @@ rb_proc_ractor_make_shareable(VALUE self, VALUE replace_self)
+@@ -1596,7 +1665,8 @@ rb_proc_ractor_make_shareable(VALUE self, VALUE replace_self)
          proc_isolate_env(self, proc, read_only_variables);
          proc->is_isolated = TRUE;
      }
