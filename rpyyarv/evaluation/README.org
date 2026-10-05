@@ -4,6 +4,154 @@ This file is the reproduction guide for the paper's evaluation and the
 reference for the harness.  All commands run from =rpyyarv/= unless stated
 otherwise.
 
+* Artifact evaluation
+
+Three levels, each a =make= target after [[*Build from scratch][the build]] and =make setup=.
+Each runs =evaluation/campaign.sh= steps (gate, watchdog, crash-report log
+as below) into =evaluation/results/ae-LEVEL-STAMP/=, then
+=evaluation/ae.rb check LEVEL DIR=, which prints one line per paper claim:
+measured value, the paper's value, and PASS / WARN / INFO / SKIP.  Set
+=GEM_PATH= as in [[*Benchmarks and gems][Benchmarks and gems]]; run the longer two detached (=nohup make
+ae-quick &=).
+
+| Target | Time (M4 Pro) | What it runs |
+|--------+---------------+--------------|
+| =make ae-smoke= | about 15 min | =make test eval-test=, doctor; =gccheck= and dispatch compaction (b) on 14 GC/fiber/thread scripts; crossing; 5 benchmarks (richards, deltablue, keyword_args, 30k_methods, railsbench) on all five engines, one verified process each |
+| =make ae-quick= | 5-5.5 h | every claim on the 39-benchmark subset below, one process |
+| =make ae-full= | 35 h plus the stress step (see [[*The campaign][The campaign]]) | exactly =evaluation/campaign.sh=, then =ae.rb check full= |
+
+=make ae-quick AE_SPEC_SUITES="--suite language --suite core"= adds
+ruby/spec core (about 6 min per stress, 50 min for (c)).  =ae.rb check=
+exits 1 when any claim WARNs.
+
+** Claims
+
+Tolerances are in =ae.rb= (=CLAIMS=); the paper's values in =ae-paper.json=:
+=full= from the final campaign of 1313bdb9d6, and for =quick= and =smoke=
+the same campaign's data restricted to that level's benchmarks (so a
+subset is compared with the paper's numbers for that subset).  =ae.rb check
+full= on that campaign reproduces every value (40 PASS).
+
+| RQ | Claim | Level | Step | Paper (full) | Rule |
+|----+-------+-------+------+--------------+------|
+| RQ1 | ruby/spec pass rate under rpyyarv-jit | quick (language), full | specstress, none | language 99.1%, core 97.9%, C-API 100% | within 0.5 pt |
+| RQ1 | every benchmark runs native, none FAIL/DELEGATED | smoke, quick, full | performance | 0 of 85 | = 0 |
+| RQ1 | native iseq share, CRuby share of sends | quick, full | coverage (boundary in full) | 94.1%, 0.66% | within 5 pt, 1 pt |
+| RQ2 | =gccheck= at the malloc limit; fibercycle.rb (cycles through suspended fibers are reclaimed) | smoke (subset), quick, full | gc | 164 ok, 0 failed | = 0 |
+| RQ2 | compaction stress (b) on scripts | smoke | ae-compact | - | = 0 |
+| RQ2 | gc-no-hook breaks most benchmarks | quick, full | nohook | 69/85 | at least half |
+| RQ2 | GC count multiplier at 16384 | quick, full | gc | jit 1.37, cruby 1.15 | within 0.2 |
+| RQ2 | no crash at any nursery size | quick, full | nursery | 0/60 | = 0 |
+| RQ2 | corpus stresses (a)-(d): no crash but shipit/(c)/jit | quick, full | stress | 1 crash, 35 timeouts | = 0 others |
+| RQ2 | ruby/spec under (a)(b)(d) = unstressed | quick, full | specstress | identical | within 0.2 pt |
+| RQ3 | geomean jit/cruby, CI below 1 | smoke, quick, full | performance | 0.365 [0.288, 0.466] | CI < 1 and overlaps |
+| RQ3 | geomean jit/yjit, jit/zjit, AWFY jit/yjit, interp/cruby | smoke, quick, full | performance | 0.967 [0.829, 1.144], 0.604, 0.819, 2.50 | CIs overlap |
+| RQ3 | keyword_args, 30k_methods faster than YJIT; railsbench, lobsters, shipit, rubocop, hexapdf slower | smoke (3), quick, full | performance | 0.07 / 2.9-4.9 | same side of 1 |
+| RQ3 | native vs delegated gems, jit | quick (5), full (12) | delegation | 1.39 (quick: 1.81) | within 25% |
+| RQ3 | boundary crossing cost vs CRuby | smoke, quick, full | crossing | 0.85-2.33 | each within 2x |
+| RQ4 | fast-paths-off slowdown; keyword_args | quick, full | ablate | 6.35 [4.81, 8.47]; 218x | CI overlaps; > 50x |
+| RQ4 | invalidation-global, jit-params eager/lazy | quick, full | ablate | 0.98-1.03 | within 0.1 |
+| RQ4 | sends correlate with jit/yjit | quick, full | mechanisms | r 0.593 [0.492, 0.695] | CI > 0 |
+| RQ4 | bridges/loop correlate | full only | mechanisms | r 0.224 [0.052, 0.383] | CI > 0 |
+| RQ4 | compile time is a small share | quick, full | mechanisms | 0.65%, AWFY 4.2% | < 10% |
+| RQ5 | peak RSS jit/cruby, jit/yjit | quick, full | memory | 2.34 [2.10, 2.60], 2.11 | CIs overlap |
+| RQ5 | startup RSS | quick, full | memory | jit 18.2 MB, cruby 12.6 MB | within 15% |
+| RQ5 | warm-up: median time-to-stable jit/yjit | quick, full | performance | 1.92 [1.00, 2.81] | CIs overlap |
+
+Not in any level: the footprint decomposition and retention
+(=footprint.rb=, macOS only, several hours), the time breakdown
+(=breakdown.rb=), the build-only ablations, and LoC (=make eval EVAL=loc=,
+seconds).
+
+** The quick subset
+
+=evaluation/ae.rb= fixes it (=AWFY=, =RUBY_BENCH=), stratified by suite and
+by ruby-bench's =benchmarks.yml= category, each stratum spread over its
+jit/yjit range in the paper's run:
+
+| Stratum | Corpus | Subset |
+|---------+--------+--------|
+| AWFY | 14 | all 14 (7 min a process) |
+| headline | 16 | chunky-png liquid-render railsbench hexapdf shipit lobsters rubocop |
+| other | 28 | nqueens fannkuchredux graphql-native binarytrees, plus json_parse_float json_parse_string ruby-json nbody, which the AWFY filters =json= and =nbody= select too |
+| micro | 25 | keyword_args 30k_methods send_cfunc_block 30k_ifelse throw setivar_young object-new-initialize fib structaref |
+| gc | 2 | gcbench |
+
+39 benchmarks, 40% of the full run's time.  Every per-benchmark claim's
+benchmark is in it (keyword_args and 30k_methods, the apps, 30k_ifelse for
+jit-params-lazy, the five gem benchmarks of the delegation claim).
+rubyboy, optcarrot and string_malloc_pressure are left out: they are 12%
+of the full run's time.  On the paper's own data the subset gives jit/yjit
+0.960 (full 0.967), jit/cruby 0.358 (0.365), AWFY 0.819 (identical),
+ruby-bench 1.05 (1.00), and sends r = 0.55 (0.59).
+
+** What quick changes, and what it cannot show
+
+| Step | Full | Quick |
+|------+------+-------|
+| gc | three malloc limits, GC frequency on all 165 scripts | 16384 only (the multiplier is 1.37 at all three); =gccheck= on all scripts, GC frequency on every 4th (=EVAL_GCFREQ_EVERY=4=) |
+| performance | 3 processes, all 85, native and delegated passes | 1 process, subset, native pass only (=EVAL_DELEGATED_PASS=0=); same per-process protocol, so each number is one sample of the full run's |
+| boundary | own step | none: it is the same =bench.rb --foreign=20= run as coverage's =foreign= pass; the checker reads coverage.csv |
+| delegation | 12 gem benchmarks, five engines, 3 processes | the 5 in the subset, rpyyarv-jit only, 1 process |
+| memory | five engines | cruby, cruby+yjit, rpyyarv-jit (the ones the claims use) |
+| nohook + ablate | gc-no-hook runs in both; ablate on both rpyyarv engines | gc-no-hook once (nohook step); ablate on rpyyarv-jit only |
+| stress | none and (a)-(d), with CRuby, 600 s alarm | (a)-(d) on rpyyarv and rpyyarv-jit, 120 s alarm, watchdog 10 min; =none= is the performance run |
+| specstress | language, core, C-API | language |
+
+Lost precision: with one process the bootstrap CIs cover benchmark
+variation only, and with 39 benchmarks they are about 1.5x as wide
+(jit/yjit [0.75, 1.27] against [0.83, 1.14]), so quick confirms the
+direction and the overlap, not the third digit.  The bridges/loop
+correlation (r = 0.22) needs about (1.96/0.22)^2 + 3 = 80 points for a CI
+that excludes 0, i.e. the full corpus; quick reports it as INFO.  The sends
+correlation (r = 0.59) is decided by 39 points: Fisher's z gives a CI
+half-width of about 0.3.  Benchmarks outside the subset carry no
+per-benchmark claim, but the paper's per-benchmark table, warm-up curves of
+optcarrot, the 85-benchmark stress table, ruby/spec core under (c), the
+CRuby column of the stress table, and the other two malloc limits are
+full-only.
+
+** Hardware
+
+The times above are from the reference machine (Apple M4 Pro, 14 cores,
+24 GB): 4 parallel jobs in stress and spec, otherwise one benchmark process
+at a time, and peak RSS up to 7 GB (string_malloc_pressure, full only; the quick
+subset's largest is under 1 GB).  16 GB and 8 cores are enough.  A slower machine scales the time-floored ruby-bench
+runs (5 s warm-up, 5 s measured) little and AWFY and the stresses roughly
+with single-core speed.  On Linux x86-64 every claim above runs (see
+[[*Portability to Linux and x86-64][Portability]]): the levels use neither =footprint.rb= nor =breakdown.rb=;
+=EVAL=memory= needs GNU =time=.  Absolute numbers differ by machine; the
+rules compare ratios and directions, and a WARN on another machine is a
+difference to explain, not necessarily a failure.
+
+** Redundant measurement in the full campaign
+
+The full campaign is kept as run.  Steps that measure the same thing
+twice, and what quick does about each:
+
+| Overlap | Quick | Full (recommendation, not applied) |
+|---------+-------+------------------------------------|
+| boundary = coverage's =foreign= pass: same argv, same binary (4.7 min each) | shared | drop the boundary step; extract boundary.csv from coverage's foreign.log |
+| coverage's =--inventory= and performance's =--refresh-inventory= probe every ruby-bench benchmark again (25 min) | shared: performance reuses the fresh cache | drop =--refresh-inventory=, coverage just refreshed it |
+| performance's delegated pass re-times all 85 on five engines (3.9 h), though =--no-gem-require= only changes Gemfile benchmarks, and the delegation step times those again | dropped; delegation runs on the subset's gem benchmarks | restrict the delegated pass to Gemfile benchmarks and rpyyarv engines, or drop it for the delegation step (changes =geomean_native_over_delegated=, so a protocol change) |
+| =nohook= = ablate's =gc-no-hook= (57 + 54 min) | once | pass explicit names to ablate without gc-no-hook; figures merge ablation dirs anyway |
+| stress =none= = one verified process of the performance protocol per engine | the performance run | keep: it runs in parallel under the same 600 s alarm as the stresses |
+| memory's peak-RSS run is an uninstrumented process of the timed protocol | kept, three engines | wrap performance processes in =/usr/bin/time=; the heap and PYPYLOG runs must stay separate |
+| mechanisms' coverage probe = coverage's foreign probe | kept (one iteration, seconds) | share it |
+| warm-up | from performance's raw.json, no rerun | - |
+
+Kept separate on purpose: mechanisms (=PYPYLOG=jit-summary=, =--yjit-stats=
+and =--zjit-stats= runs perturb timing), GC frequency versus =gccheck=
+(=RPYYARV_COVERAGE=1= changes JIT selection, so =gccheck= would test a
+different VM), memory's =GC.stat= and =PYPYLOG= runs, and ablate's own
+baseline (ablation ratios are against a baseline from the same hours).
+
+The stress step's 93.7 h is 4.6 h of runs plus four CRuby processes, under
+(a) and (c), that hung for 88 h: CRuby handles =SIGALRM= in Ruby, which a
+deadlocked process never does, and the watchdog only kills =rpyyarv=
+children.  A watchdog for CRuby children would cut the full campaign to
+about 40 h.
+
 * The paper's build
 
 | Item                 | Value                                                  |
@@ -177,26 +325,28 @@ usual.  Run it detached (=nohup=): a session-bound background job may be
 killed with its terminal.
 
 The steps, in order, and their wall-clock time on the reference machine
-(from manifests' =seconds=):
+(from manifests' =seconds=; the last column, wall time of the final
+campaign's =campaign.log= START/END):
 
-| Step | Command | Time |
-|------+---------+------|
-| gc | =make eval EVAL=gc EVALFLAGS="16384 4096 1024"= | 23 min gccheck, 55 min with the GC-frequency probes |
-| nursery | =EVAL_TRIALS=20 make eval EVAL=nursery EVALFLAGS="evaluation/nursery-hexapdf.rb 1073741824 4194304 131072"= | 21 min |
-| nohook | =make eval EVAL=ablate EVALFLAGS="gc-no-hook"= | 10 min |
-| crossing | =make eval EVAL=crossing= | 8 s |
-| boundary | =make eval EVAL=boundary EVALFLAGS="--suite all"= | 5 min |
-| coverage | =make eval EVAL=coverage EVALFLAGS="--suite all"= | 30-42 min |
-| performance | =make eval EVAL=performance EVALFLAGS="--suite all --procs 3 --refresh-inventory"= | 8.3 h |
-| mechanisms | =make eval EVAL=mechanisms EVALFLAGS="--suite all --performance RESULTS/raw.json"= (the performance run's) | 1.1 h |
-| memory | =make eval EVAL=memory EVALFLAGS="--suite all"= | 2.8 h |
-| delegation | =make eval EVAL=delegation EVALFLAGS="--suite ruby-bench --filter sequel --filter mail --filter rack --filter railsbench --filter shipit --filter lobsters --filter erubi-rails --filter activerecord --filter hexapdf --filter rubocop --filter fluentd --filter ruby-lsp"= | 1.4 h |
-| ablate | =make eval EVAL=ablate= (eight runtime ablations, all suites, 3 processes) | not timed as a whole; =fast-paths-off= alone took 3.9 h |
-| stress | =make eval EVAL=stress EVALFLAGS="--timeout 600 --jobs 4"= | not yet recorded |
-| specstress | =ruby --disable-gems evaluation/spec.rb --suite language --suite core --suite capi --timeout 120 --jobs 4 [--env K=V ...] --out DIR=, once per stress (none, a-d below) | not yet recorded |
+| Step | Command | Time | Wall (1313bdb9d6) |
+|------+---------+------+------|
+| gc | =make eval EVAL=gc EVALFLAGS="16384 4096 1024"= | 23 min gccheck, 55 min with the GC-frequency probes | 47 min |
+| nursery | =EVAL_TRIALS=20 make eval EVAL=nursery EVALFLAGS="evaluation/nursery-hexapdf.rb 1073741824 4194304 131072"= | 21 min | 6 min |
+| nohook | =make eval EVAL=ablate EVALFLAGS="gc-no-hook"= | 10 min | 57 min |
+| crossing | =make eval EVAL=crossing= | 8 s | 8 s |
+| boundary | =make eval EVAL=boundary EVALFLAGS="--suite all"= | 5 min | 5 min |
+| coverage | =make eval EVAL=coverage EVALFLAGS="--suite all"= | 30-42 min | 30 min |
+| performance | =make eval EVAL=performance EVALFLAGS="--suite all --procs 3 --refresh-inventory"= | 8.3 h | 8.1 h |
+| mechanisms | =make eval EVAL=mechanisms EVALFLAGS="--suite all --performance RESULTS/raw.json"= (the performance run's) | 1.1 h | 1.1 h |
+| memory | =make eval EVAL=memory EVALFLAGS="--suite all"= | 2.8 h | 3.4 h |
+| delegation | =make eval EVAL=delegation EVALFLAGS="--suite ruby-bench --filter sequel --filter mail --filter rack --filter railsbench --filter shipit --filter lobsters --filter erubi-rails --filter activerecord --filter hexapdf --filter rubocop --filter fluentd --filter ruby-lsp"= | 1.4 h | 1.4 h |
+| ablate | =make eval EVAL=ablate= (eight runtime ablations, all suites, 3 processes) | not timed as a whole; =fast-paths-off= alone took 3.9 h | 17.0 h |
+| stress | =make eval EVAL=stress EVALFLAGS="--timeout 600 --jobs 4"= | 4.6 h of runs | 93.7 h, of which 88 h four hung CRuby runs |
+| specstress | =ruby --disable-gems evaluation/spec.rb --suite language --suite core --suite capi --timeout 120 --jobs 4 [--env K=V ...] --out DIR=, once per stress (none, a-d below) | 6 min each, (c) 56 min | 1.5 h with gate waits |
 
 The last two are stress runs, not timings; =--jobs 4= runs benchmarks in
-parallel.  The whole campaign takes more than a day.
+parallel.  The whole campaign took 5.4 days, 35 h of it outside the
+stress step.
 
 * GC and compaction stresses
 
@@ -406,7 +556,8 @@ ruby evaluation/run.rb crossing
 ruby evaluation/run.rb delegation --filter sequel --filter mail --filter rack
 ruby evaluation/run.rb memory --suite all
 ruby evaluation/run.rb mechanisms --suite all --performance RESULTS/raw.json
-ruby evaluation/run.rb stress [--stress NAME] [--timeout SEC] [--jobs N]
+ruby evaluation/run.rb stress [--stress NAME] [--timeout SEC] [--jobs N] \
+  [--filter BENCH] [--engine ENGINE]
 ruby evaluation/run.rb gc 16384 4096 1024
 ruby evaluation/run.rb nursery SCRIPT 1073741824 131072
 ruby evaluation/run.rb ablate baseline gc-no-hook --suite awfy
