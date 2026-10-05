@@ -392,7 +392,7 @@ def test_inject_needs_a_block():
                        "inject without a block is not supported: RPyYARV has "
                        "no Symbol, so inject(:+) cannot work")
 
-                       
+
 def test_wrong_argc():
     add_id = symbols.intern('add')
     iseq = asm([_add_iseq(), W_Fixnum(1), W_CallInfo(add_id, 1)], 0, 4, [
@@ -498,6 +498,18 @@ def test_concatstrings_needs_strings():
     expect_unsupported(iseq, W_Main(), 'not a string')
 
 
+def test_string_plus():
+    iseq = asm([W_String('4'), W_String('2')], 0, 2, [
+        insns.PUTOBJECT, 0,
+        insns.PUTOBJECT, 1,
+        insns.OPT_PLUS,
+        insns.LEAVE,
+    ])
+    w_str = interp.run(iseq)
+    assert isinstance(w_str, W_String)
+    assert w_str.str_w() == '42'
+
+    
 def test_to_s_str():
     assert W_Fixnum(-7).to_s_str() == '-7'
     assert w_nil.to_s_str() == ''
