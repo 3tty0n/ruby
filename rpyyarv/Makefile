@@ -254,7 +254,7 @@ GCSCRIPTS = benchmark/*.rb test/exceptions.rb test/coverage.rb \
             test/definedgvar.rb test/blockraise.rb test/defmethodsuper.rb \
             test/includelate.rb test/threads.rb test/methodintro.rb \
             test/stalebh.rb test/singletongc.rb test/purgegc.rb \
-            test/procdup.rb \
+            test/procdup.rb test/procdupcref.rb \
             $(HOST_SRC)/benchmark/app_*.rb $(HOST_SRC)/benchmark/so_*.rb
 
 gcscripts:

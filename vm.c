@@ -1350,8 +1350,12 @@ rb_proc_dup(VALUE self)
 
     switch (vm_block_type(&src->block)) {
       case block_type_ifunc:
-        procval = rb_func_proc_dup(self);
-        break;
+        // A copied env hides ME_CREF and SPECVAL from GC: share a real env.
+        if (UNDEF_P(vm_block_ep(&src->block)[VM_ENV_DATA_INDEX_ENV])) {
+            procval = rb_func_proc_dup(self);
+            break;
+        }
+        /* fall through */
       default:
         procval = proc_create(rb_obj_class(self), &src->block, src->is_from_method, src->is_lambda);
         break;
