@@ -48,12 +48,14 @@ module Stress
     suite.with_script(bench) do |script, env, _warm|
       began = Process.clock_gettime(Process::CLOCK_MONOTONIC)
       _t, err, info = run_once(argv, script, env.merge(env_extra), timeout)
+      secs = Process.clock_gettime(Process::CLOCK_MONOTONIC) - began
+      # A run that outlived its alarm was killed from outside: a hang.
+      err = "TIMEOUT" if err && secs >= timeout
       row = { "stress" => stress, "suite" => suite.name, "benchmark" => bench,
               "engine" => engine,
               "outcome" => err.nil? ? "pass" : err.downcase,
               "signature" => err && signature(info),
-              "seconds" => (Process.clock_gettime(Process::CLOCK_MONOTONIC) -
-                            began).round(1) }
+              "seconds" => secs.round(1) }
     end
     row
   end
