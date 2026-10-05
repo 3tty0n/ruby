@@ -92,6 +92,7 @@ BIN       ?= .
 .PHONY: bench-bootstrap bench-setup
 .PHONY: gccheck gcscripts compactcheck stresscompactcheck timercompactcheck
 .PHONY: ractorcheck purgecheck
+.PHONY: ae-smoke ae-quick ae-full
 .PHONY: build build-cruby build-interp build-jit link clean
 .PHONY: pypy-patch host
 
@@ -163,6 +164,28 @@ eval:
 eval-test:
 	RPYYARV_BUILD=$(BUILD) RUBYLIB=$(UNINSTALLED_RUBYLIB) $(LIBPATH) \
 	  $(RUBY_CMD) evaluation/test_run.rb
+
+# Artifact evaluation: campaign.sh steps on evaluation/ae.rb's subsets, then
+# the claim checker. evaluation/README.org lists what each level shows.
+AE_STEPS_smoke = ae-sanity ae-gccheck ae-compact crossing ae-performance
+AE_STEPS_quick = ae-sanity ae-gc nursery crossing ae-coverage ae-performance \
+                 ae-mechanisms ae-memory ae-delegation ae-nohook ae-ablate \
+                 ae-stress specstress
+AE_GATE_smoke = 0
+AE_GATE_quick = 600
+# Add --suite core for RQ1's core numbers (about 6 min more per stress).
+AE_SPEC_SUITES ?= --suite language
+ae-smoke ae-quick:
+	d=$(CURDIR)/evaluation/results/$@-`date -u +%Y%m%dT%H%M%SZ`; \
+	 CAMPAIGN_DIR=$$d AE_LEVEL=$(@:ae-%=%) STEPS="$(AE_STEPS_$(@:ae-%=%))" \
+	   GATE_TIMEOUT=$(AE_GATE_$(@:ae-%=%)) WATCHDOG_SECS=600 \
+	   SPEC_SUITES="$(AE_SPEC_SUITES)" evaluation/campaign.sh; \
+	 ruby --disable-gems evaluation/ae.rb check $(@:ae-%=%) $$d
+
+ae-full:
+	d=$(CURDIR)/evaluation/results/campaign-`date -u +%Y%m%dT%H%M%SZ`; \
+	 CAMPAIGN_DIR=$$d evaluation/campaign.sh; \
+	 ruby --disable-gems evaluation/ae.rb check full $$d
 
 # JSONL history from bench.rb, plotted separately from the worker.
 bench-viz:

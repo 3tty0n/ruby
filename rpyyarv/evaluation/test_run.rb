@@ -5,6 +5,7 @@ require "tmpdir"
 
 require_relative "run"
 require_relative "mechanisms"
+require_relative "ae"
 
 def assert(condition, message)
   raise message unless condition
@@ -260,6 +261,101 @@ Dir.mktmpdir("rpyyarv-footprint-test") do |dir|
   assert(sets["hook:pools+caches+frames"]["retained"] == 1,
          "an object a CRuby root also reaches is not retained")
   assert(r["rpyyarv_only"] == 3, "rpyyarv-only objects")
+end
+
+# The paper's 85 benchmarks: AWFY, then ruby-bench at 09b76c8b0f.
+CORPUS = AE::AWFY + %w[
+  30k_ifelse 30k_methods activerecord attr_accessor binarytrees blurhash
+  cfunc_itself chunky-png erubi erubi-rails etanni fannkuchredux fib fluentd
+  gcbench getivar getivar-module graphql graphql-native gvl_release_acquire
+  hexapdf json_parse_float json_parse_string keyword_args knucleotide
+  knucleotide-ractor lee liquid-c liquid-compile liquid-il liquid-render
+  lobsters loops-times mail matmul nbody nqueens object-new
+  object-new-initialize object-new-no-escape optcarrot protoboeuf
+  protoboeuf-encode psych-load rack railsbench respond_to rubocop ruby-json
+  ruby-lsp ruby-xor rubyboy rubykon send_bmethod send_cfunc_block
+  send_rubyfunc_block send_rubyfunc_inline sequel setivar setivar_object
+  setivar_young shipit splay str_concat string_malloc_pressure structaref
+  structaset sudoku symbol-name-ractor throw tinygql
+]
+assert(CORPUS.size == 85, "corpus size")
+quick = AE.selected(CORPUS, "quick")
+# Substring filters: the AWFY json/nbody filters pull in four ruby-bench.
+assert(quick.size == 39, "quick subset: 14 AWFY + 25 ruby-bench")
+assert((quick - AE::FILTERS["quick"]).sort ==
+         %w[json_parse_float json_parse_string ruby-json],
+       "only the documented extra benchmarks")
+assert(AE.selected(CORPUS, "smoke").size == 5, "smoke subset")
+assert((AE::HEADLINE + AE::DELEGATION - quick).empty?,
+       "claim-carrying benchmarks are in the quick subset")
+assert(AE.selected(CORPUS, "full") == CORPUS, "full keeps everything")
+assert(AE.flags(%w[a b]) == "--filter a --filter b", "filter flags")
+
+assert(AE.verdict(:zero, 0, nil, nil) == "PASS", "zero")
+assert(AE.verdict(:zero, 2, 0, nil) == "WARN", "nonzero")
+assert(AE.verdict(:overlap, [1, 0.9, 1.1], [1.2, 1.05, 1.3], nil) == "PASS",
+       "overlapping CIs")
+assert(AE.verdict(:overlap, [1, 0.9, 1.0], [1.2, 1.05, 1.3], nil) == "WARN",
+       "disjoint CIs")
+assert(AE.verdict(:below, [0.9, 0.8, 1.01], [0.9, 0.8, 1.0], nil) == "WARN",
+       "a CI reaching 1 is not below 1")
+assert(AE.verdict(:abs, [0.95, 0.9, 1.0], [1.0, 0.9, 1.1], 0.1) == "PASS",
+       "abs compares point estimates")
+assert(AE.verdict(:rel, 1.3, 1.0, 0.25) == "WARN", "relative tolerance")
+assert(AE.verdict(:positive, [0.2, -0.1, 0.4], nil, nil) == "WARN",
+       "a CI reaching 0 is not positive")
+assert(AE.verdict(:overlap, nil, [1, 1, 1], nil) == "SKIP", "not run")
+assert(AE.verdict(:overlap, [1, 1, 1], nil, nil) == "INFO", "no reference")
+
+Dir.mktmpdir("rpyyarv-ae-test") do |dir|
+  perf = File.join(dir, "20260101T000000Z-performance-1")
+  stress = File.join(dir, "20260101T000000Z-stress-1")
+  camp = File.join(dir, "ae-smoke")
+  [perf, stress, camp].each { |d| FileUtils.mkdir_p(d) }
+  File.write(File.join(perf, "manifest.json"), '{"kind":"performance"}')
+  File.write(File.join(stress, "manifest.json"), '{"kind":"stress"}')
+  times = { "cruby" => 10.0, "cruby+yjit" => 4.0, "cruby+zjit" => 5.0,
+            "rpyyarv" => 20.0, "rpyyarv-jit" => 2.0 }
+  raw = {}
+  %w[awfy/richards ruby-bench/keyword_args ruby-bench/lee].each do |b|
+    times.each do |e, t|
+      raw["#{b}/#{e}"] = { "median" => t, "per_proc" => [t],
+                           "raw_iterations" => [[t] * 6], "warmed_at" => [1] }
+    end
+  end
+  File.write(File.join(perf, "raw.json"), JSON.generate(raw))
+  File.write(File.join(stress, "stress.csv"), <<~CSV)
+    stress,suite,benchmark,engine,outcome,signature,seconds
+    c-timer-compact,ruby-bench,shipit,rpyyarv-jit,fail,x,1
+    b-dispatch-compact,ruby-bench,lee,rpyyarv,fail,x,1
+    b-dispatch-compact,ruby-bench,lee,rpyyarv-jit,timeout,,120
+    a-autocompact,ruby-bench,lee,cruby,fail,x,1
+  CSV
+  File.write(File.join(camp, "campaign.log"),
+             "T START a: x\nT END a rc=0 crash_reports=0\n" \
+             "T END b rc=2 crash_reports=0\n")
+  File.write(File.join(camp, "step-ae-performance.log"),
+             "noise\nartifacts: #{perf}\n")
+  File.write(File.join(camp, "step-ae-stress.log"), "artifacts: #{stress}\n")
+  File.write(File.join(camp, "step-ae-gccheck.log"),
+             "gccheck: 13 ok, 1 skipped, 0 failed (RUBY_GC_MALLOC_LIMIT=1)\n")
+  runs = AE.collect([camp])
+  assert(runs["performance"] == [perf] && runs["stress"] == [stress],
+         "campaign dirs expand to their results dirs")
+  m = AE.measure(runs, "full")
+  assert(m["steps_rc"] == 1, "non-zero step")
+  assert(m["gccheck_failed"].zero?, "gccheck summary line")
+  assert((m["jit_over_cruby"][0] - 0.2).abs < 1e-9, "jit/cruby geomean")
+  assert((m["interp_over_cruby"][0] - 2.0).abs < 1e-9, "interp/cruby")
+  assert(m["corpus_failed"].zero?, "no failed benchmark")
+  assert(m["headline_ratios"] == { "keyword_args" => 0.5 },
+         "headline ratios of the measured benchmarks only")
+  assert(m["stress_unexpected"] == 1 && m["stress_timeouts"] == 1,
+         "the known crash and CRuby are not charged; lee is")
+  m = AE.measure(runs, "smoke")
+  assert(m["headline_ratios"].keys == ["keyword_args"] &&
+         (m["faster_than_yjit"] - 1.0).abs < 1e-9,
+         "smoke drops lee and keeps richards and keyword_args")
 end
 
 puts "evaluation tests: ok"

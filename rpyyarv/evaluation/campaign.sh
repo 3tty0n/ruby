@@ -14,6 +14,10 @@ GATE_LOAD=${GATE_LOAD:-3.0}
 GATE_TIMEOUT=${GATE_TIMEOUT:-7200}
 STEPS=${STEPS:-"gc nursery nohook crossing boundary coverage performance \
 mechanisms memory delegation ablate stress specstress"}
+WATCHDOG_SECS=${WATCHDOG_SECS:-900}
+SPEC_SUITES=${SPEC_SUITES:-"--suite language --suite core --suite capi"}
+# The ae-* steps take their benchmarks from evaluation/ae.rb for AE_LEVEL.
+AE_LEVEL=${AE_LEVEL:-quick}
 
 stamp() { date -u +%Y-%m-%dT%H:%M:%SZ; }
 
@@ -92,11 +96,12 @@ step() {
 # Alarm-surviving children (> 15 min; every run has a 600 s alarm).
 watchdog() {
   while :; do
-    ps -Ao pid=,nice=,etime=,command= | awk -v r="$R/rpyyarv" '
+    ps -Ao pid=,nice=,etime=,command= | awk -v r="$R/rpyyarv" \
+      -v lim="$WATCHDOG_SECS" '
       $2 < 19 && index($4, r) == 1 {
         n = split($3, a, /[-:]/); s = a[n] + 60 * a[n-1]
         if (n >= 3) s += 3600 * a[n-2]; if (n == 4) s += 86400 * a[1]
-        if (s > 900) print $1 }' | while read -r pid; do
+        if (s > lim) print $1 }' | while read -r pid; do
       echo "$(stamp) WATCHDOG-KILL $pid" \
         "$(ps -o command= -p "$pid" | cut -c1-160)" >> "$T/campaign.log"
       kill -9 "$pid"
@@ -109,6 +114,7 @@ WD=$!
 trap 'kill $WD' EXIT
 
 latest() { ls -td evaluation/results/*-"$1"-* | head -1; }
+ae() { ruby --disable-gems evaluation/ae.rb "$1" "$AE_LEVEL"; }
 
 DELEGATION_FILTERS="--suite ruby-bench --filter sequel --filter mail \
 --filter rack --filter railsbench --filter shipit --filter lobsters \
@@ -148,10 +154,41 @@ for s in $STEPS; do
       for e in "${SE[@]}"; do
         n=${e%%|*}; f=${e#*|}
         # shellcheck disable=SC2086
-        step "spec-$n" ruby --disable-gems evaluation/spec.rb --suite language \
-          --suite core --suite capi --timeout 120 --jobs 4 $f \
+        step "spec-$n" ruby --disable-gems evaluation/spec.rb $SPEC_SUITES \
+          --timeout 120 --jobs 4 $f \
           --out "$R/evaluation/results/$(date -u +%Y%m%dT%H%M%SZ)-spec-$n"
       done ;;
+    # Artifact evaluation: the steps above on a subset, one process.
+    ae-sanity) step ae-sanity make test eval-test eval EVAL=doctor ;;
+    ae-gccheck) step ae-gccheck make gccheck GCSCRIPTS="$(ae gcscripts)" ;;
+    ae-compact) step ae-compact make stresscompactcheck \
+      GCSCRIPTS="$(ae gcscripts)" ;;
+    ae-gc) step ae-gc env EVAL_GCFREQ_EVERY=4 make eval EVAL=gc \
+      EVALFLAGS=16384 ;;
+    ae-nohook) step ae-nohook make eval EVAL=ablate \
+      EVALFLAGS="gc-no-hook --procs 1 $(ae filters)" ;;
+    ae-coverage) step ae-coverage make eval EVAL=coverage \
+      EVALFLAGS="$(ae filters)" ;;
+    ae-performance) step ae-performance env EVAL_DELEGATED_PASS=0 \
+      make eval EVAL=performance EVALFLAGS="--suite all --procs 1 \
+$(ae filters)" ;;
+    ae-mechanisms) step ae-mechanisms make eval EVAL=mechanisms \
+      EVALFLAGS="--suite all $(ae filters) \
+--performance $R/$(latest performance)/raw.json" ;;
+    ae-memory) step ae-memory make eval EVAL=memory EVALFLAGS="--suite all \
+--only-engine cruby --only-engine cruby+yjit --only-engine rpyyarv-jit \
+$(ae filters)" ;;
+    ae-delegation) step ae-delegation make eval EVAL=delegation \
+      EVALFLAGS="--suite ruby-bench --procs 1 --only-engine rpyyarv-jit \
+$(ae delegation)" ;;
+    ae-ablate) step ae-ablate make eval EVAL=ablate EVALFLAGS="baseline \
+fast-paths-off method-invalidation-global class-invalidation-global \
+constant-invalidation-global jit-params-eager jit-params-lazy --procs 1 \
+--only-engine rpyyarv-jit $(ae filters)" ;;
+    ae-stress) step ae-stress make eval EVAL=stress EVALFLAGS="\
+--stress a-autocompact --stress b-dispatch-compact --stress c-timer-compact \
+--stress d-dispatch-full --engine rpyyarv --engine rpyyarv-jit \
+--timeout 120 --jobs 4 $(ae filters)" ;;
     *) echo "unknown step $s" >&2; exit 1 ;;
   esac
 done
