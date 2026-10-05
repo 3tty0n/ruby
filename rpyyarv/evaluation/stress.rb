@@ -37,7 +37,12 @@ module Stress
   # The first line that names the failure, else the harness's reason.
   def signature(info)
     text = %w[err_head err_tail out_tail].map { |k| info[k].to_s }.join("\n")
-    line = text.lines.find { |l| l =~ /\[BUG\]|Error\b|terminated object/ }
+    lines = text.lines
+    # A [BUG] report or a fatal signal outranks an Error line printed before.
+    line = lines.find { |l| l.include?("[BUG]") }
+    sig = info["termsig"]
+    line ||= "killed by SIG#{Signal.signame(sig)}" if sig
+    line ||= lines.find { |l| l =~ /Error\b|terminated object/ }
     drv = %r{\A\S*/(bench|awfy)_tmp_drv_\S+: }
     (line || info["why"]).to_s.strip.sub(drv, "")[0, 160]
   end

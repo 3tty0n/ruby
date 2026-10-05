@@ -358,4 +358,11 @@ Dir.mktmpdir("rpyyarv-ae-test") do |dir|
          "smoke drops lee and keeps richards and keyword_args")
 end
 
+sig = Stress.signature({ "err_head" => "rpyyarv: no threads (ThreadError)\n",
+                         "err_tail" => "", "termsig" => 11 })
+assert(sig == "killed by SIGSEGV", "a fatal signal outranks an Error line")
+sig = Stress.signature({ "err_head" => "x (ThreadError)\n",
+                         "err_tail" => "[BUG] Segmentation fault at 0x1\n" })
+assert(sig.start_with?("[BUG]"), "a [BUG] line outranks an Error line")
+
 puts "evaluation tests: ok"
