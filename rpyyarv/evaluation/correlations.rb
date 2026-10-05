@@ -3,7 +3,10 @@
 
 # Pearson and Spearman of log(jit/yjit) against log1p of each mechanism
 # statistic in DIR/mechanisms.json, with benchmark-bootstrap 95% CIs.
-# usage: correlations.rb MECHANISMS-DIR ...   (writes DIR/correlations.csv)
+# --warmup PERF-DIR targets the time-to-stable ratio vs YJIT instead, from
+# PERF-DIR/warmup-comparison.csv, joined by benchmark name.
+# usage: correlations.rb [--warmup PERF-DIR] MECHANISMS-DIR ...
+#   (writes DIR/correlations.csv, or DIR/correlations-warmup.csv)
 
 require "json"
 require_relative "run"
@@ -11,6 +14,7 @@ require_relative "run"
 module Correlations
   PREDICTORS = %w[cruby_sends_per_iteration bridges_per_loop].freeze
   TARGET = "performance_jit_over_yjit"
+  WARMUP_TARGET = "time_to_stable_ratio"
   RESAMPLES = RPyYARVEvaluation::Bootstrap::RESAMPLES
   SEED = RPyYARVEvaluation::Bootstrap::SEED
 
@@ -38,10 +42,10 @@ module Correlations
 
   def spearman(xs, ys) = pearson(ranks(xs), ranks(ys))
 
-  def points(rows, predictor)
+  def points(rows, predictor, target = TARGET)
     rows.filter_map do |row|
       x = row[predictor]
-      y = row[TARGET]
+      y = row[target]
       next unless x.is_a?(Numeric) && x >= 0 && y.is_a?(Numeric) && y.positive?
 
       [Math.log1p(x), Math.log(y)]
@@ -57,9 +61,9 @@ module Correlations
     [0.025, 0.975].map { |q| stats[(q * (stats.size - 1)).round] }
   end
 
-  def analyze(rows)
+  def analyze(rows, target = TARGET)
     PREDICTORS.flat_map do |predictor|
-      pts = points(rows, predictor)
+      pts = points(rows, predictor, target)
       %i[pearson spearman].map do |method|
         lo, hi = ci(pts, method)
         { "predictor" => predictor, "method" => method.to_s, "n" => pts.size,
@@ -69,11 +73,25 @@ module Correlations
     end
   end
 
-  def main(dirs)
-    abort "usage: correlations.rb MECHANISMS-DIR ..." if dirs.empty?
+  def warmup_ratios(perf_dir)
+    head, *lines = File.readlines(File.join(perf_dir, "warmup-comparison.csv"))
+    col = head.chomp.split(",").index(WARMUP_TARGET)
+    lines.to_h { |l| f = l.chomp.split(","); [f[0], f[col] && Float(f[col], exception: false)] }
+  end
+
+  def main(args)
+    perf = (i = args.index("--warmup")) && args.slice!(i, 2).last
+    dirs = args
+    abort "usage: correlations.rb [--warmup PERF-DIR] MECHANISMS-DIR ..." if dirs.empty?
     dirs.each do |dir|
-      rows = analyze(JSON.parse(File.read(File.join(dir, "mechanisms.json"))))
-      RPyYARVEvaluation::Csv.write(File.join(dir, "correlations.csv"),
+      mech = JSON.parse(File.read(File.join(dir, "mechanisms.json")))
+      if perf
+        ratios = warmup_ratios(perf)
+        mech = mech.map { |r| r.merge(WARMUP_TARGET => ratios[r["benchmark"]]) }
+      end
+      rows = analyze(mech, perf ? WARMUP_TARGET : TARGET)
+      name = perf ? "correlations-warmup.csv" : "correlations.csv"
+      RPyYARVEvaluation::Csv.write(File.join(dir, name),
                                    %w[predictor method n r ci_lo ci_hi], rows)
       rows.each do |row|
         puts format("%-26s %-8s n=%d r=%.3f [%.3f, %.3f]  %s", row["predictor"],
