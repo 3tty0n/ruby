@@ -192,7 +192,7 @@ module MemoryHarness
 
   def main(argv)
     load_bench
-    options = { suite: "all", filters: [], extra: [] }
+    options = { suite: "all", filters: [], extra: [], only: [] }
     parser = OptionParser.new
     parser.on("--raw FILE") { |value| options[:raw] = value }
     parser.on("--suite NAME") { |value| options[:suite] = value }
@@ -200,6 +200,7 @@ module MemoryHarness
     parser.on("--ruby-bench DIR") { |value| options[:dir] = value }
     parser.on("--warmup N", Integer) { |value| options[:warmup] = value }
     parser.on("--iters N", Integer) { |value| options[:iters] = value }
+    parser.on("--only-engine NAME") { |value| options[:only] << value }
     parser.on("--engine NAME=PATH") do |value|
       name, path = value.split("=", 2)
       abort "--engine needs NAME=PATH" unless path
@@ -217,6 +218,8 @@ module MemoryHarness
              end
 
     engines = BASE_ENGINES + options[:extra]
+    engines = engines.select { |n, _| options[:only].include?(n) } \
+      unless options[:only].empty?
     output = File.expand_path(options[:raw])
     FileUtils.mkdir_p(File.dirname(output))
     time_missing = !time_tool_available?

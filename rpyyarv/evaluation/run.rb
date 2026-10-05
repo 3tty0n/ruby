@@ -798,7 +798,10 @@ module RPyYARVEvaluation
     run.manifest["engine_binaries"] = binary_metadata(engine_paths(args))
     ok = run.execute("performance", base_env, argv)
     # Delegated pass is supplementary: its failure does not fail the run.
-    run.execute("performance-delegated", base_env, delegated_argv)
+    # ae-quick/ae-smoke skip it and run EVAL=delegation on gem benchmarks.
+    unless ENV["EVAL_DELEGATED_PASS"] == "0"
+      run.execute("performance-delegated", base_env, delegated_argv)
+    end
     if File.exist?(raw)
       begin
         delegated_path = File.exist?(delegated_raw) ? delegated_raw : nil
@@ -1032,21 +1035,28 @@ module RPyYARVEvaluation
     names = []
     timeout = 600
     jobs = 4
+    filters = []
+    only = []
     OptionParser.new do |o|
       o.on("--stress NAME") { |n| names << n }
       o.on("--timeout SEC", Integer) { |t| timeout = t }
       o.on("--jobs N", Integer) { |j| jobs = j }
+      o.on("--filter NAME") { |f| filters << f }
+      o.on("--engine NAME") { |e| only << e }
     end.parse!(args)
     names = Stress::STRESSES.keys if names.empty?
     run = Run.new("stress", results_root)
     envs = names.to_h { |n| [n, Stress::STRESSES.fetch(n)[0]] }
     run.manifest["stress"] = { "stresses" => envs, "timeout" => timeout,
                                "jobs" => jobs }
+    run.manifest["stress"]["filters"] = filters unless filters.empty?
+    run.manifest["stress"]["engines"] = only unless only.empty?
     run.manifest["engine_binaries"] = binary_metadata(
       "rpyyarv" => File.join(ROOT, "rpyyarv"),
       "rpyyarv-jit" => File.join(ROOT, "rpyyarv-jit"))
     rows = Stress.run(build_dir, names, timeout, jobs,
-                      File.join(run.dir, "stress.csv"))
+                      File.join(run.dir, "stress.csv"),
+                      filters: filters, only: only)
     summary = Stress.summarize(rows)
     Csv.write(File.join(run.dir, "stress-summary.csv"), (summary[0] || {}).keys,
               summary)

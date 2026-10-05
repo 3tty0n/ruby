@@ -12,9 +12,11 @@ module GcFreq
 
   module_function
 
+  # EVAL_GCFREQ_EVERY=N keeps every Nth script (ae-quick).
   def scripts(root)
     out, status = Open3.capture2("make", "-s", "gcscripts", chdir: root)
-    status.success? ? out.split : []
+    every = Integer(ENV.fetch("EVAL_GCFREQ_EVERY", "1"))
+    status.success? ? out.split.each_slice(every).map(&:first) : []
   end
 
   def engines(root, build)

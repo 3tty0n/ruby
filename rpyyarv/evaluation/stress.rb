@@ -62,10 +62,14 @@ module Stress
 
   # Benchmarks run in parallel; one benchmark's runs stay on one thread,
   # since its generated driver file is named by benchmark and pid.
-  def run(build, stresses, timeout, jobs, out_csv)
+  def run(build, stresses, timeout, jobs, out_csv, filters: [], only: [])
     load File.join(ROOT, "scripts", "bench.rb") unless defined?(AwfySuite)
     suites = [AwfySuite.new({}), RubyBenchSuite.new({})].select(&:available?)
     queue = suites.flat_map { |s| s.benchmarks.map { |b| [s, b] } }
+    queue.select! { |_, b| filters.any? { |f| b.include?(f) } } \
+      unless filters.empty?
+    targets = engines(build).to_a
+    targets.select! { |e, _| only.include?(e) } unless only.empty?
     rows = []
     lock = Mutex.new
     File.open(out_csv, "w") do |csv|
@@ -74,7 +78,7 @@ module Stress
         Thread.new do
           while (item = lock.synchronize { queue.shift })
             suite, bench = item
-            stresses.product(engines(build).to_a).each do |stress, (e, argv)|
+            stresses.product(targets).each do |stress, (e, argv)|
               next if e == "cruby" && !STRESSES.fetch(stress)[1]
 
               row = one(suite, bench, stress, e, argv, timeout)
