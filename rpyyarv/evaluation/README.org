@@ -458,6 +458,12 @@ Every =evaluation/results/STAMP-KIND-PID/manifest.json= records:
 - =engine_binaries=: path and SHA-256 of each engine (most experiments)
 - =commands=: argv, environment, exit status and =seconds= of every command
 
+The paper's numbers come from =1313bdb9d6=.  The branch head also carries
+one later engine fix, =84fc875f2c= (=vm.c= =rb_proc_dup= shares a real env
+in an ifunc Proc's dup), validated separately: it removes the single crash
+under stress (c).  To reproduce the paper's numbers exactly, check out
+=1313bdb9d6=.
+
 A run matches the paper's build when =git.commit= is =1313bdb9d6= (or a
 descendant that only changes =rpyyarv/evaluation/= and =rpyyarv/Makefile=),
 =build.rpython_base= is =4eeb73ca...=, =build.pypy_patches= has the four
