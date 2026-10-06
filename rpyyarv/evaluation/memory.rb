@@ -76,7 +76,11 @@ module MemoryHarness
 
   def run_measured(argv, script, env, timeout)
     full = timeout_argv(timeout, time_wrapper(argv) + [script])
-    Open3.capture3(env, *full)
+    # Elided loops print millions of ITER lines: stdout is never buffered.
+    Tempfile.create("memory_err") do |err|
+      Process.wait(Process.spawn(env, *full, out: File::NULL, err: err.path))
+      [nil, File.read(err.path).scrub, $?]
+    end
   end
 
   def run_heap(argv, script, env, timeout)
@@ -106,6 +110,8 @@ module MemoryHarness
     row["peak_rss_bytes"] = peak
     row["peak_rss_mb"] = peak ? (peak / 1_048_576.0).round(2) : nil
     row["status"] = peak && status.success? ? nil : "UNAVAILABLE"
+    return row if ForeignEngine.foreign?(row["engine"])
+
     row.merge!(run_heap(argv, script, env, timeout))
     row.merge!(run_rpython_report(argv, script, env, timeout)) unless cruby_engine?(argv)
     row
@@ -151,7 +157,8 @@ module MemoryHarness
     Tempfile.create(["memory_empty", ".rb"]) do |file|
       file.write("")
       file.close
-      fill_measurements(row, eargv, file.path, env, 60, time_missing)
+      fill_measurements(row, eargv, file.path, engine_env(ename, env), 60,
+                        time_missing)
     end
     row
   end
@@ -161,7 +168,8 @@ module MemoryHarness
     return row.merge("status" => "MISSING") unless File.executable?(eargv[0])
 
     suite.with_script(benchmark) do |script, env, _warm|
-      fill_measurements(row, eargv, script, env, suite.timeout, time_missing)
+      fill_measurements(row, eargv, script, engine_env(ename, env),
+                        suite.timeout, time_missing)
     end
     peak = row["peak_rss_bytes"]
     if peak && startup_peak
