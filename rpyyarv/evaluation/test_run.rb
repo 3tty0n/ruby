@@ -63,25 +63,35 @@ Dir.mktmpdir("rpyyarv-warmup-test") do |dir|
       "warmed_at" => [0]
     },
     "awfy/b/cruby+yjit" => { "raw_iterations" => [[10.0] + [2.0] * 6],
-                             "warmed_at" => [1] }
+                             "warmed_at" => [1] },
+    # ruby-bench has its own unrelated "b", same name as awfy's above.
+    "ruby-bench/b/rpyyarv-jit" => { "raw_iterations" => [[80.0] + steady],
+                                    "warmed_at" => [1] },
+    "ruby-bench/b/cruby+yjit" => { "raw_iterations" => [[20.0] + [2.0] * 6],
+                                   "warmed_at" => [1] }
   }
   File.write(File.join(dir, "raw.json"), JSON.generate(raw))
-  assert(RPyYARVEvaluation::Analyzer.warmup_only(dir) == 5, "warmup rows")
+  assert(RPyYARVEvaluation::Analyzer.warmup_only(dir) == 7, "warmup rows")
   rows = File.readlines(File.join(dir, "warmup-summary.csv"), chomp: true)
   head = rows.first.split(",")
   jit = rows.find { |line| line.start_with?("all,rpyyarv-jit") }.split(",")
   cell = ->(name) { jit[head.index(name)] }
-  assert(cell.call("processes") == "4", "process count")
-  assert(cell.call("processes_stable") == "3", "stable process count")
-  assert(cell.call("flat") == "1" && cell.call("warmup") == "1" &&
+  assert(cell.call("processes") == "5", "process count")
+  assert(cell.call("flat") == "1" && cell.call("warmup") == "2" &&
          cell.call("slowdown") == "1" && cell.call("no_steady_state") == "1",
          "Barrett categories")
-  assert(cell.call("median_time_to_stable_ms") == "5.0", "median time")
+  assert(cell.call("median_time_to_stable_ms") == "24.5", "median time")
   comparison = File.readlines(File.join(dir, "warmup-comparison.csv"),
                               chomp: true)
-  b = comparison.find { |line| line.start_with?("b,") }.split(",")
-  assert(b[1] == "44.0" && b[2] == "12.0", "per-benchmark medians")
-  assert(b[3].to_f.round(4) == (44.0 / 12.0).round(4), "time ratio")
+  awfy_b = comparison.find { |line| line.start_with?("awfy,b,") }.split(",")
+  rb_b = comparison.find { |line| line.start_with?("ruby-bench,b,") }
+                   .split(",")
+  assert(awfy_b[2] == "44.0" && awfy_b[3] == "12.0", "awfy b medians")
+  assert(rb_b[2] == "84.0" && rb_b[3] == "22.0", "ruby-bench b medians")
+  assert(awfy_b[4].to_f.round(4) == (44.0 / 12.0).round(4), "awfy b ratio")
+  assert(rb_b[4].to_f.round(4) == (84.0 / 22.0).round(4), "ruby-bench b ratio")
+  assert(awfy_b[4] != rb_b[4],
+         "same-named benchmarks in different suites don't collide")
 end
 
 summary = <<~TEXT
@@ -202,6 +212,27 @@ assert(corr[["cruby_sends_per_iteration", "pearson"]]["r"].round(9) == 1.0,
        "log-log pearson")
 assert(corr[["bridges_per_loop", "spearman"]]["r"].round(9) == -1.0,
        "spearman ranks")
+
+Dir.mktmpdir("rpyyarv-correlations-warmup-test") do |dir|
+  # AWFY's and ruby-bench's "nbody" must not collide once keyed by suite.
+  File.write(File.join(dir, "warmup-comparison.csv"), <<~CSV)
+    suite,benchmark,time_to_stable_ratio
+    awfy,nbody,2.0
+    ruby-bench,nbody,0.5
+  CSV
+  ratios = Correlations.warmup_ratios(dir)
+  assert(ratios[%w[awfy nbody]] == 2.0 && ratios[%w[ruby-bench nbody]] == 0.5,
+         "suite-keyed warmup ratios keep same-named benchmarks distinct")
+end
+
+Dir.mktmpdir("rpyyarv-correlations-warmup-fallback-test") do |dir|
+  File.write(File.join(dir, "warmup-comparison.csv"), <<~CSV)
+    benchmark,time_to_stable_ratio
+    nbody,2.0
+  CSV
+  assert(Correlations.warmup_ratios(dir) == { "nbody" => 2.0 },
+         "name-keyed fallback for CSVs without a suite column")
+end
 
 require_relative "footprint"
 require_relative "retention"

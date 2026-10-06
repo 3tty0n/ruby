@@ -4,7 +4,8 @@
 # Pearson and Spearman of log(jit/yjit) against log1p of each mechanism
 # statistic in DIR/mechanisms.json, with benchmark-bootstrap 95% CIs.
 # --warmup PERF-DIR targets the time-to-stable ratio vs YJIT instead, from
-# PERF-DIR/warmup-comparison.csv, joined by benchmark name.
+# PERF-DIR/warmup-comparison.csv, joined by (suite, benchmark) when the CSV
+# has a suite column, else by benchmark name.
 # usage: correlations.rb [--warmup PERF-DIR] MECHANISMS-DIR ...
 #   (writes DIR/correlations.csv, or DIR/correlations-warmup.csv)
 
@@ -73,10 +74,23 @@ module Correlations
     end
   end
 
+  # Keyed by [suite, benchmark] when the CSV has a suite column (so AWFY's
+  # and ruby-bench's same-named benchmarks don't collide); else by name.
   def warmup_ratios(perf_dir)
     head, *lines = File.readlines(File.join(perf_dir, "warmup-comparison.csv"))
-    col = head.chomp.split(",").index(WARMUP_TARGET)
-    lines.to_h { |l| f = l.chomp.split(","); [f[0], f[col] && Float(f[col], exception: false)] }
+    cols = head.chomp.split(",")
+    suite_i = cols.index("suite")
+    bench_i = cols.index("benchmark")
+    target_i = cols.index(WARMUP_TARGET)
+    rows = lines.map { |l| l.chomp.split(",") }
+    ratio = ->(f) { f[target_i] && Float(f[target_i], exception: false) }
+    return rows.to_h { |f| [[f[suite_i], f[bench_i]], ratio.(f)] } if suite_i
+
+    counts = rows.each_with_object(Hash.new(0)) { |f, h| h[f[bench_i]] += 1 }
+    dups = counts.select { |_, n| n > 1 }.keys
+    warn "warmup CSV has no suite column; duplicate names collide: " \
+         "#{dups.join(', ')}" unless dups.empty?
+    rows.to_h { |f| [f[bench_i], ratio.(f)] }
   end
 
   def main(args)
@@ -87,7 +101,11 @@ module Correlations
       mech = JSON.parse(File.read(File.join(dir, "mechanisms.json")))
       if perf
         ratios = warmup_ratios(perf)
-        mech = mech.map { |r| r.merge(WARMUP_TARGET => ratios[r["benchmark"]]) }
+        by_pair = ratios.keys.first.is_a?(Array)
+        mech = mech.map do |r|
+          key = by_pair ? [r["suite"], r["benchmark"]] : r["benchmark"]
+          r.merge(WARMUP_TARGET => ratios[key])
+        end
       end
       rows = analyze(mech, perf ? WARMUP_TARGET : TARGET)
       name = perf ? "correlations-warmup.csv" : "correlations.csv"

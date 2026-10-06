@@ -366,12 +366,13 @@ module RPyYARVEvaluation
 
     def warmup_comparison_rows(warmup, engine = "rpyyarv-jit",
                                reference = "cruby+yjit")
-      by_benchmark = warmup.group_by { |row| row["benchmark"] }
-      by_benchmark.keys.sort.map do |benchmark|
-        rows = by_benchmark[benchmark].group_by { |row| row["engine"] }
+      # Key by (suite, benchmark): AWFY and ruby-bench both have an "nbody".
+      by_pair = warmup.group_by { |row| [row["suite"], row["benchmark"]] }
+      by_pair.keys.sort.map do |suite, benchmark|
+        rows = by_pair[[suite, benchmark]].group_by { |row| row["engine"] }
         jit = warmup_medians(rows[engine])
         ref = warmup_medians(rows[reference])
-        { "benchmark" => benchmark,
+        { "suite" => suite, "benchmark" => benchmark,
           "rpyyarv_jit_time_to_stable_ms" => jit[0],
           "cruby_yjit_time_to_stable_ms" => ref[0],
           "time_to_stable_ratio" => ratio_of(jit[0], ref[0]),
@@ -532,7 +533,7 @@ module RPyYARVEvaluation
       write_csv(File.join(out_dir, "warmup-summary.csv"), headers,
                 warmup_summary_rows(warmup))
       write_csv(File.join(out_dir, "warmup-comparison.csv"),
-                %w[benchmark rpyyarv_jit_time_to_stable_ms
+                %w[suite benchmark rpyyarv_jit_time_to_stable_ms
                    cruby_yjit_time_to_stable_ms time_to_stable_ratio
                    rpyyarv_jit_stable_iteration cruby_yjit_stable_iteration
                    stable_iteration_ratio],
