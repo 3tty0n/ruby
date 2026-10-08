@@ -294,7 +294,7 @@ def execute(iseq, frame):
             pc += 1
             backward = target < pc
             pc = target
-            if target < pc:
+            if backward:
                 jitdriver.can_enter_jit(iseq=iseq, pc=pc, frame=frame)
         elif opcode == insns.BRANCHIF:
             target = code[pc]
