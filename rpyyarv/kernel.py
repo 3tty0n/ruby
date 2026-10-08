@@ -5,7 +5,8 @@ import os
 import symbols
 from methods import W_CFunc
 from objects.string import W_String 
-from objects.transparent import w_nil
+from objects.transparent import W_Fixnum, w_nil
+from rlib import now_ns
 
 
 def write(s):
@@ -24,8 +25,15 @@ class W_ToS(W_CFunc):
     def call(self, w_recv, args_w, w_block):
         return W_String(w_recv.to_s_str())
 
+class W_BenchNowNs(W_CFunc):
+    """Monotonic clock in integer nanoseconds, for the benchmark harness."""
+    def call(self, w_recv, args_w, w_block):
+        return W_Fixnum(now_ns())
+
 def install(w_class):
     puts_id = symbols.intern('puts')
     w_class.add_method(puts_id, W_Puts(puts_id, -1))
     to_s_id = symbols.intern('to_s')
     w_class.add_method(to_s_id, W_ToS(to_s_id, 0))
+    now_id = symbols.intern('bench_now_ns')
+    w_class.add_method(now_id, W_BenchNowNs(now_id, 0))
