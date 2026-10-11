@@ -10,23 +10,42 @@ import os
 import re
 import subprocess
 import sys
+import argparse
+import csv
+import glob
+import os
 
 HERE = os.path.dirname(os.path.abspath(__file__))   # ~/ruby-rpyyarv/rpyyarv/bench
 TOP = os.path.dirname(os.path.dirname(HERE))        # ~/ruby-rpyyarv
 BUILD = os.environ.get('RPYYARV_BUILD', os.path.join(TOP, 'build'))
-RUBY = os.path.join(BUILD, 'ruby')
+# CRuby with YJIT and ZJIT, built from a clean clone of the same commit: ~/ruby-jit/build
+JIT_BUILD = os.environ.get('RPYYARV_JIT_BUILD',
+                           os.path.join(os.path.dirname(TOP), 'ruby-jit', 'build'))
+RUBY_JIT = os.path.join(JIT_BUILD, 'ruby')
 RPYYARV = os.environ.get('RPYYARV_BIN', os.path.join(TOP, 'rpyyarv-jit'))
+RPYYARV_NOJIT = os.environ.get('RPYYARV_NOJIT_BIN', os.path.join(TOP, 'rpyyarv-vm'))
 PRELUDE = '-r' + os.path.join(HERE, 'prelude.rb')
+
+def _find_truffleruby():
+    found = sorted(glob.glob(os.path.expanduser(
+        '~/.rbenv/versions/truffleruby-*/bin/truffleruby')))
+    if len(found) > 1:
+        sys.exit('several TruffleRubies installed; set TRUFFLERUBY_BIN:\n  ' + '\n  '.join(found))
+    return found[0] if found else 'truffleruby'
+TRUFFLERUBY = os.environ.get('TRUFFLERUBY_BIN') or _find_truffleruby()
 # Results live outside the repository: ~/rpyyarv-results
 RESULTS = os.environ.get('RPYYARV_RESULTS',
                          os.path.join(os.path.dirname(TOP), 'rpyyarv-results'))
 
+# name -> (command, directory of the libruby.so it must load, or None)
+# CRuby, YJIT and ZJIT share one binary so that only the JIT differs.
 IMPLS = {
-    'rpyyarv':     [RPYYARV, '--disable-gems'],
-    'cruby':       [RUBY, '--disable-gems', PRELUDE],
-    'yjit':        [RUBY, '--yjit', '--disable-gems', PRELUDE],
-    'zjit':        [RUBY, '--zjit', '--disable-gems', PRELUDE],
-    'truffleruby': ['truffleruby', PRELUDE],
+    'rpyyarv':     ([RPYYARV, '--disable-gems'], BUILD),
+    'rpyyarv-nojit': ([RPYYARV_NOJIT, '--disable-gems'], BUILD),
+    'cruby':       ([RUBY_JIT, '--disable-gems', PRELUDE], JIT_BUILD),
+    'yjit':        ([RUBY_JIT, '--yjit', '--disable-gems', PRELUDE], JIT_BUILD),
+    'zjit':        ([RUBY_JIT, '--zjit', '--disable-gems', PRELUDE], JIT_BUILD),
+    'truffleruby':   ([TRUFFLERUBY, '--disable-gems', PRELUDE], None),
 }
 
 DEF_START = re.compile(r'^(def|class|module)\b')
@@ -65,6 +84,14 @@ def wrap(path, iters):
     return '\n'.join(out) + '\n'
 
 
+def env_for(libdir):
+    env = dict(os.environ)
+    if libdir:
+        env['LD_LIBRARY_PATH'] = os.pathsep.join(
+            [libdir] + [p for p in [os.environ.get('LD_LIBRARY_PATH')] if p])
+    return env
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('bench')
@@ -81,18 +108,15 @@ def main():
         f.write(wrap(a.bench, a.iters))
     out = a.out or os.path.join(RESULTS, name + '.csv')
 
-    env = dict(os.environ)
-    env['LD_LIBRARY_PATH'] = os.pathsep.join(
-        [BUILD] + [p for p in [env.get('LD_LIBRARY_PATH')] if p])
-
     new = not os.path.exists(out)
     with open(out, 'a', newline='') as f:
         w = csv.writer(f)
         if new:
             w.writerow(['bench', 'impl', 'run', 'iter', 'ns'])
         for impl in a.impl:
+            cmd, libdir = IMPLS[impl]
             for run in range(a.runs):
-                p = subprocess.run(IMPLS[impl] + [gen], env=env,
+                p = subprocess.run(cmd + [gen], env=env_for(libdir),
                                    capture_output=True, text=True)
                 times = [int(l[len(MARK):]) for l in p.stdout.splitlines()
                          if l.startswith(MARK)]
