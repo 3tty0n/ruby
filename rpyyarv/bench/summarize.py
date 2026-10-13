@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
 """Statistics from run_bench.py's raw CSV.
 
-usage: python3 bench/summarize.py SRC.csv [--steady-from 50] [--steady-to N] [--baseline cruby]
+usage: python3 bench/summarize.py SRC.csv [--steady-from 50] [--steady-to N]
+                                  [--baseline cruby] [--baseline-sha SHA]
   -> C:\\Users\\katue\\RPYYARV研究\\bench_results\\<name>_by_iter.csv  per iteration, across runs
   -> C:\\Users\\katue\\RPYYARV研究\\bench_results\\<name>_steady.csv   steady state, speedup over baseline
+
+Rows are grouped by (bench, impl, binary, sha), so each build of a binary is its own group.
 """
 import argparse
 import collections
@@ -59,11 +62,22 @@ def fmt(x):
     return '' if x is None else '%.4f' % x
 
 
+def label(key):
+    bench, impl, binary, sha = key
+    return '%s %s@%s' % (impl, binary, sha) if binary else impl
+
+
 def output_paths(src):
     name = os.path.splitext(os.path.basename(src))[0]
     os.makedirs(OUT_DIR, exist_ok=True)
-    return (os.path.join(OUT_DIR, name + '_by_iter.csv'),
-            os.path.join(OUT_DIR, name + '_steady.csv'))
+    paths = (os.path.join(OUT_DIR, name + '_by_iter.csv'),
+             os.path.join(OUT_DIR, name + '_steady.csv'))
+    for p in paths:
+        try:
+            open(p, 'a').close()
+        except PermissionError:
+            sys.exit('cannot write %s: close it in Excel and run again' % p)
+    return paths
 
 
 def main():
@@ -75,27 +89,30 @@ def main():
                     help='end of the window, exclusive (default: through the last iteration)')
     ap.add_argument('--baseline', default='cruby',
                     help='implementation the speedups are relative to (default cruby)')
+    ap.add_argument('--baseline-sha',
+                    help='which build of the baseline, when the CSV holds several')
     a = ap.parse_args()
 
     src = os.path.expanduser(a.src)
     by_iter_path, steady_path = output_paths(src)
 
-    # (bench, impl) -> run -> iter -> ms
+    # (bench, impl, binary, sha) -> run -> iter -> ms; CSVs without binary/sha still load
     data = collections.defaultdict(lambda: collections.defaultdict(dict))
     for r in csv.DictReader(open(src)):
-        data[(r['bench'], r['impl'])][int(r['run'])][int(r['iter'])] = int(r['ns']) / 1e6
+        key = (r['bench'], r['impl'], r.get('binary', ''), r.get('sha', ''))
+        data[key][int(r['run'])][int(r['iter'])] = int(r['ns']) / 1e6
 
     # 1. Per iteration, across runs (warmup curves)
     with open(by_iter_path, 'w', newline='') as f:
         w = csv.writer(f)
-        w.writerow(['bench', 'impl', 'iter', 'runs',
+        w.writerow(['bench', 'impl', 'binary', 'sha', 'iter', 'runs',
                     'mean_ms', 'geomean_ms', 'median_ms', 'stdev_ms', 'min_ms', 'max_ms',
                     'q1_ms', 'q3_ms'])
-        for (bench, impl), runs in sorted(data.items()):
+        for key, runs in sorted(data.items()):
             for it in sorted(set(i for t in runs.values() for i in t)):
                 xs = [t[it] for t in runs.values() if it in t]
                 q1, q3 = quartiles(xs)
-                w.writerow([bench, impl, it, len(xs)] +
+                w.writerow(list(key) + [it, len(xs)] +
                            [fmt(x) for x in (statistics.fmean(xs),
                                              statistics.geometric_mean(xs),
                                              statistics.median(xs),
@@ -107,57 +124,69 @@ def main():
     def in_window(it):
         return it >= a.steady_from and (a.steady_to is None or it < a.steady_to)
 
-    per_run, medians = {}, {}   # (bench, impl) -> [value of each run]
-    for (bench, impl), runs in sorted(data.items()):
-        per_run[(bench, impl)], medians[(bench, impl)] = [], []
+    per_run, medians = {}, {}   # key -> [value of each run]
+    for key, runs in sorted(data.items()):
+        per_run[key], medians[key] = [], []
         for run, t in sorted(runs.items()):
             win = [ms for it, ms in t.items() if in_window(it)]
             if not win:
-                sys.exit('%s/%s run %d: no iterations in the steady window' % (bench, impl, run))
-            per_run[(bench, impl)].append(statistics.fmean(win))
-            medians[(bench, impl)].append(statistics.median(win))
+                sys.exit('%s run %d: no iterations in the steady window' % (label(key), run))
+            per_run[key].append(statistics.fmean(win))
+            medians[key].append(statistics.median(win))
+
+    # The baseline of each benchmark must be a single build
+    baseline = {}
+    for bench in sorted(set(k[0] for k in per_run)):
+        cands = [k for k in per_run if k[0] == bench and k[1] == a.baseline
+                 and (a.baseline_sha is None or k[3] == a.baseline_sha)]
+        if len(cands) > 1:
+            sys.exit('%s: several %s builds; pick one with --baseline-sha:\n  %s'
+                     % (bench, a.baseline, '\n  '.join(label(k) for k in cands)))
+        if cands:
+            baseline[bench] = cands[0]
 
     rows = []
-    for (bench, impl), xs in sorted(per_run.items()):
+    for key, xs in sorted(per_run.items()):
         m, ci = mean_ci(xs)
-        base = per_run.get((bench, a.baseline))
         sp = lo = hi = None
-        if base is not None:
+        bkey = baseline.get(key[0])
+        if bkey is not None:
+            base = per_run[bkey]
             sp = statistics.fmean(base) / m
-            if impl != a.baseline:
+            if key != bkey:
                 lo, hi = bootstrap_ratio(base, xs)
-        rows.append((bench, impl, len(xs), m, ci,
-                     statistics.fmean(medians[(bench, impl)]), sp, lo, hi))
+        rows.append((key, len(xs), m, ci, statistics.fmean(medians[key]), sp, lo, hi))
 
     with open(steady_path, 'w', newline='') as f:
         w = csv.writer(f)
-        w.writerow(['bench', 'impl', 'runs', 'steady_mean_ms', 'ci95_ms',
+        w.writerow(['bench', 'impl', 'binary', 'sha', 'runs', 'steady_mean_ms', 'ci95_ms',
                     'steady_median_ms', 'speedup_vs_' + a.baseline, 'speedup_lo', 'speedup_hi'])
-        for r in rows:
-            w.writerow(list(r[:3]) + [fmt(x) for x in r[3:]])
+        for key, n, m, ci, med, sp, lo, hi in rows:
+            w.writerow(list(key) + [n] + [fmt(x) for x in (m, ci, med, sp, lo, hi)])
 
     window = '%d..%s' % (a.steady_from, a.steady_to - 1 if a.steady_to else 'last')
     print('steady window: iterations %s, speedup = %s time / impl time\n' % (window, a.baseline))
-    print('%-12s %-12s %12s %10s %12s %20s'
-          % ('bench', 'impl', 'mean ms', '±95%', 'median ms', 'speedup [95% CI]'))
-    for bench, impl, n, m, ci, med, sp, lo, hi in rows:
+    print('%-12s %-36s %10s %9s %10s %20s'
+          % ('bench', 'impl binary@sha', 'mean ms', '±95%', 'median ms', 'speedup [95% CI]'))
+    for key, n, m, ci, med, sp, lo, hi in rows:
         spd = '' if sp is None else '%.2fx' % sp
         if lo is not None:
             spd += ' [%.2f, %.2f]' % (lo, hi)
-        print('%-12s %-12s %12.2f %10s %12.2f %20s' % (bench, impl, m, fmt(ci), med, spd))
+        print('%-12s %-36s %10.2f %9s %10.2f %20s' % (key[0], label(key), m, fmt(ci), med, spd))
 
     # Several benchmarks: geometric mean of the per-benchmark speedups
-    by_impl = collections.defaultdict(list)
-    for bench, impl, n, m, ci, med, sp, lo, hi in rows:
+    by_build = collections.defaultdict(list)
+    for key, n, m, ci, med, sp, lo, hi in rows:
         if sp is not None:
-            by_impl[impl].append(sp)
-    if any(len(v) > 1 for v in by_impl.values()):
+            by_build[key[1:]].append(sp)
+    if any(len(v) > 1 for v in by_build.values()):
         print('\ngeometric mean of speedups over benchmarks:')
-        for impl, sps in sorted(by_impl.items()):
-            print('  %-12s %.2fx  (%d benchmarks)'
-                  % (impl, math.exp(statistics.fmean(math.log(s) for s in sps)), len(sps)))
+        for build, sps in sorted(by_build.items()):
+            print('  %-36s %.2fx  (%d benchmarks)'
+                  % (label(('',) + build), math.exp(statistics.fmean(math.log(s) for s in sps)),
+                     len(sps)))
 
-    if not any(impl == a.baseline for _, impl in per_run):
+    if not baseline:
         print('\n(no %s rows yet: speedup columns are empty)' % a.baseline)
     print('\nwrote', by_iter_path)
     print('wrote', steady_path)
