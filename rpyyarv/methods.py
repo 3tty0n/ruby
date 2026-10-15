@@ -18,6 +18,8 @@ class W_Method(W_Root):
 
 
 class W_ISeqMethod(W_Method):
+    _immutable_fields_ = ['w_iseq']
+
     def __init__(self, mid, w_iseq, private=False):
         W_Method.__init__(self, mid, private)
         self.w_iseq = w_iseq
