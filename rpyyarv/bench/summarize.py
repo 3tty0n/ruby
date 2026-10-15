@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
 """Statistics from run_bench.py's raw CSV.
 
-usage: python3 bench/summarize.py SRC.csv [--steady-from 50] [--steady-to N]
-                                  [--baseline cruby] [--baseline-sha SHA]
-  -> C:\\Users\\katue\\RPYYARV研究\\bench_results\\<name>_by_iter.csv  per iteration, across runs
-  -> C:\\Users\\katue\\RPYYARV研究\\bench_results\\<name>_steady.csv   steady state, speedup over baseline
+usage (from ~/ruby-rpyyarv/rpyyarv):
+  python3 bench/summarize.py SRC [--steady-from 50] [--steady-to N]
+                             [--baseline cruby] [--baseline-sha SHA] [--no-windows-copy]
+  SRC is a raw CSV, or a benchmark name for ~/ruby-rpyyarv/bench_results/raw/<name>.csv
+  -> ~/ruby-rpyyarv/bench_results/<name>_by_iter.csv  per iteration, across runs
+  -> ~/ruby-rpyyarv/bench_results/<name>_steady.csv   steady state, speedup over baseline
+  then both, and SRC under raw/, are copied to C:\\Users\\katue\\RPYYARV研究\\bench_results
 
 Rows are grouped by (bench, impl, binary, sha), so each build of a binary is its own group.
 """
@@ -14,12 +17,17 @@ import csv
 import math
 import os
 import random
+import shutil
 import statistics
 import sys
 
-# Windows side, seen from WSL: C:\Users\katue\RPYYARV研究\bench_results
-OUT_DIR = os.environ.get('RPYYARV_BENCH_RESULTS',
-                         '/mnt/c/Users/katue/RPYYARV研究/bench_results')
+HERE = os.path.dirname(os.path.abspath(__file__))   # ~/ruby-rpyyarv/rpyyarv/bench
+TOP = os.path.dirname(os.path.dirname(HERE))        # ~/ruby-rpyyarv
+# Same default as run_bench.py: ~/ruby-rpyyarv/bench_results
+RESULTS = os.environ.get('RPYYARV_RESULTS', os.path.join(TOP, 'bench_results'))
+# Copy for Excel on the Windows side; set RPYYARV_WINDOWS_COPY= (empty) to turn it off
+WINDOWS_COPY = os.environ.get('RPYYARV_WINDOWS_COPY',
+                              '/mnt/c/Users/katue/RPYYARV研究/bench_results')
 
 # Two-sided 95% critical values of Student's t, by degrees of freedom
 T95 = {1: 12.706, 2: 4.303, 3: 3.182, 4: 2.776, 5: 2.571, 6: 2.447, 7: 2.365,
@@ -67,22 +75,48 @@ def label(key):
     return '%s %s@%s' % (impl, binary, sha) if binary else impl
 
 
+def source_path(src):
+    """A path as given; a bare benchmark name is its raw CSV under RESULTS/raw."""
+    src = os.path.expanduser(src)
+    if os.path.exists(src) or os.sep in src or src.endswith('.csv'):
+        return src
+    return os.path.join(RESULTS, 'raw', src + '.csv')
+
+
 def output_paths(src):
     name = os.path.splitext(os.path.basename(src))[0]
-    os.makedirs(OUT_DIR, exist_ok=True)
-    paths = (os.path.join(OUT_DIR, name + '_by_iter.csv'),
-             os.path.join(OUT_DIR, name + '_steady.csv'))
-    for p in paths:
+    os.makedirs(RESULTS, exist_ok=True)
+    return (os.path.join(RESULTS, name + '_by_iter.csv'),
+            os.path.join(RESULTS, name + '_steady.csv'))
+
+
+def copy_to_windows(copies):
+    """Copy (source, path under WINDOWS_COPY) pairs; the WSL files stay the originals."""
+    if not WINDOWS_COPY:
+        return
+    if not os.path.isdir(os.path.dirname(WINDOWS_COPY.rstrip('/'))):
+        print('\n(Windows copy skipped: %s is not reachable)' % WINDOWS_COPY)
+        return
+    locked = []
+    for src, rel in copies:
+        dst = os.path.join(WINDOWS_COPY, rel)
+        os.makedirs(os.path.dirname(dst), exist_ok=True)
         try:
-            open(p, 'a').close()
+            # copyfile, not copy2: drvfs may refuse the permission bits copy2 sets
+            shutil.copyfile(src, dst)
         except PermissionError:
-            sys.exit('cannot write %s: close it in Excel and run again' % p)
-    return paths
+            locked.append(dst)
+            continue
+        print('copied', dst)
+    if locked:
+        # Excel locks what it has open; the results in WSL are already written
+        print('\nnot copied (close them in Excel and run summarize again):\n  '
+              + '\n  '.join(locked))
 
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument('src')
+    ap.add_argument('src', help='raw CSV from run_bench.py, or a benchmark name')
     ap.add_argument('--steady-from', type=int, default=50,
                     help='first iteration of the steady-state window (default 50)')
     ap.add_argument('--steady-to', type=int,
@@ -91,9 +125,13 @@ def main():
                     help='implementation the speedups are relative to (default cruby)')
     ap.add_argument('--baseline-sha',
                     help='which build of the baseline, when the CSV holds several')
+    ap.add_argument('--no-windows-copy', action='store_true',
+                    help='do not copy the results to the Windows side')
     a = ap.parse_args()
 
-    src = os.path.expanduser(a.src)
+    src = source_path(a.src)
+    if not os.path.exists(src):
+        sys.exit('no such CSV: %s' % src)
     by_iter_path, steady_path = output_paths(src)
 
     # (bench, impl, binary, sha) -> run -> iter -> ms; CSVs without binary/sha still load
@@ -190,6 +228,11 @@ def main():
         print('\n(no %s rows yet: speedup columns are empty)' % a.baseline)
     print('\nwrote', by_iter_path)
     print('wrote', steady_path)
+
+    if not a.no_windows_copy:
+        copy_to_windows([(by_iter_path, os.path.basename(by_iter_path)),
+                         (steady_path, os.path.basename(steady_path)),
+                         (src, os.path.join('raw', os.path.basename(src)))])
 
 
 if __name__ == '__main__':

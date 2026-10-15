@@ -8,6 +8,10 @@ usage (from ~/ruby-rpyyarv/rpyyarv):
 --rpyyarv-bin / --rpyyarv-nojit-bin pick the RPyYARV binary to measure: a path, or a bare
 name looked up in ~/ruby-rpyyarv.  Every CSV row records the binary's name and the first
 8 hex digits of its SHA-256, so rebuilds that keep a name stay apart.
+
+Raw rows are appended to ~/ruby-rpyyarv/bench_results/raw/<name>.csv; then run
+  python3 bench/summarize.py <name>
+for the statistics and the copy to the Windows side.
 """
 import argparse
 import csv
@@ -27,9 +31,8 @@ JIT_BUILD = os.environ.get('RPYYARV_JIT_BUILD',
                            os.path.join(os.path.dirname(TOP), 'ruby-jit', 'build'))
 RUBY_JIT = os.path.join(JIT_BUILD, 'ruby')
 PRELUDE = '-r' + os.path.join(HERE, 'prelude.rb')
-# Results live outside the repository: ~/rpyyarv-results
-RESULTS = os.environ.get('RPYYARV_RESULTS',
-                         os.path.join(os.path.dirname(TOP), 'rpyyarv-results'))
+# Results sit in the repository, kept out of git by .git/info/exclude: ~/ruby-rpyyarv/bench_results
+RESULTS = os.environ.get('RPYYARV_RESULTS', os.path.join(TOP, 'bench_results'))
 
 IMPL_NAMES = ['rpyyarv', 'rpyyarv-nojit', 'cruby', 'yjit', 'zjit', 'truffleruby']
 HEADER = ['bench', 'impl', 'binary', 'sha', 'run', 'iter', 'ns']
@@ -129,7 +132,8 @@ def main():
                     help='RPyYARV without JIT: a path, or a name in ~/ruby-rpyyarv (default rpyyarv-vm)')
     ap.add_argument('--iters', type=int, default=100)
     ap.add_argument('--runs', type=int, default=10)
-    ap.add_argument('--out', help='CSV to append to (default: ~/rpyyarv-results/<bench>.csv)')
+    ap.add_argument('--out', help='CSV to append to '
+                    '(default: ~/ruby-rpyyarv/bench_results/raw/<bench>.csv)')
     a = ap.parse_args()
 
     name = os.path.splitext(os.path.basename(a.bench))[0]
@@ -137,15 +141,22 @@ def main():
     gen = os.path.join(RESULTS, 'gen', name + '.rb')
     with open(gen, 'w') as f:
         f.write(wrap(a.bench, a.iters))
-    out = a.out or os.path.join(RESULTS, name + '.csv')
+    os.makedirs(os.path.join(RESULTS, 'raw'), exist_ok=True)
+    out = a.out or os.path.join(RESULTS, 'raw', name + '.csv')
 
     new = not os.path.exists(out)
+    # (impl, binary, sha) -> first unused run number, so measuring a build again adds runs
+    next_run = {}
     if not new:
         with open(out) as f:
-            head = next(csv.reader(f), None)
-        if head != HEADER:
-            sys.exit('%s has columns %s, expected %s:\nconvert it first, or pass --out NEW.csv'
-                     % (out, head, HEADER))
+            r = csv.reader(f)
+            head = next(r, None)
+            if head != HEADER:
+                sys.exit('%s has columns %s, expected %s:\nconvert it first, or pass --out NEW.csv'
+                         % (out, head, HEADER))
+            for row in r:
+                k = (row[1], row[2], row[3])
+                next_run[k] = max(next_run.get(k, 0), int(row[4]) + 1)
 
     with open(out, 'a', newline='') as f:
         w = csv.writer(f)
@@ -154,8 +165,10 @@ def main():
         for impl in a.impl:
             cmd, libdir = command(impl, a)
             binary, sha = binary_id(cmd[0])
-            print('%s: %s (sha256 %s...)' % (impl, cmd[0], sha))
-            for run in range(a.runs):
+            first = next_run.get((impl, binary, sha), 0)
+            print('%s: %s (sha256 %s...)%s' % (impl, cmd[0], sha,
+                  ', runs %d.. after the earlier ones' % first if first else ''))
+            for run in range(first, first + a.runs):
                 p = subprocess.run(cmd + [gen], env=env_for(libdir),
                                    capture_output=True, text=True)
                 times = [int(l[len(MARK):]) for l in p.stdout.splitlines()
@@ -171,6 +184,7 @@ def main():
                 print('%-14s %-26s run %2d  first %8.2f ms  median %8.2f ms'
                       % (impl, binary + '@' + sha, run, times[0] / 1e6, s[len(s) // 2] / 1e6))
     print('wrote', out)
+    print('next: python3 bench/summarize.py %s' % (a.out or name))
 
 
 if __name__ == '__main__':
