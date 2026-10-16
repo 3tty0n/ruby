@@ -279,4 +279,4 @@ lcov*.info
 /default_gems.json
 /gems/default_gems
 
-/rpyyarv-vm
+/rpyyarv-rt-repl
