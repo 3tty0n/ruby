@@ -28,6 +28,7 @@ import support
 from frame import Frame
 from objects.array import W_Array
 from objects.main import W_Main
+from objects.regexp import W_Regexp
 from objects.string import W_String
 from objects.transparent import w_nil
 
@@ -43,7 +44,8 @@ pytestmark = pytest.mark.skipif(
 def _seed():
     """llinterp sees only the graph it is given, and a field with no writer
     in it has no type. Building one of each keeps execute() annotatable."""
-    return len(W_Array([w_nil]).items_w) + len(W_String('x').strval)
+    return (len(W_Array([w_nil]).items_w) + len(W_String('x').strval)
+            + len(W_Regexp('x').pattern))
 
 
 def ll_run(w_iseq):
