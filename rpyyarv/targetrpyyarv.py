@@ -35,7 +35,7 @@ def entry_point(argv):
 
 
 def target(driver, args):
-    driver.exe_name = 'rpyyarv-rt-repl'
+    driver.exe_name = 'rpyyarv-runtime-replacing'
     return entry_point, None
 
 
