@@ -52,7 +52,6 @@ class W_CallInfo(W_Root):
                                            self.argc)
 
 class W_Block(W_Root):
-    # A block literal at a send site: its ISeq plus the self it was written
     _immutable_fields_ = ['w_iseq', 'w_self']
 
     def __init__(self, w_iseq, w_self):
