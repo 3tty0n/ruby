@@ -18,6 +18,8 @@ class W_Method(W_Root):
 
 
 class W_ISeqMethod(W_Method):
+    _immutable_fields_ = ['w_iseq']
+
     def __init__(self, mid, w_iseq, private=False):
         W_Method.__init__(self, mid, private)
         self.w_iseq = w_iseq
@@ -31,10 +33,9 @@ class W_CFunc(W_Method):
         W_Method.__init__(self, mid)
         self.arity = arity      # -1 takes any number of arguments
 
-    def call(self, w_recv, args_w):
+    def call(self, w_recv, args_w, w_block):
         raise UnsupportedOperation("'%s' has no body"
                                    % symbols.name_of(self.mid))
-
 
 class MethodTable(object):
     def __init__(self):

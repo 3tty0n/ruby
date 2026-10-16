@@ -11,6 +11,8 @@ from objects.instance import W_Object
 from objects.klass import W_Class, w_class_class, w_object_class
 from objects.main import W_Main, w_main
 from objects.string import W_String
+from objects.array import W_Array
+from objects.regexp import W_Regexp
 from objects.transparent import W_Fixnum, w_nil, w_true, w_false
 from support import asm, capture, expect_unsupported
 
@@ -317,6 +319,80 @@ def test_send_with_block_unsupported():
                        "send with a block is not supported: 'add'")
 
 
+def test_a_block_runs_under_the_self_it_was_written_in():
+    class W_CallIt(W_CFunc):
+        def call(self, w_recv, args_w, w_block):
+            return interp.call_block(w_block, [])
+
+    call_id = symbols.intern('call_it')
+    w_self = W_Main()
+    w_self.define_method(call_id, W_CallIt(call_id, 0))
+    w_block = asm([], 0, 1, [insns.PUTSELF, insns.LEAVE],
+                  name='block in test')
+    # 5.call_it { self } -- the receiver is 5, the block's self is w_self
+    iseq = asm([W_Fixnum(5), W_CallInfo(call_id, 0), w_block], 0, 2, [
+        insns.PUTOBJECT, 0,
+        insns.SEND, 1, 2,
+        insns.LEAVE,
+    ])
+    assert interp.execute(iseq, Frame(iseq, w_self)) is w_self
+
+
+def test_block_arity_is_checked():
+    class W_CallIt(W_CFunc):
+        def call(self, w_recv, args_w, w_block):
+            return interp.call_block(w_block, [w_nil])
+
+    call_id = symbols.intern('call_it')
+    w_self = W_Main()
+    w_self.define_method(call_id, W_CallIt(call_id, 0))
+    w_block = asm([], 2, 2, [insns.PUTNIL, insns.LEAVE],
+                  name='block in test', nparams=2)
+    # call_it { |a, b| nil } -- but the builtin yields only one value
+    iseq = asm([W_CallInfo(call_id, 0), w_block], 0, 2, [
+        insns.PUTSELF,
+        insns.SEND, 0, 1,
+        insns.LEAVE,
+    ])
+    expect_unsupported(iseq, w_self,
+                       "block 'block in test' takes 2 argument(s), given 1")
+
+
+
+def test_inject_with_an_initial_value():
+    inject_id = symbols.intern('inject')
+    w_block = asm([], 2, 2, [
+        insns.GETLOCAL, 0,
+        insns.GETLOCAL, 1,
+        insns.OPT_PLUS,
+        insns.LEAVE,
+    ], name='block in test', nparams=2)
+    items = [W_Fixnum(1), W_Fixnum(2), W_Fixnum(3), W_Fixnum(4)]
+    # [1, 2, 3, 4].inject(0) { |s, x| s + x }
+    iseq = asm([W_Array(items), W_Fixnum(0), W_CallInfo(inject_id, 1), w_block],
+               0, 4, [
+        insns.PUTOBJECT, 0,
+        insns.PUTOBJECT, 1,
+        insns.SEND, 2, 3,
+        insns.LEAVE,
+    ])
+    assert interp.run(iseq).int_w() == 10
+
+def test_inject_needs_a_block():
+    inject_id = symbols.intern('inject')
+    # [1].inject(0) -- no block, so there is nothing to fold with
+    iseq = asm([W_Array([W_Fixnum(1)]), W_Fixnum(0),
+                W_CallInfo(inject_id, 1)], 0, 4, [
+        insns.PUTOBJECT, 0,
+        insns.PUTOBJECT, 1,
+        insns.OPT_SEND_WITHOUT_BLOCK, 2,
+        insns.LEAVE,
+    ])
+    expect_unsupported(iseq, W_Main(),
+                       "inject without a block is not supported: RPyYARV has "
+                       "no Symbol, so inject(:+) cannot work")
+
+
 def test_wrong_argc():
     add_id = symbols.intern('add')
     iseq = asm([_add_iseq(), W_Fixnum(1), W_CallInfo(add_id, 1)], 0, 4, [
@@ -398,6 +474,20 @@ def test_string_literal_and_concat():
     assert w_str.is_true()
 
 
+def test_putchilledstring_copies_the_constant():          
+    # Chilled strings must be independently mutable later, so the constant
+    # pool's literal is never pushed directly -- a fresh copy is made.
+    w_lit = W_String('hi')
+    iseq = asm([w_lit], 0, 1, [
+        insns.PUTCHILLEDSTRING, 0,
+        insns.LEAVE,
+    ])
+    w_ret = interp.run(iseq)
+    assert isinstance(w_ret, W_String)
+    assert w_ret.str_w() == 'hi'
+    assert w_ret is not w_lit
+
+
 def test_concatstrings_needs_strings():
     iseq = asm([W_Fixnum(1), W_String('x')], 0, 4, [
         insns.PUTOBJECT, 0,
@@ -408,6 +498,18 @@ def test_concatstrings_needs_strings():
     expect_unsupported(iseq, W_Main(), 'not a string')
 
 
+def test_string_plus():
+    iseq = asm([W_String('4'), W_String('2')], 0, 2, [
+        insns.PUTOBJECT, 0,
+        insns.PUTOBJECT, 1,
+        insns.OPT_PLUS,
+        insns.LEAVE,
+    ])
+    w_str = interp.run(iseq)
+    assert isinstance(w_str, W_String)
+    assert w_str.str_w() == '42'
+
+    
 def test_to_s_str():
     assert W_Fixnum(-7).to_s_str() == '-7'
     assert w_nil.to_s_str() == ''
@@ -478,10 +580,73 @@ def test_puts():
     assert printed2 == '\n'
     assert w_ret2 is w_nil
 
+def test_to_i():                                          
+    to_i_id = symbols.intern('to_i')
 
+    def to_i_of(s):
+        iseq = asm([W_String(s), W_CallInfo(to_i_id, 0)], 0, 2, [
+            insns.PUTOBJECT, 0,
+            insns.OPT_SEND_WITHOUT_BLOCK, 1,
+            insns.LEAVE,
+        ])
+        return interp.run(iseq).int_w()
+
+    assert to_i_of('42') == 42
+    assert to_i_of('  42') == 42
+    assert to_i_of('-5') == -5
+
+def test_to_s():
+    to_s_id = symbols.intern('to_s')
+
+    def to_s_of(w_recv):
+        iseq = asm([w_recv, W_CallInfo(to_s_id, 0)], 0, 2, [
+            insns.PUTOBJECT, 0,
+            insns.OPT_SEND_WITHOUT_BLOCK, 1,
+            insns.LEAVE,
+        ])
+        return interp.run(iseq).str_w()
+
+    assert to_s_of(W_Fixnum(42)) == '42'
+    assert to_s_of(W_String('hi')) == 'hi'
+    assert to_s_of(w_nil) == ''
+    assert to_s_of(w_true) == 'true'
+    assert to_s_of(w_false) == 'false'
+
+def test_split_on_empty_regexp():
+    split_id = symbols.intern('split')
+
+    def split_of(s):
+        iseq = asm([W_String(s), W_Regexp(''), W_CallInfo(split_id, 1)],
+                   0, 3, [
+            insns.PUTOBJECT, 0,
+            insns.PUTOBJECT, 1,
+            insns.OPT_SEND_WITHOUT_BLOCK, 2,
+            insns.LEAVE,
+        ])
+        w_ary = interp.run(iseq)
+        assert isinstance(w_ary, W_Array)
+        return [w.str_w() for w in w_ary.items_w]
+
+    assert split_of('1021') == ['1', '0', '2', '1']
+    assert split_of('') == []
+
+
+def test_split_needs_an_empty_regexp():
+    split_id = symbols.intern('split')
+    iseq = asm([W_String('a,b'), W_Regexp(','), W_CallInfo(split_id, 1)],
+               0, 3, [
+        insns.PUTOBJECT, 0,
+        insns.PUTOBJECT, 1,
+        insns.OPT_SEND_WITHOUT_BLOCK, 2,
+        insns.LEAVE,
+    ])
+    expect_unsupported(iseq, W_Main(),
+                       "split on /,/: RPyYARV only supports split(//) so far")
+
+                       
 def test_cfunc_arity_is_checked():
     class W_One(W_CFunc):
-        def call(self, w_recv, args_w):
+        def call(self, w_recv, args_w, w_block):
             return args_w[0]
 
     one_id = symbols.intern('one')
@@ -497,6 +662,31 @@ def test_cfunc_arity_is_checked():
     expect_unsupported(
         iseq, w_self,
         "wrong number of arguments to 'one' (given 2, expected 1)")
+
+
+def test_a_block_reaches_a_cfunc():
+    class W_Twice(W_CFunc):
+        def call(self, w_recv, args_w, w_block):
+            w_once = interp.call_block(w_block, [args_w[0]])
+            return interp.call_block(w_block, [w_once])
+
+    twice_id = symbols.intern('twice')
+    w_self = W_Main()
+    w_self.define_method(twice_id, W_Twice(twice_id, 1))
+    w_block = asm([], 1, 2, [
+        insns.GETLOCAL, 0,
+        insns.GETLOCAL, 0,
+        insns.OPT_PLUS,
+        insns.LEAVE,
+    ], name='block in test', nparams=1)
+    # twice(3) { |x| x + x }
+    iseq = asm([W_Fixnum(3), W_CallInfo(twice_id, 1), w_block], 0, 4, [
+        insns.PUTSELF,
+        insns.PUTOBJECT, 0,
+        insns.SEND, 1, 2,
+        insns.LEAVE,
+    ])
+    assert interp.execute(iseq, Frame(iseq, w_self)).int_w() == 12
 
 
 def test_class_is_an_object():
@@ -535,7 +725,7 @@ def test_new_runs_initialize():
     seen = []
 
     class W_Init(W_CFunc):
-        def call(self, w_recv, args_w):
+        def call(self, w_recv, args_w, w_block):
             seen.append((w_recv, args_w[0].int_w()))
             return w_nil
 
@@ -638,3 +828,5 @@ def _send_new(w_class, args_w):
     frame = Frame(iseq, w_main)
     frame.locals[0] = w_class
     return interp.execute(iseq, frame)
+
+

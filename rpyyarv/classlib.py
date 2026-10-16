@@ -10,13 +10,13 @@ INITIALIZE = symbols.intern('initialize')
 
 
 class W_New(W_CFunc):
-    def call(self, w_recv, args_w):
+    def call(self, w_recv, args_w, w_block):
         import interp
         assert isinstance(w_recv, W_Class)       # `new` lives only on Class
         w_obj = W_Object(w_recv)
         w_init = w_recv.find_method(INITIALIZE)
         if w_init is not None:
-            interp.call_method(w_init, w_obj, args_w)
+            interp.call_method(w_init, w_obj, args_w, w_block)
         elif len(args_w) != 0:
             raise UnsupportedOperation(
                 "wrong number of arguments to 'new' (given %d, expected 0)"

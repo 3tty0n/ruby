@@ -21,9 +21,7 @@ import debug
 import kernel
 from objects.klass import w_object_class
 
-BUILD = os.environ.get('RPYYARV_BUILD',
-                       os.path.join(os.path.dirname(ROOT), 'build'))
-DUMPER = os.path.join(ROOT, 'scripts', 'dump_iseq.rb')
+import support
 
 
 @pytest.fixture(autouse=True)
@@ -62,30 +60,27 @@ def out():
 @pytest.fixture(scope='session')
 def ruby():
     """This tree's ruby; only it emits instructions that match insns.py."""
-    exe = os.environ.get('RUBY', os.path.join(BUILD, 'ruby'))
-    if not os.path.exists(exe):
-        pytest.skip('no ruby in %s; build CRuby first' % BUILD)
-    env = dict(os.environ)
-    # The build tree's libruby is tagged with its install prefix, not its path
-    for var in ('DYLD_LIBRARY_PATH', 'LD_LIBRARY_PATH'):
-        env[var] = os.pathsep.join([BUILD] + [p for p in [env.get(var)] if p])
-    try:
-        subprocess.check_output([exe, '-e', ''], env=env,
-                                stderr=subprocess.STDOUT)
-    except (OSError, subprocess.CalledProcessError) as e:
-        pytest.skip('%s will not run: %s' % (exe, e))
+    exe, env = support.ruby_exe()
+    if exe is None:
+        pytest.skip(env)
     return exe, env
 
 
 @pytest.fixture(scope='session')
 def compile_rb(ruby):
     """Compiles a .rb path to the ISeq dump text loader.load_dump() reads."""
-    exe, env = ruby
+    return lambda path: support.compile_rb(path, ruby)
 
-    def compile_rb(path):
-        text = subprocess.check_output([exe, DUMPER, path], env=env)
-        if not isinstance(text, str):
-            text = text.decode('utf-8')
-        return text
 
-    return compile_rb
+@pytest.fixture
+def ruby_program(ruby, out):
+    """Runs Ruby source on RPyYARV -- source, CRuby's compiler, ISeq, us.
+
+        def test_addition(ruby_program):
+            assert ruby_program('puts 1 + 2') == '3\n'
+    """
+    def ruby_program(source):
+        support.run_dump(support.compile_source(source, ruby))
+        return out.text
+
+    return ruby_program

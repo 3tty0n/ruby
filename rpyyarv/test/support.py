@@ -7,6 +7,9 @@ without going through Ruby source at all.
 """
 
 import os
+import shutil
+import subprocess
+import tempfile
 
 import debug
 import interp
@@ -18,6 +21,40 @@ from iseq import W_ISeq
 from objects.main import W_Main
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+ROOT = os.path.dirname(HERE)
+BUILD = os.environ.get('RPYYARV_BUILD',
+                       os.path.join(os.path.dirname(ROOT), 'build'))
+DUMPER = os.path.join(ROOT, 'scripts', 'dump_iseq.rb')
+
+
+def ruby_exe():
+    """This tree's ruby as (exe, env); only it matches insns.py.
+
+    Returns (None, why) when it is missing or will not run, so a caller can
+    skip rather than fail.
+    """
+    exe = os.environ.get('RUBY', os.path.join(BUILD, 'ruby'))
+    if not os.path.exists(exe):
+        return None, 'no ruby in %s; build CRuby first' % BUILD
+    env = dict(os.environ)
+    # The build tree's libruby is tagged with its install prefix, not its path
+    for var in ('DYLD_LIBRARY_PATH', 'LD_LIBRARY_PATH'):
+        env[var] = os.pathsep.join([BUILD] + [p for p in [env.get(var)] if p])
+    try:
+        subprocess.check_output([exe, '-e', ''], env=env,
+                                stderr=subprocess.STDOUT)
+    except (OSError, subprocess.CalledProcessError) as e:
+        return None, '%s will not run: %s' % (exe, e)
+    return exe, env
+
+
+def compile_rb(path, ruby=None):
+    """Compiles a .rb to the ISeq dump text load_dump() reads."""
+    exe, env = ruby if ruby else ruby_exe()
+    text = subprocess.check_output([exe, DUMPER, path], env=env)
+    if not isinstance(text, str):
+        text = text.decode('utf-8')
+    return text
 
 
 def asm(consts, nlocals, stack_max, items, name='<test>', nparams=0,
@@ -41,6 +78,21 @@ def asm(consts, nlocals, stack_max, items, name='<test>', nparams=0,
             code.append(item)
     return W_ISeq(name, code, consts, nlocals, stack_max, nparams,
                   simple_params)
+
+
+def compile_source(source, ruby=None):
+    """Compiles Ruby source text to an ISeq dump, through a temp file."""
+    tmp = tempfile.mkdtemp(prefix='rpyyarv-')
+    try:
+        path = os.path.join(tmp, 'program.rb')
+        f = open(path, 'w')
+        try:
+            f.write(source)
+        finally:
+            f.close()
+        return compile_rb(path, ruby)
+    finally:
+        shutil.rmtree(tmp)
 
 
 def run(w_iseq, w_self=None):

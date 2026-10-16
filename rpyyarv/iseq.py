@@ -50,3 +50,13 @@ class W_CallInfo(W_Root):
     def repr(self):
         return '<W_CallInfo %s argc=%d>' % (symbols.name_of(self.mid),
                                            self.argc)
+
+class W_Block(W_Root):
+    _immutable_fields_ = ['w_iseq', 'w_self']
+
+    def __init__(self, w_iseq, w_self):
+        self.w_iseq = w_iseq
+        self.w_self = w_self
+
+    def repr(self):
+        return '<W_Block %s>' % self.w_iseq.name
