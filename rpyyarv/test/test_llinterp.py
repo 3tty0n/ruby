@@ -6,7 +6,7 @@ an unannotatable type, a list RPython may not resize, a bad downcast.
 
 Needs Python 2 and the pypy checkout, so `make test` skips it; run it with
 
-    make test-llinterp        # or: python2 test/test_llinterp.py
+    make test-llinterp        # or: pypy2 test/test_llinterp.py
 """
 
 import os

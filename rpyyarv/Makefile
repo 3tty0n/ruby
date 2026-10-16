@@ -41,7 +41,7 @@ SHIM    := librpyyarv_boot.$(SOEXT)
 PYPY    ?= ./pypy
 PYTHON  ?= python3
 PYTEST  ?= $(PYTHON) -m pytest
-PYTHON2 ?= python2
+PYTHON2 ?= pypy2
 RPYTHON ?= python2 $(PYPY)/rpython/bin/rpython
 RUBY    ?= $(BUILD)/ruby
 
@@ -63,7 +63,7 @@ $(PROBE): test/probe.c
 test: $(SHIM)
 	RPYYARV_BUILD=$(BUILD) $(PYTEST) $(PYTEST_ARGS)
 
-# llinterp needs Python 2 and the pypy checkout, which pytest 9 cannot host.
+# llinterp needs Python 2 (pypy2) and the pypy checkout, which pytest 9 cannot host.
 test-llinterp: | $(PYPY)
 	RPYYARV_BUILD=$(BUILD) $(PYTHON2) test/test_llinterp.py
 
