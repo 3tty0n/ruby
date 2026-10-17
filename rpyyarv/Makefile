@@ -14,9 +14,7 @@ SOVER   := $(patsubst $(BUILD)/libruby.%.dylib,%,$(firstword $(wildcard $(BUILD)
 LIBRUBY := $(BUILD)/libruby.$(SOVER).dylib
 LDLIBS  += -lruby.$(SOVER)
 SHARED  := -dynamiclib
-LIBPATH := DYLD_LIBRARY_PATH=$(BUILD)
 LDFLAGS += -Wl,-headerpad_max_install_names
-INSTNAME := $(shell otool -D $(LIBRUBY) 2>/dev/null | tail -1)
 
 define fix_install_name
 	@[ -e "$(1)" ] || exit 0; \
@@ -31,7 +29,6 @@ LIBRUBY := $(firstword $(wildcard $(BUILD)/libruby.so))
 LDLIBS  += -lruby
 LDFLAGS += -Wl,-rpath,'$$ORIGIN'
 SHARED  := -shared -fPIC
-LIBPATH := LD_LIBRARY_PATH=$(BUILD)
 define fix_install_name
 endef
 endif
@@ -39,13 +36,14 @@ endif
 PROBE   := test/probe
 SHIM    := librpyyarv_boot.$(SOEXT)
 PYPY    ?= ./pypy
+PYPY_URL ?= https://github.com/plig-tmu/pypy
+PYPY_BRANCH ?= callee-frame
 PYTHON  ?= pypy2
 RPYTHON ?= $(PYTHON) $(PYPY)/rpython/bin/rpython
 PYTEST  ?= $(PYTHON) $(PYPY)/pytest.py
 RPYTHON_FLAGS ?=
-RUBY    ?= $(BUILD)/ruby
 
-.PHONY: all test test-llinterp build-interp build-jit link clean
+.PHONY: test test-llinterp build-interp build-jit link clean
 
 link: $(SHIM)
 
@@ -65,7 +63,7 @@ test: $(SHIM)
 
 # llinterp needs Python 2 (pypy2) and the pypy checkout, which pytest 9 cannot host.
 test-llinterp: | $(PYPY)
-	RPYYARV_BUILD=$(BUILD) $(PYTHON2) $(PYPY)/pytest.py test/test_llinterp.py
+	RPYYARV_BUILD=$(BUILD) $(PYTHON) $(PYPY)/pytest.py test/test_llinterp.py
 
 build-interp: | $(PYPY)
 	RPYYARV_BUILD=$(BUILD) $(RPYTHON) --output=rpyyarv-runtime-replacing targetrpyyarv.py
@@ -76,7 +74,7 @@ build-jit: | $(PYPY)
 	$(call fix_install_name,rpyyarv-runtime-replacing-jit)
 
 $(PYPY):
-	git clone --depth=1 https://github.com/pypy/pypy $@
+	git clone --depth=1 --branch $(PYPY_BRANCH) $(PYPY_URL) $@
 
 clean:
 	rm -f $(PROBE) $(SHIM) rpyyarv-runtime-replacing rpyyarv-runtime-replacing-jit
