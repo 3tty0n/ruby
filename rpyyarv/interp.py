@@ -4,12 +4,12 @@ import helpers
 import symbols
 from error import UnsupportedOperation
 from frame import Frame
-from iseq import W_Block, W_CallInfo, W_ISeq, NO_BLOCK_ISEQ
+from iseq import W_Block, W_CallInfo, W_ISeq, NO_BLOCK_ISEQ, tail_position
 from methods import W_CFunc, W_ISeqMethod
 from objects.array import W_Array
 from objects.string import W_String
 from objects.transparent import w_nil
-from rlib import JitDriver, unroll_safe
+from rlib import JitDriver, elidable, unroll_safe
 
 
 def _as_iseq(w_x):
@@ -24,10 +24,11 @@ def _callinfo(iseq, idx):
 
 
 @unroll_safe
-def invoke(frame, w_ci, w_block):
+def invoke(frame, iseq, w_ci, w_block, tail=False):
+    # None is a restart signal only when the caller passes tail=True.
     argc = w_ci.argc
     recv_at = frame.sp - argc - 1
-    if recv_at < 0:
+    if recv_at < iseq.nlocals:
         raise UnsupportedOperation(
             "call to '%s' with %d argument(s) underflows the stack"
             % (symbols.name_of(w_ci.mid), argc))
@@ -36,7 +37,7 @@ def invoke(frame, w_ci, w_block):
             "call to '%s' passes arguments RPyYARV does not support"
             % symbols.name_of(w_ci.mid))
 
-    w_recv = frame.stack[recv_at]
+    w_recv = frame.peek(recv_at)
     w_method = w_recv.lookup_method(w_ci.mid)
     if w_method.private and not w_ci.fcall:
         raise UnsupportedOperation("private method '%s' called for %s"
@@ -53,18 +54,30 @@ def invoke(frame, w_ci, w_block):
                 "method '%s' has parameters RPyYARV does not support"
                 % symbols.name_of(w_ci.mid))
         _check_argc(w_ci.mid, argc, callee_iseq.nparams)
+        if tail and callee_iseq is iseq and not debug.is_enabled():
+            # The separate argument stack makes f(b, a) safe to copy in place.
+            i = 0
+            while i < argc:
+                frame.setlocal(i, frame.peek(recv_at + 1 + i))
+                i += 1
+            while i < callee_iseq.nlocals:
+                frame.setlocal(i, w_nil)
+                i += 1
+            _drop(frame, iseq.nlocals)
+            frame.w_self = w_recv
+            return None
         callee = Frame(callee_iseq, w_recv)
         i = 0
         while i < argc:
-            callee.locals[i] = frame.stack[recv_at + 1 + i]
+            callee.setlocal(i, frame.peek(recv_at + 1 + i))
             i += 1
         _drop(frame, recv_at)
-        if not debug.state.enabled:
+        if not debug.is_enabled():
             return execute(callee_iseq, callee)
         traced_w = []
         i = 0
         while i < argc:
-            traced_w.append(callee.locals[i])
+            traced_w.append(callee.getlocal(i))
             i += 1
         debug.trace_enter(w_ci.mid, traced_w)
         w_ret = execute(callee_iseq, callee)
@@ -77,10 +90,10 @@ def invoke(frame, w_ci, w_block):
     args_w = []
     i = 0
     while i < argc:
-        args_w.append(frame.stack[recv_at + 1 + i])
+        args_w.append(frame.peek(recv_at + 1 + i))
         i += 1
     _drop(frame, recv_at)
-    if not debug.state.enabled:
+    if not debug.is_enabled():
         return w_method.call(w_recv, args_w, w_block)
     debug.trace_enter(w_ci.mid, args_w)
     w_ret = w_method.call(w_recv, args_w, w_block)
@@ -110,7 +123,7 @@ def call_method(w_method, w_recv, args_w, w_block):
     callee = Frame(callee_iseq, w_recv)
     i = 0
     while i < len(args_w):
-        callee.locals[i] = args_w[i]
+        callee.setlocal(i, args_w[i])
         i += 1
     return execute(callee_iseq, callee)
 
@@ -124,7 +137,7 @@ def call_block(w_block, args_w):
     callee = Frame(w_iseq, w_block.w_self)
     i = 0
     while i < len(args_w):
-        callee.locals[i] = args_w[i]
+        callee.setlocal(i, args_w[i])
         i += 1
     return execute(w_iseq, callee)
 
@@ -147,6 +160,14 @@ def _to_s(w_x):
     return W_String(w_x.to_s_str())
 
 
+@elidable
+def _call_tail(iseq, w_ci, pc):
+    # Hand-built ISeqs have no precomputed flag.
+    if w_ci.tail is not None:
+        return w_ci.tail
+    return tail_position(iseq.code, pc)
+
+
 def get_printable_location(pc, iseq):
     return '%s@%d %s' % (iseq.name, pc, insns.NAMES[iseq.code[pc]])
 
@@ -164,7 +185,7 @@ def execute(iseq, frame):
         # live variable across the merge point that is neither green nor red
         code = iseq.code
         opcode = code[pc]
-        if debug.state.enabled:
+        if debug.is_enabled():
             debug.trace_insn(iseq, pc, frame)
         pc += 1
 
@@ -186,12 +207,12 @@ def execute(iseq, frame):
             idx = code[pc]
             pc += 1
             assert idx >= 0
-            frame.push(frame.locals[idx])
+            frame.push(frame.getlocal(idx))
         elif opcode == insns.SETLOCAL:
             idx = code[pc]
             pc += 1
             assert idx >= 0
-            frame.locals[idx] = frame.pop()
+            frame.setlocal(idx, frame.pop())
         elif opcode == insns.DUP:
             w_x = frame.pop()
             frame.push(w_x)
@@ -278,7 +299,14 @@ def execute(iseq, frame):
         elif opcode == insns.OPT_SEND_WITHOUT_BLOCK:
             idx = code[pc]
             pc += 1
-            frame.push(invoke(frame, _callinfo(iseq, idx), None))
+            w_ci = _callinfo(iseq, idx)
+            w_ret = invoke(frame, iseq, w_ci, None,
+                           _call_tail(iseq, w_ci, pc))
+            if w_ret is None:
+                pc = 0
+                jitdriver.can_enter_jit(iseq=iseq, pc=pc, frame=frame)
+            else:
+                frame.push(w_ret)
         elif opcode == insns.SEND:
             idx = code[pc]
             block = code[pc + 1]
@@ -288,7 +316,13 @@ def execute(iseq, frame):
                 w_block = None
             else:
                 w_block = W_Block(_as_iseq(iseq.consts[block]), frame.w_self)
-            frame.push(invoke(frame, w_ci, w_block))
+            w_ret = invoke(frame, iseq, w_ci, w_block,
+                           _call_tail(iseq, w_ci, pc))
+            if w_ret is None:
+                pc = 0
+                jitdriver.can_enter_jit(iseq=iseq, pc=pc, frame=frame)
+            else:
+                frame.push(w_ret)
         elif opcode == insns.JUMP:
             target = code[pc]
             pc += 1

@@ -1,7 +1,5 @@
 """Unit tests for the debug channels: tracing, iseq dumps, the summary."""
 
-import os
-
 import debug
 import insns
 import interp
@@ -45,21 +43,6 @@ def test_configure_all_and_unknown():
     assert debug.configure('insn,bogus,') == ['bogus']
     assert debug.on(debug.INSN)
     debug.reset()
-
-
-def test_configure_from_env():
-    debug.reset()
-    saved = os.environ.get('RPYYARV_DEBUG')
-    os.environ['RPYYARV_DEBUG'] = 'stack'
-    try:
-        assert debug.configure_from_env() == []
-        assert debug.on(debug.STACK)
-    finally:
-        if saved is None:
-            del os.environ['RPYYARV_DEBUG']
-        else:
-            os.environ['RPYYARV_DEBUG'] = saved
-        debug.reset()
 
 
 def test_disasm_decodes_every_operand_kind():

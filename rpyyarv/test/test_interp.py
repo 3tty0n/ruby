@@ -163,15 +163,15 @@ def test_pop_clears():
     frame = Frame(iseq)
     assert interp.execute(iseq, frame).int_w() == 7
     assert frame.sp == 0
-    for slot in frame.stack:
-        assert slot is None
+    for i in range(iseq.stack_max):
+        assert frame.peek(i) is None
 
     frame2 = Frame(iseq)
     w_x = W_Fixnum(1)
     frame2.push(w_x)
-    assert frame2.stack[0] is w_x
+    assert frame2.peek(0) is w_x
     assert frame2.pop() is w_x
-    assert frame2.stack[0] is None
+    assert frame2.peek(0) is None
     assert frame2.sp == 0
 
 
@@ -223,9 +223,9 @@ def test_definemethod_and_call():
     w_method = w_object_class.find_method(add_id)
     assert isinstance(w_method, W_ISeqMethod)
     assert w_method.w_iseq is w_body
-    assert frame.sp == 0
-    for slot in frame.stack:
-        assert slot is None
+    assert frame.sp == iseq.nlocals
+    for i in range(iseq.stack_max):
+        assert frame.peek(iseq.nlocals + i) is None
 
 
 def test_argument_order():
@@ -760,7 +760,7 @@ def test_instance_method_is_found_through_its_class():
         insns.LEAVE,
     ])
     frame = Frame(iseq, w_main)
-    frame.locals[0] = w_obj
+    frame.setlocal(0, w_obj)
     assert interp.execute(iseq, frame).int_w() == 42
 
 
@@ -774,7 +774,7 @@ def test_new_is_not_inherited_by_instances():
         insns.LEAVE,
     ])
     frame = Frame(iseq, w_main)
-    frame.locals[0] = w_obj
+    frame.setlocal(0, w_obj)
     try:
         interp.execute(iseq, frame)
     except UnsupportedOperation as e:
@@ -826,7 +826,7 @@ def _send_new(w_class, args_w):
     items += [insns.OPT_SEND_WITHOUT_BLOCK, 0, insns.LEAVE]
     iseq = asm(consts, 1, 4 + len(args_w), items)
     frame = Frame(iseq, w_main)
-    frame.locals[0] = w_class
+    frame.setlocal(0, w_class)
     return interp.execute(iseq, frame)
 
 

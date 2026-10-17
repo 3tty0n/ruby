@@ -6,11 +6,11 @@ import optable
 import rawiseq
 import symbols
 from error import LoadError, UnsupportedOperation
-from iseq import W_CallInfo, W_ISeq, NO_BLOCK_ISEQ
+from iseq import W_CallInfo, W_ISeq, NO_BLOCK_ISEQ, tail_position
 from objects.array import W_Array
 from objects.string import W_String
 from objects.regexp import W_Regexp
-from objects.transparent import W_Fixnum, w_nil, w_true, w_false
+from objects.transparent import newint, w_nil, w_true, w_false
 
 
 class ConstPool(object):
@@ -25,7 +25,7 @@ class ConstPool(object):
     def add_fixnum(self, value):
         if value in self.fixnums:
             return self.fixnums[value]
-        idx = self.add(W_Fixnum(value))
+        idx = self.add(newint(value))
         self.fixnums[value] = idx
         return idx
 
@@ -154,18 +154,30 @@ class Loader(object):
 
         # W_ISeq declares code and consts immutable, so both have to reach it
         # as lists that were never resized: pc already holds the final length.
+        # Call data goes last: its tail flag walks the finished code.
         pool = ConstPool()
         code = [0] * pc
+        pending = []                # (slot, start, op, pos, ops) for call data
         at = 0
         for i in range(len(opcodes)):
             op = opcodes[i]
             ops = operands[i]
             self.check_dropped(op, ops, raw)
+            start = at
             code[at] = op
             at += 1
             for pos in optable.EMIT_POSITIONS[op]:
-                code[at] = self.operand(op, pos, ops, raw, pool, labels)
-                at += 1
+                if insns.OPERAND_TYPES[op][pos] == insns.T_CALL_DATA:
+                    pending.append((at, start, op, pos, ops))
+                    at += 1
+                else:
+                    code[at] = self.operand(op, pos, ops, raw, pool, labels)
+                    at += 1
+        for slot, start, op, pos, ops in pending:
+            post_pc = start + 1 + len(optable.EMIT_POSITIONS[op])
+            w_ci = self.callinfo(ops[pos], op, raw, ops,
+                                 tail_position(code, post_pc))
+            code[slot] = pool.add(w_ci)
 
         w_iseq = W_ISeq(raw.name, code, [w for w in pool.consts], raw.nlocals,
                         raw.stack_max, raw.lead_num, raw.extra_params == '')
@@ -209,8 +221,6 @@ class Loader(object):
                                 % (insns.NAMES[op], raw.name,
                                    operand.describe()))
             return pool.add(self.load_iseq(operand.intval))
-        if t == insns.T_CALL_DATA:
-            return pool.add(self.callinfo(operand, op, raw, ops))
         raise LoadError("%s in '%s' has an operand of type %s, which "
                         "yarv_map.py supports but the loader does not"
                         % (insns.NAMES[op], raw.name, insns.TYPE_NAMES[t]))
@@ -223,7 +233,7 @@ class Loader(object):
     def literal_value(self, operand, op, raw):
         kind = operand.kind
         if kind == rawiseq.OP_INT:
-            return W_Fixnum(operand.intval)
+            return newint(operand.intval)
         if kind == rawiseq.OP_NIL:
             return w_nil
         if kind == rawiseq.OP_TRUE:
@@ -267,7 +277,7 @@ class Loader(object):
                             % (insns.NAMES[op], raw.name, name))
         return labels[name]
 
-    def callinfo(self, operand, op, raw, ops):
+    def callinfo(self, operand, op, raw, ops, tail):
         if operand.kind != rawiseq.OP_CALL:
             raise LoadError("%s in '%s' wants call data, got %s"
                             % (insns.NAMES[op], raw.name, operand.describe()))
@@ -280,7 +290,8 @@ class Loader(object):
                   and ((flags & optable.CALL_FLAG_ARGS_SIMPLE) != 0
                        or has_block))
         return W_CallInfo(symbols.intern(operand.strval), operand.intval,
-                          simple, (flags & optable.CALL_FLAG_FCALL) != 0)
+                          simple, (flags & optable.CALL_FLAG_FCALL) != 0,
+                          tail)
 
     def int_of(self, operand, op, raw, what):
         if operand.kind != rawiseq.OP_INT:

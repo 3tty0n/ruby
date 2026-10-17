@@ -5,7 +5,7 @@ import os
 import symbols
 from methods import W_CFunc
 from objects.string import W_String 
-from objects.transparent import W_Fixnum, w_nil
+from objects.transparent import newint, w_nil
 from rlib import now_ns
 
 
@@ -28,7 +28,7 @@ class W_ToS(W_CFunc):
 class W_BenchNowNs(W_CFunc):
     """Monotonic clock in integer nanoseconds, for the benchmark harness."""
     def call(self, w_recv, args_w, w_block):
-        return W_Fixnum(now_ns())
+        return newint(now_ns())
 
 def install(w_class):
     puts_id = symbols.intern('puts')
