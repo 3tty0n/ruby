@@ -3,6 +3,8 @@ import os
 import debug
 import interp
 import loader
+from error import RPyYarvError
+from options import configure_options
 
 
 def read_file(path):
@@ -18,12 +20,14 @@ def read_file(path):
 
 
 def entry_point(argv):
-    if len(argv) != 2:
-        print 'usage: %s FILE.iseq' % argv[0]
+    try:
+        argv = configure_options(argv, interp.jitdriver)
+    except RPyYarvError, e:
+        print '[rpyyarv] %s' % e.msg
         return 1
-    for name in debug.configure_from_env():
-        debug.note('unknown RPYYARV_DEBUG channel %s; known: %s'
-                   % (name, debug.CHANNELS))
+    if len(argv) != 2:
+        print 'usage: %s [--jit PARAM=VALUE,...] [--debug CHANNELS] FILE.iseq' % argv[0]
+        return 1
     interp.run(loader.load_dump(read_file(argv[1])))
     return 0
 

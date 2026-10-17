@@ -42,6 +42,7 @@ PYPY    ?= ./pypy
 PYTHON  ?= pypy2
 RPYTHON ?= $(PYTHON) $(PYPY)/rpython/bin/rpython
 PYTEST  ?= $(PYTHON) $(PYPY)/pytest.py
+RPYTHON_FLAGS ?=
 RUBY    ?= $(BUILD)/ruby
 
 .PHONY: all test test-llinterp build-interp build-jit link clean

@@ -2,7 +2,10 @@ import os
 
 try:
     from rpython.rlib.jit import (
-        JitDriver, elidable, promote, unroll_safe, dont_look_inside, hint)
+        JitDriver, elidable, promote, unroll_safe, dont_look_inside, hint,
+        set_user_param, TraceLimitTooHigh)
+    from rpython.rlib.objectmodel import UnboxedValue, fetch_translated_config
+    from rpython.rlib.rstackovf import StackOverflow, check_stack_overflow
 
     def oswrite(fd, s):
         os.write(fd, s)
@@ -36,6 +39,17 @@ RPY_EXTERN long long rpyyarv_now_ns(void)
     assert LONG_BIT == 64, 'now_ns() needs a 64-bit Signed to hold nanoseconds'
 
 except ImportError:
+    def fetch_translated_config():
+        return None
+
+    class UnboxedValue(object):
+        def __init__(self, value):
+            import sys
+            limit = sys.maxsize >> 1
+            if value < -limit - 1 or value > limit:
+                raise OverflowError('UnboxedValue: argument out of range')
+            self.intval = value
+
     class JitDriver(object):
         def __init__(self, **kwargs):
             pass
@@ -45,6 +59,17 @@ except ImportError:
 
         def can_enter_jit(self, **kwargs):
             pass
+
+    class TraceLimitTooHigh(Exception):
+        pass
+
+    StackOverflow = RuntimeError
+
+    def check_stack_overflow():
+        pass
+
+    def set_user_param(driver, text):
+        pass
 
     def elidable(func):
         return func
@@ -70,3 +95,8 @@ except ImportError:
 
     def now_ns():
         return time.monotonic_ns()
+
+
+def tagged_ints_enabled():
+    config = fetch_translated_config()
+    return config is not None and config.translation.taggedpointers
