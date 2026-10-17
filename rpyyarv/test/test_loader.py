@@ -2,15 +2,15 @@
 
 import os
 
-import insns
-import iseqdump
-import loader
-from error import LoadError, UnsupportedOperation
-from iseq import W_CallInfo, W_ISeq, NO_BLOCK_ISEQ
-from objects.string import W_String
-from objects.regexp import W_Regexp
-from objects.transparent import W_Fixnum, w_nil
-from support import HERE, fixture, run, run_dump
+from rpyyarv import insns
+from rpyyarv import iseqdump
+from rpyyarv import loader
+from rpyyarv.error import LoadError, UnsupportedOperation
+from rpyyarv.iseq import W_CallInfo, W_ISeq, NO_BLOCK_ISEQ
+from rpyyarv.objects.string import W_String
+from rpyyarv.objects.regexp import W_Regexp
+from rpyyarv.objects.transparent import W_Fixnum, w_nil
+from rpyyarv.test.support import HERE, fixture, run, run_dump
 
 def expect(exc_class, text, msg):
     try:

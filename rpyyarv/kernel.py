@@ -2,11 +2,11 @@
 
 import os
 
-import symbols
-from methods import W_CFunc
-from objects.string import W_String 
-from objects.transparent import W_Fixnum, w_nil
-from rlib import now_ns
+from rpyyarv import symbols
+from rpyyarv.methods import W_CFunc
+from rpyyarv.objects.string import W_String 
+from rpyyarv.objects.transparent import W_Fixnum, w_nil
+from rpyyarv.rlib import now_ns
 
 
 def write(s):

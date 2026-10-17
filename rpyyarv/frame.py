@@ -1,6 +1,6 @@
-from objects.main import w_main
-from objects.transparent import w_nil
-from rlib import hint
+from rpyyarv.objects.main import w_main
+from rpyyarv.objects.transparent import w_nil
+from rpyyarv.rlib import hint
 
 
 class Frame(object):

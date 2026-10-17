@@ -1,8 +1,8 @@
 """Classes: the method tables that method lookup walks."""
 
-from methods import MethodTable
-from objects.base import W_Root
-from rlib import elidable
+from rpyyarv.methods import MethodTable
+from rpyyarv.objects.base import W_Root
+from rpyyarv.rlib import elidable
 
 
 class VersionTag(object):

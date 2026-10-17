@@ -6,8 +6,8 @@ literals, nested ISeqs, the W_CallInfo distilled from CALL_DATA -- goes into
 consts and the code stream carries the index.
 """
 
-import symbols
-from objects.base import W_Root
+from rpyyarv import symbols
+from rpyyarv.objects.base import W_Root
 
 # A `send` whose call site has no block. Pool indices are >= 0.
 NO_BLOCK_ISEQ = -1

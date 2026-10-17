@@ -1,15 +1,15 @@
-import debug
-import insns
-import helpers
-import symbols
-from error import UnsupportedOperation
-from frame import Frame
-from iseq import W_Block, W_CallInfo, W_ISeq, NO_BLOCK_ISEQ
-from methods import W_CFunc, W_ISeqMethod
-from objects.array import W_Array
-from objects.string import W_String
-from objects.transparent import w_nil
-from rlib import JitDriver, unroll_safe
+from rpyyarv import debug
+from rpyyarv import insns
+from rpyyarv import helpers
+from rpyyarv import symbols
+from rpyyarv.error import UnsupportedOperation
+from rpyyarv.frame import Frame
+from rpyyarv.iseq import W_Block, W_CallInfo, W_ISeq, NO_BLOCK_ISEQ
+from rpyyarv.methods import W_CFunc, W_ISeqMethod
+from rpyyarv.objects.array import W_Array
+from rpyyarv.objects.string import W_String
+from rpyyarv.objects.transparent import w_nil
+from rpyyarv.rlib import JitDriver, unroll_safe
 
 
 def _as_iseq(w_x):

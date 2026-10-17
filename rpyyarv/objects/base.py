@@ -1,6 +1,6 @@
-import symbols
-from error import UnsupportedOperation
-from rlib import promote
+from rpyyarv import symbols
+from rpyyarv.error import UnsupportedOperation
+from rpyyarv.rlib import promote
 
 
 class W_Root(object):

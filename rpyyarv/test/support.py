@@ -11,14 +11,14 @@ import shutil
 import subprocess
 import tempfile
 
-import debug
-import interp
-import kernel
-import loader
-from error import UnsupportedOperation
-from frame import Frame
-from iseq import W_ISeq
-from objects.main import W_Main
+from rpyyarv import debug
+from rpyyarv import interp
+from rpyyarv import kernel
+from rpyyarv import loader
+from rpyyarv.error import UnsupportedOperation
+from rpyyarv.frame import Frame
+from rpyyarv.iseq import W_ISeq
+from rpyyarv.objects.main import W_Main
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
