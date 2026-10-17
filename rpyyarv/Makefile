@@ -42,6 +42,7 @@ PYPY    ?= ./pypy
 PYTHON  ?= pypy2
 RPYTHON ?= $(PYTHON) $(PYPY)/rpython/bin/rpython
 PYTEST  ?= $(PYTHON) $(PYPY)/pytest.py
+RPYTHON_FLAGS ?=
 RUBY    ?= $(BUILD)/ruby
 
 .PHONY: all test test-llinterp build-interp build-jit link clean
@@ -67,11 +68,11 @@ test-llinterp: | $(PYPY)
 	RPYYARV_BUILD=$(BUILD) $(PYTHON2) $(PYPY)/pytest.py test/test_llinterp.py
 
 build-interp: | $(PYPY)
-	RPYYARV_BUILD=$(BUILD) $(RPYTHON) --output=rpyyarv targetrpyyarv.py
+	RPYYARV_BUILD=$(BUILD) $(RPYTHON) $(RPYTHON_FLAGS) --output=rpyyarv targetrpyyarv.py
 	$(call fix_install_name,rpyyarv)
 
 build-jit: | $(PYPY)
-	RPYYARV_BUILD=$(BUILD) $(RPYTHON) -Ojit --output=rpyyarv-jit targetrpyyarv.py
+	RPYYARV_BUILD=$(BUILD) $(RPYTHON) -Ojit $(RPYTHON_FLAGS) --output=rpyyarv-jit targetrpyyarv.py
 	$(call fix_install_name,rpyyarv-jit)
 
 $(PYPY):
