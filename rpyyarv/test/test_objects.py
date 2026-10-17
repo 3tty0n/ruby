@@ -6,19 +6,19 @@ interface, which is the cheapest way to pin down new behaviour.
 
 import pytest
 
-import symbols
-from error import UnsupportedOperation
-from methods import MethodTable, W_CFunc, W_Method
-from objects.array import W_Array
-from objects.instance import W_Object
-from objects.main import W_Main
-from objects.string import W_String
-from objects.transparent import (W_Fixnum, newbool, w_false, w_nil, w_true)
+from rpyyarv import symbols
+from rpyyarv.error import UnsupportedOperation
+from rpyyarv.methods import MethodTable, W_CFunc, W_Method
+from rpyyarv.objects.array import W_Array
+from rpyyarv.objects.instance import W_Object
+from rpyyarv.objects.main import W_Main
+from rpyyarv.objects.string import W_String
+from rpyyarv.objects.transparent import (W_Fixnum, newbool, w_false, w_nil, w_true)
 
-from objects.klass import (W_Class, w_array_class, w_class_class,
+from rpyyarv.objects.klass import (W_Class, w_array_class, w_class_class,
                            w_integer_class, w_object_class, w_regexp_class,
                            w_string_class)
-from objects.regexp import W_Regexp
+from rpyyarv.objects.regexp import W_Regexp
 
 def test_only_nil_and_false_are_falsy():
     assert not w_nil.is_true()

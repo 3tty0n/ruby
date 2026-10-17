@@ -1,11 +1,17 @@
 """RPython translation entry point: embedded CRuby compiles, RPyYARV runs."""
 
-import boot
-import bootiseq
-import debug
-import interp
-import loader
-from error import RPyYarvError
+import os
+import sys
+
+# rpython puts only this dir on sys.path; add the repo root so `rpyyarv` imports resolve
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from rpyyarv import boot
+from rpyyarv import bootiseq
+from rpyyarv import debug
+from rpyyarv import interp
+from rpyyarv import loader
+from rpyyarv.error import RPyYarvError
 
 
 def entry_point(argv):

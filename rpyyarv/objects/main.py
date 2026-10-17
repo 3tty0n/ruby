@@ -1,12 +1,12 @@
 """The toplevel self: an ordinary Object, as in CRuby."""
 
-import classlib
-import kernel
-from objects.base import W_Root
-from objects.klass import (w_array_class, w_class_class, w_object_class,
+from rpyyarv import classlib
+from rpyyarv import kernel
+from rpyyarv.objects.base import W_Root
+from rpyyarv.objects.klass import (w_array_class, w_class_class, w_object_class,
                            w_string_class)
-import objects.array as arraylib
-import objects.string as stringlib
+from rpyyarv.objects import array as arraylib
+from rpyyarv.objects import string as stringlib
 
 class W_Main(W_Root):
     def getclass(self):

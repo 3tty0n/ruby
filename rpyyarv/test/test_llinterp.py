@@ -14,23 +14,23 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
-for _p in (ROOT, HERE):
-    if _p not in sys.path:
-        sys.path.insert(0, _p)
+_REPO = os.path.dirname(ROOT)
+if _REPO not in sys.path:
+    sys.path.insert(0, _REPO)
 # pypy/ ships its own pytest and py; only Python 2 may see them.
 if sys.version_info[0] == 2:
     sys.path.insert(0, os.path.join(ROOT, 'pypy'))
 
 import pytest
 
-import loader
-import support
-from frame import Frame
-from objects.array import W_Array
-from objects.main import W_Main
-from objects.regexp import W_Regexp
-from objects.string import W_String
-from objects.transparent import w_nil
+from rpyyarv import loader
+from rpyyarv.test import support
+from rpyyarv.frame import Frame
+from rpyyarv.objects.array import W_Array
+from rpyyarv.objects.main import W_Main
+from rpyyarv.objects.regexp import W_Regexp
+from rpyyarv.objects.string import W_String
+from rpyyarv.objects.transparent import w_nil
 
 try:
     from rpython.rtyper.test.test_llinterp import interpret
@@ -55,7 +55,7 @@ def ll_run(w_iseq):
     prebuilt constant -- exactly as the boot path hands one over after
     translation.
     """
-    import interp
+    from rpyyarv import interp
 
     def entry():
         if _seed() < 0:

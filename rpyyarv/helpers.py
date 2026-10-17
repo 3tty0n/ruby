@@ -1,5 +1,5 @@
-from objects.string import W_String
-from objects.transparent import W_Fixnum, newbool
+from rpyyarv.objects.string import W_String
+from rpyyarv.objects.transparent import W_Fixnum, newbool
 
 # Interface contract C2: wrapped in, wrapped out. Non-Fixnum operands make
 # int_w() raise UnsupportedOperation from W_Root. No overflow handling yet.

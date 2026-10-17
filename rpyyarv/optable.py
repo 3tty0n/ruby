@@ -1,7 +1,7 @@
 """Join insns.py's facts with yarv_map.py's decisions, indexed by opcode."""
 
-import insns
-import yarv_map
+from rpyyarv import insns
+from rpyyarv import yarv_map
 
 _N = insns.INSTRUCTION_COUNT
 
