@@ -4,14 +4,20 @@
 This helps recursive calls but currently slows arithmetic JIT loops.
 """
 
-import boot
-import bootiseq
-import debug
-import interp
-import loader
-from options import configure_options
-from error import RPyYarvError
-from rlib import StackOverflow, check_stack_overflow
+import os
+import sys
+
+# rpython puts only this dir on sys.path; add the repo root so `rpyyarv` imports resolve
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from rpyyarv import boot
+from rpyyarv import bootiseq
+from rpyyarv import debug
+from rpyyarv import interp
+from rpyyarv import loader
+from rpyyarv.options import configure_options
+from rpyyarv.error import RPyYarvError
+from rpyyarv.rlib import StackOverflow, check_stack_overflow
 
 
 def entry_point(argv):

@@ -1,17 +1,17 @@
 """Class#new: allocate an instance, then run the class's initialize."""
 
-import symbols
-from error import UnsupportedOperation
-from methods import W_CFunc
-from objects.instance import W_Object
-from objects.klass import W_Class
+from rpyyarv import symbols
+from rpyyarv.error import UnsupportedOperation
+from rpyyarv.methods import W_CFunc
+from rpyyarv.objects.instance import W_Object
+from rpyyarv.objects.klass import W_Class
 
 INITIALIZE = symbols.intern('initialize')
 
 
 class W_New(W_CFunc):
     def call(self, w_recv, args_w, w_block):
-        import interp
+        from rpyyarv import interp
         assert isinstance(w_recv, W_Class)       # `new` lives only on Class
         w_obj = W_Object(w_recv)
         w_init = w_recv.find_method(INITIALIZE)

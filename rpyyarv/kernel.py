@@ -2,11 +2,11 @@
 
 import os
 
-import symbols
-from methods import W_CFunc
-from objects.string import W_String
-from objects.transparent import newint, w_nil
-from rlib import now_ns
+from rpyyarv import symbols
+from rpyyarv.methods import W_CFunc
+from rpyyarv.objects.string import W_String
+from rpyyarv.objects.transparent import newint, w_nil
+from rpyyarv.rlib import now_ns
 
 
 def write(s):
@@ -15,7 +15,7 @@ def write(s):
 
 class W_Puts(W_CFunc):
     def call(self, w_recv, args_w, w_block):
-        import interp
+        from rpyyarv import interp
         if len(args_w) == 0:
             write('\n')
         for w_arg in args_w:

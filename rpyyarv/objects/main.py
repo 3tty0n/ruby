@@ -1,13 +1,14 @@
 """The toplevel self: an ordinary Object, as in CRuby."""
 
-import classlib
-import kernel
-from objects.base import W_Root
-from objects.klass import (W_Class, w_array_class, w_class_class, w_false_class,
-                           w_integer_class, w_nil_class, w_object_class,
-                           w_string_class, w_true_class)
-import objects.array as arraylib
-import objects.string as stringlib
+from rpyyarv import classlib
+from rpyyarv import kernel
+from rpyyarv.objects.base import W_Root
+from rpyyarv.objects.klass import (W_Class, w_array_class, w_class_class,
+                                   w_false_class, w_integer_class, w_nil_class,
+                                   w_object_class, w_string_class,
+                                   w_true_class)
+from rpyyarv.objects import array as arraylib
+from rpyyarv.objects import string as stringlib
 
 # CRuby gives main a singleton class with its own to_s, so a toplevel
 # `def to_s` (which lands on Object) does not change how main prints.

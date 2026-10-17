@@ -1,6 +1,6 @@
-from objects.main import w_main
-from objects.transparent import w_nil
-from rlib import hint, unroll_safe
+from rpyyarv.objects.main import w_main
+from rpyyarv.objects.transparent import w_nil
+from rpyyarv.rlib import hint, unroll_safe
 
 
 _EMPTY_SLOTS = []

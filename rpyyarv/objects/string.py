@@ -1,13 +1,13 @@
 import sys
 
-import symbols
-from methods import W_CFunc
-from objects.array import W_Array
-from objects.base import W_Root
-from objects.klass import w_string_class
-from objects.regexp import W_Regexp
-from objects.transparent import newint
-from error import UnsupportedOperation
+from rpyyarv import symbols
+from rpyyarv.methods import W_CFunc
+from rpyyarv.objects.array import W_Array
+from rpyyarv.objects.base import W_Root
+from rpyyarv.objects.klass import w_string_class
+from rpyyarv.objects.regexp import W_Regexp
+from rpyyarv.objects.transparent import newint
+from rpyyarv.error import UnsupportedOperation
 
 class W_String(W_Root):
     # Immutable: nothing mutates a string yet, so frozen, chilled and
@@ -119,7 +119,6 @@ def _utf8_chars(s):
         i += width
     return chars_w
 
->>>>>>> ruby_4_0_rpyyarv_dev_cruby_compat
 
 class W_Split(W_CFunc):
     def call(self, w_recv, args_w, w_block):

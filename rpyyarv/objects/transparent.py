@@ -1,7 +1,7 @@
-from objects.base import W_Root
-from objects.klass import (w_false_class, w_integer_class, w_nil_class,
-                           w_true_class)
-from rlib import UnboxedValue, elidable, tagged_ints_enabled
+from rpyyarv.objects.base import W_Root
+from rpyyarv.objects.klass import (w_false_class, w_integer_class,
+                                   w_nil_class, w_true_class)
+from rpyyarv.rlib import UnboxedValue, elidable, tagged_ints_enabled
 
 
 class W_Integer(W_Root):

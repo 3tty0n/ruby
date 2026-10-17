@@ -3,8 +3,8 @@
 Record and operand grammar: see scripts/dump_iseq.rb.
 """
 
-import rawiseq
-from error import LoadError
+from rpyyarv import rawiseq
+from rpyyarv.error import LoadError
 
 FORMAT_VERSION = 1
 

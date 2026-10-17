@@ -1,10 +1,14 @@
 import os
+import sys
 
-import debug
-import interp
-import loader
-from error import RPyYarvError
-from options import configure_options
+# rpython puts only this dir on sys.path; add the repo root so `rpyyarv` imports resolve
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from rpyyarv import debug
+from rpyyarv import interp
+from rpyyarv import loader
+from rpyyarv.error import RPyYarvError
+from rpyyarv.options import configure_options
 
 
 def read_file(path):

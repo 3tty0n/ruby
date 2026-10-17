@@ -1,4 +1,4 @@
-from objects.base import W_Root
+from rpyyarv.objects.base import W_Root
 
 
 class W_Object(W_Root):

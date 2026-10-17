@@ -1,5 +1,5 @@
-from objects.string import W_String
-from objects.transparent import newbool, newint
+from rpyyarv.objects.string import W_String
+from rpyyarv.objects.transparent import newbool, newint
 
 # Interface contract C2: wrapped in, wrapped out. Non-integer operands make
 # int_w() raise UnsupportedOperation from W_Root. No overflow handling yet.
