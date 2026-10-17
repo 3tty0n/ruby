@@ -9,7 +9,7 @@ from error import LoadError, UnsupportedOperation
 from iseq import W_CallInfo, W_ISeq, NO_BLOCK_ISEQ
 from objects.string import W_String
 from objects.regexp import W_Regexp
-from objects.transparent import W_Fixnum, w_nil
+from objects.transparent import W_Integer, w_nil
 from support import HERE, fixture, run, run_dump
 
 def expect(exc_class, text, msg):
@@ -113,7 +113,7 @@ def test_specialized_variants_and_const_pool():
     w_body = loader.load_dump(fixture('fib_rec.iseq')).consts[0]
     assert insns.GETLOCAL in w_body.code
     assert insns.PUTOBJECT in w_body.code
-    values = [w.int_w() for w in w_body.consts if isinstance(w, W_Fixnum)]
+    values = [w.int_w() for w in w_body.consts if isinstance(w, W_Integer)]
     assert 1 in values           # folded out of putobject_INT2FIX_1_
     # `putobject 2` appears three times in the body
     assert values.count(2) == 1

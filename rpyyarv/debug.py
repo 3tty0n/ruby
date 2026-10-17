@@ -1,6 +1,6 @@
 """Tracing hooks for watching the interpreter run.
 
-RPYYARV_DEBUG names the channels to turn on, comma separated:
+--debug names the channels to turn on, comma separated:
 
     insn     one line per dispatched instruction
     stack    the operand stack alongside it
@@ -11,13 +11,11 @@ RPYYARV_DEBUG names the channels to turn on, comma separated:
 
 """
 
-import os
-
 import insns
 import optable
 import symbols
 from iseq import W_ISeq, NO_BLOCK_ISEQ
-from rlib import dont_look_inside, oswrite
+from rlib import dont_look_inside, elidable, oswrite
 
 INSN = 1
 STACK = 2
@@ -33,8 +31,7 @@ CHANNELS = 'insn, stack, call, iseq, summary, all'
 
 class _State(object):
     def __init__(self):
-        # The dispatch loop reads `enabled` once per instruction, so it is
-        # kept apart from `channels` rather than derived on the spot.
+        # Read once per instruction by the dispatch loop, so kept apart.
         self.enabled = False
         self.channels = 0
         self.depth = 0
@@ -42,6 +39,12 @@ class _State(object):
 
 
 state = _State()
+
+
+@elidable
+def is_enabled():
+    # Configured once before any code runs, so a trace may treat it as fixed.
+    return state.enabled
 
 
 def write(s):
@@ -80,13 +83,6 @@ def configure(spec):
     return unknown
 
 
-def configure_from_env():
-    spec = os.environ.get('RPYYARV_DEBUG')
-    if spec is None:
-        return []
-    return configure(spec)
-
-
 def reset():
     state.channels = 0
     state.enabled = False
@@ -102,7 +98,7 @@ def trace_insn(w_iseq, pc, frame):
         write('%s%s  %s\n' % (_indent(), _pad(str(pc), 4),
                               insn_at(w_iseq, pc)))
     if state.channels & STACK:
-        write('%s      stack %s\n' % (_indent(), _stack_repr(frame)))
+        write('%s      stack %s\n' % (_indent(), _stack_repr(w_iseq, frame)))
 
 
 @dont_look_inside
@@ -190,10 +186,10 @@ def _operand(w_iseq, op, pos, val):
     return str(val)
 
 
-def _stack_repr(frame):
+def _stack_repr(w_iseq, frame):
     parts = []
-    for i in range(frame.sp):
-        parts.append(frame.stack[i].repr())
+    for i in range(w_iseq.nlocals, frame.sp):
+        parts.append(frame.peek(i).repr())
     return '[%s]' % ', '.join(parts)
 
 

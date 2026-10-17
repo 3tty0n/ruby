@@ -14,9 +14,7 @@ SOVER   := $(patsubst $(BUILD)/libruby.%.dylib,%,$(firstword $(wildcard $(BUILD)
 LIBRUBY := $(BUILD)/libruby.$(SOVER).dylib
 LDLIBS  += -lruby.$(SOVER)
 SHARED  := -dynamiclib
-LIBPATH := DYLD_LIBRARY_PATH=$(BUILD)
 LDFLAGS += -Wl,-headerpad_max_install_names
-INSTNAME := $(shell otool -D $(LIBRUBY) 2>/dev/null | tail -1)
 
 define fix_install_name
 	@[ -e "$(1)" ] || exit 0; \
@@ -31,7 +29,6 @@ LIBRUBY := $(firstword $(wildcard $(BUILD)/libruby.so))
 LDLIBS  += -lruby
 LDFLAGS += -Wl,-rpath,'$$ORIGIN'
 SHARED  := -shared -fPIC
-LIBPATH := LD_LIBRARY_PATH=$(BUILD)
 define fix_install_name
 endef
 endif
@@ -39,13 +36,15 @@ endif
 PROBE   := test/probe
 SHIM    := librpyyarv_boot.$(SOEXT)
 PYPY    ?= ./pypy
+PYPY_URL ?= https://github.com/plig-tmu/pypy
+PYPY_BRANCH ?= callee-frame
 PYTHON  ?= python3
 PYTEST  ?= $(PYTHON) -m pytest
 PYTHON2 ?= pypy2
 RPYTHON ?= python2 $(PYPY)/rpython/bin/rpython
-RUBY    ?= $(BUILD)/ruby
+RPYTHON_FLAGS ?=
 
-.PHONY: all test test-llinterp build-interp build-jit link clean
+.PHONY: test test-llinterp build-interp build-jit link clean
 
 link: $(SHIM)
 
@@ -68,15 +67,15 @@ test-llinterp: | $(PYPY)
 	RPYYARV_BUILD=$(BUILD) $(PYTHON2) test/test_llinterp.py
 
 build-interp: | $(PYPY)
-	RPYYARV_BUILD=$(BUILD) $(RPYTHON) --output=rpyyarv targetrpyyarv.py
+	RPYYARV_BUILD=$(BUILD) $(RPYTHON) $(RPYTHON_FLAGS) --output=rpyyarv targetrpyyarv.py
 	$(call fix_install_name,rpyyarv)
 
 build-jit: | $(PYPY)
-	RPYYARV_BUILD=$(BUILD) $(RPYTHON) -Ojit --output=rpyyarv-jit targetrpyyarv.py
+	RPYYARV_BUILD=$(BUILD) $(RPYTHON) -Ojit $(RPYTHON_FLAGS) --output=rpyyarv-jit targetrpyyarv.py
 	$(call fix_install_name,rpyyarv-jit)
 
 $(PYPY):
-	git clone --depth=1 https://github.com/pypy/pypy $@
+	git clone --depth=1 --branch $(PYPY_BRANCH) $(PYPY_URL) $@
 
 clean:
 	rm -f $(PROBE) $(SHIM) rpyyarv rpyyarv-jit
