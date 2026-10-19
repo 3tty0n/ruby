@@ -15,10 +15,11 @@ def write(s):
 
 class W_Puts(W_CFunc):
     def call(self, w_recv, args_w, w_block):
+        import interp
         if len(args_w) == 0:
             write('\n')
         for w_arg in args_w:
-            s = w_arg.to_s_str()
+            s = interp.to_s_string(w_arg).str_w()
             if not s.endswith('\n'):   # CRuby adds a newline only if missing
                 s += '\n'
             write(s)
@@ -32,6 +33,11 @@ class W_BenchNowNs(W_CFunc):
     """Monotonic clock in integer nanoseconds, for the benchmark harness."""
     def call(self, w_recv, args_w, w_block):
         return newint(now_ns())
+
+def install_to_s(w_class):
+    to_s_id = symbols.intern('to_s')
+    w_class.add_method(to_s_id, W_ToS(to_s_id, 0))
+
 
 def install(w_class):
     puts_id = symbols.intern('puts')

@@ -474,7 +474,7 @@ def test_string_literal_and_concat():
     assert w_str.is_true()
 
 
-def test_putchilledstring_copies_the_constant():          
+def test_putchilledstring_copies_the_constant():
     # Chilled strings must be independently mutable later, so the constant
     # pool's literal is never pushed directly -- a fresh copy is made.
     w_lit = W_String('hi')
@@ -509,7 +509,7 @@ def test_string_plus():
     assert isinstance(w_str, W_String)
     assert w_str.str_w() == '42'
 
-    
+
 def test_to_s_str():
     assert W_Fixnum(-7).to_s_str() == '-7'
     assert w_nil.to_s_str() == ''
@@ -544,7 +544,44 @@ def test_objtostring_without_to_s():
         insns.OBJTOSTRING,
         insns.LEAVE,
     ])
-    expect_unsupported(iseq, W_Main(), 'no to_s for <W_ISeq inner>')
+    expect_unsupported(iseq, W_Main(), 'no class for <W_ISeq inner>')
+
+
+def _interpolate(w_x):
+    # "#{x}": x, dup, objtostring, anytostring
+    iseq = asm([w_x], 0, 4, [
+        insns.PUTOBJECT, 0,
+        insns.DUP,
+        insns.OBJTOSTRING,
+        insns.ANYTOSTRING,
+        insns.LEAVE,
+    ])
+    return interp.run(iseq).str_w()
+
+
+def test_objtostring_calls_a_user_defined_to_s():
+    to_s_id = symbols.intern('to_s')
+    w_foo = W_Class('Foo', w_object_class)
+    w_body = asm([W_String('custom')], 0, 1, [insns.PUTOBJECT, 0, insns.LEAVE])
+    w_foo.add_method(to_s_id, W_ISeqMethod(to_s_id, w_body))
+    assert _interpolate(W_Object(w_foo)) == 'custom'
+
+
+def test_toplevel_to_s_does_not_capture_builtin_classes():
+    # `def to_s` at toplevel replaces Object#to_s; Integer, nil, true, false
+    # and String keep their own, as in CRuby.
+    to_s_id = symbols.intern('to_s')
+    w_body = asm([W_String('X')], 0, 1, [insns.PUTOBJECT, 0, insns.LEAVE])
+    w_object_class.add_method(to_s_id, W_ISeqMethod(to_s_id, w_body, True))
+    assert _interpolate(W_Object(w_object_class)) == 'X'
+    assert _interpolate(W_Fixnum(7)) == '7'
+    assert _interpolate(w_nil) == ''
+    assert _interpolate(w_true) == 'true'
+    assert _interpolate(w_false) == 'false'
+
+
+def test_main_to_s():
+    assert _interpolate(w_main) == 'main'
 
 
 def test_anytostring_needs_a_string():
@@ -589,6 +626,38 @@ def test_puts_adds_a_newline_only_when_missing():
     assert printed == 'a\n\nb\n\n'
 
 
+def test_puts_calls_a_user_defined_to_s():
+    puts_id = symbols.intern('puts')
+    to_s_id = symbols.intern('to_s')
+    w_foo = W_Class('Foo', w_object_class)
+    w_body = asm([W_String('custom')], 0, 1, [insns.PUTOBJECT, 0, insns.LEAVE])
+    w_foo.add_method(to_s_id, W_ISeqMethod(to_s_id, w_body))
+    iseq = asm([W_CallInfo(puts_id, 1)], 0, 3, [
+        insns.PUTSELF, insns.PUTSELF, insns.OPT_SEND_WITHOUT_BLOCK, 0,
+        insns.LEAVE])
+    w_self = W_Object(w_foo)
+    printed, _ = capture(lambda: interp.execute(iseq, Frame(iseq, w_self)))
+    assert printed == 'custom\n'
+
+
+def test_puts_needs_to_s_to_return_a_string():
+    puts_id = symbols.intern('puts')
+    to_s_id = symbols.intern('to_s')
+    w_foo = W_Class('Foo', w_object_class)
+    w_body = asm([W_Fixnum(1)], 0, 1, [insns.PUTOBJECT, 0, insns.LEAVE])
+    w_foo.add_method(to_s_id, W_ISeqMethod(to_s_id, w_body))
+    iseq = asm([W_CallInfo(puts_id, 1)], 0, 3, [
+        insns.PUTSELF, insns.PUTSELF, insns.OPT_SEND_WITHOUT_BLOCK, 0,
+        insns.LEAVE])
+    w_self = W_Object(w_foo)
+    try:
+        capture(lambda: interp.execute(iseq, Frame(iseq, w_self)))
+    except UnsupportedOperation as e:
+        assert e.msg == 'to_s on #<Foo> did not return a String'
+    else:
+        raise AssertionError('expected UnsupportedOperation')
+
+
 def test_puts_is_private():
     puts_id = symbols.intern('puts')
     iseq = asm([W_Fixnum(1), W_Fixnum(2), W_CallInfo(puts_id, 1, True, False)],
@@ -596,7 +665,7 @@ def test_puts_is_private():
                       insns.OPT_SEND_WITHOUT_BLOCK, 2, insns.LEAVE])
     expect_unsupported(iseq, W_Main(), "private method 'puts' called for 1")
 
-def test_to_i():                                          
+def test_to_i():
     to_i_id = symbols.intern('to_i')
 
     def to_i_of(s):
@@ -679,6 +748,7 @@ def test_split_on_empty_regexp():
 
     assert split_of('1021') == ['1', '0', '2', '1']
     assert split_of('') == []
+<<<<<<< HEAD
     assert split_of('\xe3\x81\x82\xe3\x81\x84') == ['\xe3\x81\x82',
                                                     '\xe3\x81\x84']
     assert split_of('\xf0\x9f\x98\x80x') == ['\xf0\x9f\x98\x80', 'x']
@@ -697,6 +767,16 @@ def test_split_rejects_invalid_utf8():
         ])
         expect_unsupported(iseq, W_Main(),
                            'split on "%s": invalid byte sequence in UTF-8' % s)
+    # Strings are bytes (RPython str; the tests model that with latin-1).
+    assert split_of('a\xc3\xa9\xe2\x82\xac\xf0\x9f\x98\x80') == [
+        'a', '\xc3\xa9', '\xe2\x82\xac', '\xf0\x9f\x98\x80']
+    # a broken sequence is one char per byte, as String#each_char has it
+    assert split_of('\xe3\x81') == ['\xe3', '\x81']
+    assert split_of('\xe3a') == ['\xe3', 'a']
+    assert split_of('\xff\x80') == ['\xff', '\x80']
+    assert split_of('\xc0\x80') == ['\xc0', '\x80']          # overlong
+    assert split_of('\xed\xa0\x80') == ['\xed', '\xa0', '\x80']  # surrogate
+    assert split_of('\xf4\x90\x80\x80') == ['\xf4', '\x90', '\x80', '\x80']
 
 
 def test_split_needs_an_empty_regexp():
@@ -711,7 +791,7 @@ def test_split_needs_an_empty_regexp():
     expect_unsupported(iseq, W_Main(),
                        "split on /,/: RPyYARV only supports split(//) so far")
 
-                       
+
 def test_cfunc_arity_is_checked():
     class W_One(W_CFunc):
         def call(self, w_recv, args_w, w_block):
