@@ -3,10 +3,6 @@
 `ll_run` annotates, rtypes and executes interp.execute() the way a
 translation would, so a test here catches what plain CPython lets past:
 an unannotatable type, a list RPython may not resize, a bad downcast.
-
-Needs Python 2 and the pypy checkout, so `make test` skips it; run it with
-
-    make test-llinterp        # or: pypy2 test/test_llinterp.py
 """
 
 import os
