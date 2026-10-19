@@ -9,8 +9,9 @@ from error import LoadError, UnsupportedOperation
 from iseq import W_CallInfo, W_ISeq, NO_BLOCK_ISEQ
 from objects.string import W_String
 from objects.regexp import W_Regexp
-from objects.transparent import W_Fixnum, w_nil
-from support import HERE, fixture, run, run_dump
+from objects.transparent import w_nil
+from support import (HERE, decode, defined_method, fixture, only_insn, run,
+                     run_dump)
 
 def expect(exc_class, text, msg):
     try:
@@ -52,12 +53,15 @@ def test_string_literal_loaded():
     assert strings == ['EXECUTED:']
 
 
-def _regexp_const(patched_operand):
-    """Swaps fib(20)'s `putobject i:20` for a regexp literal operand and
-    returns the W_Regexp the loader produced for it."""
-    text = patched(fixture('fib_rec.iseq'), 'insn\tputobject\ti:20',
-                   'insn\tputobject\t%s' % patched_operand)
-    w_iseq = loader.load_dump(text)
+def _regexp_dump(operand):
+    """Puts a regexp literal operand in fib(20)'s `putobject` site."""
+    return patched(fixture('fib_rec.iseq'), 'insn\tputobject\ti:20',
+                   'insn\tputobject\t%s' % operand)
+
+
+def _regexp_const(operand):
+    """Returns the W_Regexp the loader produced for operand."""
+    w_iseq = loader.load_dump(_regexp_dump(operand))
     regexps = [w for w in w_iseq.consts if isinstance(w, W_Regexp)]
     assert len(regexps) == 1
     return regexps[0]
@@ -65,58 +69,75 @@ def _regexp_const(patched_operand):
 
 def test_regexp_literal_loaded():
     assert _regexp_const('x:/foo/').pattern == 'foo'
-    # `//`: rfind still lands on the closing slash, not the opening one, so
-    # this does not fall through to "no such object yet".
+    # `//` is the empty pattern, not a fall-through to "no such object yet".
     assert _regexp_const('x://').pattern == ''
 
 
-def test_regexp_literal_is_a_rough_slice_of_inspect():
-    """Documents current behaviour: the loader takes everything between the
-    first and the *last* '/', so flags are dropped and an escaped in-pattern
-    '/' is kept raw. Both are known gaps in this temporary implementation
-    (see loader.py's OP_OTHER branch, added by 58c6a10c7b)."""
-    assert _regexp_const('x:/foo/i').pattern == 'foo'
-    assert _regexp_const('x:/foo/mix').pattern == 'foo'
-    assert _regexp_const('x:/a\\\\/b/').pattern == 'a\\/b'
+def test_regexp_literal_with_flags_is_rejected():
+    expect(UnsupportedOperation, _regexp_dump('x:/foo/i'),
+           "regexp literal /foo/i in '<main>' is not supported yet")
+    expect(UnsupportedOperation, _regexp_dump('x:/foo/mix'),
+           "regexp literal /foo/mix in '<main>' is not supported yet")
+
+
+def test_regexp_literal_unescapes_the_delimiter():
+    # The dump writes a backslash as \\, so the loader sees the inspect
+    # form /a\/b/; its pattern is a/b, as Regexp#source would report.
+    # (inspect cannot distinguish source "a/b" from "a\/b"; both match '/'.)
+    assert _regexp_const('x:/a\\\\/b/').pattern == 'a/b'
+
+
+def _fib_body():
+    return defined_method(loader.load_dump(fixture('fib_rec.iseq')), 'fib')
 
 
 def test_locals_end_to_end():
     # f(9, 4)
-    w_iseq = loader.load_dump(fixture('locals.iseq'))
-    assert run(w_iseq).int_w() == 5
-    w_body = w_iseq.consts[0]
-    assert isinstance(w_body, W_ISeq)
-    # locals are [a, b, c]
+    assert run(loader.load_dump(fixture('locals.iseq'))).int_w() == 5
+
+
+def test_local_slots_are_remapped():
+    # The dump's lindex_t operands count down from the top of the
+    # environment; the loader turns them into frame slots.
+    w_body = defined_method(loader.load_dump(fixture('locals.iseq')), 'f')
     assert w_body.nlocals == 3
     assert w_body.nparams == 2
-    assert w_body.code[0] == insns.GETLOCAL and w_body.code[1] == 0
-    assert w_body.code[2] == insns.GETLOCAL and w_body.code[3] == 1
-    assert w_body.code[5] == insns.SETLOCAL and w_body.code[6] == 2
+    assert [(op, operands) for _, op, operands in decode(w_body)] == [
+        (insns.GETLOCAL, [0]),
+        (insns.GETLOCAL, [1]),
+        (insns.OPT_MINUS, []),
+        (insns.SETLOCAL, [2]),
+        (insns.GETLOCAL, [2]),
+        (insns.LEAVE, []),
+    ]
 
 
 def test_nested_iseq():
-    w_iseq = loader.load_dump(fixture('fib_rec.iseq'))
-    assert w_iseq.code[0] == insns.DEFINEMETHOD
-    w_body = w_iseq.consts[w_iseq.code[2]]
+    w_body = _fib_body()
     assert isinstance(w_body, W_ISeq)
     assert w_body.name == 'fib'
     assert w_body.nparams == 1
     assert w_body.simple_params
     calls = [w for w in w_body.consts if isinstance(w, W_CallInfo)]
-    assert len(calls) > 0
-    for w_ci in calls:
-        assert w_ci.simple
-    assert [w_ci.argc for w_ci in calls] == [1] * len(calls)
+    assert calls
+    assert all(w_ci.simple for w_ci in calls)
+    assert {w_ci.argc for w_ci in calls} == {1}
 
 
-def test_specialized_variants_and_const_pool():
-    w_body = loader.load_dump(fixture('fib_rec.iseq')).consts[0]
-    assert insns.GETLOCAL in w_body.code
-    assert insns.PUTOBJECT in w_body.code
-    values = [w.int_w() for w in w_body.consts if isinstance(w, W_Fixnum)]
-    assert 1 in values           # folded out of putobject_INT2FIX_1_
-    # `putobject 2` appears three times in the body
-    assert values.count(2) == 1
+def test_specialized_variants_lower_to_putobject():
+    w_body = _fib_body()
+    puts = [operands[0] for _, op, operands in decode(w_body)
+            if op == insns.PUTOBJECT]
+    # putobject 2, putobject_INT2FIX_1_, putobject 2
+    assert [w_body.consts[i].int_w() for i in puts] == [2, 1, 2]
+
+
+def test_equal_fixnum_literals_share_a_pool_slot():
+    w_body = _fib_body()
+    puts = [operands[0] for _, op, operands in decode(w_body)
+            if op == insns.PUTOBJECT]
+    assert puts[0] == puts[2]
+    assert puts[1] != puts[0]
 
 
 def test_missing_instructions_are_reported_together():
@@ -156,9 +177,9 @@ def test_blockless_send_encoding():
                    'insn\tsend\tc:0,0,0,times\tq:1',
                    'insn\tsend\tc:0,0,0,times\tn:')
     w_iseq = loader.load_dump(text)
-    at = w_iseq.code.index(insns.SEND)
-    assert w_iseq.code[at + 2] == NO_BLOCK_ISEQ
-    w_ci = w_iseq.consts[w_iseq.code[at + 1]]
+    _, operands = only_insn(w_iseq, insns.SEND)
+    assert operands[1] == NO_BLOCK_ISEQ
+    w_ci = w_iseq.consts[operands[0]]
     assert isinstance(w_ci, W_CallInfo)
     assert not w_ci.simple
 
@@ -168,13 +189,14 @@ def test_a_call_with_a_block_literal_is_simple():
     text = patched(fixture('block.iseq'), 'insn\tgetlocal_WC_1\ti:3',
                    'insn\tputnil')
     w_iseq = loader.load_dump(text)
-    at = w_iseq.code.index(insns.SEND)
-    w_ci = w_iseq.consts[w_iseq.code[at + 1]]
+    _, operands = only_insn(w_iseq, insns.SEND)
+    w_ci = w_iseq.consts[operands[0]]
     assert isinstance(w_ci, W_CallInfo)
     assert w_ci.simple
-    assert w_iseq.code[at + 2] != NO_BLOCK_ISEQ
+    assert operands[1] != NO_BLOCK_ISEQ
+    assert isinstance(w_iseq.consts[operands[1]], W_ISeq)
 
-    
+
 def test_trace_build_rejected():
     text = patched(fixture('fib_rec.iseq'), 'insn\tputself',
                    'insn\ttrace_putself')

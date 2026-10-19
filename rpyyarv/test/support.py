@@ -1,10 +1,4 @@
-"""Helpers for writing RPyYARV unit tests.
-
-`asm` builds an ISeq by hand, `run` executes one, and `expect_unsupported`
-asserts on the message RPyYARV gives when it meets something it cannot do.
-Together they are enough to test an instruction, a builtin or an object
-without going through Ruby source at all.
-"""
+"""Helpers for writing unit tests."""
 
 import os
 import shutil
@@ -12,9 +6,12 @@ import subprocess
 import tempfile
 
 import debug
+import insns
 import interp
 import kernel
 import loader
+import optable
+import symbols
 from error import UnsupportedOperation
 from frame import Frame
 from iseq import W_ISeq
@@ -93,6 +90,40 @@ def compile_source(source, ruby=None):
         return compile_rb(path, ruby)
     finally:
         shutil.rmtree(tmp)
+
+
+def decode(w_iseq):
+    """The loaded code as (pc, opcode, operands) tuples."""
+    code = w_iseq.code
+    out = []
+    pc = 0
+    while pc < len(code):
+        op = code[pc]
+        width = optable.NUM_OPERANDS[op]
+        out.append((pc, op, code[pc + 1:pc + 1 + width]))
+        pc += 1 + width
+    return out
+
+
+def only_insn(w_iseq, op):
+    """The one decoded instruction with opcode op, as (opcode, operands)."""
+    hits = []
+    for _, got, operands in decode(w_iseq):
+        if got == op:
+            hits.append((got, operands))
+    assert len(hits) == 1, 'expected one %s, found %d' % (
+        insns.NAMES[op], len(hits))
+    return hits[0]
+
+
+def defined_method(w_iseq, name):
+    """The W_ISeq body a `def name` in w_iseq compiles to."""
+    for _, op, operands in decode(w_iseq):
+        if op == insns.DEFINEMETHOD:
+            mid, body_index = operands
+            if symbols.name_of(mid) == name:
+                return w_iseq.consts[body_index]
+    raise AssertionError('no method %r in %r' % (name, w_iseq.name))
 
 
 def run(w_iseq, w_self=None):

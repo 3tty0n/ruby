@@ -12,6 +12,8 @@ from objects.string import W_String
 from objects.regexp import W_Regexp
 from objects.transparent import W_Fixnum, w_nil, w_true, w_false
 
+from rlib import unroll_safe
+
 
 class ConstPool(object):
     def __init__(self):
@@ -28,6 +30,23 @@ class ConstPool(object):
         idx = self.add(W_Fixnum(value))
         self.fixnums[value] = idx
         return idx
+
+
+@unroll_safe
+def _regexp_pattern(inspect_text):
+    assert len(inspect_text) > 0
+    end = len(inspect_text) - 1
+    chars = []
+    i = 1
+    while i < end:
+        c = inspect_text[i]
+        if c == '\\' and i + 1 < end and inspect_text[i + 1] == '/':
+            chars.append('/')
+            i += 2
+        else:
+            chars.append(c)
+            i += 1
+    return ''.join(chars)
 
 
 class Loader(object):
@@ -235,15 +254,17 @@ class Loader(object):
         if kind == rawiseq.OP_OTHER:
             s = operand.strval
             if s and s[0] == '/':
-              last_slash = s.rfind('/')
-              if last_slash > 0:
-                  return W_Regexp(s[1:last_slash])
+                if len(s) >= 2 and s.endswith('/'):
+                    return W_Regexp(_regexp_pattern(s))
+                raise UnsupportedOperation(
+                    "regexp literal %s in '%s' is not supported yet"
+                    % (s, raw.name))
         if kind == rawiseq.OP_ARRAY:
             items_w = []
             for item in operand.items:
                 items_w.append(self.literal_value(item, op, raw))
             return W_Array(items_w)
-        
+
         raise UnsupportedOperation(
             "%s of %s in '%s': RPyYARV has no such object yet"
             % (insns.NAMES[op], operand.describe(), raw.name))
