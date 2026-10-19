@@ -5,28 +5,19 @@ import pytest
 import insns
 import iseqdump
 import loader
-import optable
-import rawiseq
-import symbols
 from error import LoadError, UnsupportedOperation
 from iseq import W_CallInfo, W_ISeq, NO_BLOCK_ISEQ
-from objects.array import W_Array
 from objects.string import W_String
 from objects.regexp import W_Regexp
-from objects.transparent import W_Fixnum, w_false, w_nil, w_true
-from support import (HERE, decode, defined_method, fixture, only_insn, run,
-                     run_dump, run_ruby_file)
+from objects.transparent import w_nil
+from support import (HERE, check_loaded, decode, defined_method, fixture,
+                     only_insn, run, run_dump, run_ruby_file)
+
 
 def expect(exc_class, text, msg):
-    try:
+    with pytest.raises(exc_class) as info:
         loader.load_dump(text)
-    except exc_class as e:
-        assert e.msg == msg, 'got %r, expected %r' % (e.msg, msg)
-    except Exception as e:
-        raise AssertionError('expected %s(%r), got %r'
-                             % (exc_class.__name__, msg, e))
-    else:
-        raise AssertionError('expected %s: %s' % (exc_class.__name__, msg))
+    assert info.value.msg == msg
 
 
 def patched(text, old, new):
@@ -122,18 +113,20 @@ def test_nested_iseq():
     assert {w_ci.argc for w_ci in calls} == {1}
 
 
+def _putobject_slots(w_body):
+    return [operands[0] for _, op, operands in decode(w_body)
+            if op == insns.PUTOBJECT]
+
+
 def test_specialized_variants_lower_to_putobject():
     w_body = _fib_body()
-    puts = [operands[0] for _, op, operands in decode(w_body)
-            if op == insns.PUTOBJECT]
+    puts = _putobject_slots(w_body)
     # putobject 2, putobject_INT2FIX_1_, putobject 2
     assert [w_body.consts[i].int_w() for i in puts] == [2, 1, 2]
 
 
 def test_equal_fixnum_literals_share_a_pool_slot():
-    w_body = _fib_body()
-    puts = [operands[0] for _, op, operands in decode(w_body)
-            if op == insns.PUTOBJECT]
+    puts = _putobject_slots(_fib_body())
     assert puts[0] == puts[2]
     assert puts[1] != puts[0]
 
@@ -270,195 +263,26 @@ CRUBY_FILES = ['arith.rb', 'interpolation.rb', 'locals.rb', 'method_def.rb',
                'while_loop.rb']
 
 
-def _base_opcode(insn):
-    if insn.name in insns.SPEC_BASE:
-        return insns.SPEC_BASE[insn.name]
-    return insns.NAME_TO_OP[insn.name]
 
-
-def _raw_operands(insn, op):
-    """The dump's operands with specialized variants filled back in."""
-    want = len(insns.OPERAND_TYPES[op])
-    given = insn.operands
-    fill = insns.SPEC_FILL.get(insn.name)
-    if fill is None:
-        assert len(given) == want
-        return given
-    operands = []
-    taken = 0
-    for pos in range(want):
-        value = None
-        for pair in fill:
-            if pair[0] == pos:
-                value = rawiseq.int_operand(pair[1])
-        if value is None:
-            value = given[taken]
-            taken += 1
-        operands.append(value)
-    assert taken == len(given)
-    return operands
-
-
-def _check_code_references(w_iseq):
-    starts = []
-    decoded = decode(w_iseq)
-    for pc, _, _ in decoded:
-        starts.append(pc)
-    starts.append(len(w_iseq.code))
-    for _, op, operands in decoded:
-        assert optable.IMPLEMENTED[op]
-        positions = optable.EMIT_POSITIONS[op]
-        assert len(operands) == len(positions)
-        for i, value in enumerate(operands):
-            t = insns.OPERAND_TYPES[op][positions[i]]
-            if t == insns.T_OFFSET:
-                assert value in starts, (
-                    '%s in %s jumps outside the code'
-                    % (insns.NAMES[op], w_iseq.name))
-            elif t == insns.T_LINDEX_T:
-                assert 0 <= value < w_iseq.nlocals
-            elif t == insns.T_ISEQ:
-                if value == NO_BLOCK_ISEQ:
-                    assert op == insns.SEND
-                else:
-                    assert 0 <= value < len(w_iseq.consts)
-                    assert isinstance(w_iseq.consts[value], W_ISeq)
-            elif t == insns.T_CALL_DATA:
-                assert 0 <= value < len(w_iseq.consts)
-                assert isinstance(w_iseq.consts[value], W_CallInfo)
-            elif t == insns.T_VALUE:
-                assert 0 <= value < len(w_iseq.consts)
-            elif t == insns.T_ID or t == insns.T_RB_NUM_T:
-                pass
-            else:
-                raise AssertionError('unexpected operand type %r' % t)
-
-
-def _check_literal(w_x, raw_op):
-    kind = raw_op.kind
-    if kind == rawiseq.OP_INT:
-        assert isinstance(w_x, W_Fixnum)
-        assert w_x.int_w() == raw_op.intval
-    elif kind == rawiseq.OP_NIL:
-        assert w_x is w_nil
-    elif kind == rawiseq.OP_TRUE:
-        assert w_x is w_true
-    elif kind == rawiseq.OP_FALSE:
-        assert w_x is w_false
-    elif kind == rawiseq.OP_STR:
-        assert isinstance(w_x, W_String)
-        assert w_x.str_w() == raw_op.strval
-    elif kind == rawiseq.OP_ARRAY:
-        assert isinstance(w_x, W_Array)
-        assert len(w_x.items_w) == len(raw_op.items)
-        for i in range(len(raw_op.items)):
-            _check_literal(w_x.items_w[i], raw_op.items[i])
-    elif kind == rawiseq.OP_OTHER:
-        # The pattern itself is checked by the regexp tests.
-        assert isinstance(w_x, W_Regexp)
-    else:
-        raise AssertionError('unexpected literal kind %r' % kind)
-
-
-def _check_operand_values(raw, w_iseq, decoded, labels, l):
-    for (_, op, operands), insn in zip(decoded, raw.insns):
-        raw_ops = _raw_operands(insn, op)
-        for i, pos in enumerate(optable.EMIT_POSITIONS[op]):
-            t = insns.OPERAND_TYPES[op][pos]
-            got = operands[i]
-            raw_op = raw_ops[pos]
-            if t == insns.T_OFFSET:
-                assert raw_op.kind == rawiseq.OP_SYM
-                assert got == labels[raw_op.strval]
-            elif t == insns.T_LINDEX_T:
-                assert raw_op.kind == rawiseq.OP_INT
-                assert got == (raw.nlocals - raw_op.intval
-                               + optable.ENV_DATA_SIZE - 1)
-            elif t == insns.T_RB_NUM_T:
-                assert raw_op.kind == rawiseq.OP_INT
-                assert got == raw_op.intval
-            elif t == insns.T_ID:
-                assert raw_op.kind == rawiseq.OP_SYM
-                assert symbols.name_of(got) == raw_op.strval
-            elif t == insns.T_ISEQ:
-                if raw_op.kind == rawiseq.OP_NIL:
-                    assert got == NO_BLOCK_ISEQ
-                else:
-                    assert raw_op.kind == rawiseq.OP_ISEQ
-                    assert w_iseq.consts[got] is l.w_iseqs[raw_op.intval]
-            elif t == insns.T_CALL_DATA:
-                assert raw_op.kind == rawiseq.OP_CALL
-                w_ci = w_iseq.consts[got]
-                assert w_ci.mid == symbols.intern(raw_op.strval)
-                assert w_ci.argc == raw_op.intval
-                assert w_ci.fcall == (
-                    (raw_op.flag & optable.CALL_FLAG_FCALL) != 0)
-                has_block = (op == insns.SEND
-                             and raw_ops[1].kind == rawiseq.OP_ISEQ)
-                simple = (not raw_op.has_kwarg
-                          and (raw_op.flag & ~optable.SIMPLE_CALL_FLAGS) == 0
-                          and ((raw_op.flag & optable.CALL_FLAG_ARGS_SIMPLE)
-                               != 0 or has_block))
-                assert w_ci.simple == simple
-            elif t == insns.T_VALUE:
-                assert 0 <= got < len(w_iseq.consts)
-                _check_literal(w_iseq.consts[got], raw_op)
-            else:
-                raise AssertionError('unexpected operand type %r' % t)
-
-
-def _audit_loaded(program, l):
-    assert set(l.w_iseqs) <= set(range(len(program.iseqs)))
-    for index, raw in enumerate(program.iseqs):
-        if index not in l.w_iseqs:
-            continue
-        w_iseq = l.w_iseqs[index]
-        assert w_iseq.name == raw.name
-        assert w_iseq.nlocals == raw.nlocals
-        assert w_iseq.stack_max == raw.stack_max
-        assert w_iseq.nparams == raw.lead_num
-        assert w_iseq.simple_params == (raw.extra_params == '')
-        decoded = decode(w_iseq)
-        assert len(decoded) == len(raw.insns)
-        starts = []
-        labels = {}
-        pc = 0
-        for insn in raw.insns:
-            base = _base_opcode(insn)
-            starts.append(pc)
-            pc += 1 + optable.NUM_OPERANDS[base]
-        starts.append(pc)
-        for name, at in raw.labels.items():
-            labels[name] = starts[at]
-        for (_, op, _), insn in zip(decoded, raw.insns):
-            assert op == _base_opcode(insn)
-        assert len(w_iseq.code) == pc
-        _check_code_references(w_iseq)
-        _check_operand_values(raw, w_iseq, decoded, labels, l)
+def _assert_matches_cruby(text, expected, out):
+    """Loads text, audits it against its raw ISeqs, runs it, compares stdout."""
+    program = iseqdump.parse(text)
+    l = loader.Loader(program)
+    w_iseq = l.load()
+    check_loaded(program, l)
+    run(w_iseq)
+    assert out.text == expected
 
 
 @pytest.mark.parametrize('source', [source for _, source in CRUBY_CASES],
                          ids=[name for name, _ in CRUBY_CASES])
 def test_loader_matches_cruby(source, compile_source, cruby_program, out):
     """Arbitrary supported source: the loaded ISeq must agree with CRuby."""
-    text = compile_source(source)
-    expected = cruby_program(source)
-    program = iseqdump.parse(text)
-    l = loader.Loader(program)
-    w_iseq = l.load()
-    _audit_loaded(program, l)
-    run(w_iseq)
-    assert out.text == expected
+    _assert_matches_cruby(compile_source(source), cruby_program(source), out)
 
 
 @pytest.mark.parametrize('name', CRUBY_FILES)
 def test_loader_matches_cruby_file(name, compile_rb, ruby, out):
     """A .rb path is just another arbitrary ISeq to load and check."""
     path = os.path.join(HERE, 'ruby', name)
-    expected = run_ruby_file(path, ruby)
-    program = iseqdump.parse(compile_rb(path))
-    l = loader.Loader(program)
-    w_iseq = l.load()
-    _audit_loaded(program, l)
-    run(w_iseq)
-    assert out.text == expected
+    _assert_matches_cruby(compile_rb(path), run_ruby_file(path, ruby), out)
