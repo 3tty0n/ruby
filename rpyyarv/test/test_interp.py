@@ -594,6 +594,28 @@ def test_to_i():
     assert to_i_of('42') == 42
     assert to_i_of('  42') == 42
     assert to_i_of('-5') == -5
+    assert to_i_of('+7') == 7
+    assert to_i_of('1_000') == 1000
+    assert to_i_of('1__000') == 1
+    assert to_i_of('_1') == 0
+    assert to_i_of('1_') == 1
+    assert to_i_of('5abc') == 5
+    assert to_i_of('abc') == 0
+    assert to_i_of('') == 0
+    assert to_i_of('\xef\xbc\x91\xef\xbc\x92') == 0
+    assert to_i_of('0x10') == 0
+    assert to_i_of('  -0012x') == -12
+    assert to_i_of('\t\n 9') == 9
+    assert to_i_of('- 5') == 0
+    assert to_i_of('0d12') == 12
+    assert to_i_of('-0d12') == -12
+    assert to_i_of('0d_1') == 0
+    try:
+        to_i_of('99999999999999999999')
+    except UnsupportedOperation:
+        pass
+    else:
+        raise AssertionError('expected UnsupportedOperation')
 
 def test_to_s():
     to_s_id = symbols.intern('to_s')

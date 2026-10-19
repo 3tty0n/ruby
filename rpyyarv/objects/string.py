@@ -1,3 +1,5 @@
+import sys
+
 import symbols
 from methods import W_CFunc
 from objects.array import W_Array
@@ -25,15 +27,46 @@ class W_String(W_Root):
     def repr(self):
         return '"%s"' % self.strval
 
+_MAX_FIXNUM = sys.maxsize
+
+
+def _is_digit(c):
+    return '0' <= c <= '9'
+
+
+def string_to_i(s):
+    n = len(s)
+    i = 0
+    while i < n and s[i] in ' \t\n\v\f\r':
+        i += 1
+    sign = 1
+    if i < n and (s[i] == '+' or s[i] == '-'):
+        if s[i] == '-':
+            sign = -1
+        i += 1
+    if i + 1 < n and s[i] == '0' and (s[i + 1] == 'd' or s[i + 1] == 'D'):
+        i += 2
+    start = i
+    value = 0
+    while i < n:
+        c = s[i]
+        if _is_digit(c):
+            digit = ord(c) - ord('0')
+            if value > (_MAX_FIXNUM - digit) // 10:
+                raise UnsupportedOperation(
+                    "to_i on %s: the result does not fit in a Fixnum" % s)
+            value = value * 10 + digit
+        elif not (c == '_' and i > start and _is_digit(s[i - 1])
+                  and i + 1 < n and _is_digit(s[i + 1])):
+            break
+        i += 1
+    return sign * value
+
+
 class W_ToI(W_CFunc):
     def call(self, w_recv, args_w, w_block):
         assert isinstance(w_recv, W_String)
-        try:
-            return W_Fixnum(int(w_recv.strval))
-        except ValueError:
-            raise UnsupportedOperation(
-                "to_i on %s: RPyYARV only supports a plain integer string, "
-                "not Ruby's full parsing" % w_recv.repr())
+        return W_Fixnum(string_to_i(w_recv.strval))
 
 class W_Split(W_CFunc):
     def call(self, w_recv, args_w, w_block):
