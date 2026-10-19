@@ -21,8 +21,9 @@ def test_jit_options_are_consumed_before_forwarding_ruby_arguments(monkeypatch):
 
 @pytest.mark.parametrize('option', ['--jit', '--debug'])
 def test_missing_parameters(option):
-    with pytest.raises(RPyYarvError, match='requires a parameter string'):
+    with pytest.raises(RPyYarvError) as info:
         options.configure_options(['vm', option], object())
+    assert 'requires a parameter string' in info.value.msg
 
 
 def test_debug_and_jit_options_can_be_combined(monkeypatch):
@@ -57,5 +58,6 @@ def test_invalid_jit_parameters_are_reported(monkeypatch, error):
     def invalid(driver, text):
         raise error()
     monkeypatch.setattr(options, 'set_user_param', invalid)
-    with pytest.raises(RPyYarvError, match='--jit'):
+    with pytest.raises(RPyYarvError) as info:
         options.configure_options(['vm', '--jit', 'bad=value'], object())
+    assert '--jit' in info.value.msg

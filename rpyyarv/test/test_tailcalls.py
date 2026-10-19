@@ -95,8 +95,9 @@ def test_debug_keeps_recursive_call_events(monkeypatch):
 def test_tail_call_still_checks_arity():
     body, recv = countdown()
     body.nparams = 2
-    with pytest.raises(UnsupportedOperation, match='wrong number of arguments'):
+    with pytest.raises(UnsupportedOperation) as info:
         interp.execute(body, new_frame(body, recv, 1))
+    assert 'wrong number of arguments' in info.value.msg
 
 
 def test_lookup_uses_actual_method_after_redefinition(monkeypatch):
