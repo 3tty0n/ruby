@@ -18,7 +18,10 @@ class W_Puts(W_CFunc):
         if len(args_w) == 0:
             write('\n')
         for w_arg in args_w:
-            write(w_arg.to_s_str() + '\n')
+            s = w_arg.to_s_str()
+            if not s.endswith('\n'):   # CRuby adds a newline only if missing
+                s += '\n'
+            write(s)
         return w_nil
 
 class W_ToS(W_CFunc):
@@ -32,7 +35,7 @@ class W_BenchNowNs(W_CFunc):
 
 def install(w_class):
     puts_id = symbols.intern('puts')
-    w_class.add_method(puts_id, W_Puts(puts_id, -1))
+    w_class.add_method(puts_id, W_Puts(puts_id, -1, True))  # Kernel#puts is private
     to_s_id = symbols.intern('to_s')
     w_class.add_method(to_s_id, W_ToS(to_s_id, 0))
     now_id = symbols.intern('bench_now_ns')

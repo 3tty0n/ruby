@@ -580,6 +580,22 @@ def test_puts():
     assert printed2 == '\n'
     assert w_ret2 is w_nil
 
+
+def test_puts_adds_a_newline_only_when_missing():
+    puts_id = symbols.intern('puts')
+    iseq = _puts_iseq([W_String('a\n'), W_String(''), W_String('b\n\n'),
+                       W_CallInfo(puts_id, 3)], 3)
+    printed, _ = capture(lambda: interp.run(iseq))
+    assert printed == 'a\n\nb\n\n'
+
+
+def test_puts_is_private():
+    puts_id = symbols.intern('puts')
+    iseq = asm([W_Fixnum(1), W_Fixnum(2), W_CallInfo(puts_id, 1, True, False)],
+               0, 3, [insns.PUTOBJECT, 0, insns.PUTOBJECT, 1,
+                      insns.OPT_SEND_WITHOUT_BLOCK, 2, insns.LEAVE])
+    expect_unsupported(iseq, W_Main(), "private method 'puts' called for 1")
+
 def test_to_i():                                          
     to_i_id = symbols.intern('to_i')
 
