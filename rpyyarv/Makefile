@@ -39,10 +39,9 @@ endif
 PROBE   := test/probe
 SHIM    := librpyyarv_boot.$(SOEXT)
 PYPY    ?= ./pypy
-PYTHON  ?= python3
-PYTEST  ?= $(PYTHON) -m pytest
-PYTHON2 ?= pypy2
-RPYTHON ?= python2 $(PYPY)/rpython/bin/rpython
+PYTHON  ?= pypy2
+RPYTHON ?= $(PYTHON) $(PYPY)/rpython/bin/rpython
+PYTEST  ?= $(PYTHON) $(PYPY)/pytest.py
 RUBY    ?= $(BUILD)/ruby
 
 .PHONY: all test test-llinterp build-interp build-jit link clean
