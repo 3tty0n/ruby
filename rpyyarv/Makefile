@@ -65,7 +65,7 @@ test: $(SHIM)
 
 # llinterp needs Python 2 (pypy2) and the pypy checkout, which pytest 9 cannot host.
 test-llinterp: | $(PYPY)
-	RPYYARV_BUILD=$(BUILD) $(PYTHON2) test/test_llinterp.py
+	RPYYARV_BUILD=$(BUILD) $(PYTHON2) $(PYPY)/pytest.py test/test_llinterp.py
 
 build-interp: | $(PYPY)
 	RPYYARV_BUILD=$(BUILD) $(RPYTHON) --output=rpyyarv targetrpyyarv.py

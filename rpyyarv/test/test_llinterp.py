@@ -87,17 +87,3 @@ def test_recursion():
 
         fib(10)
     """, (exe, env))) == 55
-
-
-if __name__ == '__main__':
-    # Python 2 has no modern pytest here, so run the tests directly.
-    failed = 0
-    for name in sorted(n for n in dir() if n.startswith('test_')):
-        try:
-            globals()[name]()
-        except Exception as e:
-            failed += 1
-            print('FAIL %s: %r' % (name, e))
-        else:
-            print('ok %s' % name)
-    sys.exit(1 if failed else 0)
