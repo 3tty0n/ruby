@@ -10,13 +10,14 @@ try:
     from rpython.rtyper.lltypesystem import lltype, rffi
     from rpython.translator.tool.cbuild import ExternalCompilationInfo
 
-    # Same clock as CRuby's Process.clock_gettime(Process::CLOCK_MONOTONIC)
+    # TODO: extract the following definition to a different file to keep this
+    # rlib as an interface to the RPyton library (rlib)
     _now_eci = ExternalCompilationInfo(
         includes=['time.h'],
-        post_include_bits=['long long rpyyarv_now_ns(void);'],
+        post_include_bits=['RPY_EXTERN long long rpyyarv_now_ns(void);'],
         separate_module_sources=['''
 #include <time.h>
-long long rpyyarv_now_ns(void)
+RPY_EXTERN long long rpyyarv_now_ns(void)
 {
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
@@ -27,6 +28,7 @@ long long rpyyarv_now_ns(void)
                                 compilation_info=_now_eci,
                                 releasegil=False, _nowrapper=True)
 
+    # TODO: sme to the above
     def now_ns():
         return rffi.cast(lltype.Signed, _c_now_ns())
 
