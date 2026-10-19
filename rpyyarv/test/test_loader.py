@@ -1,17 +1,21 @@
-"""Loader tests; the .iseq fixtures are real InstructionSequence output."""
-
 import os
+
+import pytest
 
 import insns
 import iseqdump
 import loader
+import optable
+import rawiseq
+import symbols
 from error import LoadError, UnsupportedOperation
 from iseq import W_CallInfo, W_ISeq, NO_BLOCK_ISEQ
+from objects.array import W_Array
 from objects.string import W_String
 from objects.regexp import W_Regexp
-from objects.transparent import w_nil
+from objects.transparent import W_Fixnum, w_false, w_nil, w_true
 from support import (HERE, decode, defined_method, fixture, only_insn, run,
-                     run_dump)
+                     run_dump, run_ruby_file)
 
 def expect(exc_class, text, msg):
     try:
@@ -53,38 +57,32 @@ def test_string_literal_loaded():
     assert strings == ['EXECUTED:']
 
 
-def _regexp_dump(operand):
-    """Puts a regexp literal operand in fib(20)'s `putobject` site."""
-    return patched(fixture('fib_rec.iseq'), 'insn\tputobject\ti:20',
-                   'insn\tputobject\t%s' % operand)
-
-
-def _regexp_const(operand):
-    """Returns the W_Regexp the loader produced for operand."""
-    w_iseq = loader.load_dump(_regexp_dump(operand))
+def _regexp_const(compile_source, source):
+    """Returns the W_Regexp the loader produced for a regexp source."""
+    w_iseq = loader.load_dump(compile_source(source))
     regexps = [w for w in w_iseq.consts if isinstance(w, W_Regexp)]
     assert len(regexps) == 1
     return regexps[0]
 
 
-def test_regexp_literal_loaded():
-    assert _regexp_const('x:/foo/').pattern == 'foo'
+def test_regexp_literal_loaded(compile_source):
+    assert _regexp_const(compile_source, '/foo/').pattern == 'foo'
     # `//` is the empty pattern, not a fall-through to "no such object yet".
-    assert _regexp_const('x://').pattern == ''
+    assert _regexp_const(compile_source, '//').pattern == ''
 
 
-def test_regexp_literal_with_flags_is_rejected():
-    expect(UnsupportedOperation, _regexp_dump('x:/foo/i'),
+def test_regexp_literal_with_flags_is_rejected(compile_source):
+    expect(UnsupportedOperation, compile_source('/foo/i'),
            "regexp literal /foo/i in '<main>' is not supported yet")
-    expect(UnsupportedOperation, _regexp_dump('x:/foo/mix'),
+    expect(UnsupportedOperation, compile_source('/foo/mix'),
            "regexp literal /foo/mix in '<main>' is not supported yet")
 
 
-def test_regexp_literal_unescapes_the_delimiter():
+def test_regexp_literal_unescapes_the_delimiter(compile_source):
     # The dump writes a backslash as \\, so the loader sees the inspect
     # form /a\/b/; its pattern is a/b, as Regexp#source would report.
     # (inspect cannot distinguish source "a/b" from "a\/b"; both match '/'.)
-    assert _regexp_const('x:/a\\\\/b/').pattern == 'a/b'
+    assert _regexp_const(compile_source, '/a\\/b/').pattern == 'a/b'
 
 
 def _fib_body():
@@ -238,5 +236,229 @@ def test_malformed_dump():
            'dump format version 99, expected 1')
     expect(LoadError, 'iseq\t0\ttop\t<main>\n', 'line 1: no dump header')
     expect(LoadError, 'dump\t1\t3.3.8\tx.rb\n', 'dump contains no iseq')
-    text = patched(fixture('fib_rec.iseq'), 'insn\tputself', 'insn\tputself\ti')
+    text = patched(fixture('fib_rec.iseq'), 'insn\tputself',
+                   'insn\tputself\ti')
     expect(LoadError, text, 'malformed operand: i')
+
+
+CRUBY_CASES = [
+    ('arith', 'puts 1 + 2\n'),
+    ('precedence', 'puts (1 + 2) * 3\n'),
+    ('locals', 'a = 9\nb = 4\nputs a - b\n'),
+    ('reassign', 'x = 1\nx = 2\nputs x\n'),
+    ('if_else', 'x = 3\nif x > 2\n  puts 1\nelse\n  puts 0\nend\n'),
+    ('unless', 'x = 3\nunless x > 2\n  puts 0\nelse\n  puts 1\nend\n'),
+    ('elsif', 'x = 2\nif x == 1\n  puts 10\nelsif x == 2\n  puts 20\n'
+              'else\n  puts 30\nend\n'),
+    ('while', 'n = 0\nwhile n < 5\n  n += 1\nend\nputs n\n'),
+    ('method', 'def add(a, b)\n  a + b\nend\nputs add(2, 3)\n'),
+    ('zero_arg_method', 'def answer\n  42\nend\nputs answer\n'),
+    ('nested_calls', 'def inc(n)\n  n + 1\nend\n'
+                     'def twice(n)\n  inc(inc(n))\nend\nputs twice(5)\n'),
+    ('recursion', 'def fib(n)\n  if n < 2\n    n\n  else\n'
+                  '    fib(n - 1) + fib(n - 2)\n  end\nend\nputs fib(10)\n'),
+    ('string', 's = "abc"\nputs s\n'),
+    ('interpolation', 'n = 7\nputs "n=#{n}"\n'),
+    ('two_interpolations', 'a = 2\nb = 3\nputs "#{a}+#{b}=#{a + b}"\n'),
+    ('masgn', 'a, b = 1, 2\nputs a + b\n'),
+    ('nil_true_false', 'puts nil\nputs true\nputs false\n'),
+    ('comparison', 'puts 1 == 1\nputs 2 <= 3\nputs 3 >= 2\n'),
+]
+
+# bench_clock.rb needs RPyYARV's bench_now_ns, which CRuby does not have.
+CRUBY_FILES = ['arith.rb', 'interpolation.rb', 'locals.rb', 'method_def.rb',
+               'while_loop.rb']
+
+
+def _base_opcode(insn):
+    if insn.name in insns.SPEC_BASE:
+        return insns.SPEC_BASE[insn.name]
+    return insns.NAME_TO_OP[insn.name]
+
+
+def _raw_operands(insn, op):
+    """The dump's operands with specialized variants filled back in."""
+    want = len(insns.OPERAND_TYPES[op])
+    given = insn.operands
+    fill = insns.SPEC_FILL.get(insn.name)
+    if fill is None:
+        assert len(given) == want
+        return given
+    operands = []
+    taken = 0
+    for pos in range(want):
+        value = None
+        for pair in fill:
+            if pair[0] == pos:
+                value = rawiseq.int_operand(pair[1])
+        if value is None:
+            value = given[taken]
+            taken += 1
+        operands.append(value)
+    assert taken == len(given)
+    return operands
+
+
+def _check_code_references(w_iseq):
+    starts = []
+    decoded = decode(w_iseq)
+    for pc, _, _ in decoded:
+        starts.append(pc)
+    starts.append(len(w_iseq.code))
+    for _, op, operands in decoded:
+        assert optable.IMPLEMENTED[op]
+        positions = optable.EMIT_POSITIONS[op]
+        assert len(operands) == len(positions)
+        for i, value in enumerate(operands):
+            t = insns.OPERAND_TYPES[op][positions[i]]
+            if t == insns.T_OFFSET:
+                assert value in starts, (
+                    '%s in %s jumps outside the code'
+                    % (insns.NAMES[op], w_iseq.name))
+            elif t == insns.T_LINDEX_T:
+                assert 0 <= value < w_iseq.nlocals
+            elif t == insns.T_ISEQ:
+                if value == NO_BLOCK_ISEQ:
+                    assert op == insns.SEND
+                else:
+                    assert 0 <= value < len(w_iseq.consts)
+                    assert isinstance(w_iseq.consts[value], W_ISeq)
+            elif t == insns.T_CALL_DATA:
+                assert 0 <= value < len(w_iseq.consts)
+                assert isinstance(w_iseq.consts[value], W_CallInfo)
+            elif t == insns.T_VALUE:
+                assert 0 <= value < len(w_iseq.consts)
+            elif t == insns.T_ID or t == insns.T_RB_NUM_T:
+                pass
+            else:
+                raise AssertionError('unexpected operand type %r' % t)
+
+
+def _check_literal(w_x, raw_op):
+    kind = raw_op.kind
+    if kind == rawiseq.OP_INT:
+        assert isinstance(w_x, W_Fixnum)
+        assert w_x.int_w() == raw_op.intval
+    elif kind == rawiseq.OP_NIL:
+        assert w_x is w_nil
+    elif kind == rawiseq.OP_TRUE:
+        assert w_x is w_true
+    elif kind == rawiseq.OP_FALSE:
+        assert w_x is w_false
+    elif kind == rawiseq.OP_STR:
+        assert isinstance(w_x, W_String)
+        assert w_x.str_w() == raw_op.strval
+    elif kind == rawiseq.OP_ARRAY:
+        assert isinstance(w_x, W_Array)
+        assert len(w_x.items_w) == len(raw_op.items)
+        for i in range(len(raw_op.items)):
+            _check_literal(w_x.items_w[i], raw_op.items[i])
+    elif kind == rawiseq.OP_OTHER:
+        # The pattern itself is checked by the regexp tests.
+        assert isinstance(w_x, W_Regexp)
+    else:
+        raise AssertionError('unexpected literal kind %r' % kind)
+
+
+def _check_operand_values(raw, w_iseq, decoded, labels, l):
+    for (_, op, operands), insn in zip(decoded, raw.insns):
+        raw_ops = _raw_operands(insn, op)
+        for i, pos in enumerate(optable.EMIT_POSITIONS[op]):
+            t = insns.OPERAND_TYPES[op][pos]
+            got = operands[i]
+            raw_op = raw_ops[pos]
+            if t == insns.T_OFFSET:
+                assert raw_op.kind == rawiseq.OP_SYM
+                assert got == labels[raw_op.strval]
+            elif t == insns.T_LINDEX_T:
+                assert raw_op.kind == rawiseq.OP_INT
+                assert got == (raw.nlocals - raw_op.intval
+                               + optable.ENV_DATA_SIZE - 1)
+            elif t == insns.T_RB_NUM_T:
+                assert raw_op.kind == rawiseq.OP_INT
+                assert got == raw_op.intval
+            elif t == insns.T_ID:
+                assert raw_op.kind == rawiseq.OP_SYM
+                assert symbols.name_of(got) == raw_op.strval
+            elif t == insns.T_ISEQ:
+                if raw_op.kind == rawiseq.OP_NIL:
+                    assert got == NO_BLOCK_ISEQ
+                else:
+                    assert raw_op.kind == rawiseq.OP_ISEQ
+                    assert w_iseq.consts[got] is l.w_iseqs[raw_op.intval]
+            elif t == insns.T_CALL_DATA:
+                assert raw_op.kind == rawiseq.OP_CALL
+                w_ci = w_iseq.consts[got]
+                assert w_ci.mid == symbols.intern(raw_op.strval)
+                assert w_ci.argc == raw_op.intval
+                assert w_ci.fcall == (
+                    (raw_op.flag & optable.CALL_FLAG_FCALL) != 0)
+                has_block = (op == insns.SEND
+                             and raw_ops[1].kind == rawiseq.OP_ISEQ)
+                simple = (not raw_op.has_kwarg
+                          and (raw_op.flag & ~optable.SIMPLE_CALL_FLAGS) == 0
+                          and ((raw_op.flag & optable.CALL_FLAG_ARGS_SIMPLE)
+                               != 0 or has_block))
+                assert w_ci.simple == simple
+            elif t == insns.T_VALUE:
+                assert 0 <= got < len(w_iseq.consts)
+                _check_literal(w_iseq.consts[got], raw_op)
+            else:
+                raise AssertionError('unexpected operand type %r' % t)
+
+
+def _audit_loaded(program, l):
+    assert set(l.w_iseqs) <= set(range(len(program.iseqs)))
+    for index, raw in enumerate(program.iseqs):
+        if index not in l.w_iseqs:
+            continue
+        w_iseq = l.w_iseqs[index]
+        assert w_iseq.name == raw.name
+        assert w_iseq.nlocals == raw.nlocals
+        assert w_iseq.stack_max == raw.stack_max
+        assert w_iseq.nparams == raw.lead_num
+        assert w_iseq.simple_params == (raw.extra_params == '')
+        decoded = decode(w_iseq)
+        assert len(decoded) == len(raw.insns)
+        starts = []
+        labels = {}
+        pc = 0
+        for insn in raw.insns:
+            base = _base_opcode(insn)
+            starts.append(pc)
+            pc += 1 + optable.NUM_OPERANDS[base]
+        starts.append(pc)
+        for name, at in raw.labels.items():
+            labels[name] = starts[at]
+        for (_, op, _), insn in zip(decoded, raw.insns):
+            assert op == _base_opcode(insn)
+        assert len(w_iseq.code) == pc
+        _check_code_references(w_iseq)
+        _check_operand_values(raw, w_iseq, decoded, labels, l)
+
+
+@pytest.mark.parametrize('source', [source for _, source in CRUBY_CASES],
+                         ids=[name for name, _ in CRUBY_CASES])
+def test_loader_matches_cruby(source, compile_source, cruby_program, out):
+    """Arbitrary supported source: the loaded ISeq must agree with CRuby."""
+    text = compile_source(source)
+    expected = cruby_program(source)
+    program = iseqdump.parse(text)
+    l = loader.Loader(program)
+    w_iseq = l.load()
+    _audit_loaded(program, l)
+    run(w_iseq)
+    assert out.text == expected
+
+
+@pytest.mark.parametrize('name', CRUBY_FILES)
+def test_loader_matches_cruby_file(name, compile_rb, ruby, out):
+    """A .rb path is just another arbitrary ISeq to load and check."""
+    path = os.path.join(HERE, 'ruby', name)
+    expected = run_ruby_file(path, ruby)
+    program = iseqdump.parse(compile_rb(path))
+    l = loader.Loader(program)
+    w_iseq = l.load()
+    _audit_loaded(program, l)
+    run(w_iseq)
+    assert out.text == expected

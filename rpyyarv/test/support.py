@@ -45,6 +45,17 @@ def ruby_exe():
     return exe, env
 
 
+def _write_program(source):
+    tmp = tempfile.mkdtemp(prefix='rpyyarv-')
+    path = os.path.join(tmp, 'program.rb')
+    f = open(path, 'w')
+    try:
+        f.write(source)
+    finally:
+        f.close()
+    return tmp, path
+
+
 def compile_rb(path, ruby=None):
     """Compiles a .rb to the ISeq dump text load_dump() reads."""
     exe, env = ruby if ruby else ruby_exe()
@@ -52,6 +63,37 @@ def compile_rb(path, ruby=None):
     if not isinstance(text, str):
         text = text.decode('utf-8')
     return text
+
+
+def _ruby_stdout(path, ruby):
+    exe, env = ruby if ruby else ruby_exe()
+    if exe is None:
+        raise AssertionError(env)
+    try:
+        out = subprocess.check_output([exe, path], env=env,
+                                      stderr=subprocess.PIPE)
+    except subprocess.CalledProcessError as e:
+        detail = e.output
+        if not isinstance(detail, str):
+            detail = detail.decode('utf-8')
+        raise AssertionError('CRuby failed on %s:\n%s' % (path, detail))
+    if not isinstance(out, str):
+        out = out.decode('utf-8')
+    return out
+
+
+def run_ruby(source, ruby=None):
+    """Runs source on CRuby and returns its stdout, for differential tests."""
+    tmp, path = _write_program(source)
+    try:
+        return _ruby_stdout(path, ruby)
+    finally:
+        shutil.rmtree(tmp)
+
+
+def run_ruby_file(path, ruby=None):
+    """Runs an existing .rb on CRuby and returns its stdout."""
+    return _ruby_stdout(path, ruby)
 
 
 def asm(consts, nlocals, stack_max, items, name='<test>', nparams=0,
@@ -79,14 +121,8 @@ def asm(consts, nlocals, stack_max, items, name='<test>', nparams=0,
 
 def compile_source(source, ruby=None):
     """Compiles Ruby source text to an ISeq dump, through a temp file."""
-    tmp = tempfile.mkdtemp(prefix='rpyyarv-')
+    tmp, path = _write_program(source)
     try:
-        path = os.path.join(tmp, 'program.rb')
-        f = open(path, 'w')
-        try:
-            f.write(source)
-        finally:
-            f.close()
         return compile_rb(path, ruby)
     finally:
         shutil.rmtree(tmp)

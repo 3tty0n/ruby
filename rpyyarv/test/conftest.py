@@ -2,7 +2,8 @@
 
 Puts the interpreter's modules on sys.path, undoes the global state a test
 leaves behind, and hands out the pieces a test needs from outside: captured
-output, and a CRuby that can compile .rb to an ISeq dump.
+output, arbitrary Ruby source compiled to an ISeq dump, and the same source
+run on CRuby as an oracle.
 """
 
 import os
@@ -70,6 +71,18 @@ def ruby():
 def compile_rb(ruby):
     """Compiles a .rb path to the ISeq dump text loader.load_dump() reads."""
     return lambda path: support.compile_rb(path, ruby)
+
+
+@pytest.fixture(scope='session')
+def compile_source(ruby):
+    """Compiles arbitrary Ruby source to the same ISeq dump text."""
+    return lambda source: support.compile_source(source, ruby)
+
+
+@pytest.fixture(scope='session')
+def cruby_program(ruby):
+    """Runs arbitrary Ruby source on CRuby and returns its stdout."""
+    return lambda source: support.run_ruby(source, ruby)
 
 
 @pytest.fixture
