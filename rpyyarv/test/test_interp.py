@@ -612,6 +612,18 @@ def test_to_s():
     assert to_s_of(w_true) == 'true'
     assert to_s_of(w_false) == 'false'
 
+def test_bench_now_ns():
+    now_id = symbols.intern('bench_now_ns')
+    iseq = asm([W_CallInfo(now_id, 0)], 0, 1, [
+        insns.PUTSELF,
+        insns.OPT_SEND_WITHOUT_BLOCK, 0,
+        insns.LEAVE,
+    ])
+    t0 = interp.run(iseq).int_w()
+    t1 = interp.run(iseq).int_w()
+    assert t0 > 0
+    assert t1 >= t0
+
 def test_split_on_empty_regexp():
     split_id = symbols.intern('split')
 
