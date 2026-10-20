@@ -67,17 +67,17 @@ test-llinterp: | $(PYPY)
 	RPYYARV_BUILD=$(BUILD) $(PYTHON2) $(PYPY)/pytest.py test/test_llinterp.py
 
 build-interp: | $(PYPY)
-	RPYYARV_BUILD=$(BUILD) $(RPYTHON) --output=rpyyarv targetrpyyarv.py
-	$(call fix_install_name,rpyyarv)
+	RPYYARV_BUILD=$(BUILD) $(RPYTHON) --output=rpyyarv-runtime-replacing targetrpyyarv.py
+	$(call fix_install_name,rpyyarv-runtime-replacing)
 
 build-jit: | $(PYPY)
-	RPYYARV_BUILD=$(BUILD) $(RPYTHON) -Ojit --output=rpyyarv-jit targetrpyyarv.py
-	$(call fix_install_name,rpyyarv-jit)
+	RPYYARV_BUILD=$(BUILD) $(RPYTHON) -Ojit --output=rpyyarv-runtime-replacing-jit targetrpyyarv.py
+	$(call fix_install_name,rpyyarv-runtime-replacing-jit)
 
 $(PYPY):
 	git clone --depth=1 https://github.com/pypy/pypy $@
 
 clean:
-	rm -f $(PROBE) $(SHIM) rpyyarv rpyyarv-jit
+	rm -f $(PROBE) $(SHIM) rpyyarv-runtime-replacing rpyyarv-runtime-replacing-jit
 	rm -rf $(PROBE).dSYM $(SHIM).dSYM *.pyc .pytest_cache
 	find . -name __pycache__ -prune -exec rm -rf {} +

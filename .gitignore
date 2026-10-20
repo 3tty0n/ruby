@@ -278,5 +278,3 @@ lcov*.info
 /bundled_gems.json
 /default_gems.json
 /gems/default_gems
-
-/rpyyarv-runtime-replacing
