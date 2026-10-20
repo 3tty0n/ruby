@@ -8,6 +8,7 @@ try:
         os.write(fd, s)
 
     from rpython.rtyper.lltypesystem import lltype, rffi
+    from rpython.rlib.rarithmetic import LONG_BIT
     from rpython.translator.tool.cbuild import ExternalCompilationInfo
 
     # TODO: extract the following definition to a different file to keep this
@@ -31,6 +32,8 @@ RPY_EXTERN long long rpyyarv_now_ns(void)
     # TODO: same to the above
     def now_ns():
         return rffi.cast(lltype.Signed, _c_now_ns())
+
+    assert LONG_BIT == 64, 'now_ns() needs a 64-bit Signed to hold nanoseconds'
 
 except ImportError:
     class JitDriver(object):
