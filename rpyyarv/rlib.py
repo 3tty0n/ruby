@@ -28,7 +28,7 @@ RPY_EXTERN long long rpyyarv_now_ns(void)
                                 compilation_info=_now_eci,
                                 releasegil=False, _nowrapper=True)
 
-    # TODO: sme to the above
+    # TODO: same to the above
     def now_ns():
         return rffi.cast(lltype.Signed, _c_now_ns())
 
