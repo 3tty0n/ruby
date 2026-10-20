@@ -73,7 +73,40 @@ class W_Split(W_CFunc):
         assert isinstance(w_recv, W_String)
         w_pattern = args_w[0]
         if isinstance(w_pattern, W_Regexp) and w_pattern.pattern == '':
-            return W_Array([W_String(c) for c in w_recv.strval])
+            s = w_recv.strval
+            n = len(s)
+            chars_w = []
+            i = 0
+            while i < n:
+                c = s[i]
+                if c < '\x80':
+                    size = 1
+                elif '\xc2' <= c <= '\xdf':
+                    size = 2
+                elif '\xe0' <= c <= '\xef':
+                    size = 3
+                elif '\xf0' <= c <= '\xf4':
+                    size = 4
+                else:
+                    size = 0
+                valid = size > 0 and i + size <= n
+                j = i + 1
+                while valid and j < i + size:
+                    valid = '\x80' <= s[j] <= '\xbf'
+                    j += 1
+                if valid and size > 2:
+                    second = s[i + 1]
+                    valid = not ((c == '\xe0' and second < '\xa0')
+                                 or (c == '\xed' and second > '\x9f')
+                                 or (c == '\xf0' and second < '\x90')
+                                 or (c == '\xf4' and second > '\x8f'))
+                if not valid:
+                    raise UnsupportedOperation(
+                        "split on %s: invalid byte sequence in UTF-8"
+                        % w_recv.repr())
+                chars_w.append(W_String(s[i:i + size]))
+                i += size
+            return W_Array(chars_w)
         raise UnsupportedOperation(
             "split on %s: RPyYARV only supports split(//) so far"
             % w_pattern.repr())

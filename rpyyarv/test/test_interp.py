@@ -663,6 +663,24 @@ def test_split_on_empty_regexp():
 
     assert split_of('1021') == ['1', '0', '2', '1']
     assert split_of('') == []
+    assert split_of('\xe3\x81\x82\xe3\x81\x84') == ['\xe3\x81\x82',
+                                                    '\xe3\x81\x84']
+    assert split_of('\xf0\x9f\x98\x80x') == ['\xf0\x9f\x98\x80', 'x']
+    assert split_of('a\xcc\x81') == ['a', '\xcc\x81']
+
+
+def test_split_rejects_invalid_utf8():
+    split_id = symbols.intern('split')
+    for s in ['\xff', '\xe3\x81', '\xe0\x80\x80', '\xed\xa0\x80']:
+        iseq = asm([W_String(s), W_Regexp(''), W_CallInfo(split_id, 1)],
+                   0, 3, [
+            insns.PUTOBJECT, 0,
+            insns.PUTOBJECT, 1,
+            insns.OPT_SEND_WITHOUT_BLOCK, 2,
+            insns.LEAVE,
+        ])
+        expect_unsupported(iseq, W_Main(),
+                           'split on "%s": invalid byte sequence in UTF-8' % s)
 
 
 def test_split_needs_an_empty_regexp():
