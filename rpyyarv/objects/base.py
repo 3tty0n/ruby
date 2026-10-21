@@ -4,6 +4,8 @@ from rlib import promote
 
 
 class W_Root(object):
+    __slots__ = ()
+
     # Only nil and false are falsy in Ruby.
     def is_true(self):
         return True

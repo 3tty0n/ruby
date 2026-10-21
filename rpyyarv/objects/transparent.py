@@ -1,29 +1,52 @@
 from objects.base import W_Root
 from objects.klass import (w_false_class, w_integer_class, w_nil_class,
                            w_true_class)
-from rlib import elidable
+from rlib import UnboxedValue, elidable, tagged_ints_enabled
 
-class W_Fixnum(W_Root):
+
+class W_Integer(W_Root):
+    __slots__ = ()
+
+    @elidable
+    def get_intval(self):
+        return self.int_w()
+
+    def getclass(self):
+        return w_integer_class
+
+    def to_s_str(self):
+        return str(self.int_w())
+
+    def repr(self):
+        return str(self.int_w())
+
+
+class W_Fixnum(W_Integer):
     _immutable_fields_ = ['intval']
 
     def __init__(self, intval):
         self.intval = intval
 
-    @elidable
-    def get_intval(self):
+    def int_w(self):
         return self.intval
 
-    def getclass(self):
-        return w_integer_class
+
+class W_SmallFixnum(W_Integer, UnboxedValue):
+    # An immediate word under translation.taggedpointers.
+    __slots__ = 'intval'
+    _immutable_fields_ = ['intval']
 
     def int_w(self):
         return self.intval
 
-    def to_s_str(self):
-        return str(self.intval)
 
-    def repr(self):
-        return str(self.intval)
+def newint(value):
+    if not tagged_ints_enabled():
+        return W_Fixnum(value)
+    try:
+        return W_SmallFixnum(value)
+    except OverflowError:
+        return W_Fixnum(value)
 
 
 class W_Nil(W_Root):

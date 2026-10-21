@@ -6,7 +6,7 @@ from objects.array import W_Array
 from objects.base import W_Root
 from objects.klass import w_string_class
 from objects.regexp import W_Regexp
-from objects.transparent import W_Fixnum
+from objects.transparent import newint
 from error import UnsupportedOperation
 
 class W_String(W_Root):
@@ -66,7 +66,12 @@ def string_to_i(s):
 class W_ToI(W_CFunc):
     def call(self, w_recv, args_w, w_block):
         assert isinstance(w_recv, W_String)
-        return W_Fixnum(string_to_i(w_recv.strval))
+        try:
+            return newint(int(w_recv.strval))
+        except ValueError:
+            raise UnsupportedOperation(
+                "to_i on %s: RPyYARV only supports a plain integer string, "
+                "not Ruby's full parsing" % w_recv.repr())
 
 class W_Split(W_CFunc):
     def call(self, w_recv, args_w, w_block):
