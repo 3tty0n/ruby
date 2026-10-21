@@ -55,7 +55,8 @@ def test_getclass():
     assert W_String('').getclass() is w_string_class
     assert W_Array([]).getclass() is w_array_class
     assert W_Class('C').getclass() is w_class_class
-    assert W_Main().getclass() is w_object_class
+    # main's singleton class, a subclass of Object
+    assert W_Main().getclass().w_superclass is w_object_class
     assert W_Regexp('x').getclass() is w_regexp_class
 
 

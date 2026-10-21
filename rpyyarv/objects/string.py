@@ -73,6 +73,54 @@ class W_ToI(W_CFunc):
                 "to_i on %s: RPyYARV only supports a plain integer string, "
                 "not Ruby's full parsing" % w_recv.repr())
 
+def _char_width(s, i):
+    """Bytes in the UTF-8 character at s[i]; a broken one is a byte on its
+    own, as String#each_char treats it.
+
+    shortcut: CRuby's split(//) raises ArgumentError on a broken string, this
+    splits it anyway; upgrade when exceptions exist.
+    """
+    c = ord(s[i])
+    if c < 0xC2 or c > 0xF4:
+        return 1
+    if c < 0xE0:
+        width = 2
+    elif c < 0xF0:
+        width = 3
+    else:
+        width = 4
+    if i + width > len(s):
+        return 1
+    lo = 0x80
+    hi = 0xBF
+    if c == 0xE0:
+        lo = 0xA0
+    elif c == 0xED:
+        hi = 0x9F
+    elif c == 0xF0:
+        lo = 0x90
+    elif c == 0xF4:
+        hi = 0x8F
+    for k in range(1, width):
+        b = ord(s[i + k])
+        if b < lo or b > hi:
+            return 1
+        lo = 0x80
+        hi = 0xBF
+    return width
+
+
+def _utf8_chars(s):
+    chars_w = []
+    i = 0
+    while i < len(s):
+        width = _char_width(s, i)
+        chars_w.append(W_String(s[i:i + width]))
+        i += width
+    return chars_w
+
+>>>>>>> ruby_4_0_rpyyarv_dev_cruby_compat
+
 class W_Split(W_CFunc):
     def call(self, w_recv, args_w, w_block):
         assert isinstance(w_recv, W_String)
