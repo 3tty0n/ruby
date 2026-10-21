@@ -5,22 +5,22 @@ import shutil
 import subprocess
 import tempfile
 
-import debug
-import insns
-import interp
-import kernel
-import loader
-import optable
-import rawiseq
-import symbols
-from error import UnsupportedOperation
-from frame import Frame
-from iseq import W_CallInfo, W_ISeq, NO_BLOCK_ISEQ
-from objects.array import W_Array
-from objects.main import W_Main
-from objects.regexp import W_Regexp
-from objects.string import W_String
-from objects.transparent import W_Fixnum, w_false, w_nil, w_true
+from rpyyarv import debug
+from rpyyarv import insns
+from rpyyarv import interp
+from rpyyarv import kernel
+from rpyyarv import loader
+from rpyyarv import optable
+from rpyyarv import rawiseq
+from rpyyarv import symbols
+from rpyyarv.error import UnsupportedOperation
+from rpyyarv.frame import Frame
+from rpyyarv.iseq import W_CallInfo, W_ISeq, NO_BLOCK_ISEQ
+from rpyyarv.objects.array import W_Array
+from rpyyarv.objects.main import W_Main
+from rpyyarv.objects.regexp import W_Regexp
+from rpyyarv.objects.string import W_String
+from rpyyarv.objects.transparent import W_Fixnum, w_false, w_nil, w_true
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)

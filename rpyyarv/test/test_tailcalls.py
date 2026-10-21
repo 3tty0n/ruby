@@ -2,19 +2,19 @@
 
 import pytest
 
-import debug
-import insns
-import interp
-import iseq
-import symbols
-from error import UnsupportedOperation
-from frame import Frame
-from iseq import NO_BLOCK_ISEQ, W_CallInfo
-from methods import W_CFunc, W_ISeqMethod
-from objects.klass import W_Class
-from objects.instance import W_Object
-from objects.transparent import W_Fixnum, w_nil
-from support import asm, traced
+from rpyyarv import debug
+from rpyyarv import insns
+from rpyyarv import interp
+from rpyyarv import iseq
+from rpyyarv import symbols
+from rpyyarv.error import UnsupportedOperation
+from rpyyarv.frame import Frame
+from rpyyarv.iseq import NO_BLOCK_ISEQ, W_CallInfo
+from rpyyarv.methods import W_CFunc, W_ISeqMethod
+from rpyyarv.objects.klass import W_Class
+from rpyyarv.objects.instance import W_Object
+from rpyyarv.objects.transparent import W_Fixnum, w_nil
+from rpyyarv.test.support import asm, traced
 
 
 def countdown(send=insns.OPT_SEND_WITHOUT_BLOCK, indirect=False,

@@ -1,5 +1,5 @@
-from objects.base import W_Root
-from objects.klass import w_regexp_class
+from rpyyarv.objects.base import W_Root
+from rpyyarv.objects.klass import w_regexp_class
 
 class W_Regexp(W_Root):
     def __init__(self, pattern):

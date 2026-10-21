@@ -1,7 +1,7 @@
-import debug
+from rpyyarv import debug
 
-from error import RPyYarvError
-from rlib import TraceLimitTooHigh, set_user_param
+from rpyyarv.error import RPyYarvError
+from rpyyarv.rlib import TraceLimitTooHigh, set_user_param
 
 
 def configure_options(argv, driver):

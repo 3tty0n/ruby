@@ -1,8 +1,8 @@
-import symbols
-from error import UnsupportedOperation 
-from methods import W_CFunc
-from objects.base import W_Root
-from objects.klass import w_array_class
+from rpyyarv import symbols
+from rpyyarv.error import UnsupportedOperation 
+from rpyyarv.methods import W_CFunc
+from rpyyarv.objects.base import W_Root
+from rpyyarv.objects.klass import w_array_class
 
 
 class W_Array(W_Root):
@@ -18,7 +18,7 @@ class W_Array(W_Root):
 
 class W_Inject(W_CFunc):
     def call(self, w_recv, args_w, w_block):
-        import interp
+        from rpyyarv import interp
         assert isinstance(w_recv, W_Array)
         if w_block is None:
             raise UnsupportedOperation(

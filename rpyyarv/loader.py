@@ -1,18 +1,18 @@
 """Load raw ISeqs into W_ISeqs, transforming operands by their insns.def type."""
 
-import insns
-import iseqdump
-import optable
-import rawiseq
-import symbols
-from error import LoadError, UnsupportedOperation
-from iseq import W_CallInfo, W_ISeq, NO_BLOCK_ISEQ, tail_position
-from objects.array import W_Array
-from objects.string import W_String
-from objects.regexp import W_Regexp
-from objects.transparent import newint, w_nil, w_true, w_false
+from rpyyarv import insns
+from rpyyarv import iseqdump
+from rpyyarv import optable
+from rpyyarv import rawiseq
+from rpyyarv import symbols
+from rpyyarv.error import LoadError, UnsupportedOperation
+from rpyyarv.iseq import W_CallInfo, W_ISeq, NO_BLOCK_ISEQ, tail_position
+from rpyyarv.objects.array import W_Array
+from rpyyarv.objects.string import W_String
+from rpyyarv.objects.regexp import W_Regexp
+from rpyyarv.objects.transparent import newint, w_nil, w_true, w_false
 
-from rlib import unroll_safe
+from rpyyarv.rlib import unroll_safe
 
 
 class ConstPool(object):

@@ -10,7 +10,7 @@ import os
 
 import pytest
 
-import to_a_layout
+from rpyyarv import to_a_layout
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 PROJ = os.path.dirname(HERE)

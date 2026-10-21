@@ -1,8 +1,8 @@
 import pytest
 
-import debug
-import options
-from error import RPyYarvError
+from rpyyarv import debug
+from rpyyarv import options
+from rpyyarv.error import RPyYarvError
 
 
 def test_jit_options_are_consumed_before_forwarding_ruby_arguments(monkeypatch):

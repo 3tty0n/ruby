@@ -2,16 +2,17 @@ import os
 
 import pytest
 
-import insns
-import iseqdump
-import loader
-from error import LoadError, UnsupportedOperation
-from iseq import W_CallInfo, W_ISeq, NO_BLOCK_ISEQ
-from objects.string import W_String
-from objects.regexp import W_Regexp
-from objects.transparent import w_nil
-from support import (HERE, check_loaded, decode, defined_method, fixture,
-                     only_insn, run, run_dump, run_ruby_file)
+from rpyyarv import insns
+from rpyyarv import iseqdump
+from rpyyarv import loader
+from rpyyarv.error import LoadError, UnsupportedOperation
+from rpyyarv.iseq import W_CallInfo, W_ISeq, NO_BLOCK_ISEQ
+from rpyyarv.objects.string import W_String
+from rpyyarv.objects.regexp import W_Regexp
+from rpyyarv.objects.transparent import w_nil
+from rpyyarv.test.support import (HERE, check_loaded, decode, defined_method,
+                                  fixture, only_insn, run, run_dump,
+                                  run_ruby_file)
 
 
 def expect(exc_class, text, msg):

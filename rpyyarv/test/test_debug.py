@@ -1,16 +1,16 @@
 """Unit tests for the debug channels: tracing, iseq dumps, the summary."""
 
-import debug
-import insns
-import interp
-import loader
-import symbols
-from frame import Frame
-from iseq import W_CallInfo, W_ISeq, NO_BLOCK_ISEQ
-from objects.main import W_Main
-from objects.string import W_String
-from objects.transparent import W_Fixnum
-from support import fixture, traced
+from rpyyarv import debug
+from rpyyarv import insns
+from rpyyarv import interp
+from rpyyarv import loader
+from rpyyarv import symbols
+from rpyyarv.frame import Frame
+from rpyyarv.iseq import W_CallInfo, W_ISeq, NO_BLOCK_ISEQ
+from rpyyarv.objects.main import W_Main
+from rpyyarv.objects.string import W_String
+from rpyyarv.objects.transparent import W_Fixnum
+from rpyyarv.test.support import fixture, traced
 
 
 def run_fixture(name):

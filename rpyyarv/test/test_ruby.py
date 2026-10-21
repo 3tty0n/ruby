@@ -10,7 +10,7 @@ import os
 
 import pytest
 
-from support import run_dump
+from rpyyarv.test.support import run_dump
 
 PROGRAMS = sorted(glob.glob(os.path.join(os.path.dirname(__file__),
                                          'ruby', '*.rb')))

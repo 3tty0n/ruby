@@ -1,8 +1,8 @@
 import pytest
 
-from frame import Frame
-from objects.transparent import W_Fixnum, w_nil
-from support import asm
+from rpyyarv.frame import Frame
+from rpyyarv.objects.transparent import W_Fixnum, w_nil
+from rpyyarv.test.support import asm
 
 
 @pytest.mark.parametrize('nlocals, stack_max', [
