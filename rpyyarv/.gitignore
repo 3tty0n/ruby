@@ -6,8 +6,8 @@ __pycache__/
 .pytest_cache/
 test/probe
 docs/
-rpyyarv
-rpyyarv-jit
+rpyyarv-runtime-replacing
+rpyyarv-runtime-replacing-jit
 rpyyarv-dump
 rpyyarv-dump-jit
 !Makefile

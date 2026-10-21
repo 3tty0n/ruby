@@ -6,10 +6,19 @@ _ids = {}
 _names = {}
 
 
+class _Counter(object):
+    def __init__(self):
+        self.value = 0
+
+
+_next_id = _Counter()
+
+
 def intern(name):
     if name in _ids:
         return _ids[name]
-    mid = len(_ids)
+    mid = _next_id.value
+    _next_id.value = mid + 1
     _ids[name] = mid
     _names[mid] = name
     return mid

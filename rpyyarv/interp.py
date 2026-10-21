@@ -4,7 +4,7 @@ import helpers
 import symbols
 from error import UnsupportedOperation
 from frame import Frame
-from iseq import W_CallInfo, W_ISeq, NO_BLOCK_ISEQ
+from iseq import W_Block, W_CallInfo, W_ISeq, NO_BLOCK_ISEQ
 from methods import W_CFunc, W_ISeqMethod
 from objects.array import W_Array
 from objects.string import W_String
@@ -24,7 +24,7 @@ def _callinfo(iseq, idx):
 
 
 @unroll_safe
-def invoke(frame, w_ci):
+def invoke(frame, w_ci, w_block):
     argc = w_ci.argc
     recv_at = frame.sp - argc - 1
     if recv_at < 0:
@@ -43,6 +43,10 @@ def invoke(frame, w_ci):
                                    % (symbols.name_of(w_ci.mid), w_recv.repr()))
 
     if isinstance(w_method, W_ISeqMethod):
+        if w_block is not None:
+            raise UnsupportedOperation(
+                "send with a block is not supported: '%s'"
+                % symbols.name_of(w_ci.mid))
         callee_iseq = w_method.w_iseq
         if not callee_iseq.simple_params:
             raise UnsupportedOperation(
@@ -77,20 +81,26 @@ def invoke(frame, w_ci):
         i += 1
     _drop(frame, recv_at)
     if not debug.state.enabled:
-        return w_method.call(w_recv, args_w)
+        return w_method.call(w_recv, args_w, w_block)
     debug.trace_enter(w_ci.mid, args_w)
-    w_ret = w_method.call(w_recv, args_w)
+    w_ret = w_method.call(w_recv, args_w, w_block)
     debug.trace_leave(w_ci.mid, w_ret)
     return w_ret
 
 
-def call_method(w_method, w_recv, args_w):
+def call_method(w_method, w_recv, args_w, w_block):
     if isinstance(w_method, W_CFunc):
         if w_method.arity >= 0:
             _check_argc(w_method.mid, len(args_w), w_method.arity)
-        return w_method.call(w_recv, args_w)
+        return w_method.call(w_recv, args_w, w_block)
 
     assert isinstance(w_method, W_ISeqMethod)
+
+    if w_block is not None:
+        raise UnsupportedOperation(
+            "send with a block is not supported: '%s'"
+            % symbols.name_of(w_method.mid))
+
     callee_iseq = w_method.w_iseq
     if not callee_iseq.simple_params:
         raise UnsupportedOperation(
@@ -104,6 +114,19 @@ def call_method(w_method, w_recv, args_w):
         i += 1
     return execute(callee_iseq, callee)
 
+
+def call_block(w_block, args_w):
+    w_iseq = w_block.w_iseq
+    if len(args_w) != w_iseq.nparams:
+        raise UnsupportedOperation(
+            "block '%s' takes %d argument(s), given %d"
+            % (w_iseq.name, w_iseq.nparams, len(args_w)))
+    callee = Frame(w_iseq, w_block.w_self)
+    i = 0
+    while i < len(args_w):
+        callee.locals[i] = args_w[i]
+        i += 1
+    return execute(w_iseq, callee)
 
 def _check_argc(mid, argc, want):
     if argc != want:
@@ -155,6 +178,10 @@ def execute(iseq, frame):
             idx = code[pc]
             pc += 1
             frame.push(iseq.consts[idx])
+        elif opcode == insns.PUTCHILLEDSTRING:
+            idx = code[pc]
+            pc += 1
+            frame.push(W_String(iseq.consts[idx].str_w())) 
         elif opcode == insns.GETLOCAL:
             idx = code[pc]
             pc += 1
@@ -251,23 +278,23 @@ def execute(iseq, frame):
         elif opcode == insns.OPT_SEND_WITHOUT_BLOCK:
             idx = code[pc]
             pc += 1
-            frame.push(invoke(frame, _callinfo(iseq, idx)))
+            frame.push(invoke(frame, _callinfo(iseq, idx), None))
         elif opcode == insns.SEND:
             idx = code[pc]
             block = code[pc + 1]
             pc += 2
             w_ci = _callinfo(iseq, idx)
-            if block != NO_BLOCK_ISEQ:
-                raise UnsupportedOperation(
-                    "send with a block is not supported: '%s'"
-                    % symbols.name_of(w_ci.mid))
-            frame.push(invoke(frame, w_ci))
+            if block == NO_BLOCK_ISEQ:
+                w_block = None
+            else:
+                w_block = W_Block(_as_iseq(iseq.consts[block]), frame.w_self)
+            frame.push(invoke(frame, w_ci, w_block))
         elif opcode == insns.JUMP:
             target = code[pc]
             pc += 1
             backward = target < pc
             pc = target
-            if target < pc:
+            if backward:
                 jitdriver.can_enter_jit(iseq=iseq, pc=pc, frame=frame)
         elif opcode == insns.BRANCHIF:
             target = code[pc]

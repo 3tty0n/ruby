@@ -1,6 +1,6 @@
-"""Loader tests; the .iseq fixtures are real InstructionSequence output."""
-
 import os
+
+import pytest
 
 import insns
 import iseqdump
@@ -8,19 +8,16 @@ import loader
 from error import LoadError, UnsupportedOperation
 from iseq import W_CallInfo, W_ISeq, NO_BLOCK_ISEQ
 from objects.string import W_String
-from objects.transparent import W_Fixnum, w_nil
-from support import HERE, fixture, run, run_dump
+from objects.regexp import W_Regexp
+from objects.transparent import w_nil
+from support import (HERE, check_loaded, decode, defined_method, fixture,
+                     only_insn, run, run_dump, run_ruby_file)
+
 
 def expect(exc_class, text, msg):
-    try:
+    with pytest.raises(exc_class) as info:
         loader.load_dump(text)
-    except exc_class as e:
-        assert e.msg == msg, 'got %r, expected %r' % (e.msg, msg)
-    except Exception as e:
-        raise AssertionError('expected %s(%r), got %r'
-                             % (exc_class.__name__, msg, e))
-    else:
-        raise AssertionError('expected %s: %s' % (exc_class.__name__, msg))
+    assert info.value.msg == msg
 
 
 def patched(text, old, new):
@@ -51,43 +48,87 @@ def test_string_literal_loaded():
     assert strings == ['EXECUTED:']
 
 
+def _regexp_const(compile_source, source):
+    """Returns the W_Regexp the loader produced for a regexp source."""
+    w_iseq = loader.load_dump(compile_source(source))
+    regexps = [w for w in w_iseq.consts if isinstance(w, W_Regexp)]
+    assert len(regexps) == 1
+    return regexps[0]
+
+
+def test_regexp_literal_loaded(compile_source):
+    assert _regexp_const(compile_source, '/foo/').pattern == 'foo'
+    # `//` is the empty pattern, not a fall-through to "no such object yet".
+    assert _regexp_const(compile_source, '//').pattern == ''
+
+
+def test_regexp_literal_with_flags_is_rejected(compile_source):
+    expect(UnsupportedOperation, compile_source('/foo/i'),
+           "regexp literal /foo/i in '<main>' is not supported yet")
+    expect(UnsupportedOperation, compile_source('/foo/mix'),
+           "regexp literal /foo/mix in '<main>' is not supported yet")
+
+
+def test_regexp_literal_unescapes_the_delimiter(compile_source):
+    # The dump writes a backslash as \\, so the loader sees the inspect
+    # form /a\/b/; its pattern is a/b, as Regexp#source would report.
+    # (inspect cannot distinguish source "a/b" from "a\/b"; both match '/'.)
+    assert _regexp_const(compile_source, '/a\\/b/').pattern == 'a/b'
+
+
+def _fib_body():
+    return defined_method(loader.load_dump(fixture('fib_rec.iseq')), 'fib')
+
+
 def test_locals_end_to_end():
     # f(9, 4)
-    w_iseq = loader.load_dump(fixture('locals.iseq'))
-    assert run(w_iseq).int_w() == 5
-    w_body = w_iseq.consts[0]
-    assert isinstance(w_body, W_ISeq)
-    # locals are [a, b, c]
+    assert run(loader.load_dump(fixture('locals.iseq'))).int_w() == 5
+
+
+def test_local_slots_are_remapped():
+    # The dump's lindex_t operands count down from the top of the
+    # environment; the loader turns them into frame slots.
+    w_body = defined_method(loader.load_dump(fixture('locals.iseq')), 'f')
     assert w_body.nlocals == 3
     assert w_body.nparams == 2
-    assert w_body.code[0] == insns.GETLOCAL and w_body.code[1] == 0
-    assert w_body.code[2] == insns.GETLOCAL and w_body.code[3] == 1
-    assert w_body.code[5] == insns.SETLOCAL and w_body.code[6] == 2
+    assert [(op, operands) for _, op, operands in decode(w_body)] == [
+        (insns.GETLOCAL, [0]),
+        (insns.GETLOCAL, [1]),
+        (insns.OPT_MINUS, []),
+        (insns.SETLOCAL, [2]),
+        (insns.GETLOCAL, [2]),
+        (insns.LEAVE, []),
+    ]
 
 
 def test_nested_iseq():
-    w_iseq = loader.load_dump(fixture('fib_rec.iseq'))
-    assert w_iseq.code[0] == insns.DEFINEMETHOD
-    w_body = w_iseq.consts[w_iseq.code[2]]
+    w_body = _fib_body()
     assert isinstance(w_body, W_ISeq)
     assert w_body.name == 'fib'
     assert w_body.nparams == 1
     assert w_body.simple_params
     calls = [w for w in w_body.consts if isinstance(w, W_CallInfo)]
-    assert len(calls) > 0
-    for w_ci in calls:
-        assert w_ci.simple
-    assert [w_ci.argc for w_ci in calls] == [1] * len(calls)
+    assert calls
+    assert all(w_ci.simple for w_ci in calls)
+    assert {w_ci.argc for w_ci in calls} == {1}
 
 
-def test_specialized_variants_and_const_pool():
-    w_body = loader.load_dump(fixture('fib_rec.iseq')).consts[0]
-    assert insns.GETLOCAL in w_body.code
-    assert insns.PUTOBJECT in w_body.code
-    values = [w.int_w() for w in w_body.consts if isinstance(w, W_Fixnum)]
-    assert 1 in values           # folded out of putobject_INT2FIX_1_
-    # `putobject 2` appears three times in the body
-    assert values.count(2) == 1
+def _putobject_slots(w_body):
+    return [operands[0] for _, op, operands in decode(w_body)
+            if op == insns.PUTOBJECT]
+
+
+def test_specialized_variants_lower_to_putobject():
+    w_body = _fib_body()
+    puts = _putobject_slots(w_body)
+    # putobject 2, putobject_INT2FIX_1_, putobject 2
+    assert [w_body.consts[i].int_w() for i in puts] == [2, 1, 2]
+
+
+def test_equal_fixnum_literals_share_a_pool_slot():
+    puts = _putobject_slots(_fib_body())
+    assert puts[0] == puts[2]
+    assert puts[1] != puts[0]
 
 
 def test_missing_instructions_are_reported_together():
@@ -127,11 +168,24 @@ def test_blockless_send_encoding():
                    'insn\tsend\tc:0,0,0,times\tq:1',
                    'insn\tsend\tc:0,0,0,times\tn:')
     w_iseq = loader.load_dump(text)
-    at = w_iseq.code.index(insns.SEND)
-    assert w_iseq.code[at + 2] == NO_BLOCK_ISEQ
-    w_ci = w_iseq.consts[w_iseq.code[at + 1]]
+    _, operands = only_insn(w_iseq, insns.SEND)
+    assert operands[1] == NO_BLOCK_ISEQ
+    w_ci = w_iseq.consts[operands[0]]
     assert isinstance(w_ci, W_CallInfo)
     assert not w_ci.simple
+
+
+def test_a_call_with_a_block_literal_is_simple():
+    # CRuby leaves ARGS_SIMPLE off a call site that has a block literal
+    text = patched(fixture('block.iseq'), 'insn\tgetlocal_WC_1\ti:3',
+                   'insn\tputnil')
+    w_iseq = loader.load_dump(text)
+    _, operands = only_insn(w_iseq, insns.SEND)
+    w_ci = w_iseq.consts[operands[0]]
+    assert isinstance(w_ci, W_CallInfo)
+    assert w_ci.simple
+    assert operands[1] != NO_BLOCK_ISEQ
+    assert isinstance(w_iseq.consts[operands[1]], W_ISeq)
 
 
 def test_trace_build_rejected():
@@ -175,5 +229,60 @@ def test_malformed_dump():
            'dump format version 99, expected 1')
     expect(LoadError, 'iseq\t0\ttop\t<main>\n', 'line 1: no dump header')
     expect(LoadError, 'dump\t1\t3.3.8\tx.rb\n', 'dump contains no iseq')
-    text = patched(fixture('fib_rec.iseq'), 'insn\tputself', 'insn\tputself\ti')
+    text = patched(fixture('fib_rec.iseq'), 'insn\tputself',
+                   'insn\tputself\ti')
     expect(LoadError, text, 'malformed operand: i')
+
+
+CRUBY_CASES = [
+    ('arith', 'puts 1 + 2\n'),
+    ('precedence', 'puts (1 + 2) * 3\n'),
+    ('locals', 'a = 9\nb = 4\nputs a - b\n'),
+    ('reassign', 'x = 1\nx = 2\nputs x\n'),
+    ('if_else', 'x = 3\nif x > 2\n  puts 1\nelse\n  puts 0\nend\n'),
+    ('unless', 'x = 3\nunless x > 2\n  puts 0\nelse\n  puts 1\nend\n'),
+    ('elsif', 'x = 2\nif x == 1\n  puts 10\nelsif x == 2\n  puts 20\n'
+              'else\n  puts 30\nend\n'),
+    ('while', 'n = 0\nwhile n < 5\n  n += 1\nend\nputs n\n'),
+    ('method', 'def add(a, b)\n  a + b\nend\nputs add(2, 3)\n'),
+    ('zero_arg_method', 'def answer\n  42\nend\nputs answer\n'),
+    ('nested_calls', 'def inc(n)\n  n + 1\nend\n'
+                     'def twice(n)\n  inc(inc(n))\nend\nputs twice(5)\n'),
+    ('recursion', 'def fib(n)\n  if n < 2\n    n\n  else\n'
+                  '    fib(n - 1) + fib(n - 2)\n  end\nend\nputs fib(10)\n'),
+    ('string', 's = "abc"\nputs s\n'),
+    ('interpolation', 'n = 7\nputs "n=#{n}"\n'),
+    ('two_interpolations', 'a = 2\nb = 3\nputs "#{a}+#{b}=#{a + b}"\n'),
+    ('masgn', 'a, b = 1, 2\nputs a + b\n'),
+    ('nil_true_false', 'puts nil\nputs true\nputs false\n'),
+    ('comparison', 'puts 1 == 1\nputs 2 <= 3\nputs 3 >= 2\n'),
+]
+
+# bench_clock.rb needs RPyYARV's bench_now_ns, which CRuby does not have.
+CRUBY_FILES = ['arith.rb', 'interpolation.rb', 'locals.rb', 'method_def.rb',
+               'while_loop.rb']
+
+
+
+def _assert_matches_cruby(text, expected, out):
+    """Loads text, audits it against its raw ISeqs, runs it, compares stdout."""
+    program = iseqdump.parse(text)
+    l = loader.Loader(program)
+    w_iseq = l.load()
+    check_loaded(program, l)
+    run(w_iseq)
+    assert out.text == expected
+
+
+@pytest.mark.parametrize('source', [source for _, source in CRUBY_CASES],
+                         ids=[name for name, _ in CRUBY_CASES])
+def test_loader_matches_cruby(source, compile_source, cruby_program, out):
+    """Arbitrary supported source: the loaded ISeq must agree with CRuby."""
+    _assert_matches_cruby(compile_source(source), cruby_program(source), out)
+
+
+@pytest.mark.parametrize('name', CRUBY_FILES)
+def test_loader_matches_cruby_file(name, compile_rb, ruby, out):
+    """A .rb path is just another arbitrary ISeq to load and check."""
+    path = os.path.join(HERE, 'ruby', name)
+    _assert_matches_cruby(compile_rb(path), run_ruby_file(path, ruby), out)

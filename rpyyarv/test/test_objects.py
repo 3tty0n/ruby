@@ -11,12 +11,14 @@ from error import UnsupportedOperation
 from methods import MethodTable, W_CFunc, W_Method
 from objects.array import W_Array
 from objects.instance import W_Object
-from objects.klass import (W_Class, w_array_class, w_class_class,
-                           w_integer_class, w_object_class, w_string_class)
 from objects.main import W_Main
 from objects.string import W_String
 from objects.transparent import (W_Fixnum, newbool, w_false, w_nil, w_true)
 
+from objects.klass import (W_Class, w_array_class, w_class_class,
+                           w_integer_class, w_object_class, w_regexp_class,
+                           w_string_class)
+from objects.regexp import W_Regexp
 
 def test_only_nil_and_false_are_falsy():
     assert not w_nil.is_true()
@@ -54,6 +56,7 @@ def test_getclass():
     assert W_Array([]).getclass() is w_array_class
     assert W_Class('C').getclass() is w_class_class
     assert W_Main().getclass() is w_object_class
+    assert W_Regexp('x').getclass() is w_regexp_class
 
 
 def test_lookup_walks_superclasses():
@@ -125,7 +128,7 @@ def test_method_table_is_a_plain_map():
 def test_a_cfunc_without_a_body_says_so():
     mid = symbols.intern('bodyless_probe')
     with pytest.raises(UnsupportedOperation) as e:
-        W_CFunc(mid, 0).call(w_nil, [])
+        W_CFunc(mid, 0).call(w_nil, [], None)
     assert e.value.msg == "'bodyless_probe' has no body"
 
 
@@ -135,3 +138,4 @@ def test_repr_is_for_error_messages():
     assert W_Class('C').repr() == 'C'
     assert W_Object(W_Class('C')).repr() == '#<C>'
     assert W_Main().repr() == 'main'
+    assert W_Regexp('foo').repr() == '/foo/'

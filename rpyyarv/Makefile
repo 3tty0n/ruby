@@ -39,12 +39,12 @@ endif
 PROBE   := test/probe
 SHIM    := librpyyarv_boot.$(SOEXT)
 PYPY    ?= ./pypy
-PYTHON  ?= python3
-PYTEST  ?= $(PYTHON) -m pytest
-RPYTHON ?= python2 $(PYPY)/rpython/bin/rpython
+PYTHON  ?= pypy2
+RPYTHON ?= $(PYTHON) $(PYPY)/rpython/bin/rpython
+PYTEST  ?= $(PYTHON) $(PYPY)/pytest.py
 RUBY    ?= $(BUILD)/ruby
 
-.PHONY: all test build-interp build-jit link clean
+.PHONY: all test test-llinterp build-interp build-jit link clean
 
 link: $(SHIM)
 
@@ -62,18 +62,22 @@ $(PROBE): test/probe.c
 test: $(SHIM)
 	RPYYARV_BUILD=$(BUILD) $(PYTEST) $(PYTEST_ARGS)
 
+# llinterp needs Python 2 (pypy2) and the pypy checkout, which pytest 9 cannot host.
+test-llinterp: | $(PYPY)
+	RPYYARV_BUILD=$(BUILD) $(PYTHON2) $(PYPY)/pytest.py test/test_llinterp.py
+
 build-interp: | $(PYPY)
-	RPYYARV_BUILD=$(BUILD) $(RPYTHON) --output=rpyyarv targetrpyyarv.py
-	$(call fix_install_name,rpyyarv)
+	RPYYARV_BUILD=$(BUILD) $(RPYTHON) --output=rpyyarv-runtime-replacing targetrpyyarv.py
+	$(call fix_install_name,rpyyarv-runtime-replacing)
 
 build-jit: | $(PYPY)
-	RPYYARV_BUILD=$(BUILD) $(RPYTHON) -Ojit --output=rpyyarv-jit targetrpyyarv.py
-	$(call fix_install_name,rpyyarv-jit)
+	RPYYARV_BUILD=$(BUILD) $(RPYTHON) -Ojit --output=rpyyarv-runtime-replacing-jit targetrpyyarv.py
+	$(call fix_install_name,rpyyarv-runtime-replacing-jit)
 
 $(PYPY):
 	git clone --depth=1 https://github.com/pypy/pypy $@
 
 clean:
-	rm -f $(PROBE) $(SHIM) rpyyarv rpyyarv-jit
+	rm -f $(PROBE) $(SHIM) rpyyarv-runtime-replacing rpyyarv-runtime-replacing-jit
 	rm -rf $(PROBE).dSYM $(SHIM).dSYM *.pyc .pytest_cache
 	find . -name __pycache__ -prune -exec rm -rf {} +
