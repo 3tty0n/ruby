@@ -6,11 +6,32 @@ literals, nested ISeqs, the W_CallInfo distilled from CALL_DATA -- goes into
 consts and the code stream carries the index.
 """
 
+import insns
 import symbols
 from objects.base import W_Root
+from rlib import elidable
 
 # A `send` whose call site has no block. Pool indices are >= 0.
 NO_BLOCK_ISEQ = -1
+
+
+@elidable
+def tail_position(code, pc):
+    # Forward-only, so the walk ends on cyclic bytecode.
+    while pc < len(code):
+        opcode = code[pc]
+        if opcode == insns.LEAVE:
+            return True
+        if opcode == insns.NOP:
+            pc += 1
+        elif opcode == insns.JUMP and pc + 1 < len(code):
+            target = code[pc + 1]
+            if target <= pc:
+                return False
+            pc = target
+        else:
+            return False
+    return False
 
 
 class W_ISeq(W_Root):
@@ -37,15 +58,17 @@ class W_ISeq(W_Root):
 
 
 class W_CallInfo(W_Root):
-    _immutable_fields_ = ['mid', 'argc', 'simple', 'fcall']
+    _immutable_fields_ = ['mid', 'argc', 'simple', 'fcall', 'tail']
 
-    def __init__(self, mid, argc, simple=True, fcall=True):
+    def __init__(self, mid, argc, simple=True, fcall=True, tail=None):
         self.mid = mid
         self.argc = argc
         # False once the loader saw call flags outside SIMPLE_CALL_FLAGS.
         self.simple = simple
         # A receiverless call, or an explicit `self.`: may reach a private one.
         self.fcall = fcall
+        # None for hand-built ISeqs.
+        self.tail = tail
 
     def repr(self):
         return '<W_CallInfo %s argc=%d>' % (symbols.name_of(self.mid),
