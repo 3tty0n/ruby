@@ -66,7 +66,7 @@ def compile_rb(path, ruby=None):
     exe, env = ruby if ruby else ruby_exe()
     text = subprocess.check_output([exe, DUMPER, path], env=env)
     if not isinstance(text, str):
-        text = text.decode('utf-8')
+        text = text.decode('latin-1')
     return text
 
 
@@ -80,10 +80,10 @@ def _ruby_stdout(path, ruby):
     except subprocess.CalledProcessError as e:
         detail = e.output
         if not isinstance(detail, str):
-            detail = detail.decode('utf-8')
+            detail = detail.decode('latin-1')
         raise AssertionError('CRuby failed on %s:\n%s' % (path, detail))
     if not isinstance(out, str):
-        out = out.decode('utf-8')
+        out = out.decode('latin-1')
     return out
 
 

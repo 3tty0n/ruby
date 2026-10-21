@@ -154,10 +154,30 @@ def _drop(frame, sp):
         frame.pop()
 
 
+TO_S = symbols.intern('to_s')
+
+
 def _to_s(w_x):
     if isinstance(w_x, W_String):
         return w_x
-    return W_String(w_x.to_s_str())
+    return call_method(w_x.lookup_method(TO_S), w_x, [], None)
+
+
+def to_s_string(w_x):
+    """w_x.to_s as a String, as Kernel#puts takes it."""
+    w_str = _to_s(w_x)
+    if not isinstance(w_str, W_String):
+        raise UnsupportedOperation('to_s on %s did not return a String'
+                                   % w_x.repr())
+    return w_str
+
+
+@elidable
+def _call_tail(iseq, w_ci, pc):
+    # Hand-built ISeqs have no precomputed flag.
+    if w_ci.tail is not None:
+        return w_ci.tail
+    return tail_position(iseq.code, pc)
 
 
 @elidable

@@ -254,6 +254,13 @@ CRUBY_CASES = [
     ('interpolation', 'n = 7\nputs "n=#{n}"\n'),
     ('two_interpolations', 'a = 2\nb = 3\nputs "#{a}+#{b}=#{a + b}"\n'),
     ('masgn', 'a, b = 1, 2\nputs a + b\n'),
+    ('puts_newline', 'puts "a\\n"\nputs ""\nputs "b\\n\\n"\n'),
+    ('to_s_main', 'puts self\nputs "#{self}"\n'),
+    ('to_s_redefined', 'def to_s\n  "X"\nend\nputs "#{1}"\nputs "#{nil}"\n'
+                       'puts "#{true}"\n'),
+    ('to_s_main_redefined', 'def to_s\n  "X"\nend\nputs self\nputs "#{self}"\n'),
+    ('split_utf8', 'a, b, c, d = "a\\u00e9\\u20ac\\u{1F600}".split(//)\n'
+                   'puts a\nputs b\nputs c\nputs d\n'),
     ('nil_true_false', 'puts nil\nputs true\nputs false\n'),
     ('comparison', 'puts 1 == 1\nputs 2 <= 3\nputs 3 >= 2\n'),
 ]
