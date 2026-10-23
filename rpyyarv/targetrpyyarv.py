@@ -53,7 +53,7 @@ def entry_point(argv):
 
 def target(driver, args):
     driver.exe_name = 'rpyyarv-runtime-replacing'
-    driver.config.translation.taggedpointers = TAGGED_INTS
+    # driver.config.translation.taggedpointers = TAGGED_INTS
     return entry_point, None
 
 
