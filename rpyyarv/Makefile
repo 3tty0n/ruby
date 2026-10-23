@@ -45,6 +45,8 @@ RPYTHON_FLAGS ?=
 
 .PHONY: test test-llinterp build-interp build-jit link clean
 
+build: build-interp build-jit
+
 link: $(SHIM)
 
 $(SHIM): boot_shim.c boot_shim.h
