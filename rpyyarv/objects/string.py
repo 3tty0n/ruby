@@ -66,12 +66,7 @@ def string_to_i(s):
 class W_ToI(W_CFunc):
     def call(self, w_recv, args_w, w_block):
         assert isinstance(w_recv, W_String)
-        try:
-            return newint(int(w_recv.strval))
-        except ValueError:
-            raise UnsupportedOperation(
-                "to_i on %s: RPyYARV only supports a plain integer string, "
-                "not Ruby's full parsing" % w_recv.repr())
+        return newint(string_to_i(w_recv.strval))
 
 def _char_width(s, i):
     """Bytes in the UTF-8 character at s[i]; a broken one is a byte on its
