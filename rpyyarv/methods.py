@@ -1,9 +1,9 @@
 """Methods and method tables.
 """
 
-import symbols
-from error import UnsupportedOperation
-from objects.base import W_Root
+from rpyyarv import symbols
+from rpyyarv.error import UnsupportedOperation
+from rpyyarv.objects.base import W_Root
 
 
 class W_Method(W_Root):

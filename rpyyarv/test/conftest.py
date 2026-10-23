@@ -1,9 +1,9 @@
 """Shared setup for every RPyYARV test.
 
-Puts the interpreter's modules on sys.path, undoes the global state a test
-leaves behind, and hands out the pieces a test needs from outside: captured
-output, arbitrary Ruby source compiled to an ISeq dump, and the same source
-run on CRuby as an oracle.
+Puts the repo root on sys.path (so `rpyyarv` imports as a package), undoes
+the global state a test leaves behind, and hands out the pieces a test needs
+from outside: captured output, arbitrary Ruby source compiled to an ISeq
+dump, and the same source run on CRuby as an oracle.
 """
 
 import os
@@ -12,17 +12,17 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
-for _p in (ROOT, HERE):
-    if _p not in sys.path:
-        sys.path.insert(0, _p)
+_REPO = os.path.dirname(ROOT)
+if _REPO not in sys.path:
+    sys.path.insert(0, _REPO)
 
 import pytest
 
-import debug
-import kernel
-from objects.klass import w_object_class
+from rpyyarv import debug
+from rpyyarv import kernel
+from rpyyarv.objects.klass import w_object_class
 
-import support
+from rpyyarv.test import support
 
 
 @pytest.fixture(autouse=True)

@@ -1,20 +1,20 @@
 """Unit tests for the interpreter loop: instructions, calls, classes."""
 
-import insns
-import interp
-import symbols
-from error import UnsupportedOperation
-from frame import Frame
-from iseq import W_CallInfo, NO_BLOCK_ISEQ
-from methods import W_CFunc, W_ISeqMethod
-from objects.instance import W_Object
-from objects.klass import W_Class, w_class_class, w_object_class
-from objects.main import W_Main, w_main
-from objects.string import W_String
-from objects.array import W_Array
-from objects.regexp import W_Regexp
-from objects.transparent import W_Fixnum, w_nil, w_true, w_false
-from support import asm, capture, expect_unsupported
+from rpyyarv import insns
+from rpyyarv import interp
+from rpyyarv import symbols
+from rpyyarv.error import UnsupportedOperation
+from rpyyarv.frame import Frame
+from rpyyarv.iseq import W_CallInfo, NO_BLOCK_ISEQ
+from rpyyarv.methods import W_CFunc, W_ISeqMethod
+from rpyyarv.objects.instance import W_Object
+from rpyyarv.objects.klass import W_Class, w_class_class, w_object_class
+from rpyyarv.objects.main import W_Main, w_main
+from rpyyarv.objects.string import W_String
+from rpyyarv.objects.array import W_Array
+from rpyyarv.objects.regexp import W_Regexp
+from rpyyarv.objects.transparent import W_Fixnum, w_nil, w_true, w_false
+from rpyyarv.test.support import asm, capture, expect_unsupported
 
 
 
@@ -748,7 +748,6 @@ def test_split_on_empty_regexp():
 
     assert split_of('1021') == ['1', '0', '2', '1']
     assert split_of('') == []
-<<<<<<< HEAD
     assert split_of('\xe3\x81\x82\xe3\x81\x84') == ['\xe3\x81\x82',
                                                     '\xe3\x81\x84']
     assert split_of('\xf0\x9f\x98\x80x') == ['\xf0\x9f\x98\x80', 'x']

@@ -11,11 +11,11 @@
 
 """
 
-import insns
-import optable
-import symbols
-from iseq import W_ISeq, NO_BLOCK_ISEQ
-from rlib import dont_look_inside, elidable, oswrite
+from rpyyarv import insns
+from rpyyarv import optable
+from rpyyarv import symbols
+from rpyyarv.iseq import W_ISeq, NO_BLOCK_ISEQ
+from rpyyarv.rlib import dont_look_inside, elidable, oswrite
 
 INSN = 1
 STACK = 2

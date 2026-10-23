@@ -4,10 +4,10 @@ import sys
 
 import pytest
 
-import helpers
-from objects import transparent
-from objects.klass import w_integer_class
-from objects.transparent import W_Fixnum, W_SmallFixnum, newint
+from rpyyarv import helpers
+from rpyyarv.objects import transparent
+from rpyyarv.objects.klass import w_integer_class
+from rpyyarv.objects.transparent import W_Fixnum, W_SmallFixnum, newint
 
 
 LIMIT = sys.maxsize >> 1
