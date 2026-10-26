@@ -338,24 +338,35 @@ def test_a_block_runs_under_the_self_it_was_written_in():
     assert interp.execute(iseq, Frame(iseq, w_self)) is w_self
 
 
-def test_block_arity_is_checked():
+def _yield_one(w_arg):
+    """call_it { |a, b| b } where the builtin call_it yields only w_arg."""
     class W_CallIt(W_CFunc):
         def call(self, w_recv, args_w, w_block):
-            return interp.call_block(w_block, [w_nil])
+            return interp.call_block(w_block, [w_arg])
 
     call_id = symbols.intern('call_it')
     w_self = W_Main()
     w_self.define_method(call_id, W_CallIt(call_id, 0))
-    w_block = asm([], 2, 2, [insns.PUTNIL, insns.LEAVE],
+    w_block = asm([], 2, 1, [insns.GETLOCAL, 1, insns.LEAVE],
                   name='block in test', nparams=2)
-    # call_it { |a, b| nil } -- but the builtin yields only one value
     iseq = asm([W_CallInfo(call_id, 0), w_block], 0, 2, [
         insns.PUTSELF,
         insns.SEND, 0, 1,
         insns.LEAVE,
     ])
+    return iseq, w_self
+
+
+def test_a_missing_block_argument_is_nil():
+    iseq, w_self = _yield_one(W_Fixnum(7))
+    assert interp.execute(iseq, Frame(iseq, w_self)) is w_nil
+
+
+def test_a_block_does_not_splat_an_array_yet():
+    iseq, w_self = _yield_one(W_Array([W_Fixnum(1), W_Fixnum(2)]))
     expect_unsupported(iseq, w_self,
-                       "block 'block in test' takes 2 argument(s), given 1")
+                       "block 'block in test' would splat its Array "
+                       "argument, which RPyYARV does not support yet")
 
 
 

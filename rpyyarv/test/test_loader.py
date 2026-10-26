@@ -235,6 +235,16 @@ def test_equal_symbol_literals_are_one_object(compile_source):
     assert w_f.consts[f_idx] is w_g.consts[g_idx]
 
 
+@pytest.mark.parametrize('params, simple', [
+    ('', True), ('|e|', True), ('|a, b|', True), ('|a, |', False),
+    ('|*a|', False), ('|a, b = 5|', False)])
+def test_block_params_are_simple_only_when_plain(params, simple,
+                                                 compile_source):
+    w_iseq = loader.load_dump(compile_source('1.times { %s nil }\n' % params))
+    _, (_, block_idx) = only_insn(w_iseq, insns.SEND)
+    assert w_iseq.consts[block_idx].simple_params == simple
+
+
 def test_malformed_dump():
     expect(LoadError, 'dump\t99\t3.3.8\tx.rb\n',
            'dump format version 99, expected 1')

@@ -200,8 +200,12 @@ class Loader(object):
                                  tail_position(code, post_pc))
             code[slot] = pool.add(w_ci)
 
+        simple = raw.extra_params == ''
+        if raw.type == 'block' and raw.lead_num == 1:
+            # CRuby marks |a| ambiguous_param0; unmarked |a,| splats an Array
+            simple = raw.extra_params == 'ambiguous_param0'
         w_iseq = W_ISeq(raw.name, code, [w for w in pool.consts], raw.nlocals,
-                        raw.stack_max, raw.lead_num, raw.extra_params == '')
+                        raw.stack_max, raw.lead_num, simple)
         self.w_iseqs[index] = w_iseq
         return w_iseq
 

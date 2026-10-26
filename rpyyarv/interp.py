@@ -130,13 +130,17 @@ def call_method(w_method, w_recv, args_w, w_block):
 
 def call_block(w_block, args_w):
     w_iseq = w_block.w_iseq
-    if len(args_w) != w_iseq.nparams:
+    if not w_iseq.simple_params:
         raise UnsupportedOperation(
-            "block '%s' takes %d argument(s), given %d"
-            % (w_iseq.name, w_iseq.nparams, len(args_w)))
+            "block '%s' has parameters RPyYARV does not support" % w_iseq.name)
+    if (w_iseq.nparams > 1 and len(args_w) == 1
+            and isinstance(args_w[0], W_Array)):
+        raise UnsupportedOperation(
+            "block '%s' would splat its Array argument, which RPyYARV does "
+            "not support yet" % w_iseq.name)
     callee = Frame(w_iseq, w_block.w_self)
     i = 0
-    while i < len(args_w):
+    while i < len(args_w) and i < w_iseq.nparams:
         callee.setlocal(i, args_w[i])
         i += 1
     return execute(w_iseq, callee)
