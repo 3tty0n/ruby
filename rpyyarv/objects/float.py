@@ -5,7 +5,7 @@ from rpyyarv.methods import W_CFunc
 from rpyyarv.objects.base import W_Root
 from rpyyarv.objects.klass import w_float_class
 from rpyyarv.objects.numeric import W_Self
-from rpyyarv.objects.transparent import newbool
+from rpyyarv.objects.transparent import newbool, newint, w_nil
 from rpyyarv.rlib import float_repr
 
 DBL_DIG = 15
@@ -114,10 +114,26 @@ class W_IsPositive(W_CFunc):
         return newbool(_floatval(w_recv) > 0.0)
 
 
+class W_IsFinite(W_CFunc):
+    def call(self, w_recv, args_w, w_block):
+        x = _floatval(w_recv)
+        return newbool(not (math.isinf(x) or math.isnan(x)))
+
+
+class W_IsInfinite(W_CFunc):
+    def call(self, w_recv, args_w, w_block):
+        x = _floatval(w_recv)
+        if not math.isinf(x):
+            return w_nil
+        if x > 0.0:
+            return newint(1)
+        return newint(-1)
+
+
 def install(w_class):
     for name, cls in [('to_f', W_Self), ('abs', W_Abs), ('magnitude', W_Abs),
                       ('-@', W_Neg), ('zero?', W_IsZero),
-                      ('negative?', W_IsNegative),
-                      ('positive?', W_IsPositive)]:
+                      ('negative?', W_IsNegative), ('positive?', W_IsPositive),
+                      ('finite?', W_IsFinite), ('infinite?', W_IsInfinite)]:
         mid = symbols.intern(name)
         w_class.add_method(mid, cls(mid, 0))

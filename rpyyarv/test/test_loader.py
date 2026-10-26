@@ -272,11 +272,23 @@ CRUBY_CASES = [
                     'puts 1.5 - 3\nputs 3 - 1.5\nputs "#{1.5}"\n'),
     ('float_compare', 'puts 1 < 1.5\nputs 1.5 > 2\nputs 2.0 <= 2\n'
                       'puts 2 >= 2.5\nputs 2.0 == 2\nputs 0.1 + 0.2 == 0.3\n'),
+    ('numeric_methods', 'puts 42.real?\nputs 4.2.real?\nputs 42.real\n'
+                        'puts 4.2.real\nputs 42.imag\nputs 4.2.imag\n'
+                        'puts 42.conj\nputs 4.2.conj\nputs 42.integer?\n'
+                        'puts 4.2.integer?\nputs 42.finite?\n'
+                        'puts 42.infinite?\nputs 42.numerator\n'
+                        'puts 42.denominator\n'),
     ('float_methods', 'f = 4.2\nn = -4.2\nz = -0.0\nputs f.to_f\n'
                       'puts n.abs\nputs n.magnitude\nputs z.abs\nputs -f\n'
                       'puts -z\nputs 0.0.zero?\nputs z.zero?\nputs f.zero?\n'
                       'puts n.negative?\nputs z.negative?\nputs f.positive?\n'
-                      'puts 0.0.positive?\n'),
+                      'puts 0.0.positive?\nputs f.finite?\nputs f.infinite?\n'),
+    ('float_special', 'inf = 1e400\nninf = -inf\nnan = inf - inf\n'
+                      'puts inf.finite?\nputs nan.finite?\n'
+                      'puts inf.infinite?\nputs ninf.infinite?\n'
+                      'puts nan.infinite?\nputs nan.zero?\n'
+                      'puts nan.positive?\nputs nan.negative?\n'
+                      'puts nan.abs\nputs ninf.abs\n'),
 ]
 
 # bench_clock.rb needs RPyYARV's bench_now_ns, which CRuby does not have.
