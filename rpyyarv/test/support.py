@@ -21,6 +21,7 @@ from rpyyarv.objects.float import W_Float
 from rpyyarv.objects.main import W_Main
 from rpyyarv.objects.regexp import W_Regexp
 from rpyyarv.objects.string import W_String
+from rpyyarv.objects.symbol import W_Symbol
 from rpyyarv.objects.transparent import W_Fixnum, w_false, w_nil, w_true
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -307,6 +308,9 @@ def _check_literal(w_x, raw_op):
     elif kind == rawiseq.OP_STR:
         assert isinstance(w_x, W_String)
         assert w_x.str_w() == raw_op.strval
+    elif kind == rawiseq.OP_SYM:
+        assert isinstance(w_x, W_Symbol)
+        assert symbols.name_of(w_x.mid) == raw_op.strval
     elif kind == rawiseq.OP_ARRAY:
         assert isinstance(w_x, W_Array)
         assert len(w_x.items_w) == len(raw_op.items)

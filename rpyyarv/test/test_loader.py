@@ -219,10 +219,20 @@ def test_operand_shape_is_checked():
 
 def test_unsupported_literal():
     text = patched(fixture('fib_rec.iseq'), 'insn\tputobject\ti:20',
-                   'insn\tputobject\ty:a_symbol')
+                   'insn\tputobject\tx:1..2')
     expect(UnsupportedOperation, text,
-           "putobject of Symbol a_symbol in '<main>': RPyYARV has no such "
+           "putobject of object 1..2 in '<main>': RPyYARV has no such "
            "object yet")
+
+
+def test_equal_symbol_literals_are_one_object(compile_source):
+    w_iseq = loader.load_dump(compile_source(
+        'def f\n  :abc\nend\ndef g\n  :abc\nend\n'))
+    w_f = defined_method(w_iseq, 'f')
+    w_g = defined_method(w_iseq, 'g')
+    _, (f_idx,) = only_insn(w_f, insns.PUTOBJECT)
+    _, (g_idx,) = only_insn(w_g, insns.PUTOBJECT)
+    assert w_f.consts[f_idx] is w_g.consts[g_idx]
 
 
 def test_malformed_dump():
@@ -289,6 +299,7 @@ CRUBY_CASES = [
                       'puts nan.infinite?\nputs nan.zero?\n'
                       'puts nan.positive?\nputs nan.negative?\n'
                       'puts nan.abs\nputs ninf.abs\n'),
+    ('symbol', 'puts :abc\nx = :foo\nputs "a#{x}b"\nputs :abc.to_s\n'),
 ]
 
 # bench_clock.rb needs RPyYARV's bench_now_ns, which CRuby does not have.

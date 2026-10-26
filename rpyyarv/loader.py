@@ -10,6 +10,7 @@ from rpyyarv.iseq import W_CallInfo, W_ISeq, NO_BLOCK_ISEQ, tail_position
 from rpyyarv.objects.array import W_Array
 from rpyyarv.objects.float import W_Float
 from rpyyarv.objects.string import W_String
+from rpyyarv.objects.symbol import newsymbol
 from rpyyarv.objects.regexp import W_Regexp
 from rpyyarv.objects.transparent import newint, w_nil, w_true, w_false
 
@@ -264,6 +265,8 @@ class Loader(object):
             return w_false
         if kind == rawiseq.OP_STR:
             return W_String(operand.strval)
+        if kind == rawiseq.OP_SYM:
+            return newsymbol(symbols.intern(operand.strval))
         if kind == rawiseq.OP_OTHER:
             s = operand.strval
             if s and s[0] == '/':
