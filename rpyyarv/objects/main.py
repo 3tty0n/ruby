@@ -9,6 +9,7 @@ from rpyyarv.objects.klass import (W_Class, w_array_class, w_class_class,
                                    w_object_class, w_string_class,
                                    w_true_class)
 from rpyyarv.objects import array as arraylib
+from rpyyarv.objects import float as floatlib
 from rpyyarv.objects import string as stringlib
 
 # CRuby gives main a singleton class with its own to_s, so a toplevel
@@ -43,5 +44,6 @@ for _w_class in (w_integer_class, w_float_class, w_nil_class, w_true_class,
 classlib.install(w_class_class)
 stringlib.install(w_string_class)
 arraylib.install(w_array_class)
+floatlib.install(w_float_class)
 
 w_main = W_Main()

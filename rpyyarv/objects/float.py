@@ -1,7 +1,11 @@
 import math
 
+from rpyyarv import symbols
+from rpyyarv.methods import W_CFunc
 from rpyyarv.objects.base import W_Root
 from rpyyarv.objects.klass import w_float_class
+from rpyyarv.objects.numeric import W_Self
+from rpyyarv.objects.transparent import newbool
 from rpyyarv.rlib import float_repr
 
 DBL_DIG = 15
@@ -78,3 +82,42 @@ def float_to_s(x):
     if len(estr) < 2:
         estr = '0' + estr
     return sign + digits[0] + '.' + frac + 'e' + esign + estr
+
+
+def _floatval(w_recv):
+    assert isinstance(w_recv, W_Float)
+    return w_recv.floatval
+
+
+class W_Abs(W_CFunc):
+    def call(self, w_recv, args_w, w_block):
+        return W_Float(math.fabs(_floatval(w_recv)))
+
+
+class W_Neg(W_CFunc):
+    def call(self, w_recv, args_w, w_block):
+        return W_Float(-_floatval(w_recv))
+
+
+class W_IsZero(W_CFunc):
+    def call(self, w_recv, args_w, w_block):
+        return newbool(_floatval(w_recv) == 0.0)
+
+
+class W_IsNegative(W_CFunc):
+    def call(self, w_recv, args_w, w_block):
+        return newbool(_floatval(w_recv) < 0.0)
+
+
+class W_IsPositive(W_CFunc):
+    def call(self, w_recv, args_w, w_block):
+        return newbool(_floatval(w_recv) > 0.0)
+
+
+def install(w_class):
+    for name, cls in [('to_f', W_Self), ('abs', W_Abs), ('magnitude', W_Abs),
+                      ('-@', W_Neg), ('zero?', W_IsZero),
+                      ('negative?', W_IsNegative),
+                      ('positive?', W_IsPositive)]:
+        mid = symbols.intern(name)
+        w_class.add_method(mid, cls(mid, 0))
