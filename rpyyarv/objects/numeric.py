@@ -1,4 +1,5 @@
 from rpyyarv import symbols
+from rpyyarv.error import UnsupportedOperation
 from rpyyarv.methods import W_CFunc
 from rpyyarv.objects.transparent import newint, w_false, w_nil, w_true
 
@@ -17,6 +18,20 @@ class W_Const(W_CFunc):
 
     def call(self, w_recv, args_w, w_block):
         return self.w_value
+
+
+class W_Times(W_CFunc):
+    def call(self, w_recv, args_w, w_block):
+        from rpyyarv import interp
+        if w_block is None:
+            raise UnsupportedOperation(
+                "times without a block (an Enumerator) is not supported yet")
+        n = w_recv.int_w()
+        i = 0
+        while i < n:
+            interp.call_block(w_block, [newint(i)])
+            i += 1
+        return w_recv
 
 
 def _add_self(w_class, name):
@@ -43,3 +58,5 @@ def install_integer(w_class):
     _add_const(w_class, 'integer?', w_true)
     _add_self(w_class, 'numerator')
     _add_const(w_class, 'denominator', newint(1))
+    mid = symbols.intern('times')
+    w_class.add_method(mid, W_Times(mid, 0))

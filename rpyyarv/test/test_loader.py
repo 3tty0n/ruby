@@ -11,8 +11,8 @@ from rpyyarv.objects.string import W_String
 from rpyyarv.objects.regexp import W_Regexp
 from rpyyarv.objects.transparent import w_nil
 from rpyyarv.test.support import (HERE, check_loaded, decode, defined_method,
-                                  fixture, only_insn, run, run_dump,
-                                  run_ruby_file)
+                                  expect_unsupported, fixture, only_insn, run,
+                                  run_dump, run_ruby_file)
 
 
 def expect(exc_class, text, msg):
@@ -245,6 +245,12 @@ def test_block_params_are_simple_only_when_plain(params, simple,
     assert w_iseq.consts[block_idx].simple_params == simple
 
 
+def test_a_block_with_a_rest_parameter_is_refused(compile_source):
+    w_iseq = loader.load_dump(compile_source('1.times { |*a| a }\n'))
+    expect_unsupported(w_iseq, None, "block 'block in <main>' has parameters "
+                       "RPyYARV does not support")
+
+
 def test_malformed_dump():
     expect(LoadError, 'dump\t99\t3.3.8\tx.rb\n',
            'dump format version 99, expected 1')
@@ -310,6 +316,9 @@ CRUBY_CASES = [
                       'puts nan.positive?\nputs nan.negative?\n'
                       'puts nan.abs\nputs ninf.abs\n'),
     ('symbol', 'puts :abc\nx = :foo\nputs "a#{x}b"\nputs :abc.to_s\n'),
+    ('times', '3.times { |i| puts i }\nputs 3.times { }\n'
+              '0.times { puts 1 }\n2.times { puts "x" }\n'
+              '2.times { |a, b| puts a\n  puts b }\n'),
 ]
 
 # bench_clock.rb needs RPyYARV's bench_now_ns, which CRuby does not have.
