@@ -132,6 +132,7 @@ rpyyarv_ary_entry(uintptr_t ary, long idx)
 int rpyyarv_is_array(uintptr_t v)  { return RB_TYPE_P((VALUE)v, T_ARRAY) ? 1 : 0; }
 int rpyyarv_is_symbol(uintptr_t v) { return SYMBOL_P((VALUE)v) ? 1 : 0; }
 int rpyyarv_is_fixnum(uintptr_t v) { return FIXNUM_P((VALUE)v) ? 1 : 0; }
+int rpyyarv_is_float(uintptr_t v)  { return RB_FLOAT_TYPE_P((VALUE)v) ? 1 : 0; }
 int rpyyarv_is_string(uintptr_t v) { return RB_TYPE_P((VALUE)v, T_STRING) ? 1 : 0; }
 int rpyyarv_is_hash(uintptr_t v)   { return RB_TYPE_P((VALUE)v, T_HASH) ? 1 : 0; }
 int rpyyarv_is_nil(uintptr_t v)    { return NIL_P((VALUE)v) ? 1 : 0; }
@@ -144,6 +145,14 @@ rpyyarv_num2long(uintptr_t v)
     VALUE val = (VALUE)v;
     if (!RB_INTEGER_TYPE_P(val)) return 0;
     return NUM2LONG(val);
+}
+
+double
+rpyyarv_num2dbl(uintptr_t v)
+{
+    VALUE val = (VALUE)v;
+    if (!RB_FLOAT_TYPE_P(val)) return 0.0;
+    return RFLOAT_VALUE(val);
 }
 
 uintptr_t

@@ -74,12 +74,14 @@ rb_ary_entry = _ext('rpyyarv_ary_entry', [VALUE, rffi.LONG], VALUE)
 rb_is_array = _ext('rpyyarv_is_array', [VALUE], rffi.INT)
 rb_is_symbol = _ext('rpyyarv_is_symbol', [VALUE], rffi.INT)
 rb_is_fixnum = _ext('rpyyarv_is_fixnum', [VALUE], rffi.INT)
+rb_is_float = _ext('rpyyarv_is_float', [VALUE], rffi.INT)
 rb_is_string = _ext('rpyyarv_is_string', [VALUE], rffi.INT)
 rb_is_hash = _ext('rpyyarv_is_hash', [VALUE], rffi.INT)
 rb_is_nil = _ext('rpyyarv_is_nil', [VALUE], rffi.INT)
 rb_is_true = _ext('rpyyarv_is_true', [VALUE], rffi.INT)
 rb_is_false = _ext('rpyyarv_is_false', [VALUE], rffi.INT)
 rb_num2long = _ext('rpyyarv_num2long', [VALUE], rffi.LONG)
+rb_num2dbl = _ext('rpyyarv_num2dbl', [VALUE], rffi.DOUBLE)
 rb_hash_aref = _ext('rpyyarv_hash_aref', [VALUE, rffi.CCHARP], VALUE)
 rb_sym_cstr = _ext('rpyyarv_sym_cstr', [VALUE], rffi.CCHARP)
 
@@ -118,6 +120,10 @@ def is_fixnum(v):
     return rffi.cast(lltype.Signed, rb_is_fixnum(v)) != 0
 
 
+def is_float(v):
+    return rffi.cast(lltype.Signed, rb_is_float(v)) != 0
+
+
 def is_string(v):
     return rffi.cast(lltype.Signed, rb_is_string(v)) != 0
 
@@ -140,6 +146,10 @@ def is_false(v):
 
 def num2long(v):
     return rffi.cast(lltype.Signed, rb_num2long(v))
+
+
+def num2dbl(v):
+    return rb_num2dbl(v)
 
 
 def ary_len(v):

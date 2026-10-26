@@ -59,6 +59,7 @@ w_object_class = W_Class('Object')
 # Ruby interposes Module between Class and Object; it owns nothing we call yet.
 w_class_class = W_Class('Class', w_object_class)
 w_integer_class = W_Class('Integer', w_object_class)
+w_float_class = W_Class('Float', w_object_class)
 w_string_class = W_Class('String', w_object_class)
 w_regexp_class = W_Class('Regexp', w_object_class)
 w_array_class = W_Class('Array', w_object_class)

@@ -13,6 +13,9 @@ class W_Root(object):
     def int_w(self):
         raise UnsupportedOperation('not an integer')
 
+    def float_w(self):
+        raise UnsupportedOperation('not a number')
+
     def str_w(self):
         raise UnsupportedOperation('not a string')
 

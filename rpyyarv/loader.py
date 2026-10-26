@@ -8,6 +8,7 @@ from rpyyarv import symbols
 from rpyyarv.error import LoadError, UnsupportedOperation
 from rpyyarv.iseq import W_CallInfo, W_ISeq, NO_BLOCK_ISEQ, tail_position
 from rpyyarv.objects.array import W_Array
+from rpyyarv.objects.float import W_Float
 from rpyyarv.objects.string import W_String
 from rpyyarv.objects.regexp import W_Regexp
 from rpyyarv.objects.transparent import newint, w_nil, w_true, w_false
@@ -253,6 +254,8 @@ class Loader(object):
         kind = operand.kind
         if kind == rawiseq.OP_INT:
             return newint(operand.intval)
+        if kind == rawiseq.OP_FLOAT:
+            return W_Float(operand.floatval)
         if kind == rawiseq.OP_NIL:
             return w_nil
         if kind == rawiseq.OP_TRUE:

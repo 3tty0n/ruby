@@ -264,6 +264,14 @@ CRUBY_CASES = [
                    'puts a\nputs b\nputs c\nputs d\n'),
     ('nil_true_false', 'puts nil\nputs true\nputs false\n'),
     ('comparison', 'puts 1 == 1\nputs 2 <= 3\nputs 3 >= 2\n'),
+    ('float_to_s', 'puts 4.2\nputs 100.0\nputs 1e15\nputs 1.5e16\n'
+                   'puts 1234567890123456.7\nputs 0.0001\nputs 0.00001\n'
+                   'puts 2.5e-10\nputs -0.0\nputs -3.25\nputs 1e400\n'
+                   'puts -1e400\nputs 1e100\n'),
+    ('float_arith', 'puts 1 + 2.5\nputs 0.1 + 0.2\nputs 2.5 * 4\n'
+                    'puts 1.5 - 3\nputs 3 - 1.5\nputs "#{1.5}"\n'),
+    ('float_compare', 'puts 1 < 1.5\nputs 1.5 > 2\nputs 2.0 <= 2\n'
+                      'puts 2 >= 2.5\nputs 2.0 == 2\nputs 0.1 + 0.2 == 0.3\n'),
 ]
 
 # bench_clock.rb needs RPyYARV's bench_now_ns, which CRuby does not have.

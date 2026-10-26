@@ -4,7 +4,8 @@ from rpyyarv import classlib
 from rpyyarv import kernel
 from rpyyarv.objects.base import W_Root
 from rpyyarv.objects.klass import (W_Class, w_array_class, w_class_class,
-                                   w_false_class, w_integer_class, w_nil_class,
+                                   w_false_class, w_float_class,
+                                   w_integer_class, w_nil_class,
                                    w_object_class, w_string_class,
                                    w_true_class)
 from rpyyarv.objects import array as arraylib
@@ -36,8 +37,8 @@ class W_Main(W_Root):
 
 kernel.install(w_object_class)
 kernel.install_to_s(w_main_class)
-for _w_class in (w_integer_class, w_nil_class, w_true_class, w_false_class,
-                 w_string_class):
+for _w_class in (w_integer_class, w_float_class, w_nil_class, w_true_class,
+                 w_false_class, w_string_class):
     kernel.install_to_s(_w_class)
 classlib.install(w_class_class)
 stringlib.install(w_string_class)

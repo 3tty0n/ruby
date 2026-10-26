@@ -14,6 +14,9 @@ class W_Integer(W_Root):
     def getclass(self):
         return w_integer_class
 
+    def float_w(self):
+        return float(self.int_w())
+
     def to_s_str(self):
         return str(self.int_w())
 

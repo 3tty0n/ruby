@@ -26,6 +26,7 @@
 # Operand tokens, one per to_a operand:
 #
 #   i:<int>   Integer          n:  nil        t:  true       f:  false
+#   d:<float> Float, as Float#inspect spells it
 #   y:<name>  Symbol: an ID, a Symbol literal, or a label reference
 #   s:<text>  String
 #   q:<index> nested ISeq
@@ -146,6 +147,7 @@ class Dumper
   def operand(obj)
     case obj
     when Integer then "i:#{obj}"
+    when Float   then "d:#{obj.inspect}"
     when nil     then 'n:'
     when true    then 't:'
     when false   then 'f:'

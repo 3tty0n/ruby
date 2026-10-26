@@ -17,6 +17,7 @@ from rpyyarv.error import UnsupportedOperation
 from rpyyarv.frame import Frame
 from rpyyarv.iseq import W_CallInfo, W_ISeq, NO_BLOCK_ISEQ
 from rpyyarv.objects.array import W_Array
+from rpyyarv.objects.float import W_Float
 from rpyyarv.objects.main import W_Main
 from rpyyarv.objects.regexp import W_Regexp
 from rpyyarv.objects.string import W_String
@@ -294,6 +295,9 @@ def _check_literal(w_x, raw_op):
     if kind == rawiseq.OP_INT:
         assert isinstance(w_x, W_Fixnum)
         assert w_x.int_w() == raw_op.intval
+    elif kind == rawiseq.OP_FLOAT:
+        assert isinstance(w_x, W_Float)
+        assert repr(w_x.float_w()) == repr(raw_op.floatval)    # tells -0.0 apart
     elif kind == rawiseq.OP_NIL:
         assert w_x is w_nil
     elif kind == rawiseq.OP_TRUE:

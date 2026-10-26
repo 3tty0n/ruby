@@ -113,6 +113,8 @@ def _insn(pending, e):
 def _operand(pending, v):
     if boot.is_fixnum(v):
         return rawiseq.int_operand(boot.num2long(v))
+    if boot.is_float(v):
+        return rawiseq.float_operand(boot.num2dbl(v))
     if boot.is_nil(v):
         return rawiseq.RawOperand(rawiseq.OP_NIL)
     if boot.is_true(v):

@@ -17,20 +17,22 @@ OP_ISEQ = 6     # intval indexes RawProgram.iseqs
 OP_CALL = 7     # intval=orig_argc, flag=flags, strval=mid
 OP_OTHER = 8
 OP_ARRAY = 9    # items holds the elements
+OP_FLOAT = 10
 
 KIND_NAMES = ['Integer', 'nil', 'true', 'false', 'Symbol', 'String',
-              'ISeq', 'call data', 'object', 'Array']
+              'ISeq', 'call data', 'object', 'Array', 'Float']
 
 
 class RawOperand(object):
     def __init__(self, kind, intval=0, strval='', flag=0, has_kwarg=False,
-                 items=None):
+                 items=None, floatval=0.0):
         self.kind = kind
         self.intval = intval
         self.strval = strval
         self.flag = flag
         self.has_kwarg = has_kwarg
         self.items = items if items is not None else []
+        self.floatval = floatval
 
     def describe(self):
         if self.kind == OP_ARRAY:
@@ -45,6 +47,10 @@ class RawOperand(object):
 
 def int_operand(value):
     return RawOperand(OP_INT, value)
+
+
+def float_operand(value):
+    return RawOperand(OP_FLOAT, floatval=value)
 
 
 class RawInsn(object):

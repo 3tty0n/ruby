@@ -6,6 +6,10 @@ try:
         set_user_param, TraceLimitTooHigh)
     from rpython.rlib.objectmodel import UnboxedValue, fetch_translated_config
     from rpython.rlib.rstackovf import StackOverflow, check_stack_overflow
+    from rpython.rlib.rfloat import formatd
+
+    def float_repr(x):
+        return formatd(x, 'r', 0)
 
     def oswrite(fd, s):
         os.write(fd, s)
@@ -64,6 +68,8 @@ except ImportError:
         pass
 
     StackOverflow = RuntimeError
+
+    float_repr = repr
 
     def check_stack_overflow():
         pass

@@ -8,6 +8,8 @@ from rpyyarv.error import LoadError
 
 FORMAT_VERSION = 1
 
+_INF = float('inf')
+
 _SEP = '\t'
 
 
@@ -16,6 +18,18 @@ def _int(field, what):
         return int(field)
     except ValueError:
         raise LoadError('%s is not a number: %s' % (what, field))
+
+
+def _float(field):
+    # Float#inspect spells infinity out; 1e400 is such a literal
+    if field == 'Infinity':
+        return _INF
+    if field == '-Infinity':
+        return -_INF
+    try:
+        return float(field)
+    except ValueError:
+        raise LoadError('Float is not a number: %s' % field)
 
 
 def _unescape(text):
@@ -79,6 +93,8 @@ def _operand(token):
     body = token[2:]
     if kind == 'i':
         return rawiseq.int_operand(_int(body, 'operand'))
+    if kind == 'd':
+        return rawiseq.float_operand(_float(body))
     if kind == 'n':
         return rawiseq.RawOperand(rawiseq.OP_NIL)
     if kind == 't':
