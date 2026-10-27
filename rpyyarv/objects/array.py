@@ -4,6 +4,7 @@ from rpyyarv.methods import W_CFunc
 from rpyyarv.objects.base import W_Root
 from rpyyarv.objects.klass import w_array_class
 from rpyyarv.objects.transparent import newint, w_nil
+from rpyyarv.rlib import JitDriver
 
 
 class W_Array(W_Root):
@@ -57,6 +58,78 @@ class W_Length(W_CFunc):
         return newint(len(w_recv.items_w))
 
 
+def _each_location(w_iseq):
+    return 'each { %s }' % w_iseq.name
+
+
+def _map_location(w_iseq):
+    return 'map { %s }' % w_iseq.name
+
+
+each_driver = JitDriver(name='each', greens=['w_iseq'], reds='auto',
+                        get_printable_location=_each_location)
+map_driver = JitDriver(name='map', greens=['w_iseq'], reds='auto',
+                       get_printable_location=_map_location)
+
+
+class W_Each(W_CFunc):
+    def call(self, w_recv, args_w, w_block):
+        from rpyyarv import interp
+        assert isinstance(w_recv, W_Array)
+        if w_block is None:
+            raise UnsupportedOperation(
+                "each without a block (an Enumerator) is not supported yet")
+        w_iseq = w_block.w_iseq
+        i = 0
+        while i < len(w_recv.items_w):
+            each_driver.jit_merge_point(w_iseq=w_iseq)
+            interp.call_block(w_block, [w_recv.items_w[i]])
+            i += 1
+        return w_recv
+
+
+class W_Map(W_CFunc):
+    def call(self, w_recv, args_w, w_block):
+        from rpyyarv import interp
+        assert isinstance(w_recv, W_Array)
+        if w_block is None:
+            raise UnsupportedOperation(
+                "map without a block (an Enumerator) is not supported yet")
+        w_iseq = w_block.w_iseq
+        result_w = []
+        i = 0
+        while i < len(w_recv.items_w):
+            map_driver.jit_merge_point(w_iseq=w_iseq)
+            result_w.append(interp.call_block(w_block, [w_recv.items_w[i]]))
+            i += 1
+        return W_Array(result_w)
+
+
+def _join(w_ary, sep, parts):
+    from rpyyarv import interp
+    for w_item in w_ary.items_w:
+        if isinstance(w_item, W_Array):
+            _join(w_item, sep, parts)
+        else:
+            parts.append(interp.to_s_string(w_item).str_w())
+
+
+class W_Join(W_CFunc):
+    def call(self, w_recv, args_w, w_block):
+        from rpyyarv.objects.string import W_String
+        assert isinstance(w_recv, W_Array)
+        if len(args_w) > 1:
+            raise UnsupportedOperation(
+                "wrong number of arguments to 'join' (given %d, expected 0..1)"
+                % len(args_w))
+        sep = ''
+        if len(args_w) == 1:
+            sep = args_w[0].str_w()
+        parts = []
+        _join(w_recv, sep, parts)
+        return W_String(sep.join(parts))
+
+
 class W_Inject(W_CFunc):
     def call(self, w_recv, args_w, w_block):
         from rpyyarv import interp
@@ -81,3 +154,7 @@ def install(w_class):
     for name in ['length', 'size']:
         mid = symbols.intern(name)
         w_class.add_method(mid, W_Length(mid, 0))
+    for name, cls, arity in [('each', W_Each, 0), ('map', W_Map, 0),
+                             ('join', W_Join, -1)]:
+        mid = symbols.intern(name)
+        w_class.add_method(mid, cls(mid, arity))

@@ -357,6 +357,11 @@ CRUBY_CASES = [
     ('length_size', 'a = [1, 2, 3]\nputs a.length\nputs a.size\n'
                     'puts "abc".size\nputs "a\\u00e9\\u20ac".length\n'
                     'puts [].size\n'),
+    ('array_each_map_join', 'a = [1, 2, 3]\nt = 0\nr = a.each { |x| t += x }\n'
+                            'puts t\nputs r.size\n'
+                            'puts a.map { |x| x * 2 }.join(",")\n'
+                            'puts [1, [2, [3, nil]], "s"].join("-")\n'
+                            'puts a.join\n'),
 ]
 
 # bench_clock.rb needs RPyYARV's bench_now_ns, which CRuby does not have.
