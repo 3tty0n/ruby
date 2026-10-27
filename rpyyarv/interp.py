@@ -48,17 +48,14 @@ def invoke(frame, iseq, w_ci, w_block, tail=False):
                                    % (symbols.name_of(w_ci.mid), w_recv.repr()))
 
     if isinstance(w_method, W_ISeqMethod):
-        if w_block is not None:
-            raise UnsupportedOperation(
-                "send with a block is not supported: '%s'"
-                % symbols.name_of(w_ci.mid))
         callee_iseq = w_method.w_iseq
         if not callee_iseq.simple_params:
             raise UnsupportedOperation(
                 "method '%s' has parameters RPyYARV does not support"
                 % symbols.name_of(w_ci.mid))
         _check_argc(w_ci.mid, argc, callee_iseq.nparams)
-        if tail and callee_iseq is iseq and not debug.is_enabled():
+        if (tail and callee_iseq is iseq and w_block is None
+                and frame.w_block is None and not debug.is_enabled()):
             # The separate argument stack makes f(b, a) safe to copy in place.
             i = 0
             while i < argc:
@@ -70,7 +67,7 @@ def invoke(frame, iseq, w_ci, w_block, tail=False):
             _drop(frame, iseq.nlocals)
             frame.w_self = w_recv
             return None
-        callee = Frame(callee_iseq, w_recv)
+        callee = Frame(callee_iseq, w_recv, None, w_block)
         i = 0
         while i < argc:
             callee.setlocal(i, frame.peek(recv_at + 1 + i))
@@ -112,19 +109,13 @@ def call_method(w_method, w_recv, args_w, w_block):
         return w_method.call(w_recv, args_w, w_block)
 
     assert isinstance(w_method, W_ISeqMethod)
-
-    if w_block is not None:
-        raise UnsupportedOperation(
-            "send with a block is not supported: '%s'"
-            % symbols.name_of(w_method.mid))
-
     callee_iseq = w_method.w_iseq
     if not callee_iseq.simple_params:
         raise UnsupportedOperation(
             "method '%s' has parameters RPyYARV does not support"
             % symbols.name_of(w_method.mid))
     _check_argc(w_method.mid, len(args_w), callee_iseq.nparams)
-    callee = Frame(callee_iseq, w_recv)
+    callee = Frame(callee_iseq, w_recv, None, w_block)
     i = 0
     while i < len(args_w):
         callee.setlocal(i, args_w[i])
@@ -149,6 +140,26 @@ def call_block(w_block, args_w):
         callee.setlocal(i, args_w[i])
         i += 1
     return execute(w_iseq, callee)
+
+
+@unroll_safe
+def yield_block(frame, w_ci):
+    if not w_ci.simple:
+        raise UnsupportedOperation(
+            "yield passes arguments RPyYARV does not support")
+    method_frame = frame
+    while method_frame.outer is not None:
+        method_frame = method_frame.outer
+    w_block = method_frame.w_block
+    if w_block is None:
+        raise UnsupportedOperation('no block given (yield)')
+    argc = w_ci.argc
+    args_w = [w_nil] * argc
+    i = argc - 1
+    while i >= 0:
+        args_w[i] = frame.pop()
+        i -= 1
+    return call_block(w_block, args_w)
 
 
 @unroll_safe
@@ -519,6 +530,10 @@ def execute(iseq, frame):
                 pc = target
                 if backward:
                     jitdriver.can_enter_jit(iseq=iseq, pc=pc, frame=frame)
+        elif opcode == insns.INVOKEBLOCK:
+            w_ci = _callinfo(iseq, code[pc])
+            pc += 1
+            frame.push(yield_block(frame, w_ci))
         elif opcode == insns.OPT_GETCONSTANT_PATH:
             w_path = iseq.consts[code[pc]]
             pc += 1

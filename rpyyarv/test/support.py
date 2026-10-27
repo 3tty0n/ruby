@@ -403,11 +403,12 @@ def check_loaded(program, l):
         assert w_iseq.nlocals == raw.nlocals
         assert w_iseq.stack_max == raw.stack_max
         assert w_iseq.nparams == raw.lead_num
+        params = [p for p in raw.extra_params.split(',')
+                  if p != '' and p != 'use_block']
         if raw.type == 'block' and raw.lead_num == 1:
-            assert w_iseq.simple_params == (
-                raw.extra_params == 'ambiguous_param0')
+            assert w_iseq.simple_params == (params == ['ambiguous_param0'])
         else:
-            assert w_iseq.simple_params == (raw.extra_params == '')
+            assert w_iseq.simple_params == (params == [])
         decoded = decode(w_iseq)
         assert len(decoded) == len(raw.insns)
         starts = []

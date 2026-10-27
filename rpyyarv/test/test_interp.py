@@ -303,7 +303,7 @@ def test_send_without_block():
     assert interp.execute(iseq, Frame(iseq, W_Main())).int_w() == 42
 
 
-def test_send_with_block_unsupported():
+def test_an_iseq_method_takes_a_block_it_never_yields_to():
     add_id = symbols.intern('add')
     w_block = asm([], 0, 1, [insns.PUTNIL, insns.LEAVE], name='block in add')
     iseq = asm([_add_iseq(), W_Fixnum(1), W_Fixnum(2),
@@ -315,8 +315,7 @@ def test_send_with_block_unsupported():
         insns.SEND, 3, 4,
         insns.LEAVE,
     ])
-    expect_unsupported(iseq, W_Main(),
-                       "send with a block is not supported: 'add'")
+    assert interp.execute(iseq, Frame(iseq, W_Main())).int_w() == 3
 
 
 def test_a_block_runs_under_the_self_it_was_written_in():

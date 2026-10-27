@@ -375,6 +375,10 @@ CRUBY_CASES = [
                       'def f\n  @a * 10\nend\nputs f\n'),
     ('constants', 'puts Array\nputs ::Integer\nputs Object\nx = Float\n'
                   'puts x == Float\nputs Array == Integer\n'),
+    ('yield', 'def f\n  yield 1, 2\nend\nf { |a, b| puts a + b }\n'
+              'def g(n)\n  n.times { |i| yield i * 10 }\nend\n'
+              'g(3) { |x| puts x }\ndef h\n  yield\nend\nputs h { 5 }\n'
+              'def c(x)\n  x\nend\nputs c(7) { 1 }\n'),
 ]
 
 # bench_clock.rb needs RPyYARV's bench_now_ns, which CRuby does not have.

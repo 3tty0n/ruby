@@ -139,9 +139,12 @@ def _operand(pending, v):
     if boot.is_hash(v):
         mid = boot.hash_aref(v, 'mid')
         argc = boot.hash_aref(v, 'orig_argc')
-        if boot.is_symbol(mid) and not boot.is_nil(argc):
+        if (boot.is_symbol(mid) or boot.is_nil(mid)) and not boot.is_nil(argc):
+            name = ''
+            if boot.is_symbol(mid):
+                name = boot.sym_of(mid)
             return rawiseq.RawOperand(
-                rawiseq.OP_CALL, boot.num2long(argc), boot.sym_of(mid),
+                rawiseq.OP_CALL, boot.num2long(argc), name,
                 _int_or(boot.hash_aref(v, 'flag'), 0),
                 not boot.is_nil(boot.hash_aref(v, 'kw_arg')))
     return rawiseq.RawOperand(rawiseq.OP_OTHER, 0, boot.inspect(v))

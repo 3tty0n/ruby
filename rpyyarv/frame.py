@@ -10,15 +10,16 @@ class Frame(object):
     # Keep small frames in one allocation; larger ones use overflow slots.
     _virtualizable_ = ['sp', 'slot0', 'slot1', 'slot2', 'slot3',
                       'slot4', 'slot5', 'slot6', 'slot7', 'extra[*]']
-    _immutable_fields_ = ['outer']
+    _immutable_fields_ = ['outer', 'w_block']
 
     @unroll_safe
-    def __init__(self, iseq, w_self=w_main, outer=None):
+    def __init__(self, iseq, w_self=w_main, outer=None, w_block=None):
         self = hint(self, access_directly=True, fresh_virtualizable=True)
         # sp is absolute: the operand stack starts after the locals.
         self.sp = iseq.nlocals
         self.w_self = w_self
         self.outer = outer
+        self.w_block = w_block
         self.slot0 = w_nil if iseq.nlocals > 0 else None
         self.slot1 = w_nil if iseq.nlocals > 1 else None
         self.slot2 = w_nil if iseq.nlocals > 2 else None
