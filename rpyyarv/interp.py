@@ -176,6 +176,8 @@ AREF = symbols.intern('[]')
 LENGTH = symbols.intern('length')
 EQ = symbols.intern('==')
 NEQ = symbols.intern('!=')
+DIV = symbols.intern('/')
+MOD = symbols.intern('%')
 SIZE = symbols.intern('size')
 ASET = symbols.intern('[]=')
 
@@ -335,6 +337,20 @@ def execute(iseq, frame):
             w_b = frame.pop()
             w_a = frame.pop()
             frame.push(helpers.w_mul(w_a, w_b))
+        elif opcode == insns.OPT_DIV:
+            w_b = frame.pop()
+            w_a = frame.pop()
+            if is_number(w_a) and is_number(w_b):
+                frame.push(helpers.w_div(w_a, w_b))
+            else:
+                frame.push(send(w_a, DIV, [w_b]))
+        elif opcode == insns.OPT_MOD:
+            w_b = frame.pop()
+            w_a = frame.pop()
+            if is_number(w_a) and is_number(w_b):
+                frame.push(helpers.w_mod(w_a, w_b))
+            else:
+                frame.push(send(w_a, MOD, [w_b]))
         elif opcode == insns.OPT_LT:
             w_b = frame.pop()
             w_a = frame.pop()

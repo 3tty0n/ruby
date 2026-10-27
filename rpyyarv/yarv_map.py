@@ -34,6 +34,8 @@ EMIT = {
     'opt_plus': [],         # CALL_DATA dropped
     'opt_minus': [],
     'opt_mult': [],
+    'opt_div': [],
+    'opt_mod': [],
     'opt_lt': [],
     'opt_gt': [],
     'opt_le': [],
