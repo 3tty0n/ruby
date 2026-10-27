@@ -27,6 +27,20 @@ class W_String(W_Root):
     def repr(self):
         return '"%s"' % self.strval
 
+def char_count(s):
+    """Characters in a UTF-8 string: every byte but continuation bytes."""
+    n = 0
+    for c in s:
+        if not ('\x80' <= c <= '\xbf'):
+            n += 1
+    return n
+
+
+class W_Length(W_CFunc):
+    def call(self, w_recv, args_w, w_block):
+        assert isinstance(w_recv, W_String)
+        return newint(char_count(w_recv.strval))
+
 _MAX_FIXNUM = sys.maxsize
 
 
@@ -163,3 +177,6 @@ def install(w_class):
     w_class.add_method(mid, W_ToI(mid, 0))  # arity=0
     split_id = symbols.intern('split')
     w_class.add_method(split_id, W_Split(split_id, 1))  # arity=1: 0 arguments and 2 arguments(with limit) are not supported yet
+    for name in ['length', 'size']:
+        mid = symbols.intern(name)
+        w_class.add_method(mid, W_Length(mid, 0))

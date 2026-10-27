@@ -9,7 +9,7 @@ from rpyyarv.methods import W_CFunc, W_ISeqMethod
 from rpyyarv.objects import array as arraylib
 from rpyyarv.objects.array import W_Array
 from rpyyarv.objects.string import W_String
-from rpyyarv.objects.transparent import W_Integer, w_nil
+from rpyyarv.objects.transparent import W_Integer, newint, w_nil
 from rpyyarv.rlib import JitDriver, elidable, unroll_safe
 
 
@@ -172,6 +172,8 @@ def _drop(frame, sp):
 
 TO_S = symbols.intern('to_s')
 AREF = symbols.intern('[]')
+LENGTH = symbols.intern('length')
+SIZE = symbols.intern('size')
 ASET = symbols.intern('[]=')
 
 
@@ -355,6 +357,14 @@ def execute(iseq, frame):
                 frame.push(arraylib.aset(w_recv, w_key.int_w(), w_value))
             else:
                 frame.push(send(w_recv, ASET, [w_key, w_value]))
+        elif opcode == insns.OPT_LENGTH or opcode == insns.OPT_SIZE:
+            w_recv = frame.pop()
+            if isinstance(w_recv, W_Array):
+                frame.push(newint(len(w_recv.items_w)))
+            elif opcode == insns.OPT_LENGTH:
+                frame.push(send(w_recv, LENGTH, []))
+            else:
+                frame.push(send(w_recv, SIZE, []))
         elif opcode == insns.OBJTOSTRING:
             frame.push(_to_s(frame.pop()))
         elif opcode == insns.ANYTOSTRING:

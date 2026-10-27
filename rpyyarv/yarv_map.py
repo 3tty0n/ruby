@@ -41,6 +41,8 @@ EMIT = {
     'opt_eq': [],
     'opt_aref': [],
     'opt_aset': [],
+    'opt_length': [],
+    'opt_size': [],
     'objtostring': [],      # CALL_DATA dropped: to_s is resolved inline
     'anytostring': [],
     'concatstrings': [0],

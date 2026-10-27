@@ -3,7 +3,7 @@ from rpyyarv.error import UnsupportedOperation
 from rpyyarv.methods import W_CFunc
 from rpyyarv.objects.base import W_Root
 from rpyyarv.objects.klass import w_array_class
-from rpyyarv.objects.transparent import w_nil
+from rpyyarv.objects.transparent import newint, w_nil
 
 
 class W_Array(W_Root):
@@ -51,6 +51,12 @@ class W_Aset(W_CFunc):
         return aset(w_recv, args_w[0].int_w(), args_w[1])
 
 
+class W_Length(W_CFunc):
+    def call(self, w_recv, args_w, w_block):
+        assert isinstance(w_recv, W_Array)
+        return newint(len(w_recv.items_w))
+
+
 class W_Inject(W_CFunc):
     def call(self, w_recv, args_w, w_block):
         from rpyyarv import interp
@@ -72,3 +78,6 @@ def install(w_class):
     w_class.add_method(aref_id, W_Aref(aref_id, 1))
     aset_id = symbols.intern('[]=')
     w_class.add_method(aset_id, W_Aset(aset_id, 2))
+    for name in ['length', 'size']:
+        mid = symbols.intern(name)
+        w_class.add_method(mid, W_Length(mid, 0))

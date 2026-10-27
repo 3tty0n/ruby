@@ -354,6 +354,9 @@ CRUBY_CASES = [
                     'a[1] = 20\na[5] = 6\nputs a[1]\nputs a[4]\nputs a[5]\n'),
     ('stack_shuffles', 'a = [1, 2]\nputs(a[0] = 7)\na[1] += 10\nputs a[0]\n'
                        'puts a[1]\nb = a[0] = 3\nputs b\n'),
+    ('length_size', 'a = [1, 2, 3]\nputs a.length\nputs a.size\n'
+                    'puts "abc".size\nputs "a\\u00e9\\u20ac".length\n'
+                    'puts [].size\n'),
 ]
 
 # bench_clock.rb needs RPyYARV's bench_now_ns, which CRuby does not have.
