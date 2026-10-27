@@ -21,6 +21,15 @@ class W_Const(W_CFunc):
         return self.w_value
 
 
+class W_NumEqual(W_CFunc):
+    def call(self, w_recv, args_w, w_block):
+        from rpyyarv import helpers
+        from rpyyarv import interp
+        if not interp.is_number(args_w[0]):
+            return w_false
+        return helpers.w_eq(w_recv, args_w[0])
+
+
 def _times_location(w_iseq):
     return 'times { %s }' % w_iseq.name
 
@@ -56,6 +65,8 @@ def _add_const(w_class, name, w_value):
 
 
 def install(w_class):
+    eq_id = symbols.intern('==')
+    w_class.add_method(eq_id, W_NumEqual(eq_id, 1))
     _add_const(w_class, 'real?', w_true)
     _add_self(w_class, 'real')
     _add_const(w_class, 'imag', newint(0))

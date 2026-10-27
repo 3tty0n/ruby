@@ -3,7 +3,7 @@ from rpyyarv.error import UnsupportedOperation
 from rpyyarv.methods import W_CFunc
 from rpyyarv.objects.base import W_Root
 from rpyyarv.objects.klass import w_array_class
-from rpyyarv.objects.transparent import newint, w_nil
+from rpyyarv.objects.transparent import newint, w_false, w_nil, w_true
 from rpyyarv.rlib import JitDriver
 
 
@@ -130,6 +130,23 @@ class W_Join(W_CFunc):
         return W_String(sep.join(parts))
 
 
+class W_AryEqual(W_CFunc):
+    def call(self, w_recv, args_w, w_block):
+        from rpyyarv import interp
+        assert isinstance(w_recv, W_Array)
+        w_other = args_w[0]
+        if not isinstance(w_other, W_Array):
+            return w_false
+        if len(w_other.items_w) != len(w_recv.items_w):
+            return w_false
+        i = 0
+        while i < len(w_recv.items_w):
+            if not interp.equal(w_recv.items_w[i], w_other.items_w[i]):
+                return w_false
+            i += 1
+        return w_true
+
+
 class W_Inject(W_CFunc):
     def call(self, w_recv, args_w, w_block):
         from rpyyarv import interp
@@ -158,3 +175,5 @@ def install(w_class):
                              ('join', W_Join, -1)]:
         mid = symbols.intern(name)
         w_class.add_method(mid, cls(mid, arity))
+    eq_id = symbols.intern('==')
+    w_class.add_method(eq_id, W_AryEqual(eq_id, 1))

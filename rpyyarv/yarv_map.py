@@ -39,6 +39,8 @@ EMIT = {
     'opt_le': [],
     'opt_ge': [],
     'opt_eq': [],
+    'opt_neq': [],
+    'opt_not': [],
     'opt_aref': [],
     'opt_aset': [],
     'opt_length': [],

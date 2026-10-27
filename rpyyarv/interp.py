@@ -9,7 +9,8 @@ from rpyyarv.methods import W_CFunc, W_ISeqMethod
 from rpyyarv.objects import array as arraylib
 from rpyyarv.objects.array import W_Array
 from rpyyarv.objects.string import W_String
-from rpyyarv.objects.transparent import W_Integer, newint, w_nil
+from rpyyarv.objects.float import W_Float
+from rpyyarv.objects.transparent import W_Integer, newbool, newint, w_nil
 from rpyyarv.rlib import JitDriver, elidable, unroll_safe
 
 
@@ -173,12 +174,24 @@ def _drop(frame, sp):
 TO_S = symbols.intern('to_s')
 AREF = symbols.intern('[]')
 LENGTH = symbols.intern('length')
+EQ = symbols.intern('==')
+NEQ = symbols.intern('!=')
 SIZE = symbols.intern('size')
 ASET = symbols.intern('[]=')
 
 
 def send(w_recv, mid, args_w):
     return call_method(w_recv.lookup_method(mid), w_recv, args_w, None)
+
+
+def is_number(w_x):
+    return isinstance(w_x, W_Integer) or isinstance(w_x, W_Float)
+
+
+def equal(w_a, w_b):
+    if is_number(w_a) and is_number(w_b):
+        return helpers.w_eq(w_a, w_b).is_true()
+    return send(w_a, EQ, [w_b]).is_true()
 
 
 def _to_s(w_x):
@@ -341,7 +354,16 @@ def execute(iseq, frame):
         elif opcode == insns.OPT_EQ:
             w_b = frame.pop()
             w_a = frame.pop()
-            frame.push(helpers.w_eq(w_a, w_b))
+            frame.push(newbool(equal(w_a, w_b)))
+        elif opcode == insns.OPT_NEQ:
+            w_b = frame.pop()
+            w_a = frame.pop()
+            if is_number(w_a) and is_number(w_b):
+                frame.push(newbool(not helpers.w_eq(w_a, w_b).is_true()))
+            else:
+                frame.push(send(w_a, NEQ, [w_b]))
+        elif opcode == insns.OPT_NOT:
+            frame.push(newbool(not frame.pop().is_true()))
         elif opcode == insns.OPT_AREF:
             w_key = frame.pop()
             w_recv = frame.pop()

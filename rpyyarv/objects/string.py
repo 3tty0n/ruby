@@ -6,7 +6,7 @@ from rpyyarv.objects.array import W_Array
 from rpyyarv.objects.base import W_Root
 from rpyyarv.objects.klass import w_string_class
 from rpyyarv.objects.regexp import W_Regexp
-from rpyyarv.objects.transparent import newint
+from rpyyarv.objects.transparent import newbool, newint
 from rpyyarv.error import UnsupportedOperation
 
 class W_String(W_Root):
@@ -34,6 +34,14 @@ def char_count(s):
         if not ('\x80' <= c <= '\xbf'):
             n += 1
     return n
+
+
+class W_StrEqual(W_CFunc):
+    def call(self, w_recv, args_w, w_block):
+        assert isinstance(w_recv, W_String)
+        w_other = args_w[0]
+        return newbool(isinstance(w_other, W_String)
+                       and w_other.strval == w_recv.strval)
 
 
 class W_Length(W_CFunc):
@@ -180,3 +188,5 @@ def install(w_class):
     for name in ['length', 'size']:
         mid = symbols.intern(name)
         w_class.add_method(mid, W_Length(mid, 0))
+    eq_id = symbols.intern('==')
+    w_class.add_method(eq_id, W_StrEqual(eq_id, 1))
