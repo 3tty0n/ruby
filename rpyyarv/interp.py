@@ -6,9 +6,10 @@ from rpyyarv.error import UnsupportedOperation
 from rpyyarv.frame import Frame
 from rpyyarv.iseq import W_Block, W_CallInfo, W_ISeq, NO_BLOCK_ISEQ, tail_position
 from rpyyarv.methods import W_CFunc, W_ISeqMethod
+from rpyyarv.objects import array as arraylib
 from rpyyarv.objects.array import W_Array
 from rpyyarv.objects.string import W_String
-from rpyyarv.objects.transparent import w_nil
+from rpyyarv.objects.transparent import W_Integer, w_nil
 from rpyyarv.rlib import JitDriver, elidable, unroll_safe
 
 
@@ -170,6 +171,12 @@ def _drop(frame, sp):
 
 
 TO_S = symbols.intern('to_s')
+AREF = symbols.intern('[]')
+ASET = symbols.intern('[]=')
+
+
+def send(w_recv, mid, args_w):
+    return call_method(w_recv.lookup_method(mid), w_recv, args_w, None)
 
 
 def _to_s(w_x):
@@ -314,6 +321,21 @@ def execute(iseq, frame):
             w_b = frame.pop()
             w_a = frame.pop()
             frame.push(helpers.w_eq(w_a, w_b))
+        elif opcode == insns.OPT_AREF:
+            w_key = frame.pop()
+            w_recv = frame.pop()
+            if isinstance(w_recv, W_Array) and isinstance(w_key, W_Integer):
+                frame.push(arraylib.aref(w_recv, w_key.int_w()))
+            else:
+                frame.push(send(w_recv, AREF, [w_key]))
+        elif opcode == insns.OPT_ASET:
+            w_value = frame.pop()
+            w_key = frame.pop()
+            w_recv = frame.pop()
+            if isinstance(w_recv, W_Array) and isinstance(w_key, W_Integer):
+                frame.push(arraylib.aset(w_recv, w_key.int_w(), w_value))
+            else:
+                frame.push(send(w_recv, ASET, [w_key, w_value]))
         elif opcode == insns.OBJTOSTRING:
             frame.push(_to_s(frame.pop()))
         elif opcode == insns.ANYTOSTRING:

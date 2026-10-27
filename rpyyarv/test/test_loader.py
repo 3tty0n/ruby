@@ -350,6 +350,8 @@ CRUBY_CASES = [
     ('array_literals', 'a = 1\nb = [a, a + 1, 3]\n'
                        'puts b.inject(0) { |s, x| s + x }\n'
                        'c = [1, 2]\nputs c.inject(10) { |s, x| s + x }\n'),
+    ('array_index', 'a = [1, 2, 3]\nputs a[0]\nputs a[-1]\nputs a[5]\n'
+                    'a[1] = 20\na[5] = 6\nputs a[1]\nputs a[4]\nputs a[5]\n'),
 ]
 
 # bench_clock.rb needs RPyYARV's bench_now_ns, which CRuby does not have.
