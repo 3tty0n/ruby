@@ -39,6 +39,15 @@ class W_Root(object):
         raise UnsupportedOperation(
             'cannot define a method on %s' % self.repr())
 
+    def get_ivar(self, mid):
+        from rpyyarv.objects.transparent import w_nil
+        return w_nil
+
+    def set_ivar(self, mid, w_value):
+        raise UnsupportedOperation(
+            "cannot set instance variable '%s' on %s"
+            % (symbols.name_of(mid), self.repr()))
+
     def no_method_error(self, mid):
         return UnsupportedOperation("undefined method '%s' for %s"
                                     % (symbols.name_of(mid), self.repr()))

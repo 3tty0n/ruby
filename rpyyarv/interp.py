@@ -280,6 +280,14 @@ def execute(iseq, frame):
                 frame.setlocal(idx, frame.pop())
             else:
                 _outer(frame, level).setlocal(idx, frame.pop())
+        elif opcode == insns.GETINSTANCEVARIABLE:
+            mid = code[pc]
+            pc += 1
+            frame.push(frame.w_self.get_ivar(mid))
+        elif opcode == insns.SETINSTANCEVARIABLE:
+            mid = code[pc]
+            pc += 1
+            frame.w_self.set_ivar(mid, frame.pop())
         elif opcode == insns.DUP:
             w_x = frame.pop()
             frame.push(w_x)

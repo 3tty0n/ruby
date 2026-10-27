@@ -13,6 +13,7 @@ from rpyyarv.objects import array as arraylib
 from rpyyarv.objects import float as floatlib
 from rpyyarv.objects import numeric as numericlib
 from rpyyarv.objects import string as stringlib
+from rpyyarv.objects.transparent import w_nil
 
 # CRuby gives main a singleton class with its own to_s, so a toplevel
 # `def to_s` (which lands on Object) does not change how main prints.
@@ -20,8 +21,17 @@ w_main_class = W_Class('Object', w_object_class)
 
 
 class W_Main(W_Root):
+    def __init__(self):
+        self.ivars_w = {}
+
     def getclass(self):
         return w_main_class
+
+    def get_ivar(self, mid):
+        return self.ivars_w.get(mid, w_nil)
+
+    def set_ivar(self, mid, w_value):
+        self.ivars_w[mid] = w_value
 
     # CRuby defines a toplevel `def` as a private method on Object, not on a
     # singleton class of main.

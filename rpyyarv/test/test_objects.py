@@ -50,6 +50,16 @@ def test_to_s_str():
         W_Array([]).to_s_str()
 
 
+def test_instance_variables():
+    w_obj = W_Object(w_object_class)
+    mid = symbols.intern('@x')
+    assert w_obj.get_ivar(mid) is w_nil
+    w_obj.set_ivar(mid, W_Fixnum(3))
+    assert w_obj.get_ivar(mid).int_w() == 3
+    with pytest.raises(UnsupportedOperation):
+        W_Fixnum(1).set_ivar(mid, w_nil)
+
+
 def test_getclass():
     assert W_Fixnum(1).getclass() is w_integer_class
     assert W_String('').getclass() is w_string_class

@@ -23,6 +23,8 @@ EMIT = {
     'duparray': [0],
     'getlocal': [0, 1],
     'setlocal': [0, 1],
+    'getinstancevariable': [0],     # IVC dropped
+    'setinstancevariable': [0],
     'dup': [],
     'pop': [],
     'swap': [],
