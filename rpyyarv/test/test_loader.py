@@ -251,6 +251,18 @@ def test_a_block_with_a_rest_parameter_is_refused(compile_source):
                        "RPyYARV does not support")
 
 
+@pytest.mark.parametrize('source, msg', [
+    ('a = 4611686018427387903\nb = a + a + 1\nb + 1\n',
+     '9223372036854775807 + 1'),
+    ('a = -4611686018427387904\nb = a + a\nb - 1\n',
+     '-9223372036854775808 - 1'),
+    ('3037000500 * 3037000500\n', '3037000500 * 3037000500')])
+def test_integer_overflow_is_refused(source, msg, compile_source):
+    w_iseq = loader.load_dump(compile_source(source))
+    expect_unsupported(w_iseq, None,
+                       msg + ' overflows a Fixnum: RPyYARV has no Bignum yet')
+
+
 def test_malformed_dump():
     expect(LoadError, 'dump\t99\t3.3.8\tx.rb\n',
            'dump format version 99, expected 1')
@@ -319,6 +331,9 @@ CRUBY_CASES = [
     ('times', '3.times { |i| puts i }\nputs 3.times { }\n'
               '0.times { puts 1 }\n2.times { puts "x" }\n'
               '2.times { |a, b| puts a\n  puts b }\n'),
+    ('int_beyond_fixnum', 'puts 4611686018427387903 + 1\n'
+                          'puts -4611686018427387904 - 1\n'
+                          'puts 3037000499 * 3037000499\n'),
 ]
 
 # bench_clock.rb needs RPyYARV's bench_now_ns, which CRuby does not have.

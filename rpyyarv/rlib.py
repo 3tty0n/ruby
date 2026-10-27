@@ -7,6 +7,7 @@ try:
     from rpython.rlib.objectmodel import UnboxedValue, fetch_translated_config
     from rpython.rlib.rstackovf import StackOverflow, check_stack_overflow
     from rpython.rlib.rfloat import formatd
+    from rpython.rlib.rarithmetic import ovfcheck
 
     def float_repr(x):
         return formatd(x, 'r', 0)
@@ -70,6 +71,12 @@ except ImportError:
     StackOverflow = RuntimeError
 
     float_repr = repr
+
+    def ovfcheck(r):
+        import sys
+        if not -sys.maxsize - 1 <= r <= sys.maxsize:
+            raise OverflowError
+        return r
 
     def check_stack_overflow():
         pass
