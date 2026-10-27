@@ -26,6 +26,10 @@ EMIT = {
     'dup': [],
     'pop': [],
     'swap': [],
+    'topn': [0],
+    'setn': [0],
+    'dupn': [0],
+    'adjuststack': [0],
     'expandarray': [0],     # flag is checked, only plain masgn
     'opt_plus': [],         # CALL_DATA dropped
     'opt_minus': [],

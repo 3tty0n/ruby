@@ -274,6 +274,25 @@ def execute(iseq, frame):
             w_b = frame.pop()
             frame.push(w_a)
             frame.push(w_b)
+        elif opcode == insns.TOPN:
+            n = code[pc]
+            pc += 1
+            frame.push(frame.peek(frame.sp - 1 - n))
+        elif opcode == insns.SETN:
+            n = code[pc]
+            pc += 1
+            frame.setlocal(frame.sp - 1 - n, frame.peek(frame.sp - 1))
+        elif opcode == insns.DUPN:
+            n = code[pc]
+            pc += 1
+            i = 0
+            while i < n:
+                frame.push(frame.peek(frame.sp - n))
+                i += 1
+        elif opcode == insns.ADJUSTSTACK:
+            n = code[pc]
+            pc += 1
+            _drop(frame, frame.sp - n)
         elif opcode == insns.EXPANDARRAY:
             n = code[pc]
             pc += 1
