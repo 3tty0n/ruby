@@ -93,11 +93,11 @@ def test_local_slots_are_remapped():
     assert w_body.nlocals == 3
     assert w_body.nparams == 2
     assert [(op, operands) for _, op, operands in decode(w_body)] == [
-        (insns.GETLOCAL, [0]),
-        (insns.GETLOCAL, [1]),
+        (insns.GETLOCAL, [0, 0]),
+        (insns.GETLOCAL, [1, 0]),
         (insns.OPT_MINUS, []),
-        (insns.SETLOCAL, [2]),
-        (insns.GETLOCAL, [2]),
+        (insns.SETLOCAL, [2, 0]),
+        (insns.GETLOCAL, [2, 0]),
         (insns.LEAVE, []),
     ]
 
@@ -157,10 +157,17 @@ def test_missing_instructions_are_counted():
            'newarray x2, putstring x1')
 
 
-def test_local_level_rejected():
-    expect(UnsupportedOperation, fixture('block.iseq'),
-           "getlocal at level 1 in 'block in <main>' reaches an enclosing "
-           "scope, which RPyYARV does not support")
+def test_a_block_local_names_its_enclosing_scope():
+    w_block = loader.load_dump(fixture('block.iseq')).consts[1]
+    _, operands = only_insn(w_block, insns.GETLOCAL)
+    assert operands == [0, 1]
+
+
+def test_a_level_beyond_the_nesting_is_refused():
+    text = patched(fixture('block.iseq'), 'insn\tgetlocal_WC_1\ti:3',
+                   'insn\tgetlocal\ti:3\ti:2')
+    expect(LoadError, text, "getlocal in 'block in <main>' reaches level 2, "
+           "but it is nested only 1 deep")
 
 
 def test_blockless_send_encoding():
@@ -334,6 +341,12 @@ CRUBY_CASES = [
     ('int_beyond_fixnum', 'puts 4611686018427387903 + 1\n'
                           'puts -4611686018427387904 - 1\n'
                           'puts 3037000499 * 3037000499\n'),
+    ('block_reads_outer', 'x = 5\n1.times { puts x }\n'),
+    ('block_writes_outer', 'sum = 0\n4.times { |i| sum += i }\nputs sum\n'),
+    ('nested_blocks', 'a = 1\n1.times { b = 2\n  1.times { puts a + b\n'
+                      '    a = 10 } }\nputs a\n'),
+    ('block_in_method', 'def f(n)\n  t = 0\n  n.times { |i| t += i }\n'
+                        '  t\nend\nputs f(5)\n'),
 ]
 
 # bench_clock.rb needs RPyYARV's bench_now_ns, which CRuby does not have.

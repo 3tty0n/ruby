@@ -273,7 +273,8 @@ def _check_code_references(w_iseq):
                     '%s in %s jumps outside the code'
                     % (insns.NAMES[op], w_iseq.name))
             elif t == insns.T_LINDEX_T:
-                assert 0 <= value < w_iseq.nlocals
+                assert 0 <= value and (operands[1] > 0
+                                       or value < w_iseq.nlocals)
             elif t == insns.T_ISEQ:
                 if value == NO_BLOCK_ISEQ:
                     assert op == insns.SEND
@@ -323,7 +324,7 @@ def _check_literal(w_x, raw_op):
         raise AssertionError('unexpected literal kind %r' % kind)
 
 
-def _check_operand_values(raw, w_iseq, decoded, labels, l):
+def _check_operand_values(raw, w_iseq, decoded, labels, l, scope_of):
     for (_, op, operands), insn in zip(decoded, raw.insns):
         raw_ops = _raw_operands(insn, op)
         for i, pos in enumerate(optable.EMIT_POSITIONS[op]):
@@ -335,8 +336,10 @@ def _check_operand_values(raw, w_iseq, decoded, labels, l):
                 assert got == labels[raw_op.strval]
             elif t == insns.T_LINDEX_T:
                 assert raw_op.kind == rawiseq.OP_INT
-                assert got == (raw.nlocals - raw_op.intval
+                scope = scope_of(raw_ops[1].intval)
+                assert got == (scope.nlocals - raw_op.intval
                                + optable.ENV_DATA_SIZE - 1)
+                assert 0 <= got < scope.nlocals
             elif t == insns.T_RB_NUM_T:
                 assert raw_op.kind == rawiseq.OP_INT
                 assert got == raw_op.intval
@@ -372,6 +375,19 @@ def _check_operand_values(raw, w_iseq, decoded, labels, l):
 
 def check_loaded(program, l):
     assert set(l.w_iseqs) <= set(range(len(program.iseqs)))
+    parent = {}
+    for index, raw in enumerate(program.iseqs):
+        for insn in raw.insns:
+            for operand in insn.operands:
+                if operand.kind == rawiseq.OP_ISEQ:
+                    parent[operand.intval] = index
+
+    def scope_of(index, level):
+        while level > 0:
+            index = parent[index]
+            level -= 1
+        return program.iseqs[index]
+
     for index, raw in enumerate(program.iseqs):
         if index not in l.w_iseqs:
             continue
@@ -401,4 +417,5 @@ def check_loaded(program, l):
             assert op == _base_opcode(insn)
         assert len(w_iseq.code) == pc
         _check_code_references(w_iseq)
-        _check_operand_values(raw, w_iseq, decoded, labels, l)
+        _check_operand_values(raw, w_iseq, decoded, labels, l,
+                              lambda level: scope_of(index, level))

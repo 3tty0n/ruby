@@ -19,8 +19,8 @@ EMIT = {
     'putself': [],
     'putobject': [0],
     'putchilledstring': [0],
-    'getlocal': [0],        # level is checked against MAX_LOCAL_LEVEL
-    'setlocal': [0],        # likewise
+    'getlocal': [0, 1],
+    'setlocal': [0, 1],
     'dup': [],
     'pop': [],
     'swap': [],
@@ -75,10 +75,6 @@ DISCARDED_OPERAND_TYPES = frozenset([
     'ICVARC',
     'ISE',
 ])
-
-# A non-zero level reaches an enclosing scope, so the _WC_1 variants and any
-# explicit non-zero level are rejected until blocks land.
-MAX_LOCAL_LEVEL = 0
 
 # vm_core.h. A lindex_t operand counts down from the top of the environment:
 #     slot = nlocals - operand + ENV_DATA_SIZE - 1

@@ -21,12 +21,12 @@ def countdown(send=insns.OPT_SEND_WITHOUT_BLOCK, indirect=False,
               result_slot=1):
     mid = symbols.intern('countdown')
     items = [
-        insns.GETLOCAL, 0, insns.PUTOBJECT, 0, insns.OPT_EQ,
+        insns.GETLOCAL, 0, 0, insns.PUTOBJECT, 0, insns.OPT_EQ,
         insns.BRANCHUNLESS, 'again',
-        insns.GETLOCAL, result_slot, insns.LEAVE,
+        insns.GETLOCAL, result_slot, 0, insns.LEAVE,
         ':again', insns.PUTSELF,
-        insns.GETLOCAL, 0, insns.PUTOBJECT, 1, insns.OPT_MINUS,
-        insns.GETLOCAL, 2, insns.GETLOCAL, 1,
+        insns.GETLOCAL, 0, 0, insns.PUTOBJECT, 1, insns.OPT_MINUS,
+        insns.GETLOCAL, 2, 0, insns.GETLOCAL, 1, 0,
         send, 2,
     ]
     if send == insns.SEND:
@@ -128,7 +128,7 @@ def test_tail_call_updates_self(monkeypatch):
     klass = W_Class('Receiver')
     other = W_Object(klass)
     body = asm([W_Fixnum(0), W_CallInfo(mid, 1), other], 1, 2, [
-        insns.GETLOCAL, 0, insns.BRANCHUNLESS, 'again',
+        insns.GETLOCAL, 0, 0, insns.BRANCHUNLESS, 'again',
         insns.PUTSELF, insns.LEAVE,
         ':again', insns.PUTOBJECT, 2, insns.PUTOBJECT, 0,
         insns.OPT_SEND_WITHOUT_BLOCK, 1, insns.LEAVE,
@@ -152,17 +152,18 @@ def test_tail_position_rejects_work_and_cycles():
 def test_ackermann_preserves_the_nested_non_tail_call(monkeypatch):
     mid = symbols.intern('ack')
     body = asm([W_Fixnum(0), W_Fixnum(1), W_CallInfo(mid, 2)], 2, 6, [
-        insns.GETLOCAL, 0, insns.PUTOBJECT, 0, insns.OPT_EQ,
+        insns.GETLOCAL, 0, 0, insns.PUTOBJECT, 0, insns.OPT_EQ,
         insns.BRANCHUNLESS, 'nonzero_m',
-        insns.GETLOCAL, 1, insns.PUTOBJECT, 1, insns.OPT_PLUS, insns.LEAVE,
-        ':nonzero_m', insns.GETLOCAL, 1, insns.PUTOBJECT, 0, insns.OPT_EQ,
+        insns.GETLOCAL, 1, 0, insns.PUTOBJECT, 1, insns.OPT_PLUS, insns.LEAVE,
+        ':nonzero_m', insns.GETLOCAL, 1, 0, insns.PUTOBJECT, 0, insns.OPT_EQ,
         insns.BRANCHUNLESS, 'nested',
-        insns.PUTSELF, insns.GETLOCAL, 0, insns.PUTOBJECT, 1, insns.OPT_MINUS,
+        insns.PUTSELF, insns.GETLOCAL, 0, 0, insns.PUTOBJECT, 1,
+        insns.OPT_MINUS,
         insns.PUTOBJECT, 1, insns.OPT_SEND_WITHOUT_BLOCK, 2, insns.LEAVE,
         ':nested', insns.PUTSELF,
-        insns.GETLOCAL, 0, insns.PUTOBJECT, 1, insns.OPT_MINUS,
-        insns.PUTSELF, insns.GETLOCAL, 0,
-        insns.GETLOCAL, 1, insns.PUTOBJECT, 1, insns.OPT_MINUS,
+        insns.GETLOCAL, 0, 0, insns.PUTOBJECT, 1, insns.OPT_MINUS,
+        insns.PUTSELF, insns.GETLOCAL, 0, 0,
+        insns.GETLOCAL, 1, 0, insns.PUTOBJECT, 1, insns.OPT_MINUS,
         insns.OPT_SEND_WITHOUT_BLOCK, 2,
         insns.OPT_SEND_WITHOUT_BLOCK, 2, insns.LEAVE,
     ], name='ack', nparams=2)

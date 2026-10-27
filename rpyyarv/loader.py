@@ -57,6 +57,7 @@ class Loader(object):
         self.missing = {}           # unimplemented name -> occurrences
         self.missing_names = []     # first seen first, for a stable report
         self.w_iseqs = {}           # program index -> W_ISeq
+        self.loading = []
 
     def load(self):
         self.scan()
@@ -154,6 +155,7 @@ class Loader(object):
             raise LoadError("'%s' takes %d parameter(s) but has %d local(s)"
                             % (raw.name, raw.lead_num, raw.nlocals))
 
+        self.loading.append(raw)
         # Widths first: a jump needs the pc of a later instruction.
         opcodes = []
         operands = []
@@ -207,18 +209,12 @@ class Loader(object):
         w_iseq = W_ISeq(raw.name, code, [w for w in pool.consts], raw.nlocals,
                         raw.stack_max, raw.lead_num, simple)
         self.w_iseqs[index] = w_iseq
+        self.loading.pop()
         return w_iseq
 
     def check_dropped(self, op, ops, raw):
         """Operand positions yarv_map.py does not emit, checked here."""
-        if op == insns.GETLOCAL or op == insns.SETLOCAL:
-            level = self.int_of(ops[1], op, raw, 'level')
-            if level > optable.MAX_LOCAL_LEVEL:
-                raise UnsupportedOperation(
-                    "%s at level %d in '%s' reaches an enclosing scope, which "
-                    "RPyYARV does not support"
-                    % (insns.NAMES[op], level, raw.name))
-        elif op == insns.EXPANDARRAY:
+        if op == insns.EXPANDARRAY:
             flag = self.int_of(ops[1], op, raw, 'flag')
             if flag != 0:
                 raise UnsupportedOperation(
@@ -231,7 +227,7 @@ class Loader(object):
         if t == insns.T_VALUE:
             return self.literal(operand, op, raw, pool)
         if t == insns.T_LINDEX_T:
-            return self.local_slot(operand, op, raw)
+            return self.local_slot(operand, op, ops, raw)
         if t == insns.T_RB_NUM_T:
             return self.int_of(operand, op, raw, 'operand')
         if t == insns.T_OFFSET:
@@ -289,13 +285,21 @@ class Loader(object):
             "%s of %s in '%s': RPyYARV has no such object yet"
             % (insns.NAMES[op], operand.describe(), raw.name))
 
-    def local_slot(self, operand, op, raw):
+    def local_slot(self, operand, op, ops, raw):
         idx = self.int_of(operand, op, raw, 'local index')
-        slot = raw.nlocals - idx + optable.ENV_DATA_SIZE - 1
-        if slot < 0 or slot >= raw.nlocals:
-            raise LoadError("%s in '%s' names local index %d, outside its %d "
-                            "local(s)"
-                            % (insns.NAMES[op], raw.name, idx, raw.nlocals))
+        level = self.int_of(ops[1], op, raw, 'level')
+        if level < 0 or level >= len(self.loading):
+            raise LoadError("%s in '%s' reaches level %d, but it is nested "
+                            "only %d deep"
+                            % (insns.NAMES[op], raw.name, level,
+                               len(self.loading) - 1))
+        scope = self.loading[len(self.loading) - 1 - level]
+        slot = scope.nlocals - idx + optable.ENV_DATA_SIZE - 1
+        if slot < 0 or slot >= scope.nlocals:
+            raise LoadError("%s in '%s' names local index %d, outside the %d "
+                            "local(s) of '%s'"
+                            % (insns.NAMES[op], raw.name, idx, scope.nlocals,
+                               scope.name))
         return slot
 
     def label(self, operand, op, raw, labels):

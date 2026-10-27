@@ -139,12 +139,22 @@ def call_block(w_block, args_w):
         raise UnsupportedOperation(
             "block '%s' would splat its Array argument, which RPyYARV does "
             "not support yet" % w_iseq.name)
-    callee = Frame(w_iseq, w_block.w_self)
+    callee = Frame(w_iseq, w_block.w_self, w_block.outer)
     i = 0
     while i < len(args_w) and i < w_iseq.nparams:
         callee.setlocal(i, args_w[i])
         i += 1
     return execute(w_iseq, callee)
+
+
+@unroll_safe
+def _outer(frame, level):
+    outer = frame.outer
+    while level > 1:
+        outer = outer.outer
+        level -= 1
+    return outer
+
 
 def _check_argc(mid, argc, want):
     if argc != want:
@@ -230,14 +240,22 @@ def execute(iseq, frame):
             frame.push(W_String(iseq.consts[idx].str_w())) 
         elif opcode == insns.GETLOCAL:
             idx = code[pc]
-            pc += 1
+            level = code[pc + 1]
+            pc += 2
             assert idx >= 0
-            frame.push(frame.getlocal(idx))
+            if level == 0:
+                frame.push(frame.getlocal(idx))
+            else:
+                frame.push(_outer(frame, level).getlocal(idx))
         elif opcode == insns.SETLOCAL:
             idx = code[pc]
-            pc += 1
+            level = code[pc + 1]
+            pc += 2
             assert idx >= 0
-            frame.setlocal(idx, frame.pop())
+            if level == 0:
+                frame.setlocal(idx, frame.pop())
+            else:
+                _outer(frame, level).setlocal(idx, frame.pop())
         elif opcode == insns.DUP:
             w_x = frame.pop()
             frame.push(w_x)
@@ -340,7 +358,8 @@ def execute(iseq, frame):
             if block == NO_BLOCK_ISEQ:
                 w_block = None
             else:
-                w_block = W_Block(_as_iseq(iseq.consts[block]), frame.w_self)
+                w_block = W_Block(_as_iseq(iseq.consts[block]), frame.w_self,
+                                  frame)
             w_ret = invoke(frame, iseq, w_ci, w_block,
                            _call_tail(iseq, w_ci, pc))
             if w_ret is None:

@@ -37,12 +37,12 @@ def test_arith():
 def test_locals():
     iseq = asm([W_Fixnum(42)], 2, 4, [
         insns.PUTOBJECT, 0,
-        insns.SETLOCAL, 1,
-        insns.GETLOCAL, 1,
+        insns.SETLOCAL, 1, 0,
+        insns.GETLOCAL, 1, 0,
         insns.LEAVE,
     ])
     assert interp.run(iseq).int_w() == 42
-    iseq2 = asm([], 2, 4, [insns.GETLOCAL, 0, insns.LEAVE])
+    iseq2 = asm([], 2, 4, [insns.GETLOCAL, 0, 0, insns.LEAVE])
     assert interp.run(iseq2) is w_nil
 
 
@@ -72,25 +72,25 @@ def test_loop_sum():
     # local 0 = i, local 1 = sum
     iseq = asm([W_Fixnum(0), W_Fixnum(1), W_Fixnum(100)], 2, 4, [
         insns.PUTOBJECT, 0,
-        insns.SETLOCAL, 1,
+        insns.SETLOCAL, 1, 0,
         insns.PUTOBJECT, 1,
-        insns.SETLOCAL, 0,
+        insns.SETLOCAL, 0, 0,
         ':loop',
-        insns.GETLOCAL, 0,
+        insns.GETLOCAL, 0, 0,
         insns.PUTOBJECT, 2,
         insns.OPT_LE,
         insns.BRANCHUNLESS, 'end',
-        insns.GETLOCAL, 1,
-        insns.GETLOCAL, 0,
+        insns.GETLOCAL, 1, 0,
+        insns.GETLOCAL, 0, 0,
         insns.OPT_PLUS,
-        insns.SETLOCAL, 1,
-        insns.GETLOCAL, 0,
+        insns.SETLOCAL, 1, 0,
+        insns.GETLOCAL, 0, 0,
         insns.PUTOBJECT, 1,
         insns.OPT_PLUS,
-        insns.SETLOCAL, 0,
+        insns.SETLOCAL, 0, 0,
         insns.JUMP, 'loop',
         ':end',
-        insns.GETLOCAL, 1,
+        insns.GETLOCAL, 1, 0,
         insns.LEAVE,
     ])
     assert interp.run(iseq).int_w() == 5050
@@ -100,31 +100,31 @@ def test_fib_iter():
     # locals: 0 = a, 1 = b, 2 = i, 3 = t
     iseq = asm([W_Fixnum(0), W_Fixnum(1), W_Fixnum(30)], 4, 4, [
         insns.PUTOBJECT, 0,
-        insns.SETLOCAL, 0,
+        insns.SETLOCAL, 0, 0,
         insns.PUTOBJECT, 1,
-        insns.SETLOCAL, 1,
+        insns.SETLOCAL, 1, 0,
         insns.PUTOBJECT, 0,
-        insns.SETLOCAL, 2,
+        insns.SETLOCAL, 2, 0,
         ':loop',
-        insns.GETLOCAL, 2,
+        insns.GETLOCAL, 2, 0,
         insns.PUTOBJECT, 2,
         insns.OPT_LT,
         insns.BRANCHUNLESS, 'end',
-        insns.GETLOCAL, 0,
-        insns.GETLOCAL, 1,
+        insns.GETLOCAL, 0, 0,
+        insns.GETLOCAL, 1, 0,
         insns.OPT_PLUS,
-        insns.SETLOCAL, 3,
-        insns.GETLOCAL, 1,
-        insns.SETLOCAL, 0,
-        insns.GETLOCAL, 3,
-        insns.SETLOCAL, 1,
-        insns.GETLOCAL, 2,
+        insns.SETLOCAL, 3, 0,
+        insns.GETLOCAL, 1, 0,
+        insns.SETLOCAL, 0, 0,
+        insns.GETLOCAL, 3, 0,
+        insns.SETLOCAL, 1, 0,
+        insns.GETLOCAL, 2, 0,
         insns.PUTOBJECT, 1,
         insns.OPT_PLUS,
-        insns.SETLOCAL, 2,
+        insns.SETLOCAL, 2, 0,
         insns.JUMP, 'loop',
         ':end',
-        insns.GETLOCAL, 0,
+        insns.GETLOCAL, 0, 0,
         insns.LEAVE,
     ])
     assert interp.run(iseq).int_w() == 832040
@@ -185,8 +185,8 @@ def test_putself():
 def _add_iseq():
     # def add(a, b) = a + b
     return asm([], 2, 2, [
-        insns.GETLOCAL, 0,
-        insns.GETLOCAL, 1,
+        insns.GETLOCAL, 0, 0,
+        insns.GETLOCAL, 1, 0,
         insns.OPT_PLUS,
         insns.LEAVE,
     ], name='add', nparams=2)
@@ -195,8 +195,8 @@ def _add_iseq():
 def _sub_iseq():
     # def sub(a, b) = a - b
     return asm([], 2, 2, [
-        insns.GETLOCAL, 0,
-        insns.GETLOCAL, 1,
+        insns.GETLOCAL, 0, 0,
+        insns.GETLOCAL, 1, 0,
         insns.OPT_MINUS,
         insns.LEAVE,
     ], name='sub', nparams=2)
@@ -247,20 +247,20 @@ def _fib_program(n):
     """What CRuby compiles for `def fib(n) ... end; fib(n)`."""
     fib_id = symbols.intern('fib')
     w_body = asm([W_Fixnum(2), W_Fixnum(1), W_CallInfo(fib_id, 1)], 1, 6, [
-        insns.GETLOCAL, 0,
+        insns.GETLOCAL, 0, 0,
         insns.PUTOBJECT, 0,
         insns.OPT_LT,
         insns.BRANCHUNLESS, 'rec',
-        insns.GETLOCAL, 0,
+        insns.GETLOCAL, 0, 0,
         insns.LEAVE,
         ':rec',
         insns.PUTSELF,
-        insns.GETLOCAL, 0,
+        insns.GETLOCAL, 0, 0,
         insns.PUTOBJECT, 1,
         insns.OPT_MINUS,
         insns.OPT_SEND_WITHOUT_BLOCK, 2,
         insns.PUTSELF,
-        insns.GETLOCAL, 0,
+        insns.GETLOCAL, 0, 0,
         insns.PUTOBJECT, 0,
         insns.OPT_MINUS,
         insns.OPT_SEND_WITHOUT_BLOCK, 2,
@@ -347,7 +347,7 @@ def _yield_one(w_arg):
     call_id = symbols.intern('call_it')
     w_self = W_Main()
     w_self.define_method(call_id, W_CallIt(call_id, 0))
-    w_block = asm([], 2, 1, [insns.GETLOCAL, 1, insns.LEAVE],
+    w_block = asm([], 2, 1, [insns.GETLOCAL, 1, 0, insns.LEAVE],
                   name='block in test', nparams=2)
     iseq = asm([W_CallInfo(call_id, 0), w_block], 0, 2, [
         insns.PUTSELF,
@@ -373,8 +373,8 @@ def test_a_block_does_not_splat_an_array_yet():
 def test_inject_with_an_initial_value():
     inject_id = symbols.intern('inject')
     w_block = asm([], 2, 2, [
-        insns.GETLOCAL, 0,
-        insns.GETLOCAL, 1,
+        insns.GETLOCAL, 0, 0,
+        insns.GETLOCAL, 1, 0,
         insns.OPT_PLUS,
         insns.LEAVE,
     ], name='block in test', nparams=2)
@@ -445,7 +445,7 @@ def test_unsupported_call_shapes():
                        "support")
 
     opt_id = symbols.intern('opt')
-    w_body = asm([], 2, 2, [insns.GETLOCAL, 0, insns.LEAVE],
+    w_body = asm([], 2, 2, [insns.GETLOCAL, 0, 0, insns.LEAVE],
                  name='opt', nparams=1, simple_params=False)
     iseq2 = asm([w_body, W_Fixnum(1), W_CallInfo(opt_id, 1)], 0, 4, [
         insns.DEFINEMETHOD, opt_id, 0,
@@ -832,8 +832,8 @@ def test_a_block_reaches_a_cfunc():
     w_self = W_Main()
     w_self.define_method(twice_id, W_Twice(twice_id, 1))
     w_block = asm([], 1, 2, [
-        insns.GETLOCAL, 0,
-        insns.GETLOCAL, 0,
+        insns.GETLOCAL, 0, 0,
+        insns.GETLOCAL, 0, 0,
         insns.OPT_PLUS,
         insns.LEAVE,
     ], name='block in test', nparams=1)
@@ -913,7 +913,7 @@ def test_instance_method_is_found_through_its_class():
     w_class.add_method(bar_id, W_ISeqMethod(bar_id, body))
     w_obj = _send_new(w_class, [])
     iseq = asm([W_CallInfo(bar_id, 0)], 1, 2, [
-        insns.GETLOCAL, 0,
+        insns.GETLOCAL, 0, 0,
         insns.OPT_SEND_WITHOUT_BLOCK, 0,
         insns.LEAVE,
     ])
@@ -927,7 +927,7 @@ def test_new_is_not_inherited_by_instances():
     w_obj = _send_new(w_class, [])
     new_id = symbols.intern('new')
     iseq = asm([W_CallInfo(new_id, 0)], 1, 2, [
-        insns.GETLOCAL, 0,
+        insns.GETLOCAL, 0, 0,
         insns.OPT_SEND_WITHOUT_BLOCK, 0,
         insns.LEAVE,
     ])
@@ -976,7 +976,7 @@ def test_method_in_a_class_body_is_public():
 def _send_new(w_class, args_w):
     """Foo.new(*args) through the interpreter's own dispatch."""
     new_id = symbols.intern('new')
-    items = [insns.GETLOCAL, 0]
+    items = [insns.GETLOCAL, 0, 0]
     consts = [W_CallInfo(new_id, len(args_w))]
     for i in range(len(args_w)):
         consts.append(args_w[i])
