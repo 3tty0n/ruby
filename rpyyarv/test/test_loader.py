@@ -149,12 +149,12 @@ def test_missing_instructions_are_reported_together():
 def test_missing_instructions_are_counted():
     text = patched(fixture('fib_rec.iseq'),
                    'insn\tputself\ninsn\tgetlocal_WC_0\ti:3',
-                   'insn\tnewarray\ti:0\ninsn\tnewarray\ti:0\n'
+                   'insn\topt_reverse\ti:0\ninsn\topt_reverse\ti:0\n'
                    'insn\tputstring\ts:x\n'
                    'insn\tputself\ninsn\tgetlocal_WC_0\ti:3')
     expect(UnsupportedOperation, text,
            '2 unimplemented instruction(s) in 3 occurrence(s): '
-           'newarray x2, putstring x1')
+           'opt_reverse x2, putstring x1')
 
 
 def test_a_block_local_names_its_enclosing_scope():
@@ -347,6 +347,9 @@ CRUBY_CASES = [
                       '    a = 10 } }\nputs a\n'),
     ('block_in_method', 'def f(n)\n  t = 0\n  n.times { |i| t += i }\n'
                         '  t\nend\nputs f(5)\n'),
+    ('array_literals', 'a = 1\nb = [a, a + 1, 3]\n'
+                       'puts b.inject(0) { |s, x| s + x }\n'
+                       'c = [1, 2]\nputs c.inject(10) { |s, x| s + x }\n'),
 ]
 
 # bench_clock.rb needs RPyYARV's bench_now_ns, which CRuby does not have.

@@ -19,6 +19,8 @@ EMIT = {
     'putself': [],
     'putobject': [0],
     'putchilledstring': [0],
+    'newarray': [0],
+    'duparray': [0],
     'getlocal': [0, 1],
     'setlocal': [0, 1],
     'dup': [],

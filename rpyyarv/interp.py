@@ -323,6 +323,21 @@ def execute(iseq, frame):
                 raise UnsupportedOperation('to_s on %s did not return a String'
                                            % w_val.repr())
             frame.push(w_str)
+        elif opcode == insns.NEWARRAY:
+            n = code[pc]
+            pc += 1
+            items_w = [w_nil] * n
+            i = n - 1
+            while i >= 0:
+                items_w[i] = frame.pop()
+                i -= 1
+            frame.push(W_Array(items_w))
+        elif opcode == insns.DUPARRAY:
+            idx = code[pc]
+            pc += 1
+            w_ary = iseq.consts[idx]
+            assert isinstance(w_ary, W_Array)
+            frame.push(W_Array(w_ary.items_w[:]))
         elif opcode == insns.CONCATSTRINGS:
             n = code[pc]
             pc += 1
