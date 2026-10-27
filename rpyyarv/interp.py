@@ -128,6 +128,7 @@ def call_method(w_method, w_recv, args_w, w_block):
     return execute(callee_iseq, callee)
 
 
+@unroll_safe
 def call_block(w_block, args_w):
     w_iseq = w_block.w_iseq
     if not w_iseq.simple_params:
@@ -197,7 +198,7 @@ def get_printable_location(pc, iseq):
 
 
 jitdriver = JitDriver(greens=['pc', 'iseq'], reds=['frame'],
-                      virtualizables=['frame'],
+                      virtualizables=['frame'], is_recursive=True,
                       get_printable_location=get_printable_location)
 
 
