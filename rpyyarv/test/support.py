@@ -15,7 +15,7 @@ from rpyyarv import rawiseq
 from rpyyarv import symbols
 from rpyyarv.error import UnsupportedOperation
 from rpyyarv.frame import Frame
-from rpyyarv.iseq import W_CallInfo, W_ISeq, NO_BLOCK_ISEQ
+from rpyyarv.iseq import W_CallInfo, W_ConstPath, W_ISeq, NO_BLOCK_ISEQ
 from rpyyarv.objects.array import W_Array
 from rpyyarv.objects.float import W_Float
 from rpyyarv.objects.main import W_Main
@@ -286,6 +286,8 @@ def _check_code_references(w_iseq):
                 assert isinstance(w_iseq.consts[value], W_CallInfo)
             elif t == insns.T_VALUE:
                 assert 0 <= value < len(w_iseq.consts)
+            elif t == insns.T_IC:
+                assert isinstance(w_iseq.consts[value], W_ConstPath)
             elif t == insns.T_ID or t == insns.T_RB_NUM_T:
                 pass
             else:
@@ -369,6 +371,11 @@ def _check_operand_values(raw, w_iseq, decoded, labels, l, scope_of):
             elif t == insns.T_VALUE:
                 assert 0 <= got < len(w_iseq.consts)
                 _check_literal(w_iseq.consts[got], raw_op)
+            elif t == insns.T_IC:
+                names = [symbols.name_of(mid)
+                         for mid in w_iseq.consts[got].mids]
+                assert names == [item.strval for item in raw_op.items
+                                 if item.strval != '']
             else:
                 raise AssertionError('unexpected operand type %r' % t)
 

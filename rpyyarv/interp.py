@@ -4,12 +4,14 @@ from rpyyarv import helpers
 from rpyyarv import symbols
 from rpyyarv.error import UnsupportedOperation
 from rpyyarv.frame import Frame
-from rpyyarv.iseq import W_Block, W_CallInfo, W_ISeq, NO_BLOCK_ISEQ, tail_position
+from rpyyarv.iseq import (W_Block, W_CallInfo, W_ConstPath, W_ISeq,
+                          NO_BLOCK_ISEQ, tail_position)
 from rpyyarv.methods import W_CFunc, W_ISeqMethod
 from rpyyarv.objects import array as arraylib
 from rpyyarv.objects.array import W_Array
 from rpyyarv.objects.string import W_String
 from rpyyarv.objects.float import W_Float
+from rpyyarv.objects.klass import W_Class, w_object_class
 from rpyyarv.objects.transparent import W_Integer, newbool, newint, w_nil
 from rpyyarv.rlib import JitDriver, elidable, unroll_safe
 
@@ -184,6 +186,21 @@ ASET = symbols.intern('[]=')
 
 def send(w_recv, mid, args_w):
     return call_method(w_recv.lookup_method(mid), w_recv, args_w, None)
+
+
+@unroll_safe
+def _const(w_path):
+    w_scope = w_object_class
+    for mid in w_path.mids:
+        if not isinstance(w_scope, W_Class):
+            raise UnsupportedOperation('%s is not a class/module'
+                                       % w_scope.repr())
+        w_value = w_scope.find_const(mid)
+        if w_value is None:
+            raise UnsupportedOperation('uninitialized constant %s'
+                                       % symbols.name_of(mid))
+        w_scope = w_value
+    return w_scope
 
 
 def is_number(w_x):
@@ -502,6 +519,11 @@ def execute(iseq, frame):
                 pc = target
                 if backward:
                     jitdriver.can_enter_jit(iseq=iseq, pc=pc, frame=frame)
+        elif opcode == insns.OPT_GETCONSTANT_PATH:
+            w_path = iseq.consts[code[pc]]
+            pc += 1
+            assert isinstance(w_path, W_ConstPath)
+            frame.push(_const(w_path))
         elif opcode == insns.LEAVE:
             return frame.pop()
         else:

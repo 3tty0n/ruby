@@ -58,6 +58,7 @@ EMIT = {
     'definemethod': [0, 1],
     'opt_send_without_block': [0],
     'send': [0, 1],         # blockiseq is iseq.NO_BLOCK_ISEQ when absent
+    'opt_getconstant_path': [0],
     'leave': [],
 }
 
@@ -73,6 +74,8 @@ EMIT = {
 #   CALL_DATA  -> W_CallInfo(mid, orig_argc) in the constant pool, index
 #                 emitted. Flags outside SIMPLE_CALL_FLAGS must clear
 #                 W_CallInfo.simple so the call fails loudly.
+#   IC         -> opt_getconstant_path's names as a W_ConstPath in the
+#                 constant pool, index emitted
 SUPPORTED_OPERAND_TYPES = frozenset([
     'VALUE',
     'lindex_t',
@@ -81,12 +84,12 @@ SUPPORTED_OPERAND_TYPES = frozenset([
     'ID',
     'ISEQ',
     'CALL_DATA',
+    'IC',
 ])
 
 # Operands the loader drops: CRuby's inline caches, which the meta-tracing
 # JIT is meant to rediscover.
 DISCARDED_OPERAND_TYPES = frozenset([
-    'IC',
     'IVC',
     'ICVARC',
     'ISE',

@@ -6,7 +6,8 @@ from rpyyarv import optable
 from rpyyarv import rawiseq
 from rpyyarv import symbols
 from rpyyarv.error import LoadError, UnsupportedOperation
-from rpyyarv.iseq import W_CallInfo, W_ISeq, NO_BLOCK_ISEQ, tail_position
+from rpyyarv.iseq import (W_CallInfo, W_ConstPath, W_ISeq, NO_BLOCK_ISEQ,
+                          tail_position)
 from rpyyarv.objects.array import W_Array
 from rpyyarv.objects.float import W_Float
 from rpyyarv.objects.string import W_String
@@ -234,6 +235,8 @@ class Loader(object):
             return self.label(operand, op, raw, labels)
         if t == insns.T_ID:
             return symbols.intern(self.sym_of(operand, op, raw))
+        if t == insns.T_IC:
+            return pool.add(self.const_path(operand, op, raw))
         if t == insns.T_ISEQ:
             if operand.kind == rawiseq.OP_NIL:
                 return NO_BLOCK_ISEQ      # no block at this call site
@@ -327,6 +330,17 @@ class Loader(object):
         return W_CallInfo(symbols.intern(operand.strval), operand.intval,
                           simple, (flags & optable.CALL_FLAG_FCALL) != 0,
                           tail)
+
+    def const_path(self, operand, op, raw):
+        if operand.kind != rawiseq.OP_ARRAY:
+            raise LoadError("%s in '%s' wants constant names, got %s"
+                            % (insns.NAMES[op], raw.name, operand.describe()))
+        mids = []
+        for item in operand.items:
+            name = self.sym_of(item, op, raw)
+            if name != '':
+                mids.append(symbols.intern(name))
+        return W_ConstPath(mids)
 
     def int_of(self, operand, op, raw, what):
         if operand.kind != rawiseq.OP_INT:

@@ -373,6 +373,8 @@ CRUBY_CASES = [
                 'puts 7.5 % 2\nputs -7.5 % 2\nputs 7.5 % -2\n'),
     ('ivars_on_main', '@a = 1\n@a += 2\nputs @a\nputs @b\n'
                       'def f\n  @a * 10\nend\nputs f\n'),
+    ('constants', 'puts Array\nputs ::Integer\nputs Object\nx = Float\n'
+                  'puts x == Float\nputs Array == Integer\n'),
 ]
 
 # bench_clock.rb needs RPyYARV's bench_now_ns, which CRuby does not have.

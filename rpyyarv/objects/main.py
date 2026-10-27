@@ -1,14 +1,15 @@
 """The toplevel self: an ordinary Object, as in CRuby."""
 
 from rpyyarv import classlib
+from rpyyarv import symbols
 from rpyyarv import kernel
 from rpyyarv.objects.base import W_Root
 from rpyyarv.objects.klass import (W_Class, w_array_class, w_class_class,
                                    w_false_class, w_float_class,
                                    w_integer_class, w_nil_class,
                                    w_numeric_class, w_object_class,
-                                   w_string_class, w_symbol_class,
-                                   w_true_class)
+                                   w_regexp_class, w_string_class,
+                                   w_symbol_class, w_true_class)
 from rpyyarv.objects import array as arraylib
 from rpyyarv.objects import float as floatlib
 from rpyyarv.objects import numeric as numericlib
@@ -59,5 +60,11 @@ arraylib.install(w_array_class)
 numericlib.install(w_numeric_class)
 numericlib.install_integer(w_integer_class)
 floatlib.install(w_float_class)
+
+for _w_class in (w_object_class, w_class_class, w_numeric_class,
+                 w_integer_class, w_float_class, w_string_class,
+                 w_symbol_class, w_array_class, w_regexp_class, w_nil_class,
+                 w_true_class, w_false_class):
+    w_object_class.set_const(symbols.intern(_w_class.name), _w_class)
 
 w_main = W_Main()

@@ -10,7 +10,7 @@ class VersionTag(object):
 
 
 class W_Class(W_Root):
-    _immutable_fields_ = ['name', 'w_superclass', 'version?']
+    _immutable_fields_ = ['name', 'w_superclass', 'version?', 'const_version?']
 
     def __init__(self, name, w_superclass=None):
         self.name = name
@@ -18,6 +18,8 @@ class W_Class(W_Root):
         self.methods = MethodTable()
         self.subclasses_w = []
         self.version = VersionTag()
+        self.constants_w = {}
+        self.const_version = VersionTag()
         if w_superclass is not None:
             w_superclass.subclasses_w.append(self)
 
@@ -35,6 +37,20 @@ class W_Class(W_Root):
         self.version = VersionTag()
         for w_subclass in self.subclasses_w:
             w_subclass.method_table_changed()
+
+    def set_const(self, mid, w_value):
+        self.constants_w[mid] = w_value
+        self.const_version = VersionTag()
+
+    def find_const(self, mid):
+        return self._find_const(mid, self.const_version)
+
+    @elidable
+    def _find_const(self, mid, version):
+        return self.constants_w.get(mid, None)
+
+    def to_s_str(self):
+        return self.name
 
     def find_method(self, mid):
         return self._find_in_ancestors(mid, self.version)

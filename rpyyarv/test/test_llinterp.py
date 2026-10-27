@@ -22,6 +22,7 @@ import pytest
 from rpyyarv import loader
 from rpyyarv.test import support
 from rpyyarv.frame import Frame
+from rpyyarv.iseq import W_ConstPath
 from rpyyarv.objects.array import W_Array
 from rpyyarv.objects.main import W_Main
 from rpyyarv.objects.regexp import W_Regexp
@@ -41,7 +42,7 @@ def _seed():
     """llinterp sees only the graph it is given, and a field with no writer
     in it has no type. Building one of each keeps execute() annotatable."""
     return (len(W_Array([w_nil]).items_w) + len(W_String('x').strval)
-            + len(W_Regexp('x').pattern))
+            + len(W_Regexp('x').pattern) + len(W_ConstPath([0]).mids))
 
 
 def ll_run(w_iseq):

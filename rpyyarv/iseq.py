@@ -84,3 +84,14 @@ class W_Block(W_Root):
 
     def repr(self):
         return '<W_Block %s>' % self.w_iseq.name
+
+
+class W_ConstPath(W_Root):
+    _immutable_fields_ = ['mids[*]']
+
+    def __init__(self, mids):
+        self.mids = mids
+
+    def repr(self):
+        return '<W_ConstPath %s>' % '::'.join(
+            [symbols.name_of(mid) for mid in self.mids])
