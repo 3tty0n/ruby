@@ -105,13 +105,15 @@ class W_Map(W_CFunc):
         return W_Array(result_w)
 
 
-def _join(w_ary, sep, parts):
+def _join(w_ary, sep):
     from rpyyarv import interp
+    parts = []
     for w_item in w_ary.items_w:
         if isinstance(w_item, W_Array):
-            _join(w_item, sep, parts)
+            parts.append(_join(w_item, sep))
         else:
             parts.append(interp.to_s_string(w_item).str_w())
+    return sep.join(parts)
 
 
 class W_Join(W_CFunc):
@@ -123,11 +125,9 @@ class W_Join(W_CFunc):
                 "wrong number of arguments to 'join' (given %d, expected 0..1)"
                 % len(args_w))
         sep = ''
-        if len(args_w) == 1:
+        if len(args_w) == 1 and args_w[0] is not w_nil:
             sep = args_w[0].str_w()
-        parts = []
-        _join(w_recv, sep, parts)
-        return W_String(sep.join(parts))
+        return W_String(_join(w_recv, sep))
 
 
 class W_AryEqual(W_CFunc):

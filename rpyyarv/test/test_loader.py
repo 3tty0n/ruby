@@ -371,6 +371,15 @@ CRUBY_CASES = [
                             'puts a.map { |x| x * 2 }.join(",")\n'
                             'puts [1, [2, [3, nil]], "s"].join("-")\n'
                             'puts a.join\n'),
+    ('array_join_nested', 'puts [1, [], 2].join("-")\nputs [1, []].join(",")\n'
+                          'puts [[[]]].join(",")\n'
+                          'puts [1, [2, []], 3].join("-")\n'
+                          'puts [1, 2].join(nil)\n'),
+    ('array_mutated_in_loop', 'a = [1, 2]\nr = []\n'
+                              'a.each { |x| r[r.size] = x\n'
+                              '  a[a.size] = 9 if a.size < 4 }\n'
+                              'puts r.join(",")\nb = [1, 2, 3]\n'
+                              'puts b.map { |x| b[2] = 7 if x == 1\n  x }.join(",")\n'),
     ('equality', 'puts 1 == 1.0\nputs 1 != 2\nputs 1 == nil\nputs nil == nil\n'
                  'puts "a" == "a"\nputs "a" != "b"\nputs :a == :a\n'
                  'puts [1, "x", [2]] == [1, "x", [2]]\nputs [1] == [2]\n'
