@@ -8,13 +8,13 @@ from rpyyarv.rlib import ovfcheck
 
 INF = float('inf')
 NAN = float('nan')
+TWO_63 = 9223372036854775808.0
+UNORDERED = 2
 
 # Interface contract C2: wrapped in, wrapped out. A Float operand makes both
 # sides Floats, as in CRuby; other non-integer operands make int_w() raise
 # UnsupportedOperation from W_Root. With no Bignum, an Integer result beyond
 # 64 bits raises UnsupportedOperation too.
-# TODO: CRuby compares an Integer with a Float exactly; float() rounds
-# integers beyond 2**53, so 2**53 + 1 == 2.0**53 is true here.
 
 
 def _floats(w_a, w_b):
@@ -108,31 +108,71 @@ def w_mod(w_a, w_b):
     return newint(a % b)
 
 
+def _int_float_cmp(i, f):
+    if math.isnan(f):
+        return UNORDERED
+    if f >= TWO_63:
+        return -1
+    if f < -TWO_63:
+        return 1
+    whole = math.floor(f)
+    n = int(whole)
+    if i < n:
+        return -1
+    if i > n:
+        return 1
+    if f > whole:
+        return -1
+    return 0
+
+
+def _float_cmp(w_a, w_b):
+    a_float = isinstance(w_a, W_Float)
+    if a_float and isinstance(w_b, W_Float):
+        x = w_a.float_w()
+        y = w_b.float_w()
+        if x < y:
+            return -1
+        if x > y:
+            return 1
+        if x == y:
+            return 0
+        return UNORDERED
+    if a_float:
+        c = _int_float_cmp(w_b.int_w(), w_a.float_w())
+        if c == UNORDERED:
+            return c
+        return -c
+    return _int_float_cmp(w_a.int_w(), w_b.float_w())
+
+
 def w_lt(w_a, w_b):
     if _floats(w_a, w_b):
-        return newbool(w_a.float_w() < w_b.float_w())
+        return newbool(_float_cmp(w_a, w_b) == -1)
     return newbool(w_a.int_w() < w_b.int_w())
 
 
 def w_gt(w_a, w_b):
     if _floats(w_a, w_b):
-        return newbool(w_a.float_w() > w_b.float_w())
+        return newbool(_float_cmp(w_a, w_b) == 1)
     return newbool(w_a.int_w() > w_b.int_w())
 
 
 def w_le(w_a, w_b):
     if _floats(w_a, w_b):
-        return newbool(w_a.float_w() <= w_b.float_w())
+        c = _float_cmp(w_a, w_b)
+        return newbool(c == -1 or c == 0)
     return newbool(w_a.int_w() <= w_b.int_w())
 
 
 def w_ge(w_a, w_b):
     if _floats(w_a, w_b):
-        return newbool(w_a.float_w() >= w_b.float_w())
+        c = _float_cmp(w_a, w_b)
+        return newbool(c == 0 or c == 1)
     return newbool(w_a.int_w() >= w_b.int_w())
 
 
 def w_eq(w_a, w_b):
     if _floats(w_a, w_b):
-        return newbool(w_a.float_w() == w_b.float_w())
+        return newbool(_float_cmp(w_a, w_b) == 0)
     return newbool(w_a.int_w() == w_b.int_w())

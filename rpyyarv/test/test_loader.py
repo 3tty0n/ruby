@@ -376,6 +376,12 @@ CRUBY_CASES = [
                  'puts [1, "x", [2]] == [1, "x", [2]]\nputs [1] == [2]\n'
                  'puts [1] != [1]\nputs !nil\nputs !1\nputs !!false\n'
                  'puts "a" == 1\n'),
+    ('int_float_exact', 'a = 9007199254740993\nf = 9007199254740992.0\n'
+                        'puts a == f\nputs a > f\nputs f < a\nputs a <= f\n'
+                        'puts a != f\nputs 1 == 1.0\nputs -0.0 == 0\n'
+                        'nan = 0.0 / 0\nputs 1 < nan\nputs 1 >= nan\n'
+                        'puts 1 != nan\nputs 4611686018427387903 < 1e19\n'
+                        'puts 1 > -1e400\nputs 2.5 > 2\nputs 2 >= 2.0\n'),
     ('div_mod', 'puts 7 / 2\nputs -7 / 2\nputs 7 / -2\nputs 7 % 3\n'
                 'puts -7 % 3\nputs 7 % -3\nputs 7.0 / 2\nputs 7 / 2.0\n'
                 'puts 1.0 / 0\nputs -1.0 / 0\nputs 0.0 / 0\nputs 1.0 / -0.0\n'
