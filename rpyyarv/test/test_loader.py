@@ -270,6 +270,14 @@ def test_integer_overflow_is_refused(source, msg, compile_source):
                        msg + ' overflows a Fixnum: RPyYARV has no Bignum yet')
 
 
+@pytest.mark.parametrize('source, msg', [
+    ('def !\n  1\nend\n!nil\n', "private method '!' called for nil"),
+    ('def ==(o)\n  1\nend\nnil == 2\n',
+     "private method '==' called for nil")])
+def test_a_private_operator_method_is_refused(source, msg, compile_source):
+    expect_unsupported(loader.load_dump(compile_source(source)), None, msg)
+
+
 def test_malformed_dump():
     expect(LoadError, 'dump\t99\t3.3.8\tx.rb\n',
            'dump format version 99, expected 1')

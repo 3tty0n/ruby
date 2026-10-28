@@ -189,6 +189,7 @@ AREF = symbols.intern('[]')
 LENGTH = symbols.intern('length')
 EQ = symbols.intern('==')
 NEQ = symbols.intern('!=')
+NOT = symbols.intern('!')
 DIV = symbols.intern('/')
 MOD = symbols.intern('%')
 SIZE = symbols.intern('size')
@@ -197,6 +198,14 @@ ASET = symbols.intern('[]=')
 
 def send(w_recv, mid, args_w):
     return call_method(w_recv.lookup_method(mid), w_recv, args_w, None)
+
+
+def send_op(w_recv, mid, args_w):
+    w_method = w_recv.lookup_method(mid)
+    if w_method.private:
+        raise UnsupportedOperation("private method '%s' called for %s"
+                                   % (symbols.name_of(mid), w_recv.repr()))
+    return call_method(w_method, w_recv, args_w, None)
 
 
 @unroll_safe
@@ -379,14 +388,14 @@ def execute(iseq, frame):
             if is_number(w_a) and is_number(w_b):
                 frame.push(helpers.w_div(w_a, w_b))
             else:
-                frame.push(send(w_a, DIV, [w_b]))
+                frame.push(send_op(w_a, DIV, [w_b]))
         elif opcode == insns.OPT_MOD:
             w_b = frame.pop()
             w_a = frame.pop()
             if is_number(w_a) and is_number(w_b):
                 frame.push(helpers.w_mod(w_a, w_b))
             else:
-                frame.push(send(w_a, MOD, [w_b]))
+                frame.push(send_op(w_a, MOD, [w_b]))
         elif opcode == insns.OPT_LT:
             w_b = frame.pop()
             w_a = frame.pop()
@@ -406,23 +415,26 @@ def execute(iseq, frame):
         elif opcode == insns.OPT_EQ:
             w_b = frame.pop()
             w_a = frame.pop()
-            frame.push(newbool(equal(w_a, w_b)))
+            if is_number(w_a) and is_number(w_b):
+                frame.push(helpers.w_eq(w_a, w_b))
+            else:
+                frame.push(send_op(w_a, EQ, [w_b]))
         elif opcode == insns.OPT_NEQ:
             w_b = frame.pop()
             w_a = frame.pop()
             if is_number(w_a) and is_number(w_b):
                 frame.push(newbool(not helpers.w_eq(w_a, w_b).is_true()))
             else:
-                frame.push(send(w_a, NEQ, [w_b]))
+                frame.push(send_op(w_a, NEQ, [w_b]))
         elif opcode == insns.OPT_NOT:
-            frame.push(newbool(not frame.pop().is_true()))
+            frame.push(send_op(frame.pop(), NOT, []))
         elif opcode == insns.OPT_AREF:
             w_key = frame.pop()
             w_recv = frame.pop()
             if isinstance(w_recv, W_Array) and isinstance(w_key, W_Integer):
                 frame.push(arraylib.aref(w_recv, w_key.int_w()))
             else:
-                frame.push(send(w_recv, AREF, [w_key]))
+                frame.push(send_op(w_recv, AREF, [w_key]))
         elif opcode == insns.OPT_ASET:
             w_value = frame.pop()
             w_key = frame.pop()
@@ -430,15 +442,15 @@ def execute(iseq, frame):
             if isinstance(w_recv, W_Array) and isinstance(w_key, W_Integer):
                 frame.push(arraylib.aset(w_recv, w_key.int_w(), w_value))
             else:
-                frame.push(send(w_recv, ASET, [w_key, w_value]))
+                frame.push(send_op(w_recv, ASET, [w_key, w_value]))
         elif opcode == insns.OPT_LENGTH or opcode == insns.OPT_SIZE:
             w_recv = frame.pop()
             if isinstance(w_recv, W_Array):
                 frame.push(newint(len(w_recv.items_w)))
             elif opcode == insns.OPT_LENGTH:
-                frame.push(send(w_recv, LENGTH, []))
+                frame.push(send_op(w_recv, LENGTH, []))
             else:
-                frame.push(send(w_recv, SIZE, []))
+                frame.push(send_op(w_recv, SIZE, []))
         elif opcode == insns.OBJTOSTRING:
             frame.push(_to_s(frame.pop()))
         elif opcode == insns.ANYTOSTRING:
