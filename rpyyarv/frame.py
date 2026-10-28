@@ -46,6 +46,14 @@ class Frame(object):
     def setlocal(self, index, w_x):
         self._setslot(index, w_x)
 
+    @unroll_safe
+    def outer_at(self, level):
+        outer = self.outer
+        while level > 1:
+            outer = outer.outer
+            level -= 1
+        return outer
+
     def peek(self, index):
         return self._getslot(index)
 

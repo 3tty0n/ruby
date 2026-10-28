@@ -162,15 +162,6 @@ def yield_block(frame, w_ci):
     return call_block(w_block, args_w)
 
 
-@unroll_safe
-def _outer(frame, level):
-    outer = frame.outer
-    while level > 1:
-        outer = outer.outer
-        level -= 1
-    return outer
-
-
 def _check_argc(mid, argc, want):
     if argc != want:
         raise UnsupportedOperation(
@@ -307,7 +298,7 @@ def execute(iseq, frame):
             if level == 0:
                 frame.push(frame.getlocal(idx))
             else:
-                frame.push(_outer(frame, level).getlocal(idx))
+                frame.push(frame.outer_at(level).getlocal(idx))
         elif opcode == insns.SETLOCAL:
             idx = code[pc]
             level = code[pc + 1]
@@ -316,7 +307,7 @@ def execute(iseq, frame):
             if level == 0:
                 frame.setlocal(idx, frame.pop())
             else:
-                _outer(frame, level).setlocal(idx, frame.pop())
+                frame.outer_at(level).setlocal(idx, frame.pop())
         elif opcode == insns.GETINSTANCEVARIABLE:
             mid = code[pc]
             pc += 1
