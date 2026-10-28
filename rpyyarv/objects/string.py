@@ -28,11 +28,11 @@ class W_String(W_Root):
         return '"%s"' % self.strval
 
 def char_count(s):
-    """Characters in a UTF-8 string: every byte but continuation bytes."""
     n = 0
-    for c in s:
-        if not ('\x80' <= c <= '\xbf'):
-            n += 1
+    i = 0
+    while i < len(s):
+        i += _char_width(s, i)
+        n += 1
     return n
 
 
