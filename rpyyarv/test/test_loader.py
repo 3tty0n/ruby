@@ -404,6 +404,10 @@ CRUBY_CASES = [
                          'puts @a == [nil]\n'),
     ('join_repeated', 'a = [1, 2]\nputs [a, a].join(",")\n'
                       'puts [[a], a].join("-")\n'),
+    ('float_mod_inf', 'i = 1.0 / 0\nputs i % 2\nputs -i % 2\nputs i % i\n'
+                      'puts 5 % i\nputs -1.0 % i\n'),
+    ('int_mod_min', 'a = -4611686018427387904\nb = a + a\nputs b % -1\n'
+                    'puts b % 3\n'),
     ('int_float_exact', 'a = 9007199254740993\nf = 9007199254740992.0\n'
                         'puts a == f\nputs a > f\nputs f < a\nputs a <= f\n'
                         'puts a != f\nputs 1 == 1.0\nputs -0.0 == 0\n'

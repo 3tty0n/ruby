@@ -75,6 +75,8 @@ def _float_div(x, y):
 def _float_mod(x, y):
     if y == 0.0:
         raise UnsupportedOperation('divided by 0 (ZeroDivisionError)')
+    if math.isinf(x):
+        return NAN
     r = math.fmod(x, y)
     if r != 0.0 and (r < 0.0) != (y < 0.0):
         r += y
@@ -105,6 +107,8 @@ def w_mod(w_a, w_b):
     a = w_a.int_w()
     b = w_b.int_w()
     _zero_division(w_b)
+    if b == -1:
+        return newint(0)
     return newint(a % b)
 
 
