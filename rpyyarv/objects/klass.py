@@ -10,11 +10,13 @@ class VersionTag(object):
 
 
 class W_Class(W_Root):
-    _immutable_fields_ = ['name', 'w_superclass', 'version?', 'const_version?']
+    _immutable_fields_ = ['name', 'w_superclass', 'builtin', 'version?',
+                          'const_version?']
 
-    def __init__(self, name, w_superclass=None):
+    def __init__(self, name, w_superclass=None, builtin=True):
         self.name = name
         self.w_superclass = w_superclass
+        self.builtin = builtin
         self.methods = MethodTable()
         self.subclasses_w = []
         self.version = VersionTag()

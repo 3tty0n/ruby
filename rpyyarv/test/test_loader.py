@@ -300,6 +300,30 @@ def test_aset_below_the_start_is_refused(compile_source):
         'index -5 too small for array; minimum: -3')
 
 
+@pytest.mark.parametrize('source, msg', [
+    ('class Integer\nend\n',
+     'reopening the built-in class Integer is not supported yet'),
+    ('class Foo < Array\nend\n',
+     'subclassing the built-in class Array is not supported yet'),
+    ('class A\nend\nclass B\nend\nclass C < A\nend\nclass C < B\nend\n',
+     'superclass mismatch for class C'),
+    ('class A < 3\nend\n',
+     'superclass must be an instance of Class (given an instance of Integer)'),
+    ('class Foo\n  class Array\n  end\n  puts Array\nend\n',
+     'reading a constant in a class body is not supported yet')])
+def test_a_class_definition_is_refused(source, msg, compile_source):
+    expect_unsupported(loader.load_dump(compile_source(source)), None, msg)
+
+
+@pytest.mark.parametrize('source', ['module M\nend\n',
+                                    'class << self\nend\n'])
+def test_a_module_or_singleton_class_is_refused_at_load(source,
+                                                        compile_source):
+    expect(UnsupportedOperation, compile_source(source),
+           "defineclass of a module or a singleton class in '<main>' is not "
+           "supported")
+
+
 def test_malformed_dump():
     expect(LoadError, 'dump\t99\t3.3.8\tx.rb\n',
            'dump format version 99, expected 1')
@@ -426,6 +450,19 @@ CRUBY_CASES = [
                        '@foo = 1\nself.foo += 4\nputs foo\n'),
     ('aset_or_assign', 'a = [1, nil]\na[0] ||= 5\na[1] ||= 6\nputs a[0]\n'
                        'puts a[1]\nx = (a[0] ||= 9)\nputs x\n'),
+    ('class_definition', 'x = class Foo\n  puts self\n  def hi\n    1\n  end\n'
+                         '  42\nend\nputs x\nclass Foo\n  puts 1\nend\n'
+                         'class Bar < Foo\nend\nputs Bar\nputs Foo == Bar\n'
+                         'class Foo\n  class Inner\n    puts self\n  end\n'
+                         'end\nputs Foo::Inner\n'
+                         'puts((class Baz; end) == nil)\n'
+                         'class Bar < Foo\n  puts 2\nend\n'
+                         '[1].each { class Qux; puts self; end }\n'),
+    ('class_scoped', 'class Base\n  class X\n  end\nend\nclass Sub < Base\n'
+                     'end\nclass Sub::X\n  puts self\nend\n'
+                     'puts Sub::X == Base::X\nclass Top\nend\n'
+                     'class Sub::Top\nend\nputs Sub::Top == Top\n'
+                     'class Sub::X\n  puts 1\nend\n'),
     ('yield_tail_new_block', 'def u(n)\n  if n == 0 then yield else '
                              'u(n - 1) { puts n } end\nend\nu(1) { puts 9 }\n'),
     ('yield_through_iseq_block', 'def inner\n  yield 2\nend\ndef outer_m\n'

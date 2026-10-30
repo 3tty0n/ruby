@@ -17,6 +17,7 @@ EMIT = {
     'nop': [],
     'putnil': [],
     'putself': [],
+    'putspecialobject': [],     # type is checked, only CONST_BASE
     'putobject': [0],
     'putchilledstring': [0],
     'newarray': [0],
@@ -56,6 +57,7 @@ EMIT = {
     'branchif': [0],
     'branchunless': [0],
     'definemethod': [0, 1],
+    'defineclass': [0, 1, 2],   # type is checked, only a class
     'opt_send_without_block': [0],
     'send': [0, 1],         # blockiseq is iseq.NO_BLOCK_ISEQ when absent
     'invokeblock': [0],
@@ -99,6 +101,12 @@ DISCARDED_OPERAND_TYPES = frozenset([
 # vm_core.h. A lindex_t operand counts down from the top of the environment:
 #     slot = nlocals - operand + ENV_DATA_SIZE - 1
 ENV_DATA_SIZE = 3
+
+# vm_core.h. putspecialobject's CONST_BASE is where class and constant
+# definitions land; defineclass's flags give the kind of definition.
+SPECIAL_OBJECT_CONST_BASE = 3
+DEFINECLASS_TYPE_MASK = 0x07
+DEFINECLASS_FLAG_HAS_SUPERCLASS = 0x10
 
 # vm_callinfo.h. Outside this mask (splat, block argument, keywords, super,
 # forwarding) the arguments reach the callee differently; ARGS_SIMPLE is

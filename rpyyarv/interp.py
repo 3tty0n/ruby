@@ -1,6 +1,7 @@
 from rpyyarv import debug
 from rpyyarv import insns
 from rpyyarv import helpers
+from rpyyarv import optable
 from rpyyarv import symbols
 from rpyyarv.error import UnsupportedOperation
 from rpyyarv.frame import Frame
@@ -212,6 +213,52 @@ def _const(w_path):
                                        % symbols.name_of(mid))
         w_scope = w_value
     return w_scope
+
+
+def _const_base(w_self):
+    # CONST_BASE compiles only at the top level and in class bodies, and
+    # their blocks, where self is the class being defined or main.
+    if isinstance(w_self, W_Class):
+        return w_self
+    return w_object_class
+
+
+def _define_class(w_cbase, mid, w_super, flags):
+    if flags & optable.DEFINECLASS_FLAG_HAS_SUPERCLASS:
+        if not isinstance(w_super, W_Class):
+            raise UnsupportedOperation(
+                'superclass must be an instance of Class (given an instance '
+                'of %s)' % w_super.getclass().name)
+    else:
+        w_super = None
+    if not isinstance(w_cbase, W_Class):
+        raise UnsupportedOperation('%s is not a class/module'
+                                   % w_cbase.repr())
+    w_class = w_cbase.find_const(mid)
+    if w_class is not None:
+        if not isinstance(w_class, W_Class):
+            raise UnsupportedOperation('%s is not a class'
+                                       % symbols.name_of(mid))
+        if w_super is not None and w_class.w_superclass is not w_super:
+            raise UnsupportedOperation('superclass mismatch for class %s'
+                                       % symbols.name_of(mid))
+        if w_class.builtin:
+            raise UnsupportedOperation(
+                'reopening the built-in class %s is not supported yet'
+                % w_class.name)
+        return w_class
+    if w_super is None:
+        w_super = w_object_class
+    if w_super.builtin and w_super is not w_object_class:
+        raise UnsupportedOperation(
+            'subclassing the built-in class %s is not supported yet'
+            % w_super.name)
+    name = symbols.name_of(mid)
+    if w_cbase is not w_object_class:
+        name = w_cbase.name + '::' + name
+    w_class = W_Class(name, w_super, builtin=False)
+    w_cbase.set_const(mid, w_class)
+    return w_class
 
 
 def is_number(w_x):
@@ -469,6 +516,16 @@ def execute(iseq, frame):
                 parts[i] = frame.pop().str_w()
                 i -= 1
             frame.push(W_String(''.join(parts)))
+        elif opcode == insns.PUTSPECIALOBJECT:
+            frame.push(_const_base(frame.w_self))
+        elif opcode == insns.DEFINECLASS:
+            mid = code[pc]
+            w_body = _as_iseq(iseq.consts[code[pc + 1]])
+            flags = code[pc + 2]
+            pc += 3
+            w_super = frame.pop()
+            w_class = _define_class(frame.pop(), mid, w_super, flags)
+            frame.push(execute(w_body, Frame(w_body, w_class)))
         elif opcode == insns.DEFINEMETHOD:
             mid = code[pc]
             w_body = iseq.consts[code[pc + 1]]
@@ -535,6 +592,9 @@ def execute(iseq, frame):
             w_path = iseq.consts[code[pc]]
             pc += 1
             assert isinstance(w_path, W_ConstPath)
+            if isinstance(frame.w_self, W_Class):
+                raise UnsupportedOperation(
+                    'reading a constant in a class body is not supported yet')
             frame.push(_const(w_path))
         elif opcode == insns.LEAVE:
             return frame.pop()

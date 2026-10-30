@@ -216,7 +216,19 @@ class Loader(object):
         return w_iseq
 
     def check_dropped(self, op, ops, raw):
-        """Operand positions yarv_map.py does not emit, checked here."""
+        """Operand values RPyYARV refuses, checked before it emits any."""
+        if op == insns.PUTSPECIALOBJECT:
+            kind = self.int_of(ops[0], op, raw, 'type')
+            if kind != optable.SPECIAL_OBJECT_CONST_BASE:
+                raise UnsupportedOperation(
+                    "putspecialobject %d in '%s' is not supported"
+                    % (kind, raw.name))
+        if op == insns.DEFINECLASS:
+            flags = self.int_of(ops[2], op, raw, 'flags')
+            if (flags & optable.DEFINECLASS_TYPE_MASK) != 0:
+                raise UnsupportedOperation(
+                    "defineclass of a module or a singleton class in '%s' is "
+                    "not supported" % raw.name)
         if op == insns.EXPANDARRAY:
             flag = self.int_of(ops[1], op, raw, 'flag')
             if flag != 0:
