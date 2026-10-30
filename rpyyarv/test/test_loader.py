@@ -294,6 +294,12 @@ def test_a_tail_call_without_a_block_drops_the_callers_block(compile_source):
                        'no block given (yield)')
 
 
+def test_aset_below_the_start_is_refused(compile_source):
+    expect_unsupported(
+        loader.load_dump(compile_source('a = [1, 2, 3]\na[-5] = 0\n')), None,
+        'index -5 too small for array; minimum: -3')
+
+
 def test_malformed_dump():
     expect(LoadError, 'dump\t99\t3.3.8\tx.rb\n',
            'dump format version 99, expected 1')
@@ -415,6 +421,11 @@ CRUBY_CASES = [
                       'puts 5 % i\nputs -1.0 % i\n'),
     ('int_mod_min', 'a = -4611686018427387904\nb = a + a\nputs b % -1\n'
                     'puts b % 3\n'),
+    ('duparray_copies', '2.times { a = [1, 2]; a[0] += 10; puts a[0] }\n'),
+    ('attr_op_assign', 'def foo\n  @foo\nend\ndef foo=(v)\n  @foo = v\nend\n'
+                       '@foo = 1\nself.foo += 4\nputs foo\n'),
+    ('aset_or_assign', 'a = [1, nil]\na[0] ||= 5\na[1] ||= 6\nputs a[0]\n'
+                       'puts a[1]\nx = (a[0] ||= 9)\nputs x\n'),
     ('yield_tail_new_block', 'def u(n)\n  if n == 0 then yield else '
                              'u(n - 1) { puts n } end\nend\nu(1) { puts 9 }\n'),
     ('yield_through_iseq_block', 'def inner\n  yield 2\nend\ndef outer_m\n'
