@@ -287,6 +287,13 @@ def test_a_recursive_join_is_refused(source, compile_source):
                        'recursive array join (ArgumentError)')
 
 
+def test_a_tail_call_without_a_block_drops_the_callers_block(compile_source):
+    source = ('def t(n)\n  if n == 0 then yield else t(n - 1) end\nend\n'
+              't(1) { puts 1 }\n')
+    expect_unsupported(loader.load_dump(compile_source(source)), None,
+                       'no block given (yield)')
+
+
 def test_malformed_dump():
     expect(LoadError, 'dump\t99\t3.3.8\tx.rb\n',
            'dump format version 99, expected 1')
@@ -408,6 +415,11 @@ CRUBY_CASES = [
                       'puts 5 % i\nputs -1.0 % i\n'),
     ('int_mod_min', 'a = -4611686018427387904\nb = a + a\nputs b % -1\n'
                     'puts b % 3\n'),
+    ('yield_tail_new_block', 'def u(n)\n  if n == 0 then yield else '
+                             'u(n - 1) { puts n } end\nend\nu(1) { puts 9 }\n'),
+    ('yield_through_iseq_block', 'def inner\n  yield 2\nend\ndef outer_m\n'
+                                 '  inner { |x| yield x * 3 }\nend\n'
+                                 'outer_m { |y| puts y }\n'),
     ('int_float_exact', 'a = 9007199254740993\nf = 9007199254740992.0\n'
                         'puts a == f\nputs a > f\nputs f < a\nputs a <= f\n'
                         'puts a != f\nputs 1 == 1.0\nputs -0.0 == 0\n'
