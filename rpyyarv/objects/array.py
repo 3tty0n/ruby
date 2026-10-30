@@ -34,10 +34,15 @@ def aset(w_ary, index, w_value):
             raise UnsupportedOperation(
                 "index %d too small for array; minimum: -%d"
                 % (index - len(items_w), len(items_w)))
-    while len(items_w) <= index:
-        items_w.append(w_nil)
+    if index >= len(items_w):
+        _grow(items_w, index)
     items_w[index] = w_value
     return w_value
+
+
+def _grow(items_w, index):
+    while len(items_w) <= index:
+        items_w.append(w_nil)
 
 
 class W_Aref(W_CFunc):
