@@ -105,12 +105,23 @@ class W_Map(W_CFunc):
         return W_Array(result_w)
 
 
+# Nested Arrays join is inside, as rb_exec_recursive tracks them
+_joining_w = []
+
+
 def _join(w_ary, sep):
     from rpyyarv import interp
     parts = []
     for w_item in w_ary.items_w:
         if isinstance(w_item, W_Array):
-            parts.append(_join(w_item, sep))
+            if w_item is w_ary or w_item in _joining_w:
+                raise UnsupportedOperation(
+                    'recursive array join (ArgumentError)')
+            _joining_w.append(w_item)
+            try:
+                parts.append(_join(w_item, sep))
+            finally:
+                _joining_w.pop()
         else:
             parts.append(interp.to_s_string(w_item).str_w())
     return sep.join(parts)

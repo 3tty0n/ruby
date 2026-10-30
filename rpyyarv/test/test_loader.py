@@ -278,6 +278,15 @@ def test_a_private_operator_method_is_refused(source, msg, compile_source):
     expect_unsupported(loader.load_dump(compile_source(source)), None, msg)
 
 
+@pytest.mark.parametrize('source', [
+    'a = [0]\na[0] = a\na.join(",")\n',
+    'a = [0]\nb = [a]\na[0] = b\na.join(",")\n',
+    'a = [0]\na[0] = [[a]]\na.join(",")\n'])
+def test_a_recursive_join_is_refused(source, compile_source):
+    expect_unsupported(loader.load_dump(compile_source(source)), None,
+                       'recursive array join (ArgumentError)')
+
+
 def test_malformed_dump():
     expect(LoadError, 'dump\t99\t3.3.8\tx.rb\n',
            'dump format version 99, expected 1')
@@ -393,6 +402,8 @@ CRUBY_CASES = [
                               'puts 1.0 == nil\nputs 1 != nil\n'),
     ('equality_resized', 'def ==(o)\n  @a[3] = 0\n  true\nend\n@a = [self]\n'
                          'puts @a == [nil]\n'),
+    ('join_repeated', 'a = [1, 2]\nputs [a, a].join(",")\n'
+                      'puts [[a], a].join("-")\n'),
     ('int_float_exact', 'a = 9007199254740993\nf = 9007199254740992.0\n'
                         'puts a == f\nputs a > f\nputs f < a\nputs a <= f\n'
                         'puts a != f\nputs 1 == 1.0\nputs -0.0 == 0\n'
