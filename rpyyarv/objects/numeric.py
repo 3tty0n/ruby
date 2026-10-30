@@ -1,7 +1,7 @@
 from rpyyarv import symbols
 from rpyyarv.error import UnsupportedOperation
 from rpyyarv.methods import W_CFunc
-from rpyyarv.objects.transparent import newint, w_false, w_nil, w_true
+from rpyyarv.objects.transparent import newbool, newint, w_false, w_nil, w_true
 from rpyyarv.rlib import JitDriver
 
 
@@ -25,9 +25,13 @@ class W_NumEqual(W_CFunc):
     def call(self, w_recv, args_w, w_block):
         from rpyyarv import helpers
         from rpyyarv import interp
-        if not interp.is_number(args_w[0]):
-            return w_false
-        return helpers.w_eq(w_recv, args_w[0])
+        w_other = args_w[0]
+        if interp.is_number(w_other):
+            return helpers.w_eq(w_recv, w_other)
+        return newbool(interp.send(w_other, EQ, [w_recv]).is_true())
+
+
+EQ = symbols.intern('==')
 
 
 def _times_location(w_iseq):

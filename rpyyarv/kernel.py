@@ -53,6 +53,16 @@ class W_Not(W_CFunc):
 EQ = symbols.intern('==')
 
 
+def equal(w_a, w_b):
+    from rpyyarv import helpers
+    from rpyyarv import interp
+    if w_a is w_b:
+        return True
+    if interp.is_number(w_a) and interp.is_number(w_b):
+        return helpers.w_eq(w_a, w_b).is_true()
+    return interp.send(w_a, EQ, [w_b]).is_true()
+
+
 def install_to_s(w_class):
     to_s_id = symbols.intern('to_s')
     w_class.add_method(to_s_id, W_ToS(to_s_id, 0))

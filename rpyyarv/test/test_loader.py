@@ -385,6 +385,14 @@ CRUBY_CASES = [
                  'puts [1, "x", [2]] == [1, "x", [2]]\nputs [1] == [2]\n'
                  'puts [1] != [1]\nputs !nil\nputs !1\nputs !!false\n'
                  'puts "a" == 1\n'),
+    ('equality_identity', 'n = 0.0 / 0\nputs n == n\nputs [n] == [n]\n'
+                          'puts [n] != [n]\nputs [0.0 / 0] == [0.0 / 0]\n'),
+    ('equality_recursive', 'a = [0]\na[0] = a\nb = [0]\nb[0] = b\n'
+                           'puts a == a\nputs a == b\nputs a != b\n'),
+    ('equality_num_reverses', 'def ==(o)\n  true\nend\nputs 1 == nil\n'
+                              'puts 1.0 == nil\nputs 1 != nil\n'),
+    ('equality_resized', 'def ==(o)\n  @a[3] = 0\n  true\nend\n@a = [self]\n'
+                         'puts @a == [nil]\n'),
     ('int_float_exact', 'a = 9007199254740993\nf = 9007199254740992.0\n'
                         'puts a == f\nputs a > f\nputs f < a\nputs a <= f\n'
                         'puts a != f\nputs 1 == 1.0\nputs -0.0 == 0\n'

@@ -130,21 +130,40 @@ class W_Join(W_CFunc):
         return W_String(_join(w_recv, sep))
 
 
+# Pairs Array#== is comparing, as rb_exec_recursive_paired tracks them
+_comparing_w = []
+
+
 class W_AryEqual(W_CFunc):
     def call(self, w_recv, args_w, w_block):
-        from rpyyarv import interp
+        from rpyyarv import kernel
         assert isinstance(w_recv, W_Array)
         w_other = args_w[0]
+        if w_recv is w_other:
+            return w_true
         if not isinstance(w_other, W_Array):
             return w_false
         if len(w_other.items_w) != len(w_recv.items_w):
             return w_false
         i = 0
-        while i < len(w_recv.items_w):
-            if not interp.equal(w_recv.items_w[i], w_other.items_w[i]):
-                return w_false
-            i += 1
-        return w_true
+        while i < len(_comparing_w):
+            if _comparing_w[i] is w_recv and _comparing_w[i + 1] is w_other:
+                return w_true
+            i += 2
+        _comparing_w.append(w_recv)
+        _comparing_w.append(w_other)
+        try:
+            i = 0
+            while i < len(w_recv.items_w):
+                if not kernel.equal(w_recv.items_w[i], w_other.items_w[i]):
+                    return w_false
+                if len(w_recv.items_w) != len(w_other.items_w):
+                    return w_false
+                i += 1
+            return w_true
+        finally:
+            _comparing_w.pop()
+            _comparing_w.pop()
 
 
 class W_Inject(W_CFunc):

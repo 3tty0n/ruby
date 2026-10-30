@@ -218,12 +218,6 @@ def is_number(w_x):
     return isinstance(w_x, W_Integer) or isinstance(w_x, W_Float)
 
 
-def equal(w_a, w_b):
-    if is_number(w_a) and is_number(w_b):
-        return helpers.w_eq(w_a, w_b).is_true()
-    return send(w_a, EQ, [w_b]).is_true()
-
-
 def _to_s(w_x):
     if isinstance(w_x, W_String):
         return w_x
