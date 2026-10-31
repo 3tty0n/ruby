@@ -342,6 +342,16 @@ def test_an_instance_creation_is_refused(source, msg, compile_source):
     expect_unsupported(loader.load_dump(compile_source(source)), None, msg)
 
 
+@pytest.mark.parametrize('source, msg', [
+    ('class Foo\n  attr_reader 1\nend\n', '1 is not a symbol nor a string'),
+    ('class Foo\n  attr_reader :a?\nend\n', "invalid attribute name 'a?'"),
+    ('attr_reader :x\n', "undefined method 'attr_reader' for main"),
+    ('Array.attr_reader :length\n',
+     'attr_reader on the built-in class Array is not supported yet')])
+def test_an_attribute_definition_is_refused(source, msg, compile_source):
+    expect_unsupported(loader.load_dump(compile_source(source)), None, msg)
+
+
 def test_malformed_dump():
     expect(LoadError, 'dump\t99\t3.3.8\tx.rb\n',
            'dump format version 99, expected 1')
@@ -509,6 +519,16 @@ CRUBY_CASES = [
      'puts (V.new(1) + V.new(2)).x\nputs (V.new(5) - V.new(2)).x\n'
      'puts (V.new(3) * V.new(4)).x\nputs V.new(1) < V.new(2)\n'
      'puts V.new(1) >= V.new(2)\n'),
+    ('attr_accessors',
+     'class P\n  attr_accessor :x, "y"\n  attr_reader :r\n  attr_writer :w\n'
+     '  def initialize\n    @r = 9\n  end\n  def w_value\n    @w\n  end\nend\n'
+     'p = P.new\nputs p.x == nil\np.x = 5\nputs p.x\np.y = 6\nputs p.y\n'
+     'puts p.r\np.w = 7\nputs p.w_value\nputs((p.x = 8))\nputs p.x\n'
+     'p.x += 1\nputs p.x\nclass T < P\nend\nt = T.new\nt.x = 4\nputs t.x\n'),
+    ('attr_return_values',
+     'class Q\n  a = attr_accessor :a, "b"\n  puts a.length\n  puts a[1]\n'
+     '  puts attr_reader(:c)[0]\n  puts attr_writer(:d)[0]\n'
+     '  attr_accessor :A\nend\nq = Q.new\nq.A = 1\nputs q.A\n'),
     ('class_scoped', 'class Base\n  class X\n  end\nend\nclass Sub < Base\n'
                      'end\nclass Sub::X\n  puts self\nend\n'
                      'puts Sub::X == Base::X\nclass Top\nend\n'
