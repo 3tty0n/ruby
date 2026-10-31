@@ -4,7 +4,8 @@ try:
     from rpython.rlib.jit import (
         JitDriver, elidable, promote, unroll_safe, dont_look_inside, hint,
         set_user_param, TraceLimitTooHigh)
-    from rpython.rlib.objectmodel import UnboxedValue, fetch_translated_config
+    from rpython.rlib.objectmodel import (
+        UnboxedValue, compute_unique_id, fetch_translated_config)
     from rpython.rlib.rstackovf import StackOverflow, check_stack_overflow
     from rpython.rlib.rfloat import formatd
     from rpython.rlib.rarithmetic import ovfcheck
@@ -89,6 +90,9 @@ except ImportError:
 
     def promote(x):
         return x
+
+    def compute_unique_id(x):
+        return id(x)
 
     def unroll_safe(func):
         return func

@@ -61,6 +61,7 @@ EMIT = {
     'opt_send_without_block': [0],
     'send': [0, 1],         # blockiseq is iseq.NO_BLOCK_ISEQ when absent
     'invokeblock': [0],
+    'opt_new': [0, 1],          # falls back to a plain send of new at 1
     'opt_getconstant_path': [0],
     'setconstant': [0],
     'leave': [],

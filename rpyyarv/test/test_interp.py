@@ -140,7 +140,7 @@ def test_unsupported():
     try:
         interp.run(iseq)
     except UnsupportedOperation as e:
-        assert e.msg == 'not an integer'
+        assert e.msg == "undefined method '+' for nil"
     else:
         raise AssertionError('expected UnsupportedOperation')
 
@@ -898,7 +898,7 @@ def test_new_without_initialize_rejects_arguments():
     try:
         _send_new(w_class, [W_Fixnum(1)])
     except UnsupportedOperation as e:
-        assert e.msg == ("wrong number of arguments to 'new' "
+        assert e.msg == ("wrong number of arguments to 'initialize' "
                          "(given 1, expected 0)")
     else:
         raise AssertionError('expected UnsupportedOperation')

@@ -1,3 +1,4 @@
+from rpyyarv import classlib
 from rpyyarv import debug
 from rpyyarv import insns
 from rpyyarv import helpers
@@ -185,6 +186,18 @@ EQ = symbols.intern('==')
 NEQ = symbols.intern('!=')
 NOT = symbols.intern('!')
 DIV = symbols.intern('/')
+PLUS = symbols.intern('+')
+MINUS = symbols.intern('-')
+MULT = symbols.intern('*')
+LT = symbols.intern('<')
+GT = symbols.intern('>')
+LE = symbols.intern('<=')
+GE = symbols.intern('>=')
+NEW = symbols.intern('new')
+# vm_method.c makes these private wherever they are defined
+ALWAYS_PRIVATE = [symbols.intern(name) for name in [
+    'initialize', 'initialize_copy', 'initialize_clone', 'initialize_dup',
+    'respond_to_missing?']]
 MOD = symbols.intern('%')
 SIZE = symbols.intern('size')
 ASET = symbols.intern('[]=')
@@ -285,7 +298,7 @@ def _define_class(w_cbase, mid, w_super, flags):
     name = symbols.name_of(mid)
     if w_cbase is not w_object_class:
         name = w_cbase.name + '::' + name
-    w_class = W_Class(name, w_super, builtin=False)
+    w_class = W_Class(name, w_super)
     w_cbase.set_const(mid, w_class)
     return w_class
 
@@ -434,15 +447,25 @@ def execute(iseq, frame):
         elif opcode == insns.OPT_PLUS:
             w_b = frame.pop()
             w_a = frame.pop()
-            frame.push(helpers.w_add(w_a, w_b))
+            if (is_number(w_a) and is_number(w_b)) or (
+                    isinstance(w_a, W_String) and isinstance(w_b, W_String)):
+                frame.push(helpers.w_add(w_a, w_b))
+            else:
+                frame.push(send_op(w_a, PLUS, [w_b]))
         elif opcode == insns.OPT_MINUS:
             w_b = frame.pop()
             w_a = frame.pop()
-            frame.push(helpers.w_sub(w_a, w_b))
+            if is_number(w_a) and is_number(w_b):
+                frame.push(helpers.w_sub(w_a, w_b))
+            else:
+                frame.push(send_op(w_a, MINUS, [w_b]))
         elif opcode == insns.OPT_MULT:
             w_b = frame.pop()
             w_a = frame.pop()
-            frame.push(helpers.w_mul(w_a, w_b))
+            if is_number(w_a) and is_number(w_b):
+                frame.push(helpers.w_mul(w_a, w_b))
+            else:
+                frame.push(send_op(w_a, MULT, [w_b]))
         elif opcode == insns.OPT_DIV:
             w_b = frame.pop()
             w_a = frame.pop()
@@ -460,19 +483,31 @@ def execute(iseq, frame):
         elif opcode == insns.OPT_LT:
             w_b = frame.pop()
             w_a = frame.pop()
-            frame.push(helpers.w_lt(w_a, w_b))
+            if is_number(w_a) and is_number(w_b):
+                frame.push(helpers.w_lt(w_a, w_b))
+            else:
+                frame.push(send_op(w_a, LT, [w_b]))
         elif opcode == insns.OPT_GT:
             w_b = frame.pop()
             w_a = frame.pop()
-            frame.push(helpers.w_gt(w_a, w_b))
+            if is_number(w_a) and is_number(w_b):
+                frame.push(helpers.w_gt(w_a, w_b))
+            else:
+                frame.push(send_op(w_a, GT, [w_b]))
         elif opcode == insns.OPT_LE:
             w_b = frame.pop()
             w_a = frame.pop()
-            frame.push(helpers.w_le(w_a, w_b))
+            if is_number(w_a) and is_number(w_b):
+                frame.push(helpers.w_le(w_a, w_b))
+            else:
+                frame.push(send_op(w_a, LE, [w_b]))
         elif opcode == insns.OPT_GE:
             w_b = frame.pop()
             w_a = frame.pop()
-            frame.push(helpers.w_ge(w_a, w_b))
+            if is_number(w_a) and is_number(w_b):
+                frame.push(helpers.w_ge(w_a, w_b))
+            else:
+                frame.push(send_op(w_a, GE, [w_b]))
         elif opcode == insns.OPT_EQ:
             w_b = frame.pop()
             w_a = frame.pop()
@@ -561,8 +596,9 @@ def execute(iseq, frame):
             w_body = iseq.consts[code[pc + 1]]
             pc += 2
             w_self = frame.w_self
+            private = w_self.defines_private() or mid in ALWAYS_PRIVATE
             w_self.define_method(mid, W_ISeqMethod(
-                mid, _as_iseq(w_body), w_self.defines_private(), frame.cref))
+                mid, _as_iseq(w_body), private, frame.cref))
         elif opcode == insns.OPT_SEND_WITHOUT_BLOCK:
             idx = code[pc]
             pc += 1
@@ -618,6 +654,20 @@ def execute(iseq, frame):
             w_ci = _callinfo(iseq, code[pc])
             pc += 1
             frame.push(yield_block(frame, w_ci))
+        elif opcode == insns.OPT_NEW:
+            w_ci = _callinfo(iseq, code[pc])
+            target = code[pc + 1]
+            pc += 2
+            # Below the arguments: the class, then a nil slot for the result
+            at = frame.sp - 1 - w_ci.argc
+            w_class = frame.peek(at)
+            if (isinstance(w_class, W_Class) and isinstance(
+                    w_class.lookup_method(NEW), classlib.W_New)):
+                w_obj = classlib.allocate(w_class)
+                frame.setlocal(at, w_obj)
+                frame.setlocal(at - 1, w_obj)
+            else:
+                pc = target
         elif opcode == insns.OPT_GETCONSTANT_PATH:
             w_path = iseq.consts[code[pc]]
             pc += 1

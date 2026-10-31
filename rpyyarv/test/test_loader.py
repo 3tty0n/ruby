@@ -332,6 +332,16 @@ def test_a_module_or_singleton_class_is_refused_at_load(source,
            "supported")
 
 
+@pytest.mark.parametrize('source, msg', [
+    ('class Foo\n  def initialize\n  end\nend\nFoo.new.initialize\n',
+     "private method 'initialize' called for #<Foo>"),
+    ('class Foo\n  def initialize(a, b)\n  end\nend\nFoo.new(1)\n',
+     "wrong number of arguments to 'initialize' (given 1, expected 2)"),
+    ('puts Array.new.length\n', 'Array.new is not supported yet')])
+def test_an_instance_creation_is_refused(source, msg, compile_source):
+    expect_unsupported(loader.load_dump(compile_source(source)), None, msg)
+
+
 def test_malformed_dump():
     expect(LoadError, 'dump\t99\t3.3.8\tx.rb\n',
            'dump format version 99, expected 1')
@@ -479,6 +489,26 @@ CRUBY_CASES = [
                            'class Outer\n  K = :outer\n'
                            '  class Sub2 < Base\n    puts K\n  end\nend\n'
                            'puts Sub::K\ndef top_k\n  K\nend\nputs top_k\n'),
+    ('new_initialize',
+     'class Point\n  def initialize(x, y)\n    @x = x\n    @y = y\n  end\n'
+     '  def sum\n    @x + @y\n  end\nend\np = Point.new(3, 4)\nputs p.sum\n'
+     'q = Point.new(10, 20)\nputs q.sum\nputs p.sum\n'
+     'class Foo\n  def hi\n    :hi\n  end\nend\nputs Foo.new.hi\n'
+     'class B < Point\nend\nputs B.new(1, 2).sum\nf = Foo.new\n'
+     'puts f == f\nputs f == Foo.new\nputs Object.new == nil\n'
+     'puts Foo.new.to_s.length\n'),
+    ('new_in_loop_and_block',
+     'class C\n  def initialize(i)\n    @i = yield(i)\n  end\n'
+     '  def i\n    @i\n  end\nend\ns = 0\n'
+     '10.times { |i| s += C.new(i) { |x| x * 2 }.i }\nputs s\n'),
+    ('user_operators',
+     'class V\n  def initialize(x)\n    @x = x\n  end\n  def x\n    @x\n  end\n'
+     '  def +(o)\n    V.new(@x + o.x)\n  end\n  def -(o)\n    V.new(@x - o.x)\n'
+     '  end\n  def *(o)\n    V.new(@x * o.x)\n  end\n  def <(o)\n    @x < o.x\n'
+     '  end\n  def >=(o)\n    @x >= o.x\n  end\nend\n'
+     'puts (V.new(1) + V.new(2)).x\nputs (V.new(5) - V.new(2)).x\n'
+     'puts (V.new(3) * V.new(4)).x\nputs V.new(1) < V.new(2)\n'
+     'puts V.new(1) >= V.new(2)\n'),
     ('class_scoped', 'class Base\n  class X\n  end\nend\nclass Sub < Base\n'
                      'end\nclass Sub::X\n  puts self\nend\n'
                      'puts Sub::X == Base::X\nclass Top\nend\n'
