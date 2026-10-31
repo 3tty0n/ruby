@@ -87,10 +87,12 @@ class W_Block(W_Root):
 
 
 class W_ConstPath(W_Root):
-    _immutable_fields_ = ['mids[*]']
+    _immutable_fields_ = ['mids[*]', 'absolute']
 
-    def __init__(self, mids):
+    def __init__(self, mids, absolute=False):
         self.mids = mids
+        # ::A starts at Object instead of the lexical scope
+        self.absolute = absolute
 
     def repr(self):
         return '<W_ConstPath %s>' % '::'.join(

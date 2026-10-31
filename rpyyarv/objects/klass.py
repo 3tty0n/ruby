@@ -2,7 +2,7 @@
 
 from rpyyarv.methods import MethodTable
 from rpyyarv.objects.base import W_Root
-from rpyyarv.rlib import elidable
+from rpyyarv.rlib import elidable, unroll_safe
 
 
 class VersionTag(object):
@@ -50,6 +50,18 @@ class W_Class(W_Root):
     @elidable
     def _find_const(self, mid, version):
         return self.constants_w.get(mid, None)
+
+    @unroll_safe
+    def find_const_in_ancestors(self, mid, exclude_object):
+        w_class = self
+        while w_class is not None:
+            if exclude_object and w_class is w_object_class:
+                return None
+            w_value = w_class.find_const(mid)
+            if w_value is not None:
+                return w_value
+            w_class = w_class.w_superclass
+        return None
 
     def to_s_str(self):
         return self.name

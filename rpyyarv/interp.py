@@ -4,7 +4,7 @@ from rpyyarv import helpers
 from rpyyarv import optable
 from rpyyarv import symbols
 from rpyyarv.error import UnsupportedOperation
-from rpyyarv.frame import Frame
+from rpyyarv.frame import Cref, Frame
 from rpyyarv.iseq import (W_Block, W_CallInfo, W_ConstPath, W_ISeq,
                           NO_BLOCK_ISEQ, tail_position)
 from rpyyarv.methods import W_CFunc, W_ISeqMethod
@@ -14,7 +14,7 @@ from rpyyarv.objects.string import W_String
 from rpyyarv.objects.float import W_Float
 from rpyyarv.objects.klass import W_Class, w_object_class
 from rpyyarv.objects.transparent import W_Integer, newbool, newint, w_nil
-from rpyyarv.rlib import JitDriver, elidable, unroll_safe
+from rpyyarv.rlib import JitDriver, elidable, promote, unroll_safe
 
 
 def _as_iseq(w_x):
@@ -56,7 +56,8 @@ def invoke(frame, iseq, w_ci, w_block, tail=False):
                 % symbols.name_of(w_ci.mid))
         _check_argc(w_ci.mid, argc, callee_iseq.nparams)
         if (tail and callee_iseq is iseq and w_block is None
-                and frame.w_block is None and not debug.is_enabled()):
+                and frame.w_block is None and w_method.cref is frame.cref
+                and not debug.is_enabled()):
             # The separate argument stack makes f(b, a) safe to copy in place.
             i = 0
             while i < argc:
@@ -68,7 +69,7 @@ def invoke(frame, iseq, w_ci, w_block, tail=False):
             _drop(frame, iseq.nlocals)
             frame.w_self = w_recv
             return None
-        callee = Frame(callee_iseq, w_recv, None, w_block)
+        callee = Frame(callee_iseq, w_recv, None, w_block, w_method.cref)
         i = 0
         while i < argc:
             callee.setlocal(i, frame.peek(recv_at + 1 + i))
@@ -116,7 +117,7 @@ def call_method(w_method, w_recv, args_w, w_block):
             "method '%s' has parameters RPyYARV does not support"
             % symbols.name_of(w_method.mid))
     _check_argc(w_method.mid, len(args_w), callee_iseq.nparams)
-    callee = Frame(callee_iseq, w_recv, None, w_block)
+    callee = Frame(callee_iseq, w_recv, None, w_block, w_method.cref)
     i = 0
     while i < len(args_w):
         callee.setlocal(i, args_w[i])
@@ -135,7 +136,8 @@ def call_block(w_block, args_w):
         raise UnsupportedOperation(
             "block '%s' would splat its Array argument, which RPyYARV does "
             "not support yet" % w_iseq.name)
-    callee = Frame(w_iseq, w_block.w_self, w_block.outer)
+    callee = Frame(w_iseq, w_block.w_self, w_block.outer, None,
+                   w_block.outer.cref)
     i = 0
     while i < len(args_w) and i < w_iseq.nparams:
         callee.setlocal(i, args_w[i])
@@ -200,27 +202,54 @@ def send_op(w_recv, mid, args_w):
     return call_method(w_method, w_recv, args_w, None)
 
 
+def _uninitialized_constant(w_scope, mid):
+    name = symbols.name_of(mid)
+    if w_scope is not w_object_class:
+        name = w_scope.name + '::' + name
+    return UnsupportedOperation('uninitialized constant %s' % name)
+
+
 @unroll_safe
-def _const(w_path):
-    w_scope = w_object_class
-    for mid in w_path.mids:
+def _lexical_const(cref, mid):
+    scope = cref
+    while scope is not None:
+        w_value = scope.w_class.find_const(mid)
+        if w_value is not None:
+            return w_value
+        scope = scope.parent
+    w_class = _const_base(cref)
+    w_value = w_class.find_const_in_ancestors(mid, False)
+    if w_value is None:
+        raise _uninitialized_constant(w_class, mid)
+    return w_value
+
+
+@unroll_safe
+def _const(cref, w_path):
+    i = 0
+    if w_path.absolute:
+        w_scope = w_object_class
+    else:
+        w_scope = _lexical_const(cref, w_path.mids[0])
+        i = 1
+    while i < len(w_path.mids):
+        mid = w_path.mids[i]
         if not isinstance(w_scope, W_Class):
             raise UnsupportedOperation('%s is not a class/module'
                                        % w_scope.repr())
-        w_value = w_scope.find_const(mid)
+        w_value = w_scope.find_const_in_ancestors(
+            mid, w_scope is not w_object_class)
         if w_value is None:
-            raise UnsupportedOperation('uninitialized constant %s'
-                                       % symbols.name_of(mid))
+            raise _uninitialized_constant(w_scope, mid)
         w_scope = w_value
+        i += 1
     return w_scope
 
 
-def _const_base(w_self):
-    # CONST_BASE compiles only at the top level and in class bodies, and
-    # their blocks, where self is the class being defined or main.
-    if isinstance(w_self, W_Class):
-        return w_self
-    return w_object_class
+def _const_base(cref):
+    if cref is None:
+        return w_object_class
+    return cref.w_class
 
 
 def _define_class(w_cbase, mid, w_super, flags):
@@ -517,7 +546,7 @@ def execute(iseq, frame):
                 i -= 1
             frame.push(W_String(''.join(parts)))
         elif opcode == insns.PUTSPECIALOBJECT:
-            frame.push(_const_base(frame.w_self))
+            frame.push(_const_base(frame.cref))
         elif opcode == insns.DEFINECLASS:
             mid = code[pc]
             w_body = _as_iseq(iseq.consts[code[pc + 1]])
@@ -525,14 +554,15 @@ def execute(iseq, frame):
             pc += 3
             w_super = frame.pop()
             w_class = _define_class(frame.pop(), mid, w_super, flags)
-            frame.push(execute(w_body, Frame(w_body, w_class)))
+            frame.push(execute(w_body, Frame(w_body, w_class, None, None,
+                                             Cref(w_class, frame.cref))))
         elif opcode == insns.DEFINEMETHOD:
             mid = code[pc]
             w_body = iseq.consts[code[pc + 1]]
             pc += 2
             w_self = frame.w_self
             w_self.define_method(mid, W_ISeqMethod(
-                mid, _as_iseq(w_body), w_self.defines_private()))
+                mid, _as_iseq(w_body), w_self.defines_private(), frame.cref))
         elif opcode == insns.OPT_SEND_WITHOUT_BLOCK:
             idx = code[pc]
             pc += 1
@@ -592,10 +622,16 @@ def execute(iseq, frame):
             w_path = iseq.consts[code[pc]]
             pc += 1
             assert isinstance(w_path, W_ConstPath)
-            if isinstance(frame.w_self, W_Class):
-                raise UnsupportedOperation(
-                    'reading a constant in a class body is not supported yet')
-            frame.push(_const(w_path))
+            frame.push(_const(promote(frame.cref), w_path))
+        elif opcode == insns.SETCONSTANT:
+            mid = code[pc]
+            pc += 1
+            w_cbase = frame.pop()
+            w_value = frame.pop()
+            if not isinstance(w_cbase, W_Class):
+                raise UnsupportedOperation('%s is not a class/module'
+                                           % w_cbase.repr())
+            w_cbase.set_const(mid, w_value)
         elif opcode == insns.LEAVE:
             return frame.pop()
         else:

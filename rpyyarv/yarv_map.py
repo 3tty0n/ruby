@@ -62,6 +62,7 @@ EMIT = {
     'send': [0, 1],         # blockiseq is iseq.NO_BLOCK_ISEQ when absent
     'invokeblock': [0],
     'opt_getconstant_path': [0],
+    'setconstant': [0],
     'leave': [],
 }
 

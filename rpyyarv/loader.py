@@ -350,11 +350,14 @@ class Loader(object):
             raise LoadError("%s in '%s' wants constant names, got %s"
                             % (insns.NAMES[op], raw.name, operand.describe()))
         mids = []
+        absolute = False
         for item in operand.items:
             name = self.sym_of(item, op, raw)
-            if name != '':
+            if name == '':
+                absolute = True
+            else:
                 mids.append(symbols.intern(name))
-        return W_ConstPath(mids)
+        return W_ConstPath(mids, absolute)
 
     def int_of(self, operand, op, raw, what):
         if operand.kind != rawiseq.OP_INT:

@@ -372,10 +372,11 @@ def _check_operand_values(raw, w_iseq, decoded, labels, l, scope_of):
                 assert 0 <= got < len(w_iseq.consts)
                 _check_literal(w_iseq.consts[got], raw_op)
             elif t == insns.T_IC:
-                names = [symbols.name_of(mid)
-                         for mid in w_iseq.consts[got].mids]
+                w_path = w_iseq.consts[got]
+                names = [symbols.name_of(mid) for mid in w_path.mids]
                 assert names == [item.strval for item in raw_op.items
                                  if item.strval != '']
+                assert w_path.absolute == (raw_op.items[0].strval == '')
             else:
                 raise AssertionError('unexpected operand type %r' % t)
 

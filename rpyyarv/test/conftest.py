@@ -20,15 +20,17 @@ import pytest
 
 from rpyyarv import debug
 from rpyyarv import kernel
-from rpyyarv.objects.klass import w_object_class
+from rpyyarv.objects.klass import VersionTag, w_object_class
 
 from rpyyarv.test import support
 
 
 @pytest.fixture(autouse=True)
 def _isolate():
-    """A toplevel `def` lands on the one Object; debug flags are global."""
+    """A toplevel `def` or constant lands on the one Object; debug flags are
+    global."""
     baseline = w_object_class.methods.methods.copy()
+    baseline_consts = w_object_class.constants_w.copy()
     saved_kernel_write = kernel.write
     saved_debug_write = debug.write
     debug.reset()
@@ -38,6 +40,8 @@ def _isolate():
     kernel.write = saved_kernel_write
     w_object_class.methods.methods = baseline
     w_object_class.method_table_changed()
+    w_object_class.constants_w = baseline_consts
+    w_object_class.const_version = VersionTag()
 
 
 class Output(object):

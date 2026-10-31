@@ -54,8 +54,9 @@ def count_allocations(monkeypatch):
     allocated = []
 
     class CountingFrame(Frame):
-        def __init__(self, iseq, w_self, outer=None, w_block=None):
-            Frame.__init__(self, iseq, w_self, outer, w_block)
+        def __init__(self, iseq, w_self, outer=None, w_block=None,
+                     cref=None):
+            Frame.__init__(self, iseq, w_self, outer, w_block, cref)
             allocated.append(self)
 
     monkeypatch.setattr(interp, 'Frame', CountingFrame)

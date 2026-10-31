@@ -309,9 +309,17 @@ def test_aset_below_the_start_is_refused(compile_source):
      'superclass mismatch for class C'),
     ('class A < 3\nend\n',
      'superclass must be an instance of Class (given an instance of Integer)'),
-    ('class Foo\n  class Array\n  end\n  puts Array\nend\n',
-     'reading a constant in a class body is not supported yet')])
+    ('X = 1\nclass X\nend\n', 'X is not a class')])
 def test_a_class_definition_is_refused(source, msg, compile_source):
+    expect_unsupported(loader.load_dump(compile_source(source)), None, msg)
+
+
+@pytest.mark.parametrize('source, msg', [
+    ('class Foo\n  puts X\nend\n', 'uninitialized constant Foo::X'),
+    ('class Foo\nend\nputs Foo::Array\n',
+     'uninitialized constant Foo::Array'),
+    ('X = 1\nY = X::Z\n', '1 is not a class/module')])
+def test_a_constant_lookup_is_refused(source, msg, compile_source):
     expect_unsupported(loader.load_dump(compile_source(source)), None, msg)
 
 
@@ -458,6 +466,19 @@ CRUBY_CASES = [
                          'puts((class Baz; end) == nil)\n'
                          'class Bar < Foo\n  puts 2\nend\n'
                          '[1].each { class Qux; puts self; end }\n'),
+    ('constant_set', 'X = 1\nputs X\nY = X + 1\nputs Y\nputs ::X\n'
+                     'class Foo\nend\nFoo::K = 7\nputs Foo::K\nF = Foo\n'
+                     'class F\n  puts self\nend\n'),
+    ('constant_lexical', 'A = 1\nclass Outer\n  A = 2\n  class Inner\n'
+                         '    puts A\n  end\n  puts A\n  class Array\n  end\n'
+                         '  puts Array\n  puts ::Array\n'
+                         '  [1].each { |x| puts A + x }\nend\nputs A\n'
+                         'puts Array\nputs Outer::Inner\n'),
+    ('constant_ancestors', 'class Base\n  K = :base\nend\nK = :top\n'
+                           'class Sub < Base\n  puts K\nend\n'
+                           'class Outer\n  K = :outer\n'
+                           '  class Sub2 < Base\n    puts K\n  end\nend\n'
+                           'puts Sub::K\ndef top_k\n  K\nend\nputs top_k\n'),
     ('class_scoped', 'class Base\n  class X\n  end\nend\nclass Sub < Base\n'
                      'end\nclass Sub::X\n  puts self\nend\n'
                      'puts Sub::X == Base::X\nclass Top\nend\n'
