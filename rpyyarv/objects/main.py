@@ -39,8 +39,8 @@ class W_Main(W_Root):
     def defines_private(self):
         return True
 
-    def define_method(self, mid, w_method):
-        w_object_class.add_method(mid, w_method)
+    def method_owner(self):
+        return w_object_class
 
     def to_s_str(self):
         return 'main'

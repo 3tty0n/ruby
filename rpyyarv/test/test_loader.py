@@ -363,6 +363,14 @@ def test_a_singleton_method_is_refused(source, msg, compile_source):
     expect_unsupported(loader.load_dump(compile_source(source)), None, msg)
 
 
+@pytest.mark.parametrize('source, msg', [
+    ('class A\n  def f\n    super\n  end\nend\nA.new.f\n',
+     "super: no superclass method 'f' for #<A>"),
+    ('def g\n  super\nend\ng\n', "super: no superclass method 'g' for main")])
+def test_a_super_call_is_refused(source, msg, compile_source):
+    expect_unsupported(loader.load_dump(compile_source(source)), None, msg)
+
+
 def test_malformed_dump():
     expect(LoadError, 'dump\t99\t3.3.8\tx.rb\n',
            'dump format version 99, expected 1')
@@ -554,6 +562,22 @@ CRUBY_CASES = [
      'class C < B\nend\nputs C.name_of\ndef A.late\n  :late\nend\n'
      'puts C.late\nclass Foo\n  def self.new(x)\n    x * 10\n  end\nend\n'
      'puts Foo.new(4)\n'),
+    ('super_calls',
+     'class A\n  attr_reader :a\n  def initialize(a)\n    super()\n'
+     '    @a = a\n  end\n  def f(x)\n    x * 10\n  end\n'
+     '  def self.make\n    :a\n  end\nend\nclass B < A\n'
+     '  def initialize(a, b)\n    super(a)\n    @b = b\n  end\n'
+     '  def f(x)\n    r = super(x + 1) + super\n    x = 7\n    r + super\n'
+     '  end\n  def self.make\n    [super, :b].join("+")\n  end\nend\n'
+     'class C < B\nend\nclass D < C\n  def f(x)\n    super * 2\n  end\n'
+     'end\nputs B.new(1, 2).a\nputs B.new(1, 2).f(2)\nputs D.new(1, 2).f(2)\n'
+     'puts B.make\nputs D.make\n'),
+    ('super_blocks',
+     'class A\n  def f(x)\n    yield(x) + 1\n  end\nend\nclass B < A\n'
+     '  def f(x)\n    super + super(x) { |v| v * 100 }\n  end\nend\n'
+     'class C < A\n  def f(x)\n    r = 0\n    [1].each { |i| r = super(x + i) }\n'
+     '    r\n  end\nend\nputs B.new.f(2) { |v| v }\n'
+     'puts C.new.f(1) { |v| v * 3 }\n'),
     ('class_scoped', 'class Base\n  class X\n  end\nend\nclass Sub < Base\n'
                      'end\nclass Sub::X\n  puts self\nend\n'
                      'puts Sub::X == Base::X\nclass Top\nend\n'

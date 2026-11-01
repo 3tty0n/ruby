@@ -70,7 +70,8 @@ def invoke(frame, iseq, w_ci, w_block, tail=False):
             _drop(frame, iseq.nlocals)
             frame.w_self = w_recv
             return None
-        callee = Frame(callee_iseq, w_recv, None, w_block, w_method.cref)
+        callee = Frame(callee_iseq, w_recv, None, w_block, w_method.cref,
+                       w_method)
         i = 0
         while i < argc:
             callee.setlocal(i, frame.peek(recv_at + 1 + i))
@@ -118,7 +119,8 @@ def call_method(w_method, w_recv, args_w, w_block):
             "method '%s' has parameters RPyYARV does not support"
             % symbols.name_of(w_method.mid))
     _check_argc(w_method.mid, len(args_w), callee_iseq.nparams)
-    callee = Frame(callee_iseq, w_recv, None, w_block, w_method.cref)
+    callee = Frame(callee_iseq, w_recv, None, w_block, w_method.cref,
+                   w_method)
     i = 0
     while i < len(args_w):
         callee.setlocal(i, args_w[i])
@@ -147,14 +149,18 @@ def call_block(w_block, args_w):
 
 
 @unroll_safe
+def _method_frame(frame):
+    while frame.outer is not None:
+        frame = frame.outer
+    return frame
+
+
+@unroll_safe
 def yield_block(frame, w_ci):
     if not w_ci.simple:
         raise UnsupportedOperation(
             "yield passes arguments RPyYARV does not support")
-    method_frame = frame
-    while method_frame.outer is not None:
-        method_frame = method_frame.outer
-    w_block = method_frame.w_block
+    w_block = _method_frame(frame).w_block
     if w_block is None:
         raise UnsupportedOperation('no block given (yield)')
     argc = w_ci.argc
@@ -164,6 +170,34 @@ def yield_block(frame, w_ci):
         args_w[i] = frame.pop()
         i -= 1
     return call_block(w_block, args_w)
+
+
+@unroll_safe
+def invoke_super(frame, w_ci, w_block):
+    if not w_ci.simple:
+        raise UnsupportedOperation(
+            "super passes arguments RPyYARV does not support")
+    method_frame = _method_frame(frame)
+    w_method = method_frame.w_method
+    if w_method is None or w_method.w_owner is None:
+        raise UnsupportedOperation('super called outside of method')
+    if w_block is None:
+        w_block = method_frame.w_block
+    args_w = [w_nil] * w_ci.argc
+    i = w_ci.argc - 1
+    while i >= 0:
+        args_w[i] = frame.pop()
+        i -= 1
+    w_recv = frame.pop()
+    w_target = None
+    w_super = w_method.w_owner.w_superclass
+    if w_super is not None:
+        w_target = w_super.find_method(w_method.mid)
+    if w_target is None:
+        raise UnsupportedOperation("super: no superclass method '%s' for %s"
+                                   % (symbols.name_of(w_method.mid),
+                                      w_recv.repr()))
+    return call_method(w_target, w_recv, args_w, w_block)
 
 
 def _check_argc(mid, argc, want):
@@ -597,8 +631,9 @@ def execute(iseq, frame):
             pc += 2
             w_self = frame.w_self
             private = w_self.defines_private() or mid in ALWAYS_PRIVATE
-            w_self.define_method(mid, W_ISeqMethod(
-                mid, _as_iseq(w_body), private, frame.cref))
+            w_owner = w_self.method_owner()
+            w_owner.add_method(mid, W_ISeqMethod(
+                mid, _as_iseq(w_body), private, frame.cref, w_owner))
         elif opcode == insns.DEFINESMETHOD:
             mid = code[pc]
             w_body = iseq.consts[code[pc + 1]]
@@ -608,8 +643,9 @@ def execute(iseq, frame):
                 raise UnsupportedOperation(
                     'a singleton method on %s is not supported yet'
                     % w_obj.repr())
-            w_obj.singleton_class().add_method(mid, W_ISeqMethod(
-                mid, _as_iseq(w_body), False, frame.cref))
+            w_owner = w_obj.singleton_class()
+            w_owner.add_method(mid, W_ISeqMethod(
+                mid, _as_iseq(w_body), False, frame.cref, w_owner))
         elif opcode == insns.OPT_SEND_WITHOUT_BLOCK:
             idx = code[pc]
             pc += 1
@@ -661,6 +697,15 @@ def execute(iseq, frame):
                 pc = target
                 if backward:
                     jitdriver.can_enter_jit(iseq=iseq, pc=pc, frame=frame)
+        elif opcode == insns.INVOKESUPER:
+            w_ci = _callinfo(iseq, code[pc])
+            block = code[pc + 1]
+            pc += 2
+            w_block = None
+            if block != NO_BLOCK_ISEQ:
+                w_block = W_Block(_as_iseq(iseq.consts[block]), frame.w_self,
+                                  frame)
+            frame.push(invoke_super(frame, w_ci, w_block))
         elif opcode == insns.INVOKEBLOCK:
             w_ci = _callinfo(iseq, code[pc])
             pc += 1

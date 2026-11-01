@@ -277,7 +277,7 @@ def _check_code_references(w_iseq):
                                        or value < w_iseq.nlocals)
             elif t == insns.T_ISEQ:
                 if value == NO_BLOCK_ISEQ:
-                    assert op == insns.SEND
+                    assert op == insns.SEND or op == insns.INVOKESUPER
                 else:
                     assert 0 <= value < len(w_iseq.consts)
                     assert isinstance(w_iseq.consts[value], W_ISeq)
@@ -361,10 +361,13 @@ def _check_operand_values(raw, w_iseq, decoded, labels, l, scope_of):
                 assert w_ci.argc == raw_op.intval
                 assert w_ci.fcall == (
                     (raw_op.flag & optable.CALL_FLAG_FCALL) != 0)
-                has_block = (op == insns.SEND
+                has_block = ((op == insns.SEND or op == insns.INVOKESUPER)
                              and raw_ops[1].kind == rawiseq.OP_ISEQ)
+                allowed = optable.SIMPLE_CALL_FLAGS
+                if op == insns.INVOKESUPER:
+                    allowed |= optable.SUPER_CALL_FLAGS
                 simple = (not raw_op.has_kwarg
-                          and (raw_op.flag & ~optable.SIMPLE_CALL_FLAGS) == 0
+                          and (raw_op.flag & ~allowed) == 0
                           and ((raw_op.flag & optable.CALL_FLAG_ARGS_SIMPLE)
                                != 0 or has_block))
                 assert w_ci.simple == simple

@@ -43,8 +43,8 @@ class W_Class(W_Root):
             self.w_singleton = W_Class('#<Class:%s>' % self.name, w_super)
         return self.w_singleton
 
-    def define_method(self, mid, w_method):
-        self.add_method(mid, w_method)
+    def method_owner(self):
+        return self
 
     def add_method(self, mid, w_method):
         self.methods.define(mid, w_method)

@@ -62,6 +62,7 @@ EMIT = {
     'opt_send_without_block': [0],
     'send': [0, 1],         # blockiseq is iseq.NO_BLOCK_ISEQ when absent
     'invokeblock': [0],
+    'invokesuper': [0, 1],      # blockiseq is iseq.NO_BLOCK_ISEQ when absent
     'opt_new': [0, 1],          # falls back to a plain send of new at 1
     'opt_getconstant_path': [0],
     'setconstant': [0],
@@ -118,5 +119,7 @@ CALL_FLAG_FCALL = 0x04
 CALL_FLAG_VCALL = 0x08
 CALL_FLAG_ARGS_SIMPLE = 0x10
 CALL_FLAG_TAILCALL = 0x80
+CALL_FLAG_SUPER = 0x100
+CALL_FLAG_ZSUPER = 0x200
 SIMPLE_CALL_FLAGS = (CALL_FLAG_FCALL | CALL_FLAG_VCALL |
                      CALL_FLAG_ARGS_SIMPLE | CALL_FLAG_TAILCALL)

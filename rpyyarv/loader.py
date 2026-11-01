@@ -336,9 +336,13 @@ class Loader(object):
         flags = operand.flag
         # CRuby never sets ARGS_SIMPLE on a call site with a block literal,
         # so the literal itself stands in for it.
-        has_block = op == insns.SEND and ops[1].kind == rawiseq.OP_ISEQ
+        has_block = ((op == insns.SEND or op == insns.INVOKESUPER)
+                     and ops[1].kind == rawiseq.OP_ISEQ)
+        allowed = optable.SIMPLE_CALL_FLAGS
+        if op == insns.INVOKESUPER:
+            allowed |= optable.SUPER_CALL_FLAGS
         simple = (not operand.has_kwarg
-                  and (flags & ~optable.SIMPLE_CALL_FLAGS) == 0
+                  and (flags & ~allowed) == 0
                   and ((flags & optable.CALL_FLAG_ARGS_SIMPLE) != 0
                        or has_block))
         return W_CallInfo(symbols.intern(operand.strval), operand.intval,

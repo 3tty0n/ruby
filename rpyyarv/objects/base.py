@@ -38,9 +38,12 @@ class W_Root(object):
     def defines_private(self):
         return False
 
-    def define_method(self, mid, w_method):
+    def method_owner(self):
         raise UnsupportedOperation(
             'cannot define a method on %s' % self.repr())
+
+    def define_method(self, mid, w_method):
+        self.method_owner().add_method(mid, w_method)
 
     def get_ivar(self, mid):
         from rpyyarv.objects.transparent import w_nil
