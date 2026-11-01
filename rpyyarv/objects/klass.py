@@ -11,7 +11,7 @@ class VersionTag(object):
 
 class W_Class(W_Root):
     _immutable_fields_ = ['name', 'w_superclass', 'builtin', 'version?',
-                          'const_version?']
+                          'const_version?', 'w_singleton?']
 
     def __init__(self, name, w_superclass=None, builtin=False):
         self.name = name
@@ -22,11 +22,26 @@ class W_Class(W_Root):
         self.version = VersionTag()
         self.constants_w = {}
         self.const_version = VersionTag()
+        self.w_singleton = None
         if w_superclass is not None:
             w_superclass.subclasses_w.append(self)
 
     def getclass(self):
         return w_class_class
+
+    def lookup_class(self):
+        return self.singleton_class()
+
+    def singleton_class(self):
+        # Made on first use; its superclass is the superclass's own, so class
+        # methods are inherited, and Object's leads on to Class
+        if self.w_singleton is None:
+            if self.w_superclass is None:
+                w_super = w_class_class
+            else:
+                w_super = self.w_superclass.singleton_class()
+            self.w_singleton = W_Class('#<Class:%s>' % self.name, w_super)
+        return self.w_singleton
 
     def define_method(self, mid, w_method):
         self.add_method(mid, w_method)

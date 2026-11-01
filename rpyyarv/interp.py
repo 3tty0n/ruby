@@ -599,6 +599,17 @@ def execute(iseq, frame):
             private = w_self.defines_private() or mid in ALWAYS_PRIVATE
             w_self.define_method(mid, W_ISeqMethod(
                 mid, _as_iseq(w_body), private, frame.cref))
+        elif opcode == insns.DEFINESMETHOD:
+            mid = code[pc]
+            w_body = iseq.consts[code[pc + 1]]
+            pc += 2
+            w_obj = frame.pop()
+            if not isinstance(w_obj, W_Class):
+                raise UnsupportedOperation(
+                    'a singleton method on %s is not supported yet'
+                    % w_obj.repr())
+            w_obj.singleton_class().add_method(mid, W_ISeqMethod(
+                mid, _as_iseq(w_body), False, frame.cref))
         elif opcode == insns.OPT_SEND_WITHOUT_BLOCK:
             idx = code[pc]
             pc += 1

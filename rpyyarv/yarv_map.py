@@ -57,6 +57,7 @@ EMIT = {
     'branchif': [0],
     'branchunless': [0],
     'definemethod': [0, 1],
+    'definesmethod': [0, 1],
     'defineclass': [0, 1, 2],   # type is checked, only a class
     'opt_send_without_block': [0],
     'send': [0, 1],         # blockiseq is iseq.NO_BLOCK_ISEQ when absent

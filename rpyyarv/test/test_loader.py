@@ -352,6 +352,17 @@ def test_an_attribute_definition_is_refused(source, msg, compile_source):
     expect_unsupported(loader.load_dump(compile_source(source)), None, msg)
 
 
+@pytest.mark.parametrize('source, msg', [
+    ('class K\n  def self.a\n    1\n  end\nend\nK.new.a\n',
+     "undefined method 'a' for #<K>"),
+    ('class K\n  def self.a\n    1\n  end\nend\nclass L\nend\nL.a\n',
+     "undefined method 'a' for L"),
+    ('s = Object.new\ndef s.hi\n  1\nend\n',
+     'a singleton method on #<Object> is not supported yet')])
+def test_a_singleton_method_is_refused(source, msg, compile_source):
+    expect_unsupported(loader.load_dump(compile_source(source)), None, msg)
+
+
 def test_malformed_dump():
     expect(LoadError, 'dump\t99\t3.3.8\tx.rb\n',
            'dump format version 99, expected 1')
@@ -529,6 +540,20 @@ CRUBY_CASES = [
      'class Q\n  a = attr_accessor :a, "b"\n  puts a.length\n  puts a[1]\n'
      '  puts attr_reader(:c)[0]\n  puts attr_writer(:d)[0]\n'
      '  attr_accessor :A\nend\nq = Q.new\nq.A = 1\nputs q.A\n'),
+    ('class_methods',
+     'class Point\n  attr_reader :x\n  V = 5\n  def initialize(x)\n'
+     '    @x = x\n  end\n  def self.origin\n    new(0)\n  end\n'
+     '  def self.twice(n)\n    n * 2 + v\n  end\n  def self.v\n    V\n'
+     '  end\nend\nputs Point.origin.x\nputs Point.twice(21)\n'
+     'puts(def Point.three; 3; end)\nputs Point.three\n'
+     'def Integer.half(n)\n  n / 2\nend\nputs Integer.half(9)\n'),
+    ('class_methods_inherited',
+     'class A\n  def self.make\n    new\n  end\n  def self.name_of\n    :a\n'
+     '  end\nend\nclass B < A\n  def self.name_of\n    :b\n  end\nend\n'
+     'puts B.make == nil\nputs A.name_of\nputs B.name_of\n'
+     'class C < B\nend\nputs C.name_of\ndef A.late\n  :late\nend\n'
+     'puts C.late\nclass Foo\n  def self.new(x)\n    x * 10\n  end\nend\n'
+     'puts Foo.new(4)\n'),
     ('class_scoped', 'class Base\n  class X\n  end\nend\nclass Sub < Base\n'
                      'end\nclass Sub::X\n  puts self\nend\n'
                      'puts Sub::X == Base::X\nclass Top\nend\n'

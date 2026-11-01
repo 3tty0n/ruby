@@ -25,8 +25,11 @@ class W_Root(object):
     def getclass(self):
         raise UnsupportedOperation('no class for %s' % self.repr())
 
+    def lookup_class(self):
+        return self.getclass()
+
     def lookup_method(self, mid):
-        w_class = promote(self.getclass())
+        w_class = promote(self.lookup_class())
         w_method = w_class.find_method(mid)
         if w_method is None:
             raise self.no_method_error(mid)
