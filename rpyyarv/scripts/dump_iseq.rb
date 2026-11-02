@@ -32,6 +32,7 @@
 #   q:<index> nested ISeq
 #   a:<item>,<item>...  Array; each item is a token whose backslashes and
 #             commas are escaped again, so nesting stays unambiguous
+#   h:<key>,<value>,...  Hash, its pairs flattened and escaped as in a:
 #   c:<argc>,<flags>,<kwarg?>,<mid>   CALL_DATA
 #   x:<text>  anything else, verbatim, so a refusal can name it
 #
@@ -164,7 +165,7 @@ class Dumper
         "c:#{obj[:orig_argc]},#{obj[:flag]},#{obj[:kw_arg] ? 1 : 0}," \
           "#{esc(obj[:mid].to_s)}"
       else
-        "x:#{esc(obj.inspect)}"
+        "h:" + obj.to_a.flatten(1).map { |o| esc_item(operand(o)) }.join(',')
       end
     else
       "x:#{esc(obj.inspect)}"

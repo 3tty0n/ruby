@@ -22,6 +22,8 @@ EMIT = {
     'putchilledstring': [0],
     'newarray': [0],
     'duparray': [0],
+    'newhash': [0],
+    'duphash': [0],
     'getlocal': [0, 1],
     'setlocal': [0, 1],
     'getinstancevariable': [0],     # IVC dropped

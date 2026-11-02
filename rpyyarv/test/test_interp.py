@@ -1098,3 +1098,15 @@ def test_a_singleton_method_is_refused(source, msg, compile_source):
     ('def g\n  super\nend\ng\n', "super: no superclass method 'g' for main")])
 def test_a_super_call_is_refused(source, msg, compile_source):
     expect_unsupported(loader.load_dump(compile_source(source)), None, msg)
+
+
+@pytest.mark.parametrize('source, msg', [
+    ('h = {}\nh[1.5] = 1\n', 'a Hash key of class Float is not supported yet'),
+    ('h = {1 => 2}\nh[[1]]\n',
+     'a Hash key of class Array is not supported yet'),
+    ('h = {1 => 2}\nh.each { |k, v| h[k + 1] = v }\n',
+     "can't add a new key into hash during iteration"),
+    ('{1 => 2}.each\n',
+     'each without a block (an Enumerator) is not supported yet')])
+def test_a_hash_operation_is_refused(source, msg, compile_source):
+    expect_unsupported(loader.load_dump(compile_source(source)), None, msg)

@@ -18,6 +18,7 @@ from rpyyarv.frame import Frame
 from rpyyarv.iseq import W_CallInfo, W_ConstPath, W_ISeq, NO_BLOCK_ISEQ
 from rpyyarv.objects.array import W_Array
 from rpyyarv.objects.float import W_Float
+from rpyyarv.objects.hash import W_Hash
 from rpyyarv.objects.main import W_Main
 from rpyyarv.objects.regexp import W_Regexp
 from rpyyarv.objects.string import W_String
@@ -319,6 +320,12 @@ def _check_literal(w_x, raw_op):
         assert len(w_x.items_w) == len(raw_op.items)
         for i in range(len(raw_op.items)):
             _check_literal(w_x.items_w[i], raw_op.items[i])
+    elif kind == rawiseq.OP_HASH:
+        assert isinstance(w_x, W_Hash)
+        assert len(w_x.keys_w) * 2 == len(raw_op.items)
+        for i in range(len(w_x.keys_w)):
+            _check_literal(w_x.keys_w[i], raw_op.items[2 * i])
+            _check_literal(w_x.values_w[i], raw_op.items[2 * i + 1])
     elif kind == rawiseq.OP_OTHER:
         # The pattern itself is checked by the regexp tests.
         assert isinstance(w_x, W_Regexp)

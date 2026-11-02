@@ -11,7 +11,9 @@ from rpyyarv.iseq import (W_Block, W_CallInfo, W_ConstPath, W_ISeq,
                           NO_BLOCK_ISEQ, tail_position)
 from rpyyarv.methods import W_CFunc, W_ISeqMethod
 from rpyyarv.objects import array as arraylib
+from rpyyarv.objects import hash as hashlib
 from rpyyarv.objects.array import W_Array
+from rpyyarv.objects.hash import W_Hash
 from rpyyarv.objects.string import W_String
 from rpyyarv.objects.klass import W_Class, w_object_class
 from rpyyarv.objects.transparent import W_Integer, newbool, newint, w_nil
@@ -607,6 +609,28 @@ def execute(iseq, frame):
             w_ary = iseq.consts[idx]
             assert isinstance(w_ary, W_Array)
             frame.push(W_Array(w_ary.items_w[:]))
+        elif opcode == insns.NEWHASH:
+            n = code[pc]
+            pc += 1
+            w_hash = W_Hash()
+            i = n
+            while i > 0:
+                hashlib.aset(w_hash, frame.topn(i - 1), frame.topn(i - 2))
+                i -= 2
+            _drop(frame, frame.sp - n)
+            frame.push(w_hash)
+        elif opcode == insns.DUPHASH:
+            idx = code[pc]
+            pc += 1
+            w_template = iseq.consts[idx]
+            assert isinstance(w_template, W_Hash)
+            w_hash = W_Hash()
+            i = 0
+            while i < len(w_template.keys_w):
+                hashlib.aset(w_hash, w_template.keys_w[i],
+                             w_template.values_w[i])
+                i += 1
+            frame.push(w_hash)
         elif opcode == insns.CONCATSTRINGS:
             n = code[pc]
             pc += 1

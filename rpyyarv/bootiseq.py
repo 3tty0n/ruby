@@ -147,6 +147,16 @@ def _operand(pending, v):
                 rawiseq.OP_CALL, boot.num2long(argc), name,
                 _int_or(boot.hash_aref(v, 'flag'), 0),
                 not boot.is_nil(boot.hash_aref(v, 'kw_arg')))
+        pairs = boot.call0(v, 'to_a')
+        items = []
+        n = boot.ary_len(pairs)
+        i = 0
+        while i < n:
+            pair = boot.ary_entry(pairs, i)
+            items.append(_operand(pending, boot.ary_entry(pair, 0)))
+            items.append(_operand(pending, boot.ary_entry(pair, 1)))
+            i += 1
+        return rawiseq.RawOperand(rawiseq.OP_HASH, 0, '', 0, False, items)
     return rawiseq.RawOperand(rawiseq.OP_OTHER, 0, boot.inspect(v))
 
 

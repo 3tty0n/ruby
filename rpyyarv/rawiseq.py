@@ -18,9 +18,10 @@ OP_CALL = 7     # intval=orig_argc, flag=flags, strval=mid
 OP_OTHER = 8
 OP_ARRAY = 9    # items holds the elements
 OP_FLOAT = 10
+OP_HASH = 11    # items holds key, value, key, value, ...
 
 KIND_NAMES = ['Integer', 'nil', 'true', 'false', 'Symbol', 'String',
-              'ISeq', 'call data', 'object', 'Array', 'Float']
+              'ISeq', 'call data', 'object', 'Array', 'Float', 'Hash']
 
 
 class RawOperand(object):

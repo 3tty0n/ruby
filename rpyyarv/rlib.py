@@ -5,7 +5,8 @@ try:
         JitDriver, elidable, promote, unroll_safe, dont_look_inside, hint,
         set_user_param, TraceLimitTooHigh)
     from rpython.rlib.objectmodel import (
-        UnboxedValue, compute_unique_id, fetch_translated_config)
+        UnboxedValue, compute_hash, compute_identity_hash, compute_unique_id,
+        fetch_translated_config, r_dict)
     from rpython.rlib.rstackovf import StackOverflow, check_stack_overflow
     from rpython.rlib.rfloat import formatd
     from rpython.rlib.rarithmetic import ovfcheck
@@ -93,6 +94,32 @@ except ImportError:
 
     def compute_unique_id(x):
         return id(x)
+
+    compute_hash = hash
+    compute_identity_hash = id
+
+    class _DictKey(object):
+        def __init__(self, d, key):
+            self.d = d
+            self.key = key
+
+        def __eq__(self, other):
+            return self.d.key_eq(self.key, other.key)
+
+        def __hash__(self):
+            return self.d.key_hash(self.key)
+
+    class r_dict(object):
+        def __init__(self, key_eq, key_hash):
+            self.key_eq = key_eq
+            self.key_hash = key_hash
+            self.entries = {}
+
+        def get(self, key, default):
+            return self.entries.get(_DictKey(self, key), default)
+
+        def __setitem__(self, key, value):
+            self.entries[_DictKey(self, key)] = value
 
     def unroll_safe(func):
         return func

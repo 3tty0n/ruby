@@ -10,6 +10,7 @@ from rpyyarv.iseq import (W_CallInfo, W_ConstPath, W_ISeq, NO_BLOCK_ISEQ,
                           tail_position)
 from rpyyarv.objects.array import W_Array
 from rpyyarv.objects.float import W_Float
+from rpyyarv.objects import hash as hashlib
 from rpyyarv.objects.string import W_String
 from rpyyarv.objects.symbol import newsymbol
 from rpyyarv.objects.regexp import W_Regexp
@@ -297,6 +298,13 @@ class Loader(object):
             for item in operand.items:
                 items_w.append(self.literal_value(item, op, raw))
             return W_Array(items_w)
+        if kind == rawiseq.OP_HASH:
+            w_hash = hashlib.W_Hash()
+            for i in range(0, len(operand.items), 2):
+                hashlib.aset(w_hash,
+                             self.literal_value(operand.items[i], op, raw),
+                             self.literal_value(operand.items[i + 1], op, raw))
+            return w_hash
 
         raise UnsupportedOperation(
             "%s of %s in '%s': RPyYARV has no such object yet"

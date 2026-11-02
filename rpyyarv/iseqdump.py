@@ -107,11 +107,12 @@ def _operand(token):
         return rawiseq.RawOperand(rawiseq.OP_STR, 0, _unescape(body))
     if kind == 'q':
         return rawiseq.RawOperand(rawiseq.OP_ISEQ, _int(body, 'iseq index'))
-    if kind == 'a':
+    if kind == 'a' or kind == 'h':
         items = []
         for item in _split_items(body):
             items.append(_operand(item))
-        return rawiseq.RawOperand(rawiseq.OP_ARRAY, 0, '', 0, False, items)
+        op_kind = rawiseq.OP_ARRAY if kind == 'a' else rawiseq.OP_HASH
+        return rawiseq.RawOperand(op_kind, 0, '', 0, False, items)
     if kind == 'x':
         return rawiseq.RawOperand(rawiseq.OP_OTHER, 0, _unescape(body))
     if kind == 'c':

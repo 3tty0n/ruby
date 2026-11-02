@@ -252,6 +252,11 @@ def test_block_params_are_simple_only_when_plain(params, simple,
     assert w_iseq.consts[block_idx].simple_params == simple
 
 
+def test_a_hash_literal_with_an_unsupported_key_is_refused(compile_source):
+    expect(UnsupportedOperation, compile_source('{1.5 => 1}\n'),
+           'a Hash key of class Float is not supported yet')
+
+
 @pytest.mark.parametrize('source', ['module M\nend\n',
                                     'class << self\nend\n'])
 def test_a_module_or_singleton_class_is_refused_at_load(source,
@@ -496,6 +501,20 @@ CRUBY_CASES = [
               'def g(n)\n  n.times { |i| yield i * 10 }\nend\n'
               'g(3) { |x| puts x }\ndef h\n  yield\nend\nputs h { 5 }\n'
               'def c(x)\n  x\nend\nputs c(7) { 1 }\n'),
+    ('hash', 'h = {1 => :a, "s" => 2, nil => 3, true => 4, :k => false}\n'
+             'puts h[1]\nputs h["s"]\nputs h[nil]\nputs h[true]\n'
+             'puts h[:k]\nputs h[:none]\nputs h.size\nputs h.length\n'
+             'puts h.key?("s")\nputs h.key?(2)\nputs h.keys[4]\n'
+             'puts h.values[1]\nputs({} == {})\n'),
+    ('hash_order', 'x = 3\ng = {x => 1, "a" => x, x => 2}\ng[9] = 1\n'
+                   'g[3] = 5\nputs g.size\ng.each { |k, v| puts k\n'
+                   '  puts v }\ng.each { |pair| puts pair[0] }\n'
+                   'g.each { |k, v| g[k] = 0 }\nputs g.values[2]\n'),
+    ('hash_equal', 'puts({1 => 2} == {1 => 2})\nputs({1 => 2} == {1 => 3})\n'
+                   'puts({1 => 2} == {2 => 2})\nputs({1 => 2} == {})\n'
+                   'puts({1 => 1} == {1 => 1.0})\nputs({} == [])\n'
+                   'puts({1 => 2} != {1 => 2})\na = {}\na[1] = a\nb = {}\n'
+                   'b[1] = b\nputs a == b\n'),
 ]
 
 # bench_clock.rb needs RPyYARV's bench_now_ns, which CRuby does not have.
