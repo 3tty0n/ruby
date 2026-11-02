@@ -1,7 +1,10 @@
 """Unit tests for the interpreter loop: instructions, calls, classes."""
 
+import pytest
+
 from rpyyarv import insns
 from rpyyarv import interp
+from rpyyarv import loader
 from rpyyarv import symbols
 from rpyyarv.error import UnsupportedOperation
 from rpyyarv.frame import Frame
@@ -987,3 +990,111 @@ def _send_new(w_class, args_w):
     return interp.execute(iseq, frame)
 
 
+def test_a_block_with_a_rest_parameter_is_refused(compile_source):
+    w_iseq = loader.load_dump(compile_source('1.times { |*a| a }\n'))
+    expect_unsupported(w_iseq, None, "block 'block in <main>' has parameters "
+                       "RPyYARV does not support")
+
+
+@pytest.mark.parametrize('source, msg', [
+    ('a = 4611686018427387903\nb = a + a + 1\nb + 1\n',
+     '9223372036854775807 + 1'),
+    ('a = -4611686018427387904\nb = a + a\nb - 1\n',
+     '-9223372036854775808 - 1'),
+    ('3037000500 * 3037000500\n', '3037000500 * 3037000500')])
+def test_integer_overflow_is_refused(source, msg, compile_source):
+    w_iseq = loader.load_dump(compile_source(source))
+    expect_unsupported(w_iseq, None,
+                       msg + ' overflows a Fixnum: RPyYARV has no Bignum yet')
+
+
+@pytest.mark.parametrize('source, msg', [
+    ('def !\n  1\nend\n!nil\n', "private method '!' called for nil"),
+    ('def ==(o)\n  1\nend\nnil == 2\n',
+     "private method '==' called for nil")])
+def test_a_private_operator_method_is_refused(source, msg, compile_source):
+    expect_unsupported(loader.load_dump(compile_source(source)), None, msg)
+
+
+@pytest.mark.parametrize('source', [
+    'a = [0]\na[0] = a\na.join(",")\n',
+    'a = [0]\nb = [a]\na[0] = b\na.join(",")\n',
+    'a = [0]\na[0] = [[a]]\na.join(",")\n'])
+def test_a_recursive_join_is_refused(source, compile_source):
+    expect_unsupported(loader.load_dump(compile_source(source)), None,
+                       'recursive array join (ArgumentError)')
+
+
+def test_a_tail_call_without_a_block_drops_the_callers_block(compile_source):
+    source = ('def t(n)\n  if n == 0 then yield else t(n - 1) end\nend\n'
+              't(1) { puts 1 }\n')
+    expect_unsupported(loader.load_dump(compile_source(source)), None,
+                       'no block given (yield)')
+
+
+def test_aset_below_the_start_is_refused(compile_source):
+    expect_unsupported(
+        loader.load_dump(compile_source('a = [1, 2, 3]\na[-5] = 0\n')), None,
+        'index -5 too small for array; minimum: -3')
+
+
+@pytest.mark.parametrize('source, msg', [
+    ('class Integer\nend\n',
+     'reopening the built-in class Integer is not supported yet'),
+    ('class Foo < Array\nend\n',
+     'subclassing the built-in class Array is not supported yet'),
+    ('class A\nend\nclass B\nend\nclass C < A\nend\nclass C < B\nend\n',
+     'superclass mismatch for class C'),
+    ('class A < 3\nend\n',
+     'superclass must be an instance of Class (given an instance of Integer)'),
+    ('X = 1\nclass X\nend\n', 'X is not a class')])
+def test_a_class_definition_is_refused(source, msg, compile_source):
+    expect_unsupported(loader.load_dump(compile_source(source)), None, msg)
+
+
+@pytest.mark.parametrize('source, msg', [
+    ('class Foo\n  puts X\nend\n', 'uninitialized constant Foo::X'),
+    ('class Foo\nend\nputs Foo::Array\n',
+     'uninitialized constant Foo::Array'),
+    ('X = 1\nY = X::Z\n', '1 is not a class/module')])
+def test_a_constant_lookup_is_refused(source, msg, compile_source):
+    expect_unsupported(loader.load_dump(compile_source(source)), None, msg)
+
+
+@pytest.mark.parametrize('source, msg', [
+    ('class Foo\n  def initialize\n  end\nend\nFoo.new.initialize\n',
+     "private method 'initialize' called for #<Foo>"),
+    ('class Foo\n  def initialize(a, b)\n  end\nend\nFoo.new(1)\n',
+     "wrong number of arguments to 'initialize' (given 1, expected 2)"),
+    ('puts Array.new.length\n', 'Array.new is not supported yet')])
+def test_an_instance_creation_is_refused(source, msg, compile_source):
+    expect_unsupported(loader.load_dump(compile_source(source)), None, msg)
+
+
+@pytest.mark.parametrize('source, msg', [
+    ('class Foo\n  attr_reader 1\nend\n', '1 is not a symbol nor a string'),
+    ('class Foo\n  attr_reader :a?\nend\n', "invalid attribute name 'a?'"),
+    ('attr_reader :x\n', "undefined method 'attr_reader' for main"),
+    ('Array.attr_reader :length\n',
+     'attr_reader on the built-in class Array is not supported yet')])
+def test_an_attribute_definition_is_refused(source, msg, compile_source):
+    expect_unsupported(loader.load_dump(compile_source(source)), None, msg)
+
+
+@pytest.mark.parametrize('source, msg', [
+    ('class K\n  def self.a\n    1\n  end\nend\nK.new.a\n',
+     "undefined method 'a' for #<K>"),
+    ('class K\n  def self.a\n    1\n  end\nend\nclass L\nend\nL.a\n',
+     "undefined method 'a' for L"),
+    ('s = Object.new\ndef s.hi\n  1\nend\n',
+     'a singleton method on #<Object> is not supported yet')])
+def test_a_singleton_method_is_refused(source, msg, compile_source):
+    expect_unsupported(loader.load_dump(compile_source(source)), None, msg)
+
+
+@pytest.mark.parametrize('source, msg', [
+    ('class A\n  def f\n    super\n  end\nend\nA.new.f\n',
+     "super: no superclass method 'f' for #<A>"),
+    ('def g\n  super\nend\ng\n', "super: no superclass method 'g' for main")])
+def test_a_super_call_is_refused(source, msg, compile_source):
+    expect_unsupported(loader.load_dump(compile_source(source)), None, msg)
