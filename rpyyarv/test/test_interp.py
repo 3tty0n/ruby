@@ -1110,3 +1110,17 @@ def test_a_super_call_is_refused(source, msg, compile_source):
      'each without a block (an Enumerator) is not supported yet')])
 def test_a_hash_operation_is_refused(source, msg, compile_source):
     expect_unsupported(loader.load_dump(compile_source(source)), None, msg)
+
+
+@pytest.mark.parametrize('source, msg', [
+    ('def f(a)\nend\nf(*[1, 2])\n',
+     "wrong number of arguments to 'f' (given 2, expected 1)"),
+    ('class U\n  def to_a\n    1\n  end\nend\n[*U.new]\n',
+     "can't convert U to Array (U#to_a gives Integer)"),
+    ('def f\n  yield(*[1])\nend\nf { |x| x }\n',
+     'yield passes arguments RPyYARV does not support'),
+    ('class A\n  def f(x)\n  end\nend\nclass B < A\n  def f(x)\n'
+     '    super(*[x])\n  end\nend\nB.new.f(1)\n',
+     'super passes arguments RPyYARV does not support')])
+def test_a_splat_is_refused(source, msg, compile_source):
+    expect_unsupported(loader.load_dump(compile_source(source)), None, msg)

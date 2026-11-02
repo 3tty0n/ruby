@@ -24,6 +24,9 @@ EMIT = {
     'duparray': [0],
     'newhash': [0],
     'duphash': [0],
+    'splatarray': [0],
+    'concattoarray': [],
+    'pushtoarray': [0],
     'getlocal': [0, 1],
     'setlocal': [0, 1],
     'getinstancevariable': [0],     # IVC dropped
@@ -117,12 +120,15 @@ DEFINECLASS_FLAG_HAS_SUPERCLASS = 0x10
 # vm_callinfo.h. Outside this mask (splat, block argument, keywords, super,
 # forwarding) the arguments reach the callee differently; ARGS_SIMPLE is
 # CRuby's own statement that none of them apply.
+CALL_FLAG_ARGS_SPLAT = 0x01
 CALL_FLAG_FCALL = 0x04
 CALL_FLAG_VCALL = 0x08
 CALL_FLAG_ARGS_SIMPLE = 0x10
 CALL_FLAG_TAILCALL = 0x80
 CALL_FLAG_SUPER = 0x100
 CALL_FLAG_ZSUPER = 0x200
+CALL_FLAG_ARGS_SPLAT_MUT = 0x1000
 SIMPLE_CALL_FLAGS = (CALL_FLAG_FCALL | CALL_FLAG_VCALL |
                      CALL_FLAG_ARGS_SIMPLE | CALL_FLAG_TAILCALL)
 SUPER_CALL_FLAGS = CALL_FLAG_SUPER | CALL_FLAG_ZSUPER
+SPLAT_CALL_FLAGS = CALL_FLAG_ARGS_SPLAT | CALL_FLAG_ARGS_SPLAT_MUT

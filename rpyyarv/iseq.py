@@ -58,9 +58,10 @@ class W_ISeq(W_Root):
 
 
 class W_CallInfo(W_Root):
-    _immutable_fields_ = ['mid', 'argc', 'simple', 'fcall', 'tail']
+    _immutable_fields_ = ['mid', 'argc', 'simple', 'fcall', 'tail', 'splat']
 
-    def __init__(self, mid, argc, simple=True, fcall=True, tail=None):
+    def __init__(self, mid, argc, simple=True, fcall=True, tail=None,
+                 splat=False):
         self.mid = mid
         self.argc = argc
         # False once the loader saw call flags outside SIMPLE_CALL_FLAGS.
@@ -69,6 +70,7 @@ class W_CallInfo(W_Root):
         self.fcall = fcall
         # None for hand-built ISeqs.
         self.tail = tail
+        self.splat = splat
 
     def repr(self):
         return '<W_CallInfo %s argc=%d>' % (symbols.name_of(self.mid),

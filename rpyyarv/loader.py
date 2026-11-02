@@ -349,13 +349,16 @@ class Loader(object):
         allowed = optable.SIMPLE_CALL_FLAGS
         if op == insns.INVOKESUPER:
             allowed |= optable.SUPER_CALL_FLAGS
+        if op == insns.SEND or op == insns.OPT_SEND_WITHOUT_BLOCK:
+            allowed |= optable.SPLAT_CALL_FLAGS
+        splat = (flags & optable.CALL_FLAG_ARGS_SPLAT) != 0
         simple = (not operand.has_kwarg
                   and (flags & ~allowed) == 0
                   and ((flags & optable.CALL_FLAG_ARGS_SIMPLE) != 0
-                       or has_block))
+                       or has_block or splat))
         return W_CallInfo(symbols.intern(operand.strval), operand.intval,
                           simple, (flags & optable.CALL_FLAG_FCALL) != 0,
-                          tail)
+                          tail, splat)
 
     def const_path(self, operand, op, raw):
         if operand.kind != rawiseq.OP_ARRAY:

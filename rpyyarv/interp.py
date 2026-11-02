@@ -57,6 +57,18 @@ def invoke(frame, iseq, w_ci, w_block, tail=False):
         raise UnsupportedOperation("private method '%s' called for %s"
                                    % (symbols.name_of(w_ci.mid), w_recv.repr()))
 
+    if w_ci.splat:
+        w_splat = frame.peek(frame.sp - 1)
+        assert isinstance(w_splat, W_Array)
+        args_w = []
+        i = 0
+        while i < argc - 1:
+            args_w.append(frame.peek(recv_at + 1 + i))
+            i += 1
+        args_w.extend(w_splat.items_w)
+        _drop(frame, recv_at)
+        return call_method(w_method, w_recv, args_w, w_block)
+
     if isinstance(w_method, W_ISeqMethod):
         callee_iseq = w_method.w_iseq
         if not callee_iseq.simple_params:
@@ -222,6 +234,7 @@ def _drop(frame, sp):
 
 
 TO_S = symbols.intern('to_s')
+TO_A = symbols.intern('to_a')
 AREF = symbols.intern('[]')
 LENGTH = symbols.intern('length')
 EQ = symbols.intern('==')
@@ -349,6 +362,21 @@ def _to_s(w_x):
     if isinstance(w_x, W_String):
         return w_x
     return call_method(w_x.lookup_method(TO_S), w_x, [], None)
+
+
+def _check_to_array(w_x):
+    if isinstance(w_x, W_Array):
+        return w_x
+    w_to_a = w_x.lookup_class().find_method(TO_A)
+    if w_to_a is None:
+        return None
+    w_ary = call_method(w_to_a, w_x, [], None)
+    if not isinstance(w_ary, W_Array):
+        name = w_x.getclass().name
+        raise UnsupportedOperation(
+            "can't convert %s to Array (%s#to_a gives %s)"
+            % (name, name, w_ary.getclass().name))
+    return w_ary
 
 
 def to_s_string(w_x):
@@ -631,6 +659,40 @@ def execute(iseq, frame):
                              w_template.values_w[i])
                 i += 1
             frame.push(w_hash)
+        elif opcode == insns.SPLATARRAY:
+            dup = iseq.consts[code[pc]].is_true()
+            pc += 1
+            w_x = frame.pop()
+            if w_x is w_nil:
+                frame.push(W_Array([]))
+            else:
+                w_ary = _check_to_array(w_x)
+                if w_ary is None:
+                    frame.push(W_Array([w_x]))
+                elif dup:
+                    frame.push(W_Array(w_ary.items_w[:]))
+                else:
+                    frame.push(w_ary)
+        elif opcode == insns.PUSHTOARRAY:
+            n = code[pc]
+            pc += 1
+            w_ary = frame.topn(n)
+            assert isinstance(w_ary, W_Array)
+            i = n - 1
+            while i >= 0:
+                w_ary.items_w.append(frame.topn(i))
+                i -= 1
+            _drop(frame, frame.sp - n)
+        elif opcode == insns.CONCATTOARRAY:
+            w_x = frame.pop()
+            w_ary = frame.topn(0)
+            assert isinstance(w_ary, W_Array)
+            if w_x is not w_nil:
+                w_tail = _check_to_array(w_x)
+                if w_tail is None:
+                    w_ary.items_w.append(w_x)
+                else:
+                    w_ary.items_w.extend(w_tail.items_w)
         elif opcode == insns.CONCATSTRINGS:
             n = code[pc]
             pc += 1

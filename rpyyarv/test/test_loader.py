@@ -515,6 +515,20 @@ CRUBY_CASES = [
                    'puts({1 => 1} == {1 => 1.0})\nputs({} == [])\n'
                    'puts({1 => 2} != {1 => 2})\na = {}\na[1] = a\nb = {}\n'
                    'b[1] = b\nputs a == b\n'),
+    ('splat_call', 'def f(x, y, z)\n  puts x + y * z\nend\na = [2, 3]\n'
+                   'f(1, *a)\nf(*a, 4)\nf(*[1, 2, 3])\nputs(*a)\n'
+                   'class C\n  def initialize(x, y)\n    @s = x - y\n  end\n'
+                   '  def s\n    @s\n  end\nend\nputs C.new(*a).s\n'
+                   'def h(x)\n  yield x\nend\nh(*[5]) { |v| puts v }\n'),
+    ('splat_array', 'a = [1, 2]\nb = 3\nx = [*a]\nx[0] = 9\nputs a[0]\n'
+                    'puts [*a, b].join(",")\nputs [b, *a].join(",")\n'
+                    'puts [*a, *a].join(",")\nputs [b, *a, b].join(",")\n'
+                    'puts([*nil].size)\nputs [*1].join(",")\n'
+                    'puts [*a, *nil].size\nputs [*a, *b].join(",")\n'
+                    'class T\n  def to_a\n    [7, 8]\n  end\nend\n'
+                    'puts [*T.new].join(",")\nputs [0, *T.new].join(",")\n'
+                    'h = {1 => 2, 3 => 4}\nputs [*h][1].join(",")\n'
+                    'puts h.to_a.size\n'),
 ]
 
 # bench_clock.rb needs RPyYARV's bench_now_ns, which CRuby does not have.

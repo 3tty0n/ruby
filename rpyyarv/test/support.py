@@ -373,11 +373,15 @@ def _check_operand_values(raw, w_iseq, decoded, labels, l, scope_of):
                 allowed = optable.SIMPLE_CALL_FLAGS
                 if op == insns.INVOKESUPER:
                     allowed |= optable.SUPER_CALL_FLAGS
+                if op == insns.SEND or op == insns.OPT_SEND_WITHOUT_BLOCK:
+                    allowed |= optable.SPLAT_CALL_FLAGS
+                splat = (raw_op.flag & optable.CALL_FLAG_ARGS_SPLAT) != 0
                 simple = (not raw_op.has_kwarg
                           and (raw_op.flag & ~allowed) == 0
                           and ((raw_op.flag & optable.CALL_FLAG_ARGS_SIMPLE)
-                               != 0 or has_block))
+                               != 0 or has_block or splat))
                 assert w_ci.simple == simple
+                assert w_ci.splat == splat
             elif t == insns.T_VALUE:
                 assert 0 <= got < len(w_iseq.consts)
                 _check_literal(w_iseq.consts[got], raw_op)

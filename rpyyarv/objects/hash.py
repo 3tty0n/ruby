@@ -98,6 +98,17 @@ class W_HashValues(W_CFunc):
         return W_Array(w_recv.values_w[:])
 
 
+class W_HashToA(W_CFunc):
+    def call(self, w_recv, args_w, w_block):
+        assert isinstance(w_recv, W_Hash)
+        pairs_w = []
+        i = 0
+        while i < len(w_recv.keys_w):
+            pairs_w.append(W_Array([w_recv.keys_w[i], w_recv.values_w[i]]))
+            i += 1
+        return W_Array(pairs_w)
+
+
 class W_HashHasKey(W_CFunc):
     def call(self, w_recv, args_w, w_block):
         assert isinstance(w_recv, W_Hash)
@@ -179,6 +190,7 @@ def install(w_class):
                              ('length', W_HashSize, 0),
                              ('keys', W_HashKeys, 0),
                              ('values', W_HashValues, 0),
+                             ('to_a', W_HashToA, 0),
                              ('key?', W_HashHasKey, 1),
                              ('each', W_HashEach, 0),
                              ('==', W_HashEqual, 1)]:
