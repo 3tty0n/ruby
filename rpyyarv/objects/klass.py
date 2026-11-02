@@ -1,8 +1,37 @@
 """Classes: the method tables that method lookup walks."""
 
+from rpyyarv import symbols
 from rpyyarv.methods import MethodTable
 from rpyyarv.objects.base import W_Root
 from rpyyarv.rlib import elidable, unroll_safe
+
+# Methods of a built-in class that the interpreter computes itself until
+# Ruby code redefines them, as CRuby's BOP flags
+BOP_PLUS = 1 << 0
+BOP_MINUS = 1 << 1
+BOP_MULT = 1 << 2
+BOP_DIV = 1 << 3
+BOP_MOD = 1 << 4
+BOP_LT = 1 << 5
+BOP_GT = 1 << 6
+BOP_LE = 1 << 7
+BOP_GE = 1 << 8
+BOP_EQ = 1 << 9
+BOP_NEQ = 1 << 10
+BOP_AREF = 1 << 11
+BOP_ASET = 1 << 12
+BOP_LENGTH = 1 << 13
+BOP_SIZE = 1 << 14
+BOP_TO_S = 1 << 15
+
+_BOP_BITS = {}
+for _name, _bit in [('+', BOP_PLUS), ('-', BOP_MINUS), ('*', BOP_MULT),
+                    ('/', BOP_DIV), ('%', BOP_MOD), ('<', BOP_LT),
+                    ('>', BOP_GT), ('<=', BOP_LE), ('>=', BOP_GE),
+                    ('==', BOP_EQ), ('!=', BOP_NEQ), ('[]', BOP_AREF),
+                    ('[]=', BOP_ASET), ('length', BOP_LENGTH),
+                    ('size', BOP_SIZE), ('to_s', BOP_TO_S)]:
+    _BOP_BITS[symbols.intern(_name)] = _bit
 
 
 class VersionTag(object):
@@ -11,7 +40,7 @@ class VersionTag(object):
 
 class W_Class(W_Root):
     _immutable_fields_ = ['name', 'w_superclass', 'builtin', 'version?',
-                          'const_version?', 'w_singleton?']
+                          'const_version?', 'w_singleton?', 'redefined?']
 
     def __init__(self, name, w_superclass=None, builtin=False):
         self.name = name
@@ -23,6 +52,7 @@ class W_Class(W_Root):
         self.constants_w = {}
         self.const_version = VersionTag()
         self.w_singleton = None
+        self.redefined = 0
         if w_superclass is not None:
             w_superclass.subclasses_w.append(self)
 
@@ -45,6 +75,11 @@ class W_Class(W_Root):
 
     def method_owner(self):
         return self
+
+    def add_user_method(self, mid, w_method):
+        if self.builtin and mid in _BOP_BITS:
+            self.redefined |= _BOP_BITS[mid]
+        self.add_method(mid, w_method)
 
     def add_method(self, mid, w_method):
         self.methods.define(mid, w_method)

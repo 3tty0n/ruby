@@ -6,7 +6,6 @@ from rpyyarv import optable
 from rpyyarv import symbols
 from rpyyarv.error import UnsupportedOperation
 from rpyyarv.frame import Cref, Frame
-from rpyyarv.helpers import is_number
 from rpyyarv.iseq import (W_Block, W_CallInfo, W_ConstPath, W_ISeq,
                           NO_BLOCK_ISEQ, tail_position)
 from rpyyarv.methods import W_CFunc, W_ISeqMethod
@@ -16,7 +15,12 @@ from rpyyarv.objects import range as rangelib
 from rpyyarv.objects.array import W_Array
 from rpyyarv.objects.hash import W_Hash
 from rpyyarv.objects.string import W_String
-from rpyyarv.objects.klass import W_Class, w_object_class
+from rpyyarv.objects.klass import (BOP_AREF, BOP_ASET, BOP_DIV, BOP_EQ,
+                                   BOP_GE, BOP_GT, BOP_LE, BOP_LENGTH, BOP_LT,
+                                   BOP_MINUS, BOP_MOD, BOP_MULT, BOP_NEQ,
+                                   BOP_PLUS, BOP_SIZE, BOP_TO_S, W_Class,
+                                   w_array_class, w_object_class,
+                                   w_string_class)
 from rpyyarv.objects.transparent import W_Integer, newbool, newint, w_nil
 from rpyyarv.rlib import JitDriver, elidable, promote, unroll_safe
 
@@ -359,12 +363,6 @@ def _define_class(w_cbase, mid, w_super, flags):
     return w_class
 
 
-def _to_s(w_x):
-    if isinstance(w_x, W_String):
-        return w_x
-    return call_method(w_x.lookup_method(TO_S), w_x, [], None)
-
-
 def _check_to_array(w_x):
     if isinstance(w_x, W_Array):
         return w_x
@@ -382,7 +380,9 @@ def _check_to_array(w_x):
 
 def to_s_string(w_x):
     """w_x.to_s as a String, as Kernel#puts takes it."""
-    w_str = _to_s(w_x)
+    if isinstance(w_x, W_String):
+        return w_x
+    w_str = send(w_x, TO_S, [])
     if not isinstance(w_str, W_String):
         raise UnsupportedOperation('to_s on %s did not return a String'
                                    % w_x.repr())
@@ -514,78 +514,79 @@ def execute(iseq, frame):
         elif opcode == insns.OPT_PLUS:
             w_b = frame.pop()
             w_a = frame.pop()
-            if (is_number(w_a) and is_number(w_b)) or (
-                    isinstance(w_a, W_String) and isinstance(w_b, W_String)):
+            if helpers.numeric_fast(w_a, w_b, BOP_PLUS) or (
+                    isinstance(w_a, W_String) and isinstance(w_b, W_String)
+                    and w_string_class.redefined & BOP_PLUS == 0):
                 frame.push(helpers.w_add(w_a, w_b))
             else:
                 frame.push(send_op(w_a, PLUS, [w_b]))
         elif opcode == insns.OPT_MINUS:
             w_b = frame.pop()
             w_a = frame.pop()
-            if is_number(w_a) and is_number(w_b):
+            if helpers.numeric_fast(w_a, w_b, BOP_MINUS):
                 frame.push(helpers.w_sub(w_a, w_b))
             else:
                 frame.push(send_op(w_a, MINUS, [w_b]))
         elif opcode == insns.OPT_MULT:
             w_b = frame.pop()
             w_a = frame.pop()
-            if is_number(w_a) and is_number(w_b):
+            if helpers.numeric_fast(w_a, w_b, BOP_MULT):
                 frame.push(helpers.w_mul(w_a, w_b))
             else:
                 frame.push(send_op(w_a, MULT, [w_b]))
         elif opcode == insns.OPT_DIV:
             w_b = frame.pop()
             w_a = frame.pop()
-            if is_number(w_a) and is_number(w_b):
+            if helpers.numeric_fast(w_a, w_b, BOP_DIV):
                 frame.push(helpers.w_div(w_a, w_b))
             else:
                 frame.push(send_op(w_a, DIV, [w_b]))
         elif opcode == insns.OPT_MOD:
             w_b = frame.pop()
             w_a = frame.pop()
-            if is_number(w_a) and is_number(w_b):
+            if helpers.numeric_fast(w_a, w_b, BOP_MOD):
                 frame.push(helpers.w_mod(w_a, w_b))
             else:
                 frame.push(send_op(w_a, MOD, [w_b]))
         elif opcode == insns.OPT_LT:
             w_b = frame.pop()
             w_a = frame.pop()
-            if is_number(w_a) and is_number(w_b):
+            if helpers.numeric_fast(w_a, w_b, BOP_LT):
                 frame.push(helpers.w_lt(w_a, w_b))
             else:
                 frame.push(send_op(w_a, LT, [w_b]))
         elif opcode == insns.OPT_GT:
             w_b = frame.pop()
             w_a = frame.pop()
-            if is_number(w_a) and is_number(w_b):
+            if helpers.numeric_fast(w_a, w_b, BOP_GT):
                 frame.push(helpers.w_gt(w_a, w_b))
             else:
                 frame.push(send_op(w_a, GT, [w_b]))
         elif opcode == insns.OPT_LE:
             w_b = frame.pop()
             w_a = frame.pop()
-            if is_number(w_a) and is_number(w_b):
+            if helpers.numeric_fast(w_a, w_b, BOP_LE):
                 frame.push(helpers.w_le(w_a, w_b))
             else:
                 frame.push(send_op(w_a, LE, [w_b]))
         elif opcode == insns.OPT_GE:
             w_b = frame.pop()
             w_a = frame.pop()
-            if is_number(w_a) and is_number(w_b):
+            if helpers.numeric_fast(w_a, w_b, BOP_GE):
                 frame.push(helpers.w_ge(w_a, w_b))
             else:
                 frame.push(send_op(w_a, GE, [w_b]))
         elif opcode == insns.OPT_EQ:
             w_b = frame.pop()
             w_a = frame.pop()
-            if is_number(w_a) and is_number(w_b):
+            if helpers.numeric_fast(w_a, w_b, BOP_EQ):
                 frame.push(helpers.w_eq(w_a, w_b))
             else:
                 frame.push(send_op(w_a, EQ, [w_b]))
         elif opcode == insns.OPT_NEQ:
             w_b = frame.pop()
             w_a = frame.pop()
-            if is_number(w_a) and is_number(w_b):
+            if helpers.numeric_fast(w_a, w_b, BOP_EQ | BOP_NEQ):
                 frame.push(newbool(not helpers.w_eq(w_a, w_b).is_true()))
             else:
                 frame.push(send_op(w_a, NEQ, [w_b]))
@@ -594,7 +595,8 @@ def execute(iseq, frame):
         elif opcode == insns.OPT_AREF:
             w_key = frame.pop()
             w_recv = frame.pop()
-            if isinstance(w_recv, W_Array) and isinstance(w_key, W_Integer):
+            if (isinstance(w_recv, W_Array) and isinstance(w_key, W_Integer)
+                    and w_array_class.redefined & BOP_AREF == 0):
                 frame.push(arraylib.aref(w_recv, w_key.int_w()))
             else:
                 frame.push(send_op(w_recv, AREF, [w_key]))
@@ -602,20 +604,28 @@ def execute(iseq, frame):
             w_value = frame.pop()
             w_key = frame.pop()
             w_recv = frame.pop()
-            if isinstance(w_recv, W_Array) and isinstance(w_key, W_Integer):
+            if (isinstance(w_recv, W_Array) and isinstance(w_key, W_Integer)
+                    and w_array_class.redefined & BOP_ASET == 0):
                 frame.push(arraylib.aset(w_recv, w_key.int_w(), w_value))
             else:
                 frame.push(send_op(w_recv, ASET, [w_key, w_value]))
         elif opcode == insns.OPT_LENGTH or opcode == insns.OPT_SIZE:
             w_recv = frame.pop()
-            if isinstance(w_recv, W_Array):
+            bop = BOP_LENGTH if opcode == insns.OPT_LENGTH else BOP_SIZE
+            if (isinstance(w_recv, W_Array)
+                    and w_array_class.redefined & bop == 0):
                 frame.push(newint(len(w_recv.items_w)))
             elif opcode == insns.OPT_LENGTH:
                 frame.push(send_op(w_recv, LENGTH, []))
             else:
                 frame.push(send_op(w_recv, SIZE, []))
         elif opcode == insns.OBJTOSTRING:
-            frame.push(_to_s(frame.pop()))
+            w_x = frame.pop()
+            if (isinstance(w_x, W_String)
+                    and w_string_class.redefined & BOP_TO_S == 0):
+                frame.push(w_x)
+            else:
+                frame.push(send(w_x, TO_S, []))
         elif opcode == insns.ANYTOSTRING:
             w_str = frame.pop()
             w_val = frame.pop()
@@ -727,7 +737,7 @@ def execute(iseq, frame):
             w_self = frame.w_self
             private = w_self.defines_private() or mid in ALWAYS_PRIVATE
             w_owner = w_self.method_owner()
-            w_owner.add_method(mid, W_ISeqMethod(
+            w_owner.add_user_method(mid, W_ISeqMethod(
                 mid, _as_iseq(w_body), private, frame.cref, w_owner))
         elif opcode == insns.DEFINESMETHOD:
             mid = code[pc]

@@ -2,6 +2,7 @@ import math
 
 from rpyyarv.error import UnsupportedOperation
 from rpyyarv.objects.float import W_Float
+from rpyyarv.objects.klass import w_float_class, w_integer_class
 from rpyyarv.objects.string import W_String
 from rpyyarv.objects.transparent import W_Integer, newbool, newint
 from rpyyarv.rlib import ovfcheck
@@ -19,6 +20,16 @@ UNORDERED = 2
 
 def is_number(w_x):
     return isinstance(w_x, W_Integer) or isinstance(w_x, W_Float)
+
+
+def numeric_fast(w_a, w_b, bop):
+    if isinstance(w_a, W_Integer):
+        w_class = w_integer_class
+    elif isinstance(w_a, W_Float):
+        w_class = w_float_class
+    else:
+        return False
+    return is_number(w_b) and w_class.redefined & bop == 0
 
 
 def _floats(w_a, w_b):

@@ -4,6 +4,7 @@ import os
 
 from rpyyarv import symbols
 from rpyyarv.methods import W_CFunc
+from rpyyarv.objects.klass import BOP_EQ
 from rpyyarv.objects.string import W_String
 from rpyyarv.objects.transparent import newbool, newint, w_nil
 from rpyyarv.rlib import now_ns
@@ -58,7 +59,7 @@ def equal(w_a, w_b):
     from rpyyarv import interp
     if w_a is w_b:
         return True
-    if helpers.is_number(w_a) and helpers.is_number(w_b):
+    if helpers.numeric_fast(w_a, w_b, BOP_EQ):
         return helpers.w_eq(w_a, w_b).is_true()
     return interp.send(w_a, EQ, [w_b]).is_true()
 

@@ -101,11 +101,11 @@ class W_Attr(W_CFunc):
             ivar = symbols.intern('@' + name)
             if self.reader:
                 mid = symbols.intern(name)
-                w_recv.add_method(mid, W_AttrReader(mid, ivar))
+                w_recv.add_user_method(mid, W_AttrReader(mid, ivar))
                 defined_w.append(newsymbol(mid))
             if self.writer:
                 mid = symbols.intern(name + '=')
-                w_recv.add_method(mid, W_AttrWriter(mid, ivar))
+                w_recv.add_user_method(mid, W_AttrWriter(mid, ivar))
                 defined_w.append(newsymbol(mid))
         return W_Array(defined_w)
 

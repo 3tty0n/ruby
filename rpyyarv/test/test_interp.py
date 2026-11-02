@@ -11,13 +11,15 @@ from rpyyarv.frame import Frame
 from rpyyarv.iseq import W_CallInfo, NO_BLOCK_ISEQ
 from rpyyarv.methods import W_CFunc, W_ISeqMethod
 from rpyyarv.objects.instance import W_Object
-from rpyyarv.objects.klass import W_Class, w_class_class, w_object_class
+from rpyyarv.objects.klass import (W_Class, w_array_class, w_class_class,
+                                   w_float_class, w_integer_class,
+                                   w_object_class, w_string_class)
 from rpyyarv.objects.main import W_Main, w_main
 from rpyyarv.objects.string import W_String
 from rpyyarv.objects.array import W_Array
 from rpyyarv.objects.regexp import W_Regexp
 from rpyyarv.objects.transparent import W_Fixnum, w_nil, w_true, w_false
-from rpyyarv.test.support import asm, capture, expect_unsupported
+from rpyyarv.test.support import asm, capture, expect_unsupported, run_dump
 
 
 
@@ -1168,3 +1170,49 @@ def test_a_times_enumerator_operation_is_refused(source, msg,
      '+ with S through to_str is not supported yet')])
 def test_an_operator_on_a_wrong_type_is_refused(source, msg, compile_source):
     expect_unsupported(loader.load_dump(compile_source(source)), None, msg)
+
+
+class W_Redefined(W_CFunc):
+    def call(self, w_recv, args_w, w_block):
+        return W_String('redefined')
+
+
+@pytest.fixture
+def redefine():
+    """Defines a method on a built-in class as Ruby code would, then
+    undoes it."""
+    saved = []
+
+    def define(w_class, name):
+        saved.append((w_class, w_class.methods.methods.copy(),
+                      w_class.redefined))
+        mid = symbols.intern(name)
+        w_class.add_user_method(mid, W_Redefined(mid, -1))
+    yield define
+    for w_class, methods, redefined in reversed(saved):
+        w_class.methods.methods = methods
+        w_class.redefined = redefined
+        w_class.method_table_changed()
+
+
+@pytest.mark.parametrize('w_class, name, source, expected', [
+    (w_integer_class, '+', 'puts 1 + 2\n', 'redefined\n'),
+    (w_integer_class, '<', 'puts 1 < 2\n', 'redefined\n'),
+    (w_float_class, '*', 'puts 1.5 * 2\n', 'redefined\n'),
+    (w_float_class, '*', 'puts 3 * 2\n', '6\n'),
+    (w_integer_class, '==', 'puts 1 == 2\nputs [1] == [2]\n',
+     'redefined\ntrue\n'),
+    (w_integer_class, '!=', 'puts 1 != 2\n', 'redefined\n'),
+    (w_string_class, '+', 'puts "a" + "b"\n', 'redefined\n'),
+    (w_array_class, '[]', 'puts [1][0]\n', 'redefined\n'),
+    (w_array_class, '[]=', 'a = [1]\na[0] = 2\nputs a[0]\n', '1\n'),
+    (w_array_class, 'length', 'puts [1].length\nputs [1].size\n',
+     'redefined\n1\n'),
+    (w_array_class, 'size', 'puts [1].size\n', 'redefined\n'),
+    (w_string_class, 'to_s', 's = "a"\nputs "#{s}"\nputs s\n',
+     'redefined\na\n')])
+def test_a_redefined_builtin_method_is_called(w_class, name, source, expected,
+                                              redefine, compile_source):
+    redefine(w_class, name)
+    out, _ = capture(lambda: run_dump(compile_source(source)))
+    assert out == expected
