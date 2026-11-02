@@ -1,6 +1,6 @@
 from rpyyarv import symbols
-from rpyyarv.error import UnsupportedOperation
 from rpyyarv.methods import W_CFunc
+from rpyyarv.objects.enumerator import W_Enumerator
 from rpyyarv.objects.transparent import newbool, newint, w_false, w_nil, w_true
 from rpyyarv.rlib import JitDriver
 
@@ -46,8 +46,7 @@ class W_Times(W_CFunc):
     def call(self, w_recv, args_w, w_block):
         from rpyyarv import interp
         if w_block is None:
-            raise UnsupportedOperation(
-                "times without a block (an Enumerator) is not supported yet")
+            return W_Enumerator(w_recv)
         n = w_recv.int_w()
         w_iseq = w_block.w_iseq
         i = 0

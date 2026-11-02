@@ -5,13 +5,15 @@ from rpyyarv import symbols
 from rpyyarv import kernel
 from rpyyarv.objects.base import W_Root
 from rpyyarv.objects.klass import (W_Class, w_array_class, w_class_class,
-                                   w_false_class, w_float_class, w_hash_class,
+                                   w_enumerator_class, w_false_class,
+                                   w_float_class, w_hash_class,
                                    w_integer_class, w_nil_class,
                                    w_numeric_class, w_object_class,
                                    w_range_class, w_regexp_class,
                                    w_string_class, w_symbol_class,
                                    w_true_class)
 from rpyyarv.objects import array as arraylib
+from rpyyarv.objects import enumerator as enumeratorlib
 from rpyyarv.objects import float as floatlib
 from rpyyarv.objects import hash as hashlib
 from rpyyarv.objects import numeric as numericlib
@@ -63,6 +65,7 @@ stringlib.install(w_string_class)
 arraylib.install(w_array_class)
 hashlib.install(w_hash_class)
 rangelib.install(w_range_class)
+enumeratorlib.install(w_enumerator_class)
 numericlib.install(w_numeric_class)
 numericlib.install_integer(w_integer_class)
 floatlib.install(w_float_class)
@@ -70,7 +73,8 @@ floatlib.install(w_float_class)
 for _w_class in (w_object_class, w_class_class, w_numeric_class,
                  w_integer_class, w_float_class, w_string_class,
                  w_symbol_class, w_array_class, w_hash_class, w_range_class,
-                 w_regexp_class, w_nil_class, w_true_class, w_false_class):
+                 w_enumerator_class, w_regexp_class, w_nil_class,
+                 w_true_class, w_false_class):
     w_object_class.set_const(symbols.intern(_w_class.name), _w_class)
 
 w_main = W_Main()

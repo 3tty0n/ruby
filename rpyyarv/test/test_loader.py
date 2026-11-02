@@ -531,6 +531,11 @@ CRUBY_CASES = [
                     'puts h.to_a.size\n'),
     ('for_loop', 'for x in [7, 8] do puts x end\nputs x\n'
                  'for y in [[1, 2]] do puts y.size end\n'),
+    ('times_enumerator', 'puts 5.times.to_a.join(",")\n'
+                         'puts 3.times.map { |i| i * 2 }.join(",")\n'
+                         'e = 3.times\nputs(e.each { |i| puts i })\n'
+                         'puts(e.each == e)\nputs((-1).times.to_a.size)\n'
+                         'puts 0.times.map { 1 }.size\n'),
     ('range', 'r = (1..4)\nr.each { |i| puts i }\n(2...4).each { |i| puts i }\n'
               'n = 3\n(1..n).each { |i| puts i * 10 }\n'
               '(1...n).each { |i| puts i }\nfor i in 1..n do puts i end\n'

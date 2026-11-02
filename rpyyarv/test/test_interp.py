@@ -1139,3 +1139,15 @@ def test_a_splat_is_refused(source, msg, compile_source):
     ('(0..1).step(0.5) { }\n', 'step by Float is not supported yet')])
 def test_a_range_operation_is_refused(source, msg, compile_source):
     expect_unsupported(loader.load_dump(compile_source(source)), None, msg)
+
+
+@pytest.mark.parametrize('source, msg', [
+    ('3.times.map\n',
+     'map without a block (an Enumerator) is not supported yet'),
+    ('3.times.map(&:to_s)\n',
+     "call to 'map' passes arguments RPyYARV does not support"),
+    ('3.times.to_h\n',
+     "undefined method 'to_h' for #<Enumerator: 3:times>")])
+def test_a_times_enumerator_operation_is_refused(source, msg,
+                                                 compile_source):
+    expect_unsupported(loader.load_dump(compile_source(source)), None, msg)
