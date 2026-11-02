@@ -72,6 +72,12 @@ class Frame(object):
     def peek(self, index):
         return self._getslot(index)
 
+    def topn(self, n):
+        return self._getslot(self.sp - 1 - n)
+
+    def set_topn(self, n, w_x):
+        self._setslot(self.sp - 1 - n, w_x)
+
     def push(self, w_x):
         sp = self.sp
         assert sp >= 0

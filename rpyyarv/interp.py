@@ -443,17 +443,17 @@ def execute(iseq, frame):
         elif opcode == insns.TOPN:
             n = code[pc]
             pc += 1
-            frame.push(frame.peek(frame.sp - 1 - n))
+            frame.push(frame.topn(n))
         elif opcode == insns.SETN:
             n = code[pc]
             pc += 1
-            frame.setlocal(frame.sp - 1 - n, frame.peek(frame.sp - 1))
+            frame.set_topn(n, frame.topn(0))
         elif opcode == insns.DUPN:
             n = code[pc]
             pc += 1
             i = 0
             while i < n:
-                frame.push(frame.peek(frame.sp - n))
+                frame.push(frame.topn(n - 1))
                 i += 1
         elif opcode == insns.ADJUSTSTACK:
             n = code[pc]
@@ -711,13 +711,12 @@ def execute(iseq, frame):
             target = code[pc + 1]
             pc += 2
             # Below the arguments: the class, then a nil slot for the result
-            at = frame.sp - 1 - w_ci.argc
-            w_class = frame.peek(at)
+            w_class = frame.topn(w_ci.argc)
             if (isinstance(w_class, W_Class) and isinstance(
                     w_class.lookup_method(NEW), classlib.W_New)):
                 w_obj = classlib.allocate(w_class)
-                frame.setlocal(at, w_obj)
-                frame.setlocal(at - 1, w_obj)
+                frame.set_topn(w_ci.argc, w_obj)
+                frame.set_topn(w_ci.argc + 1, w_obj)
             else:
                 pc = target
         elif opcode == insns.OPT_GETCONSTANT_PATH:
