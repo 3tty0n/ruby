@@ -62,7 +62,7 @@ class RawInsn(object):
 
 class RawISeq(object):
     def __init__(self, name, type_, nlocals, stack_max, lead_num,
-                 extra_params, catch_size):
+                 extra_params, catch_size, arg_size):
         self.name = name
         self.type = type_
         self.nlocals = nlocals
@@ -71,6 +71,7 @@ class RawISeq(object):
         # Names of the other parameter kinds CRuby reported, if any.
         self.extra_params = extra_params
         self.catch_size = catch_size
+        self.arg_size = arg_size
         self.insns = []
         # label name -> index into insns; the loader turns it into a pc.
         self.labels = {}

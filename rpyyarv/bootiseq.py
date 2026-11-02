@@ -83,7 +83,8 @@ def _read_iseq(program, pending, ary):
         _int_or(boot.hash_aref(misc, 'stack_max'), 0),
         _int_or(boot.hash_aref(params, 'lead_num'), 0),
         _extra_params(params),
-        boot.ary_len(boot.ary_entry(ary, I_CATCH)))
+        boot.ary_len(boot.ary_entry(ary, I_CATCH)),
+        _int_or(boot.hash_aref(misc, 'arg_size'), 0))
     program.add_iseq(raw)
 
     body = boot.ary_entry(ary, I_BODY)

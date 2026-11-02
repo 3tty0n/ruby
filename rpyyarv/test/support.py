@@ -417,9 +417,12 @@ def check_loaded(program, l):
         assert w_iseq.name == raw.name
         assert w_iseq.nlocals == raw.nlocals
         assert w_iseq.stack_max == raw.stack_max
-        assert w_iseq.nparams == raw.lead_num
         params = [p for p in raw.extra_params.split(',')
                   if p != '' and p != 'use_block']
+        nparams = raw.lead_num
+        if params == [] and nparams == 0:
+            nparams = raw.arg_size
+        assert w_iseq.nparams == nparams
         if raw.type == 'block' and raw.lead_num == 1:
             assert w_iseq.simple_params == (params == ['ambiguous_param0'])
         else:

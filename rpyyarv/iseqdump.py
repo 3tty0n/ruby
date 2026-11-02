@@ -141,6 +141,7 @@ def parse(text):
     nlocals = -1
     stack_max = -1
     catch_size = 0
+    arg_size = 0
     pending = None
     lineno = 0
 
@@ -174,6 +175,7 @@ def parse(text):
             lead_num = 0
             extra_params = ''
             catch_size = 0
+            arg_size = 0
             raw = None
         elif kind == 'locals':
             nlocals = _int(_field(fields, 1, 'local count'), 'locals')
@@ -182,6 +184,8 @@ def parse(text):
         elif kind == 'params':
             lead_num = _int(_field(fields, 1, 'lead_num'), 'lead_num')
             extra_params = fields[2] if len(fields) > 2 else ''
+        elif kind == 'argsize':
+            arg_size = _int(_field(fields, 1, 'argument count'), 'argsize')
         elif kind == 'catch':
             catch_size = _int(_field(fields, 1, 'catch table size'), 'catch')
             if pending is None or nlocals < 0 or stack_max < 0:
@@ -189,7 +193,7 @@ def parse(text):
             raw = rawiseq.RawISeq(_field(pending, 3, 'label'),
                                   _field(pending, 2, 'type'),
                                   nlocals, stack_max, lead_num,
-                                  extra_params, catch_size)
+                                  extra_params, catch_size, arg_size)
             program.add_iseq(raw)
             pending = None
         elif kind == 'insn':

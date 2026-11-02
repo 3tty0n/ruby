@@ -529,6 +529,8 @@ CRUBY_CASES = [
                     'puts [*T.new].join(",")\nputs [0, *T.new].join(",")\n'
                     'h = {1 => 2, 3 => 4}\nputs [*h][1].join(",")\n'
                     'puts h.to_a.size\n'),
+    ('for_loop', 'for x in [7, 8] do puts x end\nputs x\n'
+                 'for y in [[1, 2]] do puts y.size end\n'),
 ]
 
 # bench_clock.rb needs RPyYARV's bench_now_ns, which CRuby does not have.

@@ -153,9 +153,15 @@ class Loader(object):
             raise UnsupportedOperation(
                 "'%s' has a catch table (rescue/ensure/retry/next/break), "
                 "which RPyYARV does not support" % raw.name)
-        if raw.lead_num > raw.nlocals:
+        params = [p for p in raw.extra_params.split(',')
+                  if p != '' and p != 'use_block']
+        nparams = raw.lead_num
+        if len(params) == 0 and nparams == 0:
+            # a for loop's block has its one parameter without has_lead set
+            nparams = raw.arg_size
+        if nparams > raw.nlocals:
             raise LoadError("'%s' takes %d parameter(s) but has %d local(s)"
-                            % (raw.name, raw.lead_num, raw.nlocals))
+                            % (raw.name, nparams, raw.nlocals))
 
         self.loading.append(raw)
         # Widths first: a jump needs the pc of a later instruction.
@@ -204,14 +210,12 @@ class Loader(object):
                                  tail_position(code, post_pc))
             code[slot] = pool.add(w_ci)
 
-        params = [p for p in raw.extra_params.split(',')
-                  if p != '' and p != 'use_block']
         simple = len(params) == 0
         if raw.type == 'block' and raw.lead_num == 1:
             # CRuby marks |a| ambiguous_param0; unmarked |a,| splats an Array
             simple = params == ['ambiguous_param0']
         w_iseq = W_ISeq(raw.name, code, [w for w in pool.consts], raw.nlocals,
-                        raw.stack_max, raw.lead_num, simple)
+                        raw.stack_max, nparams, simple)
         self.w_iseqs[index] = w_iseq
         self.loading.pop()
         return w_iseq
