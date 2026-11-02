@@ -534,6 +534,29 @@ CRUBY_CASES = [
     ('numeric_equal', 'class E\n  def ==(o)\n    true\n  end\nend\n'
                       'puts(1 == E.new)\nputs(1.5 == E.new)\nputs(1 == 1.0)\n'
                       'puts(2.0 != 2)\n'),
+    ('reopen_integer', 'class Integer\n  def double\n    self * 2\n  end\n'
+                       '  def +(o)\n    42\n  end\nend\nputs 3.double\n'
+                       'puts 1 + 2\nputs 1.5 + 2\nputs 3 - 1\n'),
+    ('reopen_array', 'class Array\n  def size\n    -1\n  end\n'
+                     '  attr_reader :tag\nend\nputs [1, 2].size\n'
+                     'puts [1].length\nputs [1].tag\n'),
+    ('reopen_operators', 'class Integer\n  def <(o)\n    :lt\n  end\n'
+                         '  def ==(o)\n    :eq\n  end\nend\n'
+                         'class Float\n  def *(o)\n    :mul\n  end\nend\n'
+                         'class String\n  def +(o)\n    :plus\n  end\nend\n'
+                         'class Array\n  def [](i)\n    :aref\n  end\n'
+                         '  def []=(i, v)\n    :aset\n  end\n'
+                         '  def length\n    :length\n  end\nend\n'
+                         'puts 1 < 2\nputs 1 == 2\nputs 1 != 1\n'
+                         'puts([1] == [2])\nputs 1.5 * 2\nputs 3 * 2\n'
+                         'puts "a" + "b"\nputs [1][0]\na = [1]\na[0] = 2\n'
+                         'puts a.size\nputs a.length\n'),
+    ('reopen_string', 'class String\n  def to_s\n    "S"\n  end\nend\n'
+                      's = "a"\nputs "#{s}"\nputs s\n'),
+    ('reopen_object', 'class Object\n  def to_s\n    "obj"\n  end\n'
+                      '  def ==(o)\n    true\n  end\nend\nputs Integer\n'
+                      'puts [1].join\nputs(:a == :b)\nputs(1.5 == 2.5)\n'
+                      'puts(nil == 1)\nputs(Integer == Float)\n'),
     ('regexp_equal', 'puts(/a/ == /a/)\nputs(/a/ == /b/)\nputs(/a/ == "a")\n'
                      'r = /x/\nputs(r == r)\nputs(/a/ != /a/)\n'),
     ('times_enumerator', 'puts 5.times.to_a.join(",")\n'

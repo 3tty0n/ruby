@@ -57,9 +57,14 @@ class W_Main(W_Root):
 
 kernel.install(w_object_class)
 kernel.install_to_s(w_main_class)
+# CRuby defines these on the classes themselves, so a reopened Object must
+# not reach them
 for _w_class in (w_integer_class, w_float_class, w_nil_class, w_true_class,
-                 w_false_class, w_string_class, w_symbol_class):
+                 w_false_class, w_string_class, w_symbol_class, w_array_class,
+                 w_hash_class, w_range_class, w_regexp_class, w_class_class):
     kernel.install_to_s(_w_class)
+kernel.install_identity_eq(w_symbol_class)
+kernel.install_identity_eq(w_class_class)
 classlib.install(w_class_class)
 classlib.install_object(w_object_class)
 stringlib.install(w_string_class)

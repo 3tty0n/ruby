@@ -1041,8 +1041,6 @@ def test_aset_below_the_start_is_refused(compile_source):
 
 
 @pytest.mark.parametrize('source, msg', [
-    ('class Integer\nend\n',
-     'reopening the built-in class Integer is not supported yet'),
     ('class Foo < Array\nend\n',
      'subclassing the built-in class Array is not supported yet'),
     ('class A\nend\nclass B\nend\nclass C < A\nend\nclass C < B\nend\n',
@@ -1076,9 +1074,7 @@ def test_an_instance_creation_is_refused(source, msg, compile_source):
 @pytest.mark.parametrize('source, msg', [
     ('class Foo\n  attr_reader 1\nend\n', '1 is not a symbol nor a string'),
     ('class Foo\n  attr_reader :a?\nend\n', "invalid attribute name 'a?'"),
-    ('attr_reader :x\n', "undefined method 'attr_reader' for main"),
-    ('Array.attr_reader :length\n',
-     'attr_reader on the built-in class Array is not supported yet')])
+    ('attr_reader :x\n', "undefined method 'attr_reader' for main")])
 def test_an_attribute_definition_is_refused(source, msg, compile_source):
     expect_unsupported(loader.load_dump(compile_source(source)), None, msg)
 
@@ -1214,3 +1210,14 @@ def test_a_redefined_builtin_method_is_called(w_class, name, source, expected,
     redefine(w_class, name)
     out, _ = capture(lambda: run_dump(compile_source(source)))
     assert out == expected
+
+
+@pytest.mark.parametrize('source, msg', [
+    ('class Integer\n  def mark\n    @m = 1\n  end\nend\n1.mark\n',
+     "cannot set instance variable '@m' on 1"),
+    ('class Array\n  attr_writer :tag\nend\n[].tag = 1\n',
+     "cannot set instance variable '@tag' on <W_Array 0>"),
+    ('class Integer < Object\nend\n', 'superclass mismatch for class Integer')])
+def test_reopening_a_builtin_class_is_refused_where_unsupported(
+        source, msg, compile_source):
+    expect_unsupported(loader.load_dump(compile_source(source)), None, msg)

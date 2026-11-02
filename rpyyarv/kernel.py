@@ -68,6 +68,10 @@ def install_to_s(w_class):
     to_s_id = symbols.intern('to_s')
     w_class.add_method(to_s_id, W_ToS(to_s_id, 0))
 
+
+def install_identity_eq(w_class):
+    w_class.add_method(EQ, W_Equal(EQ, 1))
+
 def install(w_class):
     puts_id = symbols.intern('puts')
     w_class.add_method(puts_id, W_Puts(puts_id, -1, True))  # Kernel#puts is private

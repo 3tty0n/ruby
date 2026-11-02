@@ -91,10 +91,6 @@ class W_Attr(W_CFunc):
 
     def call(self, w_recv, args_w, w_block):
         assert isinstance(w_recv, W_Class)       # these live only on Class
-        if w_recv.builtin:
-            raise UnsupportedOperation(
-                '%s on the built-in class %s is not supported yet'
-                % (symbols.name_of(self.mid), w_recv.name))
         defined_w = []
         for w_name in args_w:
             name = _attr_name(w_name)

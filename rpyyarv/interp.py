@@ -344,10 +344,6 @@ def _define_class(w_cbase, mid, w_super, flags):
         if w_super is not None and w_class.w_superclass is not w_super:
             raise UnsupportedOperation('superclass mismatch for class %s'
                                        % symbols.name_of(mid))
-        if w_class.builtin:
-            raise UnsupportedOperation(
-                'reopening the built-in class %s is not supported yet'
-                % w_class.name)
         return w_class
     if w_super is None:
         w_super = w_object_class

@@ -20,16 +20,23 @@ import pytest
 
 from rpyyarv import debug
 from rpyyarv import kernel
-from rpyyarv.objects.klass import VersionTag, w_object_class
+from rpyyarv.objects import klass
+from rpyyarv.objects.klass import VersionTag, W_Class, w_object_class
 
 from rpyyarv.test import support
 
 
 @pytest.fixture(autouse=True)
 def _isolate():
-    """A toplevel `def` or constant lands on the one Object; debug flags are
-    global."""
-    baseline = w_object_class.methods.methods.copy()
+    """A toplevel `def` or constant lands on the one Object, a reopened
+    built-in class is shared too, and debug flags are global."""
+    baseline = []
+    for w_class in vars(klass).values():
+        if isinstance(w_class, W_Class) and w_class.builtin:
+            w_single = w_class.w_singleton
+            baseline.append((w_class, w_class.methods.methods.copy(),
+                             w_class.redefined, w_single,
+                             w_single and w_single.methods.methods.copy()))
     baseline_consts = w_object_class.constants_w.copy()
     saved_kernel_write = kernel.write
     saved_debug_write = debug.write
@@ -38,8 +45,14 @@ def _isolate():
     debug.reset()
     debug.write = saved_debug_write
     kernel.write = saved_kernel_write
-    w_object_class.methods.methods = baseline
-    w_object_class.method_table_changed()
+    for w_class, methods, redefined, w_single, single_methods in baseline:
+        w_class.methods.methods = methods
+        w_class.redefined = redefined
+        w_class.w_singleton = w_single
+        if w_single is not None:
+            w_single.methods.methods = single_methods
+            w_single.method_table_changed()
+        w_class.method_table_changed()
     w_object_class.constants_w = baseline_consts
     w_object_class.const_version = VersionTag()
 
