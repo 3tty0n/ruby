@@ -1,6 +1,7 @@
 from rpyyarv.objects.base import W_Root
 from rpyyarv.objects.klass import (w_false_class, w_integer_class,
                                    w_nil_class, w_true_class)
+from rpyyarv.objects.symbol import W_Symbol
 from rpyyarv.rlib import UnboxedValue, elidable, tagged_ints_enabled
 
 
@@ -100,3 +101,10 @@ def newbool(flag):
     if flag:
         return w_true
     return w_false
+
+
+def describe_operand(w_x):
+    if (w_x is w_nil or w_x is w_true or w_x is w_false
+            or isinstance(w_x, W_Symbol)):
+        return w_x.repr()
+    return w_x.getclass().name

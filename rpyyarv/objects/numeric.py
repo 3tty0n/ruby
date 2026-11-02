@@ -1,7 +1,9 @@
 from rpyyarv import symbols
+from rpyyarv.error import UnsupportedOperation
 from rpyyarv.methods import W_CFunc
 from rpyyarv.objects.enumerator import W_Enumerator
-from rpyyarv.objects.transparent import newbool, newint, w_false, w_nil, w_true
+from rpyyarv.objects.transparent import (describe_operand, newbool, newint,
+                                         w_false, w_nil, w_true)
 from rpyyarv.rlib import JitDriver
 
 
@@ -32,6 +34,32 @@ class W_NumEqual(W_CFunc):
 
 
 EQ = symbols.intern('==')
+COERCE = symbols.intern('coerce')
+
+
+class W_NumericOp(W_CFunc):
+    _immutable_fields_ = ['func', 'compare']
+
+    def __init__(self, mid, func, compare):
+        W_CFunc.__init__(self, mid, 1)
+        self.func = func
+        self.compare = compare
+
+    def call(self, w_recv, args_w, w_block):
+        from rpyyarv import helpers
+        w_other = args_w[0]
+        if helpers.is_number(w_other):
+            return self.func(w_recv, w_other)
+        if w_other.lookup_class().find_method(COERCE) is not None:
+            raise UnsupportedOperation(
+                '%s with %s through coerce is not supported yet'
+                % (symbols.name_of(self.mid), w_other.getclass().name))
+        name = describe_operand(w_other)
+        if self.compare:
+            raise UnsupportedOperation('comparison of %s with %s failed'
+                                       % (w_recv.getclass().name, name))
+        raise UnsupportedOperation("%s can't be coerced into %s"
+                                   % (name, w_recv.getclass().name))
 
 
 def _times_location(w_iseq):
@@ -68,8 +96,6 @@ def _add_const(w_class, name, w_value):
 
 
 def install(w_class):
-    eq_id = symbols.intern('==')
-    w_class.add_method(eq_id, W_NumEqual(eq_id, 1))
     _add_const(w_class, 'real?', w_true)
     _add_self(w_class, 'real')
     _add_const(w_class, 'imag', newint(0))
@@ -85,3 +111,20 @@ def install_integer(w_class):
     _add_const(w_class, 'denominator', newint(1))
     mid = symbols.intern('times')
     w_class.add_method(mid, W_Times(mid, 0))
+
+
+def install_operators(w_class):
+    from rpyyarv import helpers
+    for name, func, compare in [('+', helpers.w_add, False),
+                                ('-', helpers.w_sub, False),
+                                ('*', helpers.w_mul, False),
+                                ('/', helpers.w_div, False),
+                                ('%', helpers.w_mod, False),
+                                ('<', helpers.w_lt, True),
+                                ('>', helpers.w_gt, True),
+                                ('<=', helpers.w_le, True),
+                                ('>=', helpers.w_ge, True)]:
+        mid = symbols.intern(name)
+        w_class.add_method(mid, W_NumericOp(mid, func, compare))
+    eq_id = symbols.intern('==')
+    w_class.add_method(eq_id, W_NumEqual(eq_id, 1))

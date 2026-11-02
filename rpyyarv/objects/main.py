@@ -71,6 +71,8 @@ enumeratorlib.install(w_enumerator_class)
 numericlib.install(w_numeric_class)
 numericlib.install_integer(w_integer_class)
 floatlib.install(w_float_class)
+numericlib.install_operators(w_integer_class)
+numericlib.install_operators(w_float_class)
 
 for _w_class in (w_object_class, w_class_class, w_numeric_class,
                  w_integer_class, w_float_class, w_string_class,

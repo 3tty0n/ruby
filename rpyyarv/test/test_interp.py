@@ -1151,3 +1151,20 @@ def test_a_range_operation_is_refused(source, msg, compile_source):
 def test_a_times_enumerator_operation_is_refused(source, msg,
                                                  compile_source):
     expect_unsupported(loader.load_dump(compile_source(source)), None, msg)
+
+
+@pytest.mark.parametrize('source, msg', [
+    ('1 + "a"\n', "String can't be coerced into Integer"),
+    ('1 - nil\n', "nil can't be coerced into Integer"),
+    ('1.0 * :a\n', ":a can't be coerced into Float"),
+    ('class C\nend\n1 / C.new\n', "C can't be coerced into Integer"),
+    ('1 < "a"\n', 'comparison of Integer with String failed'),
+    ('1.5 >= true\n', 'comparison of Float with true failed'),
+    ('class K\n  def coerce(o)\n    [o, 1]\n  end\nend\n1 + K.new\n',
+     '+ with K through coerce is not supported yet'),
+    ('"a" + 1\n', 'no implicit conversion of Integer into String'),
+    ('"a" + nil\n', 'no implicit conversion of nil into String'),
+    ('class S\n  def to_str\n    "s"\n  end\nend\n"a" + S.new\n',
+     '+ with S through to_str is not supported yet')])
+def test_an_operator_on_a_wrong_type_is_refused(source, msg, compile_source):
+    expect_unsupported(loader.load_dump(compile_source(source)), None, msg)

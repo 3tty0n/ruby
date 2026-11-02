@@ -531,6 +531,9 @@ CRUBY_CASES = [
                     'puts h.to_a.size\n'),
     ('for_loop', 'for x in [7, 8] do puts x end\nputs x\n'
                  'for y in [[1, 2]] do puts y.size end\n'),
+    ('numeric_equal', 'class E\n  def ==(o)\n    true\n  end\nend\n'
+                      'puts(1 == E.new)\nputs(1.5 == E.new)\nputs(1 == 1.0)\n'
+                      'puts(2.0 != 2)\n'),
     ('regexp_equal', 'puts(/a/ == /a/)\nputs(/a/ == /b/)\nputs(/a/ == "a")\n'
                      'r = /x/\nputs(r == r)\nputs(/a/ != /a/)\n'),
     ('times_enumerator', 'puts 5.times.to_a.join(",")\n'

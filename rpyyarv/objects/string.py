@@ -6,7 +6,7 @@ from rpyyarv.objects.array import W_Array
 from rpyyarv.objects.base import W_Root
 from rpyyarv.objects.klass import w_string_class
 from rpyyarv.objects.regexp import W_Regexp
-from rpyyarv.objects.transparent import newbool, newint
+from rpyyarv.objects.transparent import describe_operand, newbool, newint
 from rpyyarv.error import UnsupportedOperation
 
 class W_String(W_Root):
@@ -42,6 +42,23 @@ class W_StrEqual(W_CFunc):
         w_other = args_w[0]
         return newbool(isinstance(w_other, W_String)
                        and w_other.strval == w_recv.strval)
+
+
+TO_STR = symbols.intern('to_str')
+
+
+class W_StrPlus(W_CFunc):
+    def call(self, w_recv, args_w, w_block):
+        assert isinstance(w_recv, W_String)
+        w_other = args_w[0]
+        if isinstance(w_other, W_String):
+            return W_String(w_recv.strval + w_other.strval)
+        if w_other.lookup_class().find_method(TO_STR) is not None:
+            raise UnsupportedOperation(
+                '+ with %s through to_str is not supported yet'
+                % w_other.getclass().name)
+        raise UnsupportedOperation('no implicit conversion of %s into String'
+                                   % describe_operand(w_other))
 
 
 class W_Length(W_CFunc):
@@ -190,3 +207,5 @@ def install(w_class):
         w_class.add_method(mid, W_Length(mid, 0))
     eq_id = symbols.intern('==')
     w_class.add_method(eq_id, W_StrEqual(eq_id, 1))
+    plus_id = symbols.intern('+')
+    w_class.add_method(plus_id, W_StrPlus(plus_id, 1))
