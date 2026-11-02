@@ -34,6 +34,7 @@
 #   a:<item>,<item>...  Array; each item is a token whose backslashes and
 #             commas are escaped again, so nesting stays unambiguous
 #   h:<key>,<value>,...  Hash, its pairs flattened and escaped as in a:
+#   r:<begin>,<end>,<t:|f:>  Range; the last item says whether it excludes end
 #   c:<argc>,<flags>,<kwarg?>,<mid>   CALL_DATA
 #   x:<text>  anything else, verbatim, so a refusal can name it
 #
@@ -169,6 +170,9 @@ class Dumper
       else
         "h:" + obj.to_a.flatten(1).map { |o| esc_item(operand(o)) }.join(',')
       end
+    when Range
+      "r:" + [obj.begin, obj.end, obj.exclude_end?]
+             .map { |o| esc_item(operand(o)) }.join(',')
     else
       "x:#{esc(obj.inspect)}"
     end

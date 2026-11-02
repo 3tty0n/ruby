@@ -113,6 +113,13 @@ def _operand(token):
             items.append(_operand(item))
         op_kind = rawiseq.OP_ARRAY if kind == 'a' else rawiseq.OP_HASH
         return rawiseq.RawOperand(op_kind, 0, '', 0, False, items)
+    if kind == 'r':
+        parts = _split_items(body)
+        if len(parts) != 3 or (parts[2] != 't:' and parts[2] != 'f:'):
+            raise LoadError('malformed range: %s' % token)
+        return rawiseq.RawOperand(rawiseq.OP_RANGE,
+                                  1 if parts[2] == 't:' else 0, '', 0, False,
+                                  [_operand(parts[0]), _operand(parts[1])])
     if kind == 'x':
         return rawiseq.RawOperand(rawiseq.OP_OTHER, 0, _unescape(body))
     if kind == 'c':

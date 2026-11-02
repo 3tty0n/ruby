@@ -12,6 +12,7 @@ from rpyyarv.iseq import (W_Block, W_CallInfo, W_ConstPath, W_ISeq,
 from rpyyarv.methods import W_CFunc, W_ISeqMethod
 from rpyyarv.objects import array as arraylib
 from rpyyarv.objects import hash as hashlib
+from rpyyarv.objects import range as rangelib
 from rpyyarv.objects.array import W_Array
 from rpyyarv.objects.hash import W_Hash
 from rpyyarv.objects.string import W_String
@@ -693,6 +694,12 @@ def execute(iseq, frame):
                     w_ary.items_w.append(w_x)
                 else:
                     w_ary.items_w.extend(w_tail.items_w)
+        elif opcode == insns.NEWRANGE:
+            exclusive = code[pc] != 0
+            pc += 1
+            w_end = frame.pop()
+            w_begin = frame.pop()
+            frame.push(rangelib.newrange(w_begin, w_end, exclusive))
         elif opcode == insns.CONCATSTRINGS:
             n = code[pc]
             pc += 1

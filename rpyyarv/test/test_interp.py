@@ -1124,3 +1124,18 @@ def test_a_hash_operation_is_refused(source, msg, compile_source):
      'super passes arguments RPyYARV does not support')])
 def test_a_splat_is_refused(source, msg, compile_source):
     expect_unsupported(loader.load_dump(compile_source(source)), None, msg)
+
+
+@pytest.mark.parametrize('source, msg', [
+    ("x = 'a'\n(1..x)\n", 'bad value for range'),
+    ('x = []\n(x..x)\n', 'a Range of Array is not supported yet'),
+    ('(1.0..2.0).each { }\n', 'each over Float..Float is not supported yet'),
+    ("('a'..'c').each { }\n",
+     'each over String..String is not supported yet'),
+    ('(1..).to_a\n', 'to_a over Integer..NilClass is not supported yet'),
+    ('(0..10).step(0) { }\n', "step can't be 0"),
+    ('(0..10).step(2)\n',
+     'step without a block (an ArithmeticSequence) is not supported yet'),
+    ('(0..1).step(0.5) { }\n', 'step by Float is not supported yet')])
+def test_a_range_operation_is_refused(source, msg, compile_source):
+    expect_unsupported(loader.load_dump(compile_source(source)), None, msg)

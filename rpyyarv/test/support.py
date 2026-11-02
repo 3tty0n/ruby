@@ -20,6 +20,7 @@ from rpyyarv.objects.array import W_Array
 from rpyyarv.objects.float import W_Float
 from rpyyarv.objects.hash import W_Hash
 from rpyyarv.objects.main import W_Main
+from rpyyarv.objects.range import W_Range
 from rpyyarv.objects.regexp import W_Regexp
 from rpyyarv.objects.string import W_String
 from rpyyarv.objects.symbol import W_Symbol
@@ -326,6 +327,11 @@ def _check_literal(w_x, raw_op):
         for i in range(len(w_x.keys_w)):
             _check_literal(w_x.keys_w[i], raw_op.items[2 * i])
             _check_literal(w_x.values_w[i], raw_op.items[2 * i + 1])
+    elif kind == rawiseq.OP_RANGE:
+        assert isinstance(w_x, W_Range)
+        assert w_x.exclusive == (raw_op.intval != 0)
+        _check_literal(w_x.w_begin, raw_op.items[0])
+        _check_literal(w_x.w_end, raw_op.items[1])
     elif kind == rawiseq.OP_OTHER:
         # The pattern itself is checked by the regexp tests.
         assert isinstance(w_x, W_Regexp)

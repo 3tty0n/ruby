@@ -158,6 +158,12 @@ def _operand(pending, v):
             items.append(_operand(pending, boot.ary_entry(pair, 1)))
             i += 1
         return rawiseq.RawOperand(rawiseq.OP_HASH, 0, '', 0, False, items)
+    if boot.inspect(boot.call0(v, 'class')) == 'Range':
+        exclusive = boot.is_true(boot.call0(v, 'exclude_end?'))
+        return rawiseq.RawOperand(
+            rawiseq.OP_RANGE, 1 if exclusive else 0, '', 0, False,
+            [_operand(pending, boot.call0(v, 'begin')),
+             _operand(pending, boot.call0(v, 'end'))])
     return rawiseq.RawOperand(rawiseq.OP_OTHER, 0, boot.inspect(v))
 
 

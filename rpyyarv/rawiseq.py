@@ -19,9 +19,11 @@ OP_OTHER = 8
 OP_ARRAY = 9    # items holds the elements
 OP_FLOAT = 10
 OP_HASH = 11    # items holds key, value, key, value, ...
+OP_RANGE = 12   # items holds begin and end; intval is 1 if end is excluded
 
 KIND_NAMES = ['Integer', 'nil', 'true', 'false', 'Symbol', 'String',
-              'ISeq', 'call data', 'object', 'Array', 'Float', 'Hash']
+              'ISeq', 'call data', 'object', 'Array', 'Float', 'Hash',
+              'Range']
 
 
 class RawOperand(object):

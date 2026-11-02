@@ -531,6 +531,20 @@ CRUBY_CASES = [
                     'puts h.to_a.size\n'),
     ('for_loop', 'for x in [7, 8] do puts x end\nputs x\n'
                  'for y in [[1, 2]] do puts y.size end\n'),
+    ('range', 'r = (1..4)\nr.each { |i| puts i }\n(2...4).each { |i| puts i }\n'
+              'n = 3\n(1..n).each { |i| puts i * 10 }\n'
+              '(1...n).each { |i| puts i }\nfor i in 1..n do puts i end\n'
+              'puts i\nputs((1..n).to_a.join(","))\nputs((5..1).to_a.size)\n'
+              'puts((1...1).to_a.size)\n(0..10).step(4) { |i| puts i }\n'
+              '(10..0).step(-3) { |i| puts i }\n'
+              '(0..10).step(-1) { |i| puts i }\n'
+              '(1...10).step(3) { |i| puts i }\nputs(r.each { } == r)\n'
+              'puts((0..2).step(1) { } == (0..2))\n'),
+    ('range_equal', 'puts((1..2) == (1..2))\nputs((1..2) == (1...2))\n'
+                    'puts((1..2) == (1..2.0))\nputs((1..2) == (1..3))\n'
+                    'puts((1..2) == [1, 2])\nputs((1..) == (1..))\n'
+                    'puts(("a".."c") == ("a".."c"))\nx = 2\n'
+                    'puts((..x) == (..2))\n'),
 ]
 
 # bench_clock.rb needs RPyYARV's bench_now_ns, which CRuby does not have.

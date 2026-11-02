@@ -27,6 +27,7 @@ EMIT = {
     'splatarray': [0],
     'concattoarray': [],
     'pushtoarray': [0],
+    'newrange': [0],
     'getlocal': [0, 1],
     'setlocal': [0, 1],
     'getinstancevariable': [0],     # IVC dropped

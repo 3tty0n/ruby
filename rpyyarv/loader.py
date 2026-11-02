@@ -11,6 +11,7 @@ from rpyyarv.iseq import (W_CallInfo, W_ConstPath, W_ISeq, NO_BLOCK_ISEQ,
 from rpyyarv.objects.array import W_Array
 from rpyyarv.objects.float import W_Float
 from rpyyarv.objects import hash as hashlib
+from rpyyarv.objects import range as rangelib
 from rpyyarv.objects.string import W_String
 from rpyyarv.objects.symbol import newsymbol
 from rpyyarv.objects.regexp import W_Regexp
@@ -309,6 +310,11 @@ class Loader(object):
                              self.literal_value(operand.items[i], op, raw),
                              self.literal_value(operand.items[i + 1], op, raw))
             return w_hash
+        if kind == rawiseq.OP_RANGE:
+            return rangelib.newrange(
+                self.literal_value(operand.items[0], op, raw),
+                self.literal_value(operand.items[1], op, raw),
+                operand.intval != 0)
 
         raise UnsupportedOperation(
             "%s of %s in '%s': RPyYARV has no such object yet"
