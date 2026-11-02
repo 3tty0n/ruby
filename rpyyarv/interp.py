@@ -18,7 +18,7 @@ from rpyyarv.objects.string import W_String
 from rpyyarv.objects.klass import (BOP_AREF, BOP_ASET, BOP_DIV, BOP_EQ,
                                    BOP_GE, BOP_GT, BOP_LE, BOP_LENGTH, BOP_LT,
                                    BOP_MINUS, BOP_MOD, BOP_MULT, BOP_NEQ,
-                                   BOP_PLUS, BOP_SIZE, BOP_TO_S, W_Class,
+                                   BOP_PLUS, BOP_SIZE, W_Class,
                                    w_array_class, w_object_class,
                                    w_string_class)
 from rpyyarv.objects.transparent import W_Integer, newbool, newint, w_nil
@@ -621,8 +621,7 @@ def execute(iseq, frame):
                 frame.push(send_op(w_recv, SIZE, []))
         elif opcode == insns.OBJTOSTRING:
             w_x = frame.pop()
-            if (isinstance(w_x, W_String)
-                    and w_string_class.redefined & BOP_TO_S == 0):
+            if isinstance(w_x, W_String):
                 frame.push(w_x)
             else:
                 frame.push(send(w_x, TO_S, []))

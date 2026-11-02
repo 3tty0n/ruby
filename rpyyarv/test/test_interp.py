@@ -1208,9 +1208,7 @@ def redefine():
     (w_array_class, '[]=', 'a = [1]\na[0] = 2\nputs a[0]\n', '1\n'),
     (w_array_class, 'length', 'puts [1].length\nputs [1].size\n',
      'redefined\n1\n'),
-    (w_array_class, 'size', 'puts [1].size\n', 'redefined\n'),
-    (w_string_class, 'to_s', 's = "a"\nputs "#{s}"\nputs s\n',
-     'redefined\na\n')])
+    (w_array_class, 'size', 'puts [1].size\n', 'redefined\n')])
 def test_a_redefined_builtin_method_is_called(w_class, name, source, expected,
                                               redefine, compile_source):
     redefine(w_class, name)

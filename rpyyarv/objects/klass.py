@@ -22,7 +22,6 @@ BOP_AREF = 1 << 11
 BOP_ASET = 1 << 12
 BOP_LENGTH = 1 << 13
 BOP_SIZE = 1 << 14
-BOP_TO_S = 1 << 15
 
 _BOP_BITS = {}
 for _name, _bit in [('+', BOP_PLUS), ('-', BOP_MINUS), ('*', BOP_MULT),
@@ -30,7 +29,7 @@ for _name, _bit in [('+', BOP_PLUS), ('-', BOP_MINUS), ('*', BOP_MULT),
                     ('>', BOP_GT), ('<=', BOP_LE), ('>=', BOP_GE),
                     ('==', BOP_EQ), ('!=', BOP_NEQ), ('[]', BOP_AREF),
                     ('[]=', BOP_ASET), ('length', BOP_LENGTH),
-                    ('size', BOP_SIZE), ('to_s', BOP_TO_S)]:
+                    ('size', BOP_SIZE)]:
     _BOP_BITS[symbols.intern(_name)] = _bit
 
 
