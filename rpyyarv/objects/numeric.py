@@ -26,7 +26,7 @@ class W_NumEqual(W_CFunc):
         from rpyyarv import helpers
         from rpyyarv import interp
         w_other = args_w[0]
-        if interp.is_number(w_other):
+        if helpers.is_number(w_other):
             return helpers.w_eq(w_recv, w_other)
         return newbool(interp.send(w_other, EQ, [w_recv]).is_true())
 

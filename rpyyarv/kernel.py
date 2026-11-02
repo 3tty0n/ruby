@@ -58,7 +58,7 @@ def equal(w_a, w_b):
     from rpyyarv import interp
     if w_a is w_b:
         return True
-    if interp.is_number(w_a) and interp.is_number(w_b):
+    if helpers.is_number(w_a) and helpers.is_number(w_b):
         return helpers.w_eq(w_a, w_b).is_true()
     return interp.send(w_a, EQ, [w_b]).is_true()
 

@@ -6,13 +6,13 @@ from rpyyarv import optable
 from rpyyarv import symbols
 from rpyyarv.error import UnsupportedOperation
 from rpyyarv.frame import Cref, Frame
+from rpyyarv.helpers import is_number
 from rpyyarv.iseq import (W_Block, W_CallInfo, W_ConstPath, W_ISeq,
                           NO_BLOCK_ISEQ, tail_position)
 from rpyyarv.methods import W_CFunc, W_ISeqMethod
 from rpyyarv.objects import array as arraylib
 from rpyyarv.objects.array import W_Array
 from rpyyarv.objects.string import W_String
-from rpyyarv.objects.float import W_Float
 from rpyyarv.objects.klass import W_Class, w_object_class
 from rpyyarv.objects.transparent import W_Integer, newbool, newint, w_nil
 from rpyyarv.rlib import JitDriver, elidable, promote, unroll_safe
@@ -335,10 +335,6 @@ def _define_class(w_cbase, mid, w_super, flags):
     w_class = W_Class(name, w_super)
     w_cbase.set_const(mid, w_class)
     return w_class
-
-
-def is_number(w_x):
-    return isinstance(w_x, W_Integer) or isinstance(w_x, W_Float)
 
 
 def _to_s(w_x):

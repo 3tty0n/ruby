@@ -3,7 +3,7 @@ import math
 from rpyyarv.error import UnsupportedOperation
 from rpyyarv.objects.float import W_Float
 from rpyyarv.objects.string import W_String
-from rpyyarv.objects.transparent import newbool, newint
+from rpyyarv.objects.transparent import W_Integer, newbool, newint
 from rpyyarv.rlib import ovfcheck
 
 INF = float('inf')
@@ -15,6 +15,10 @@ UNORDERED = 2
 # sides Floats, as in CRuby; other non-integer operands make int_w() raise
 # UnsupportedOperation from W_Root. With no Bignum, an Integer result beyond
 # 64 bits raises UnsupportedOperation too.
+
+
+def is_number(w_x):
+    return isinstance(w_x, W_Integer) or isinstance(w_x, W_Float)
 
 
 def _floats(w_a, w_b):
