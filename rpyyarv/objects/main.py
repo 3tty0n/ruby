@@ -18,6 +18,7 @@ from rpyyarv.objects import float as floatlib
 from rpyyarv.objects import hash as hashlib
 from rpyyarv.objects import numeric as numericlib
 from rpyyarv.objects import range as rangelib
+from rpyyarv.objects import regexp as regexplib
 from rpyyarv.objects import string as stringlib
 from rpyyarv.objects.transparent import w_nil
 
@@ -65,6 +66,7 @@ stringlib.install(w_string_class)
 arraylib.install(w_array_class)
 hashlib.install(w_hash_class)
 rangelib.install(w_range_class)
+regexplib.install(w_regexp_class)
 enumeratorlib.install(w_enumerator_class)
 numericlib.install(w_numeric_class)
 numericlib.install_integer(w_integer_class)
