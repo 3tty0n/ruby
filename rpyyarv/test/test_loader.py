@@ -134,16 +134,16 @@ def test_equal_fixnum_literals_share_a_pool_slot():
 
 def test_missing_instructions_are_reported_together():
     text = patched(fixture('fib_rec.iseq'), 'insn\tputself\ninsn\tputobject',
-                   'insn\tputstring\ts:x\ninsn\tnewhash\ti:0\n'
+                   'insn\tputstring\ts:x\ninsn\tintern\n'
                    'insn\tputstring\ts:y\n'
                    'insn\tputself\ninsn\tputobject')
     l = loader.Loader(iseqdump.parse(text))
     l.scan()
-    assert l.missing == {'putstring': 2, 'newhash': 1}
-    assert l.missing_names == ['putstring', 'newhash']
+    assert l.missing == {'putstring': 2, 'intern': 1}
+    assert l.missing_names == ['putstring', 'intern']
     expect(UnsupportedOperation, text,
            '2 unimplemented instruction(s) in 3 occurrence(s): '
-           'putstring x2, newhash x1')
+           'putstring x2, intern x1')
 
 
 def test_missing_instructions_are_counted():
