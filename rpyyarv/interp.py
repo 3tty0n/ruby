@@ -29,6 +29,12 @@ def _callinfo(iseq, idx):
     return w_ci
 
 
+def _literal_block(iseq, frame, idx):
+    if idx == NO_BLOCK_ISEQ:
+        return None
+    return W_Block(_as_iseq(iseq.consts[idx]), frame.w_self, frame)
+
+
 @unroll_safe
 def invoke(frame, iseq, w_ci, w_block, tail=False):
     # None is a restart signal only when the caller passes tail=True.
@@ -655,14 +661,9 @@ def execute(iseq, frame):
                 frame.push(w_ret)
         elif opcode == insns.SEND:
             idx = code[pc]
-            block = code[pc + 1]
+            w_block = _literal_block(iseq, frame, code[pc + 1])
             pc += 2
             w_ci = _callinfo(iseq, idx)
-            if block == NO_BLOCK_ISEQ:
-                w_block = None
-            else:
-                w_block = W_Block(_as_iseq(iseq.consts[block]), frame.w_self,
-                                  frame)
             w_ret = invoke(frame, iseq, w_ci, w_block,
                            _call_tail(iseq, w_ci, pc))
             if w_ret is None:
@@ -695,12 +696,8 @@ def execute(iseq, frame):
                     jitdriver.can_enter_jit(iseq=iseq, pc=pc, frame=frame)
         elif opcode == insns.INVOKESUPER:
             w_ci = _callinfo(iseq, code[pc])
-            block = code[pc + 1]
+            w_block = _literal_block(iseq, frame, code[pc + 1])
             pc += 2
-            w_block = None
-            if block != NO_BLOCK_ISEQ:
-                w_block = W_Block(_as_iseq(iseq.consts[block]), frame.w_self,
-                                  frame)
             frame.push(invoke_super(frame, w_ci, w_block))
         elif opcode == insns.INVOKEBLOCK:
             w_ci = _callinfo(iseq, code[pc])
