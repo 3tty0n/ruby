@@ -2,9 +2,10 @@ from rpyyarv import symbols
 from rpyyarv.error import UnsupportedOperation 
 from rpyyarv.methods import W_CFunc
 from rpyyarv.objects.base import W_Root
-from rpyyarv.objects.klass import w_array_class
+from rpyyarv.objects.klass import w_array_class, w_range_class
 from rpyyarv.objects.transparent import (W_Integer, describe_conversion,
-                                         newint, w_false, w_nil, w_true)
+                                         newbool, newint, w_false, w_nil,
+                                         w_true)
 from rpyyarv.rlib import JitDriver
 
 
@@ -187,21 +188,25 @@ class W_AryEqual(W_CFunc):
 MAX_SIZE = 1 << 60
 
 
-def _size_of(w_size):
+def _to_int(w_x):
     from rpyyarv.objects.float import W_Float
-    if isinstance(w_size, W_Integer):
-        n = w_size.int_w()
-    elif isinstance(w_size, W_Float):
-        f = w_size.floatval
+    if isinstance(w_x, W_Integer):
+        return w_x.int_w()
+    if isinstance(w_x, W_Float):
+        f = w_x.floatval
         if not -MAX_SIZE < f < MAX_SIZE:
-            raise UnsupportedOperation('Array.new(%s) is not supported'
-                                       % w_size.repr())
-        n = int(f)
-    elif w_size is w_nil:
-        raise UnsupportedOperation('no implicit conversion from nil to integer')
-    else:
-        raise UnsupportedOperation('no implicit conversion of %s into Integer'
-                                   % describe_conversion(w_size))
+            raise UnsupportedOperation('%s as a size or an index is not '
+                                       'supported' % w_x.repr())
+        return int(f)
+    if w_x is w_nil:
+        raise UnsupportedOperation(
+            'no implicit conversion from nil to integer')
+    raise UnsupportedOperation('no implicit conversion of %s into Integer'
+                               % describe_conversion(w_x))
+
+
+def _size_of(w_size):
+    n = _to_int(w_size)
     if n < 0:
         raise UnsupportedOperation('negative array size')
     if n > MAX_SIZE:
@@ -250,6 +255,193 @@ class W_ArrayInitialize(W_CFunc):
         return w_recv
 
 
+def _arity_error(name, given, expected):
+    return UnsupportedOperation(
+        "wrong number of arguments to '%s' (given %d, expected %s)"
+        % (name, given, expected))
+
+
+class W_At(W_CFunc):
+    def call(self, w_recv, args_w, w_block):
+        assert isinstance(w_recv, W_Array)
+        return aref(w_recv, _to_int(args_w[0]))
+
+
+class W_First(W_CFunc):
+    def call(self, w_recv, args_w, w_block):
+        assert isinstance(w_recv, W_Array)
+        if len(args_w) > 1:
+            raise _arity_error('first', len(args_w), '0..1')
+        if len(args_w) == 0:
+            return aref(w_recv, 0)
+        return W_Array(w_recv.items_w[:_size_of(args_w[0])])
+
+
+class W_Push(W_CFunc):
+    def call(self, w_recv, args_w, w_block):
+        assert isinstance(w_recv, W_Array)
+        w_recv.items_w.extend(args_w)
+        return w_recv
+
+
+class W_Pop(W_CFunc):
+    def call(self, w_recv, args_w, w_block):
+        assert isinstance(w_recv, W_Array)
+        items_w = w_recv.items_w
+        if len(args_w) > 1:
+            raise _arity_error('pop', len(args_w), '0..1')
+        if len(args_w) == 0:
+            if len(items_w) == 0:
+                return w_nil
+            return items_w.pop()
+        start = len(items_w) - _size_of(args_w[0])
+        if start < 0:
+            start = 0
+        w_popped = W_Array(items_w[start:])
+        del items_w[start:]
+        return w_popped
+
+
+class W_Shift(W_CFunc):
+    def call(self, w_recv, args_w, w_block):
+        assert isinstance(w_recv, W_Array)
+        items_w = w_recv.items_w
+        if len(args_w) > 1:
+            raise _arity_error('shift', len(args_w), '0..1')
+        if len(args_w) == 0:
+            if len(items_w) == 0:
+                return w_nil
+            return items_w.pop(0)
+        stop = _size_of(args_w[0])
+        if stop > len(items_w):
+            stop = len(items_w)
+        w_shifted = W_Array(items_w[:stop])
+        del items_w[:stop]
+        return w_shifted
+
+
+class W_Insert(W_CFunc):
+    def call(self, w_recv, args_w, w_block):
+        assert isinstance(w_recv, W_Array)
+        if len(args_w) == 0:
+            raise _arity_error('insert', 0, '1+')
+        if len(args_w) == 1:
+            return w_recv
+        items_w = w_recv.items_w
+        index = _to_int(args_w[0])
+        at = index
+        if index < 0:
+            at = index + len(items_w) + 1
+            if at < 0:
+                raise UnsupportedOperation(
+                    'index %d too small for array; minimum: -%d'
+                    % (index, len(items_w) + 1))
+        if at > len(items_w):
+            _grow(items_w, at - 1)
+        w_recv.items_w = items_w[:at] + args_w[1:] + items_w[at:]
+        return w_recv
+
+
+class W_EmptyP(W_CFunc):
+    def call(self, w_recv, args_w, w_block):
+        assert isinstance(w_recv, W_Array)
+        return newbool(len(w_recv.items_w) == 0)
+
+
+class W_Reverse(W_CFunc):
+    def call(self, w_recv, args_w, w_block):
+        assert isinstance(w_recv, W_Array)
+        items_w = w_recv.items_w[:]
+        items_w.reverse()
+        return W_Array(items_w)
+
+
+class W_ReverseBang(W_CFunc):
+    def call(self, w_recv, args_w, w_block):
+        assert isinstance(w_recv, W_Array)
+        w_recv.items_w.reverse()
+        return w_recv
+
+
+class W_SliceBang(W_CFunc):
+    def call(self, w_recv, args_w, w_block):
+        assert isinstance(w_recv, W_Array)
+        items_w = w_recv.items_w
+        if len(args_w) == 0 or len(args_w) > 2:
+            raise _arity_error('slice!', len(args_w), '1..2')
+        if args_w[0].getclass() is w_range_class:
+            raise UnsupportedOperation(
+                'slice! with a Range is not supported yet')
+        start = _to_int(args_w[0])
+        if start < 0:
+            start += len(items_w)
+        if len(args_w) == 1:
+            if start < 0 or start >= len(items_w):
+                return w_nil
+            return items_w.pop(start)
+        length = _to_int(args_w[1])
+        if length < 0 or start < 0 or start > len(items_w):
+            return w_nil
+        stop = len(items_w)
+        if length < stop - start:
+            stop = start + length
+        w_sliced = W_Array(items_w[start:stop])
+        del items_w[start:stop]
+        return w_sliced
+
+
+class W_AryPlus(W_CFunc):
+    def call(self, w_recv, args_w, w_block):
+        assert isinstance(w_recv, W_Array)
+        w_other = args_w[0]
+        if not isinstance(w_other, W_Array):
+            raise UnsupportedOperation(
+                'no implicit conversion of %s into Array'
+                % describe_conversion(w_other))
+        return W_Array(w_recv.items_w + w_other.items_w)
+
+
+class W_AryTimes(W_CFunc):
+    def call(self, w_recv, args_w, w_block):
+        from rpyyarv.objects.string import W_String
+        assert isinstance(w_recv, W_Array)
+        w_other = args_w[0]
+        if isinstance(w_other, W_String):
+            return W_String(_join(w_recv, w_other.strval))
+        n = _to_int(w_other)
+        if n < 0:
+            raise UnsupportedOperation('negative argument')
+        if n > 0 and len(w_recv.items_w) > MAX_SIZE // n:
+            raise UnsupportedOperation('argument too big')
+        return W_Array(w_recv.items_w * n)
+
+
+_inspecting_w = []
+INSPECT = symbols.intern('inspect')
+
+
+class W_AryInspect(W_CFunc):
+    def call(self, w_recv, args_w, w_block):
+        from rpyyarv import interp
+        from rpyyarv.objects.string import W_String
+        assert isinstance(w_recv, W_Array)
+        if w_recv in _inspecting_w:
+            return W_String('[...]')
+        _inspecting_w.append(w_recv)
+        try:
+            parts = []
+            for w_item in w_recv.items_w:
+                w_str = interp.send(w_item, INSPECT, [])
+                if not isinstance(w_str, W_String):
+                    raise UnsupportedOperation(
+                        'inspect on %s did not return a String'
+                        % w_item.repr())
+                parts.append(w_str.strval)
+            return W_String('[' + ', '.join(parts) + ']')
+        finally:
+            _inspecting_w.pop()
+
+
 class W_Inject(W_CFunc):
     def call(self, w_recv, args_w, w_block):
         from rpyyarv import interp
@@ -282,3 +474,16 @@ def install(w_class):
     w_class.add_method(eq_id, W_AryEqual(eq_id, 1))
     init_id = symbols.intern('initialize')
     w_class.add_method(init_id, W_ArrayInitialize(init_id, -1, True))
+    for name, cls, arity in [('at', W_At, 1), ('first', W_First, -1),
+                             ('push', W_Push, -1), ('pop', W_Pop, -1),
+                             ('shift', W_Shift, -1),
+                             ('insert', W_Insert, -1),
+                             ('empty?', W_EmptyP, 0),
+                             ('reverse', W_Reverse, 0),
+                             ('reverse!', W_ReverseBang, 0),
+                             ('slice!', W_SliceBang, -1),
+                             ('+', W_AryPlus, 1), ('*', W_AryTimes, 1),
+                             ('inspect', W_AryInspect, 0),
+                             ('to_s', W_AryInspect, 0)]:
+        mid = symbols.intern(name)
+        w_class.add_method(mid, cls(mid, arity))

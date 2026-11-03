@@ -1233,3 +1233,19 @@ def test_reopening_a_builtin_class_is_refused_where_unsupported(
     ('(1..2).dup\n', 'dup of <W_Range 1..2> is not supported yet')])
 def test_an_array_new_or_dup_is_refused(source, msg, compile_source):
     expect_unsupported(loader.load_dump(compile_source(source)), None, msg)
+
+
+@pytest.mark.parametrize('source, msg', [
+    ('[1].at("x")\n', 'no implicit conversion of String into Integer'),
+    ('[1].first(-1)\n', 'negative array size'),
+    ('[1, 2].insert(-9, 0)\n',
+     'index -9 too small for array; minimum: -3'),
+    ('[1] + 1\n', 'no implicit conversion of Integer into Array'),
+    ('[1] * -1\n', 'negative argument'),
+    ('[1] * nil\n', 'no implicit conversion from nil to integer'),
+    ('[1, 2].slice!(0..1)\n', 'slice! with a Range is not supported yet'),
+    ('[1].pop(1, 2)\n',
+     "wrong number of arguments to 'pop' (given 2, expected 0..1)"),
+    ('puts ["a"].inspect\n', "undefined method 'inspect' for \"a\"")])
+def test_an_array_method_is_refused(source, msg, compile_source):
+    expect_unsupported(loader.load_dump(compile_source(source)), None, msg)

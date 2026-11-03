@@ -15,10 +15,10 @@ from rpyyarv.objects import range as rangelib
 from rpyyarv.objects.array import W_Array
 from rpyyarv.objects.hash import W_Hash
 from rpyyarv.objects.string import W_String
-from rpyyarv.objects.klass import (BOP_AREF, BOP_ASET, BOP_DIV, BOP_EQ,
-                                   BOP_GE, BOP_GT, BOP_LE, BOP_LENGTH, BOP_LT,
-                                   BOP_MINUS, BOP_MOD, BOP_MULT, BOP_NEQ,
-                                   BOP_PLUS, BOP_SIZE, W_Class,
+from rpyyarv.objects.klass import (BOP_AREF, BOP_ASET, BOP_DIV, BOP_EMPTY_P,
+                                   BOP_EQ, BOP_GE, BOP_GT, BOP_LE, BOP_LENGTH,
+                                   BOP_LT, BOP_MINUS, BOP_MOD, BOP_MULT,
+                                   BOP_NEQ, BOP_PLUS, BOP_SIZE, W_Class,
                                    w_array_class, w_object_class,
                                    w_string_class)
 from rpyyarv.objects.transparent import W_Integer, newbool, newint, w_nil
@@ -260,6 +260,7 @@ ALWAYS_PRIVATE = [symbols.intern(name) for name in [
     'respond_to_missing?']]
 MOD = symbols.intern('%')
 SIZE = symbols.intern('size')
+EMPTY_P = symbols.intern('empty?')
 ASET = symbols.intern('[]=')
 
 
@@ -615,6 +616,13 @@ def execute(iseq, frame):
                 frame.push(send_op(w_recv, LENGTH, []))
             else:
                 frame.push(send_op(w_recv, SIZE, []))
+        elif opcode == insns.OPT_EMPTY_P:
+            w_recv = frame.pop()
+            if (isinstance(w_recv, W_Array)
+                    and w_array_class.redefined & BOP_EMPTY_P == 0):
+                frame.push(newbool(len(w_recv.items_w) == 0))
+            else:
+                frame.push(send_op(w_recv, EMPTY_P, []))
         elif opcode == insns.OBJTOSTRING:
             w_x = frame.pop()
             if isinstance(w_x, W_String):

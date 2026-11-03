@@ -16,16 +16,39 @@ def write(s):
     os.write(1, s)
 
 
+TO_ARY = symbols.intern('to_ary')
+_putting_w = []
+
+
+def _puts(w_arg):
+    from rpyyarv import interp
+    from rpyyarv.objects.array import W_Array
+    if isinstance(w_arg, W_Array):
+        if w_arg in _putting_w:
+            write('[...]\n')
+            return
+        _putting_w.append(w_arg)
+        try:
+            for w_item in w_arg.items_w:
+                _puts(w_item)
+        finally:
+            _putting_w.pop()
+        return
+    if w_arg.lookup_class().find_method(TO_ARY) is not None:
+        raise UnsupportedOperation('puts of %s, which has to_ary, is not '
+                                   'supported yet' % w_arg.repr())
+    s = interp.to_s_string(w_arg).str_w()
+    if not s.endswith('\n'):   # CRuby adds a newline only if missing
+        s += '\n'
+    write(s)
+
+
 class W_Puts(W_CFunc):
     def call(self, w_recv, args_w, w_block):
-        from rpyyarv import interp
         if len(args_w) == 0:
             write('\n')
         for w_arg in args_w:
-            s = interp.to_s_string(w_arg).str_w()
-            if not s.endswith('\n'):   # CRuby adds a newline only if missing
-                s += '\n'
-            write(s)
+            _puts(w_arg)
         return w_nil
 
 class W_ToS(W_CFunc):
@@ -99,6 +122,16 @@ def equal(w_a, w_b):
 def install_to_s(w_class):
     to_s_id = symbols.intern('to_s')
     w_class.add_method(to_s_id, W_ToS(to_s_id, 0))
+
+
+class W_Inspect(W_CFunc):
+    def call(self, w_recv, args_w, w_block):
+        return W_String(w_recv.repr())
+
+
+def install_inspect(w_class):
+    mid = symbols.intern('inspect')
+    w_class.add_method(mid, W_Inspect(mid, 0))
 
 
 def install_identity_eq(w_class):
