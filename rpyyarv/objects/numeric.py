@@ -1,10 +1,12 @@
 from rpyyarv import symbols
 from rpyyarv.error import UnsupportedOperation
 from rpyyarv.methods import W_CFunc
+from rpyyarv.objects.array import arity_error
 from rpyyarv.objects.enumerator import W_Enumerator
-from rpyyarv.objects.transparent import (describe_operand, newbool, newint,
-                                         w_false, w_nil, w_true)
-from rpyyarv.rlib import JitDriver
+from rpyyarv.objects.klass import BOP_LT, w_integer_class
+from rpyyarv.objects.transparent import (W_Integer, describe_operand, newbool,
+                                         newint, w_false, w_nil, w_true)
+from rpyyarv.rlib import JitDriver, ovfcheck
 
 
 class W_Self(W_CFunc):
@@ -85,6 +87,81 @@ class W_Times(W_CFunc):
         return w_recv
 
 
+class W_ToF(W_CFunc):
+    def call(self, w_recv, args_w, w_block):
+        from rpyyarv.objects.float import W_Float
+        return W_Float(w_recv.float_w())
+
+
+def _step_location(w_iseq):
+    return 'Integer step { %s }' % w_iseq.name
+
+
+step_driver = JitDriver(name='int_step', greens=['w_iseq'], reds='auto',
+                        get_printable_location=_step_location)
+
+
+def _step(i, last, step, w_block):
+    from rpyyarv import interp
+    w_iseq = w_block.w_iseq
+    while (step > 0 and i <= last) or (step < 0 and i >= last):
+        step_driver.jit_merge_point(w_iseq=w_iseq)
+        interp.call_block(w_block, [newint(i)])
+        try:
+            i = ovfcheck(i + step)
+        except OverflowError:
+            break
+
+
+class W_Upto(W_CFunc):
+    def call(self, w_recv, args_w, w_block):
+        if w_block is None:
+            raise UnsupportedOperation(
+                "upto without a block (an Enumerator) is not supported yet")
+        w_last = args_w[0]
+        if not isinstance(w_last, W_Integer):
+            raise UnsupportedOperation('upto to %s is not supported yet'
+                                       % w_last.getclass().name)
+        _step(w_recv.int_w(), w_last.int_w(), 1, w_block)
+        return w_recv
+
+
+class W_Step(W_CFunc):
+    def call(self, w_recv, args_w, w_block):
+        from rpyyarv import kernel
+        if w_block is None:
+            raise UnsupportedOperation(
+                "step without a block (an ArithmeticSequence) is not "
+                "supported yet")
+        if len(args_w) > 2:
+            raise arity_error('step', len(args_w), '0..2')
+        w_last = w_nil
+        if len(args_w) > 0:
+            w_last = args_w[0]
+        w_step = newint(1)
+        if len(args_w) == 2:
+            w_step = args_w[1]
+            if w_step is w_nil:
+                raise UnsupportedOperation('step must be numeric')
+            if ((isinstance(w_step, W_Integer) and w_step.int_w() == 0)
+                    or kernel.equal(w_step, newint(0))):
+                raise UnsupportedOperation("step can't be 0")
+        if w_last is w_nil:
+            raise UnsupportedOperation(
+                'step without a limit (an endless loop) is not supported yet')
+        if not isinstance(w_last, W_Integer):
+            raise UnsupportedOperation('step to %s is not supported yet'
+                                       % w_last.getclass().name)
+        if not isinstance(w_step, W_Integer):
+            raise UnsupportedOperation('step by %s is not supported yet'
+                                       % w_step.getclass().name)
+        if w_integer_class.redefined & BOP_LT:
+            raise UnsupportedOperation(
+                'step after redefining Integer#< is not supported yet')
+        _step(w_recv.int_w(), w_last.int_w(), w_step.int_w(), w_block)
+        return w_recv
+
+
 def _add_self(w_class, name):
     mid = symbols.intern(name)
     w_class.add_method(mid, W_Self(mid, 0))
@@ -109,8 +186,10 @@ def install_integer(w_class):
     _add_const(w_class, 'integer?', w_true)
     _add_self(w_class, 'numerator')
     _add_const(w_class, 'denominator', newint(1))
-    mid = symbols.intern('times')
-    w_class.add_method(mid, W_Times(mid, 0))
+    for name, cls, arity in [('times', W_Times, 0), ('to_f', W_ToF, 0),
+                             ('upto', W_Upto, 1), ('step', W_Step, -1)]:
+        mid = symbols.intern(name)
+        w_class.add_method(mid, cls(mid, arity))
 
 
 def install_operators(w_class):

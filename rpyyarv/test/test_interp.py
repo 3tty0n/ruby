@@ -1249,3 +1249,19 @@ def test_an_array_new_or_dup_is_refused(source, msg, compile_source):
     ('puts ["a"].inspect\n', "undefined method 'inspect' for \"a\"")])
 def test_an_array_method_is_refused(source, msg, compile_source):
     expect_unsupported(loader.load_dump(compile_source(source)), None, msg)
+
+
+@pytest.mark.parametrize('source, msg', [
+    ('1.step(3, nil) { }\n', 'step must be numeric'),
+    ('1.step(3, 0.0) { }\n', "step can't be 0"),
+    ('1.step(3, 1, 1) { }\n',
+     "wrong number of arguments to 'step' (given 3, expected 0..2)"),
+    ('1.step(nil) { }\n',
+     'step without a limit (an endless loop) is not supported yet'),
+    ('1.step(3, 1.5) { }\n', 'step by Float is not supported yet'),
+    ('1.upto(2.5) { }\n', 'upto to Float is not supported yet'),
+    ('(-8.0) ** 0.5\n',
+     '-8.0 ** 0.5 is a Complex: RPyYARV has no Complex yet'),
+    ('2.0 ** "a"\n', "String can't be coerced into Float")])
+def test_a_numeric_method_is_refused(source, msg, compile_source):
+    expect_unsupported(loader.load_dump(compile_source(source)), None, msg)

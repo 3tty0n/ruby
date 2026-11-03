@@ -255,7 +255,7 @@ class W_ArrayInitialize(W_CFunc):
         return w_recv
 
 
-def _arity_error(name, given, expected):
+def arity_error(name, given, expected):
     return UnsupportedOperation(
         "wrong number of arguments to '%s' (given %d, expected %s)"
         % (name, given, expected))
@@ -271,7 +271,7 @@ class W_First(W_CFunc):
     def call(self, w_recv, args_w, w_block):
         assert isinstance(w_recv, W_Array)
         if len(args_w) > 1:
-            raise _arity_error('first', len(args_w), '0..1')
+            raise arity_error('first', len(args_w), '0..1')
         if len(args_w) == 0:
             return aref(w_recv, 0)
         return W_Array(w_recv.items_w[:_size_of(args_w[0])])
@@ -289,7 +289,7 @@ class W_Pop(W_CFunc):
         assert isinstance(w_recv, W_Array)
         items_w = w_recv.items_w
         if len(args_w) > 1:
-            raise _arity_error('pop', len(args_w), '0..1')
+            raise arity_error('pop', len(args_w), '0..1')
         if len(args_w) == 0:
             if len(items_w) == 0:
                 return w_nil
@@ -307,7 +307,7 @@ class W_Shift(W_CFunc):
         assert isinstance(w_recv, W_Array)
         items_w = w_recv.items_w
         if len(args_w) > 1:
-            raise _arity_error('shift', len(args_w), '0..1')
+            raise arity_error('shift', len(args_w), '0..1')
         if len(args_w) == 0:
             if len(items_w) == 0:
                 return w_nil
@@ -324,7 +324,7 @@ class W_Insert(W_CFunc):
     def call(self, w_recv, args_w, w_block):
         assert isinstance(w_recv, W_Array)
         if len(args_w) == 0:
-            raise _arity_error('insert', 0, '1+')
+            raise arity_error('insert', 0, '1+')
         if len(args_w) == 1:
             return w_recv
         items_w = w_recv.items_w
@@ -368,7 +368,7 @@ class W_SliceBang(W_CFunc):
         assert isinstance(w_recv, W_Array)
         items_w = w_recv.items_w
         if len(args_w) == 0 or len(args_w) > 2:
-            raise _arity_error('slice!', len(args_w), '1..2')
+            raise arity_error('slice!', len(args_w), '1..2')
         if args_w[0].getclass() is w_range_class:
             raise UnsupportedOperation(
                 'slice! with a Range is not supported yet')

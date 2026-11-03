@@ -1,14 +1,16 @@
 import math
 
 from rpyyarv import symbols
+from rpyyarv.error import UnsupportedOperation
 from rpyyarv.methods import W_CFunc
 from rpyyarv.objects.base import W_Root
 from rpyyarv.objects.klass import w_float_class
-from rpyyarv.objects.numeric import W_Self
+from rpyyarv.objects.numeric import W_NumericOp, W_Self
 from rpyyarv.objects.transparent import newbool, newint, w_nil
 from rpyyarv.rlib import float_repr
 
 DBL_DIG = 15
+INF = float('inf')
 
 
 class W_Float(W_Root):
@@ -130,6 +132,30 @@ class W_IsInfinite(W_CFunc):
         return newint(-1)
 
 
+def _pow(x, y):
+    # math.pow raises where C's pow, which CRuby calls, returns an infinity
+    try:
+        return math.pow(x, y)
+    except (OverflowError, ValueError):
+        if not math.isinf(y) and math.fmod(math.fabs(y), 2.0) == 1.0:
+            return math.copysign(INF, x)
+        return INF
+
+
+def w_pow(w_x, w_y):
+    x = _floatval(w_x)
+    if isinstance(w_y, W_Float):
+        y = w_y.floatval
+        if x < 0.0 and y != math.floor(y):
+            raise UnsupportedOperation(
+                '%s ** %s is a Complex: RPyYARV has no Complex yet'
+                % (w_x.repr(), w_y.repr()))
+        return W_Float(_pow(x, y))
+    if w_y.int_w() == 2:
+        return W_Float(x * x)
+    return W_Float(_pow(x, w_y.float_w()))
+
+
 def install(w_class):
     for name, cls in [('to_f', W_Self), ('abs', W_Abs), ('magnitude', W_Abs),
                       ('-@', W_Neg), ('zero?', W_IsZero),
@@ -137,3 +163,5 @@ def install(w_class):
                       ('finite?', W_IsFinite), ('infinite?', W_IsInfinite)]:
         mid = symbols.intern(name)
         w_class.add_method(mid, cls(mid, 0))
+    pow_id = symbols.intern('**')
+    w_class.add_method(pow_id, W_NumericOp(pow_id, w_pow, False))

@@ -619,6 +619,18 @@ CRUBY_CASES = [
                     'puts((1..2) == [1, 2])\nputs((1..) == (1..))\n'
                     'puts(("a".."c") == ("a".."c"))\nx = 2\n'
                     'puts((..x) == (..2))\n'),
+    ('int_step', 'puts(3.step(0, -1) { |i| puts i })\n'
+                 '1.step(3) { |i| puts i }\n1.step(10, 4) { |i| puts i }\n'
+                 '5.step(1, 2) { |i| puts i }\n'
+                 'puts(1.upto(3) { |i| puts i })\n3.upto(1) { |i| puts i }\n'
+                 'puts 3.to_f\nputs -3.to_f\nputs 9007199254740993.to_f\n'),
+    ('float_pow', 'puts 2.0 ** 3\nputs 2.0 ** 0.5\nputs 1.5 ** 2\n'
+                  'puts 2.0 ** -2\nputs((-2.0) ** 3)\nputs((-2.0) ** 2.0)\n'
+                  'inf = 1.0 / 0\nnan = 0.0 / 0\nputs 0.0 ** -1\n'
+                  'puts((-0.0) ** -1)\nputs((-0.0) ** -2)\nputs 0.0 ** -0.5\n'
+                  'puts 0.0 ** -inf\nputs 10.0 ** 400\nputs((-10.0) ** 401)\n'
+                  'puts((-10.0) ** 400)\nputs 1.0 ** nan\nputs nan ** 0\n'
+                  'puts 2.0 ** inf\nputs((-inf) ** 3)\nputs 10.0 ** -400\n'),
 ]
 
 # bench_clock.rb needs RPyYARV's bench_now_ns, which CRuby does not have.
