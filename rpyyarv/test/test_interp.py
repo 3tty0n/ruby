@@ -1066,7 +1066,7 @@ def test_a_constant_lookup_is_refused(source, msg, compile_source):
      "private method 'initialize' called for #<Foo>"),
     ('class Foo\n  def initialize(a, b)\n  end\nend\nFoo.new(1)\n',
      "wrong number of arguments to 'initialize' (given 1, expected 2)"),
-    ('puts Array.new.length\n', 'Array.new is not supported yet')])
+    ('puts Hash.new.length\n', 'Hash.new is not supported yet')])
 def test_an_instance_creation_is_refused(source, msg, compile_source):
     expect_unsupported(loader.load_dump(compile_source(source)), None, msg)
 
@@ -1162,6 +1162,7 @@ def test_a_times_enumerator_operation_is_refused(source, msg,
      '+ with K through coerce is not supported yet'),
     ('"a" + 1\n', 'no implicit conversion of Integer into String'),
     ('"a" + nil\n', 'no implicit conversion of nil into String'),
+    ('"a" + :b\n', 'no implicit conversion of Symbol into String'),
     ('class S\n  def to_str\n    "s"\n  end\nend\n"a" + S.new\n',
      '+ with S through to_str is not supported yet')])
 def test_an_operator_on_a_wrong_type_is_refused(source, msg, compile_source):
@@ -1220,4 +1221,15 @@ def test_a_redefined_builtin_method_is_called(w_class, name, source, expected,
     ('class Integer < Object\nend\n', 'superclass mismatch for class Integer')])
 def test_reopening_a_builtin_class_is_refused_where_unsupported(
         source, msg, compile_source):
+    expect_unsupported(loader.load_dump(compile_source(source)), None, msg)
+
+
+@pytest.mark.parametrize('source, msg', [
+    ('Array.new(-1)\n', 'negative array size'),
+    ('Array.new("a")\n', 'no implicit conversion of String into Integer'),
+    ('Array.new(nil)\n', 'no implicit conversion from nil to integer'),
+    ('Array.new(1, 2, 3)\n',
+     "wrong number of arguments to 'initialize' (given 3, expected 0..2)"),
+    ('(1..2).dup\n', 'dup of <W_Range 1..2> is not supported yet')])
+def test_an_array_new_or_dup_is_refused(source, msg, compile_source):
     expect_unsupported(loader.load_dump(compile_source(source)), None, msg)

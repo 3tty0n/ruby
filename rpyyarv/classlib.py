@@ -8,7 +8,7 @@ from rpyyarv.error import UnsupportedOperation
 from rpyyarv.methods import W_CFunc
 from rpyyarv.objects.array import W_Array
 from rpyyarv.objects.instance import W_Object
-from rpyyarv.objects.klass import W_Class, w_object_class
+from rpyyarv.objects.klass import W_Class, w_array_class, w_object_class
 from rpyyarv.objects.string import W_String
 from rpyyarv.objects.symbol import W_Symbol, newsymbol
 from rpyyarv.objects.transparent import w_nil
@@ -17,6 +17,8 @@ INITIALIZE = symbols.intern('initialize')
 
 
 def allocate(w_class):
+    if w_class is w_array_class:
+        return W_Array([])
     # A built-in class other than Object needs its own kind of object
     if w_class.builtin and w_class is not w_object_class:
         raise UnsupportedOperation('%s.new is not supported yet'

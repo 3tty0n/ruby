@@ -658,13 +658,7 @@ def execute(iseq, frame):
             pc += 1
             w_template = iseq.consts[idx]
             assert isinstance(w_template, W_Hash)
-            w_hash = W_Hash()
-            i = 0
-            while i < len(w_template.keys_w):
-                hashlib.aset(w_hash, w_template.keys_w[i],
-                             w_template.values_w[i])
-                i += 1
-            frame.push(w_hash)
+            frame.push(hashlib.copy(w_template))
         elif opcode == insns.SPLATARRAY:
             dup = iseq.consts[code[pc]].is_true()
             pc += 1

@@ -3,7 +3,8 @@ from rpyyarv.error import UnsupportedOperation
 from rpyyarv.methods import W_CFunc
 from rpyyarv.objects.base import W_Root
 from rpyyarv.objects.klass import w_array_class
-from rpyyarv.objects.transparent import newint, w_false, w_nil, w_true
+from rpyyarv.objects.transparent import (W_Integer, describe_conversion,
+                                         newint, w_false, w_nil, w_true)
 from rpyyarv.rlib import JitDriver
 
 
@@ -182,6 +183,73 @@ class W_AryEqual(W_CFunc):
             _comparing_w.pop()
 
 
+# ARY_MAX_SIZE on a 64-bit CRuby
+MAX_SIZE = 1 << 60
+
+
+def _size_of(w_size):
+    from rpyyarv.objects.float import W_Float
+    if isinstance(w_size, W_Integer):
+        n = w_size.int_w()
+    elif isinstance(w_size, W_Float):
+        f = w_size.floatval
+        if not -MAX_SIZE < f < MAX_SIZE:
+            raise UnsupportedOperation('Array.new(%s) is not supported'
+                                       % w_size.repr())
+        n = int(f)
+    elif w_size is w_nil:
+        raise UnsupportedOperation('no implicit conversion from nil to integer')
+    else:
+        raise UnsupportedOperation('no implicit conversion of %s into Integer'
+                                   % describe_conversion(w_size))
+    if n < 0:
+        raise UnsupportedOperation('negative array size')
+    if n > MAX_SIZE:
+        raise UnsupportedOperation('array size too big')
+    return n
+
+
+def _new_location(w_iseq):
+    return 'Array.new { %s }' % w_iseq.name
+
+
+new_driver = JitDriver(name='array_new', greens=['w_iseq'], reds='auto',
+                       get_printable_location=_new_location)
+
+
+class W_ArrayInitialize(W_CFunc):
+    def call(self, w_recv, args_w, w_block):
+        from rpyyarv import interp
+        assert isinstance(w_recv, W_Array)
+        if len(args_w) > 2:
+            raise UnsupportedOperation(
+                "wrong number of arguments to 'initialize' (given %d, "
+                "expected 0..2)" % len(args_w))
+        if len(args_w) == 0:
+            w_recv.items_w = []
+            return w_recv
+        w_size = args_w[0]
+        if len(args_w) == 1 and isinstance(w_size, W_Array):
+            w_recv.items_w = w_size.items_w[:]
+            return w_recv
+        n = _size_of(w_size)
+        if w_block is None:
+            w_fill = w_nil
+            if len(args_w) == 2:
+                w_fill = args_w[1]
+            w_recv.items_w = [w_fill] * n
+            return w_recv
+        w_iseq = w_block.w_iseq
+        items_w = []
+        i = 0
+        while i < n:
+            new_driver.jit_merge_point(w_iseq=w_iseq)
+            items_w.append(interp.call_block(w_block, [newint(i)]))
+            i += 1
+        w_recv.items_w = items_w
+        return w_recv
+
+
 class W_Inject(W_CFunc):
     def call(self, w_recv, args_w, w_block):
         from rpyyarv import interp
@@ -212,3 +280,5 @@ def install(w_class):
         w_class.add_method(mid, cls(mid, arity))
     eq_id = symbols.intern('==')
     w_class.add_method(eq_id, W_AryEqual(eq_id, 1))
+    init_id = symbols.intern('initialize')
+    w_class.add_method(init_id, W_ArrayInitialize(init_id, -1, True))

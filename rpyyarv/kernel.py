@@ -3,10 +3,12 @@
 import os
 
 from rpyyarv import symbols
+from rpyyarv.error import UnsupportedOperation
 from rpyyarv.methods import W_CFunc
 from rpyyarv.objects.klass import BOP_EQ
 from rpyyarv.objects.string import W_String
-from rpyyarv.objects.transparent import newbool, newint, w_nil
+from rpyyarv.objects.symbol import W_Symbol
+from rpyyarv.objects.transparent import newbool, newint, w_false, w_nil, w_true
 from rpyyarv.rlib import now_ns
 
 
@@ -52,6 +54,36 @@ class W_Not(W_CFunc):
 
 
 EQ = symbols.intern('==')
+INITIALIZE_COPY = symbols.intern('initialize_copy')
+
+
+class W_Dup(W_CFunc):
+    def call(self, w_recv, args_w, w_block):
+        from rpyyarv import helpers
+        from rpyyarv import interp
+        from rpyyarv.objects import hash as hashlib
+        from rpyyarv.objects.array import W_Array
+        from rpyyarv.objects.instance import W_Object
+        if (helpers.is_number(w_recv) or isinstance(w_recv, W_Symbol)
+                or w_recv is w_nil or w_recv is w_true or w_recv is w_false):
+            return w_recv
+        if isinstance(w_recv, W_Array):
+            w_copy = W_Array(w_recv.items_w[:])
+        elif isinstance(w_recv, hashlib.W_Hash):
+            w_copy = hashlib.copy(w_recv)
+        elif isinstance(w_recv, W_String):
+            w_copy = W_String(w_recv.strval)
+        elif isinstance(w_recv, W_Object):
+            w_copy = W_Object(w_recv.w_class)
+            w_copy.ivars_w = w_recv.ivars_w.copy()
+        else:
+            raise UnsupportedOperation('%s of %s is not supported yet'
+                                       % (symbols.name_of(self.mid),
+                                          w_recv.repr()))
+        w_init = w_copy.getclass().find_method(INITIALIZE_COPY)
+        if w_init is not None:
+            interp.call_method(w_init, w_copy, [w_recv], None)
+        return w_copy
 
 
 def equal(w_a, w_b):
@@ -80,6 +112,7 @@ def install(w_class):
     now_id = symbols.intern('bench_now_ns')
     w_class.add_method(now_id, W_BenchNowNs(now_id, 0))
     for name, cls, arity in [('==', W_Equal, 1), ('!=', W_NotEqual, 1),
-                             ('!', W_Not, 0)]:
+                             ('!', W_Not, 0), ('dup', W_Dup, 0),
+                             ('clone', W_Dup, 0)]:
         mid = symbols.intern(name)
         w_class.add_method(mid, cls(mid, arity))

@@ -557,6 +557,22 @@ CRUBY_CASES = [
                       '  def ==(o)\n    true\n  end\nend\nputs Integer\n'
                       'puts [1].join\nputs(:a == :b)\nputs(1.5 == 2.5)\n'
                       'puts(nil == 1)\nputs(Integer == Float)\n'),
+    ('array_new', 'puts Array.new.size\nputs Array.new(2).size\n'
+                  'puts Array.new(2, 0).join(",")\n'
+                  'puts Array.new(3) { |i| i * i }.join(",")\n'
+                  'puts Array.new(2, 0) { |i| i }.join(",")\n'
+                  'b = [1, 2]\nc = Array.new(b)\nc[0] = 9\nputs b[0]\n'
+                  'puts Array.new(2.7).size\no = Object.new\n'
+                  'd = Array.new(2, o)\nputs d[0] == o\nputs d[1] == o\n'
+                  'puts Array.new(0).size\n'),
+    ('dup_clone', 'a = [1, 2]\nb = a.dup\nb[0] = 9\nputs a[0]\n'
+                  'h = {1 => 2}\ng = h.dup\ng[1] = 3\nputs h[1]\n'
+                  'puts "x".dup\nputs 1.dup\nputs :a.clone\nputs 1.5.dup\n'
+                  'class P\n  attr_accessor :v\n  def initialize_copy(o)\n'
+                  '    @v = 7\n  end\nend\nx = P.new\nx.v = 1\ny = x.dup\n'
+                  'puts x.v\nputs y.v\nputs [1, 2].clone.join(",")\n'
+                  'class Q\n  attr_accessor :w\nend\nq = Q.new\nq.w = 4\n'
+                  'r = q.clone\nr.w = 5\nputs q.w\nputs r.w\n'),
     ('regexp_equal', 'puts(/a/ == /a/)\nputs(/a/ == /b/)\nputs(/a/ == "a")\n'
                      'r = /x/\nputs(r == r)\nputs(/a/ != /a/)\n'),
     ('times_enumerator', 'puts 5.times.to_a.join(",")\n'

@@ -6,7 +6,7 @@ from rpyyarv.objects.array import W_Array
 from rpyyarv.objects.base import W_Root
 from rpyyarv.objects.klass import w_string_class
 from rpyyarv.objects.regexp import W_Regexp
-from rpyyarv.objects.transparent import describe_operand, newbool, newint
+from rpyyarv.objects.transparent import describe_conversion, newbool, newint
 from rpyyarv.error import UnsupportedOperation
 
 class W_String(W_Root):
@@ -58,7 +58,7 @@ class W_StrPlus(W_CFunc):
                 '+ with %s through to_str is not supported yet'
                 % w_other.getclass().name)
         raise UnsupportedOperation('no implicit conversion of %s into String'
-                                   % describe_operand(w_other))
+                                   % describe_conversion(w_other))
 
 
 class W_Length(W_CFunc):

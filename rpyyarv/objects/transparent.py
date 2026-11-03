@@ -108,3 +108,9 @@ def describe_operand(w_x):
             or isinstance(w_x, W_Symbol)):
         return w_x.repr()
     return w_x.getclass().name
+
+
+def describe_conversion(w_x):
+    if w_x is w_nil or w_x is w_true or w_x is w_false:
+        return w_x.repr()
+    return w_x.getclass().name

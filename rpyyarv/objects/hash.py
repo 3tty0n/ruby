@@ -64,6 +64,15 @@ def aset(w_hash, w_key, w_value):
     w_hash.values_w.append(w_value)
 
 
+def copy(w_hash):
+    w_copy = W_Hash()
+    i = 0
+    while i < len(w_hash.keys_w):
+        aset(w_copy, w_hash.keys_w[i], w_hash.values_w[i])
+        i += 1
+    return w_copy
+
+
 class W_HashAref(W_CFunc):
     def call(self, w_recv, args_w, w_block):
         assert isinstance(w_recv, W_Hash)
