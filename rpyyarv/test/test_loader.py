@@ -619,6 +619,9 @@ CRUBY_CASES = [
                     'puts((1..2) == [1, 2])\nputs((1..) == (1..))\n'
                     'puts(("a".."c") == ("a".."c"))\nx = 2\n'
                     'puts((..x) == (..2))\n'),
+    ('range_map', 'puts "#{(1..3).collect { |i| i * 2 }}"\n'
+                  'puts "#{(1...3).map { |i| i }}"\n'
+                  'puts "#{(3..1).collect { 1 }}"\n'),
     ('int_step', 'puts(3.step(0, -1) { |i| puts i })\n'
                  '1.step(3) { |i| puts i }\n1.step(10, 4) { |i| puts i }\n'
                  '5.step(1, 2) { |i| puts i }\n'

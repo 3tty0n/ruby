@@ -1265,3 +1265,13 @@ def test_an_array_method_is_refused(source, msg, compile_source):
     ('2.0 ** "a"\n', "String can't be coerced into Float")])
 def test_a_numeric_method_is_refused(source, msg, compile_source):
     expect_unsupported(loader.load_dump(compile_source(source)), None, msg)
+
+
+@pytest.mark.parametrize('source, msg', [
+    ('(1..3).collect\n',
+     'collect without a block (an Enumerator) is not supported yet'),
+    ('(1..).map { }\n', 'map over Integer..NilClass is not supported yet'),
+    ('class Range\n  def each\n  end\nend\n(1..3).map { }\n',
+     'map after redefining Range#each is not supported yet')])
+def test_a_range_map_is_refused(source, msg, compile_source):
+    expect_unsupported(loader.load_dump(compile_source(source)), None, msg)

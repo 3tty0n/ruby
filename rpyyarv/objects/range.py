@@ -111,6 +111,41 @@ class W_RangeStep(W_CFunc):
         return w_recv
 
 
+def _map_location(w_iseq):
+    return 'Range map { %s }' % w_iseq.name
+
+
+map_driver = JitDriver(name='range_map', greens=['w_iseq'], reds='auto',
+                       get_printable_location=_map_location)
+
+EACH = symbols.intern('each')
+
+
+class W_RangeMap(W_CFunc):
+    def call(self, w_recv, args_w, w_block):
+        from rpyyarv import interp
+        assert isinstance(w_recv, W_Range)
+        name = symbols.name_of(self.mid)
+        if w_block is None:
+            raise UnsupportedOperation(
+                "%s without a block (an Enumerator) is not supported yet"
+                % name)
+        if not isinstance(w_range_class.find_method(EACH), W_RangeEach):
+            raise UnsupportedOperation(
+                '%s after redefining Range#each is not supported yet' % name)
+        i, last = _bounds(w_recv, name)
+        w_iseq = w_block.w_iseq
+        result_w = []
+        while _within(i, last, w_recv.exclusive, 1):
+            map_driver.jit_merge_point(w_iseq=w_iseq)
+            result_w.append(interp.call_block(w_block, [newint(i)]))
+            try:
+                i = ovfcheck(i + 1)
+            except OverflowError:
+                break
+        return W_Array(result_w)
+
+
 class W_RangeToA(W_CFunc):
     def call(self, w_recv, args_w, w_block):
         assert isinstance(w_recv, W_Range)
@@ -142,6 +177,8 @@ class W_RangeEqual(W_CFunc):
 def install(w_class):
     for name, cls, arity in [('each', W_RangeEach, 0),
                              ('step', W_RangeStep, 1),
+                             ('map', W_RangeMap, 0),
+                             ('collect', W_RangeMap, 0),
                              ('to_a', W_RangeToA, 0),
                              ('==', W_RangeEqual, 1)]:
         mid = symbols.intern(name)
