@@ -1272,6 +1272,8 @@ def test_a_numeric_method_is_refused(source, msg, compile_source):
      'collect without a block (an Enumerator) is not supported yet'),
     ('(1..).map { }\n', 'map over Integer..NilClass is not supported yet'),
     ('class Range\n  def each\n  end\nend\n(1..3).map { }\n',
-     'map after redefining Range#each is not supported yet')])
-def test_a_range_map_is_refused(source, msg, compile_source):
+     'map after redefining Range#each is not supported yet'),
+    ('class Range\n  def each\n  end\nend\n(1..3).to_a\n',
+     'to_a after redefining Range#each is not supported yet')])
+def test_a_range_method_is_refused(source, msg, compile_source):
     expect_unsupported(loader.load_dump(compile_source(source)), None, msg)

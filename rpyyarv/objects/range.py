@@ -121,6 +121,12 @@ map_driver = JitDriver(name='range_map', greens=['w_iseq'], reds='auto',
 EACH = symbols.intern('each')
 
 
+def _check_each(name):
+    if not isinstance(w_range_class.find_method(EACH), W_RangeEach):
+        raise UnsupportedOperation(
+            '%s after redefining Range#each is not supported yet' % name)
+
+
 class W_RangeMap(W_CFunc):
     def call(self, w_recv, args_w, w_block):
         from rpyyarv import interp
@@ -130,9 +136,7 @@ class W_RangeMap(W_CFunc):
             raise UnsupportedOperation(
                 "%s without a block (an Enumerator) is not supported yet"
                 % name)
-        if not isinstance(w_range_class.find_method(EACH), W_RangeEach):
-            raise UnsupportedOperation(
-                '%s after redefining Range#each is not supported yet' % name)
+        _check_each(name)
         i, last = _bounds(w_recv, name)
         w_iseq = w_block.w_iseq
         result_w = []
@@ -149,6 +153,7 @@ class W_RangeMap(W_CFunc):
 class W_RangeToA(W_CFunc):
     def call(self, w_recv, args_w, w_block):
         assert isinstance(w_recv, W_Range)
+        _check_each('to_a')
         i, last = _bounds(w_recv, 'to_a')
         items_w = []
         while _within(i, last, w_recv.exclusive, 1):
