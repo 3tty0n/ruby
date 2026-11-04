@@ -266,6 +266,15 @@ def test_a_module_or_singleton_class_is_refused_at_load(source,
            "supported")
 
 
+@pytest.mark.parametrize('source, msg', [
+    ('puts $stdout\n', "global variable $stdout in '<main>' is not supported"),
+    ('$0 = "x"\n', "global variable $0 in '<main>' is not supported"),
+    ('def f\n  $;\nend\n', "global variable $; in 'f' is not supported")])
+def test_a_cruby_global_variable_is_refused_at_load(source, msg,
+                                                    compile_source):
+    expect(UnsupportedOperation, compile_source(source), msg)
+
+
 def test_malformed_dump():
     expect(LoadError, 'dump\t99\t3.3.8\tx.rb\n',
            'dump format version 99, expected 1')
@@ -622,6 +631,9 @@ CRUBY_CASES = [
     ('range_map', 'puts "#{(1..3).collect { |i| i * 2 }}"\n'
                   'puts "#{(1...3).map { |i| i }}"\n'
                   'puts "#{(3..1).collect { 1 }}"\n'),
+    ('globals', 'puts $x == nil\n$x = 1\ndef f\n  $x += 1\nend\nf\nputs $x\n'
+                '[1, 2].each { |i| $y = i }\nputs $y\nputs($z = 5)\n'
+                'def g\n  $w = ($w || 0) + 1\nend\ng\nputs g\n'),
     ('math', 'puts Math.sqrt(4)\nputs Math.sqrt(2.0)\n'
              'puts Math.sqrt(-0.0)\nputs Math.sqrt(0)\n'
              'puts Math.sqrt(1.0 / 0)\nputs Math.sqrt(0.0 / 0)\n'

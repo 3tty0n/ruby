@@ -19,6 +19,7 @@ if _REPO not in sys.path:
 import pytest
 
 from rpyyarv import debug
+from rpyyarv import interp
 from rpyyarv import kernel
 from rpyyarv.objects import klass
 from rpyyarv.objects.klass import VersionTag, W_Class, w_object_class
@@ -29,7 +30,8 @@ from rpyyarv.test import support
 @pytest.fixture(autouse=True)
 def _isolate():
     """A toplevel `def` or constant lands on the one Object, a reopened
-    built-in class is shared too, and debug flags are global."""
+    built-in class is shared too, and debug flags and global variables are
+    global."""
     baseline = []
     for w_class in vars(klass).values():
         if isinstance(w_class, W_Class) and w_class.builtin:
@@ -55,6 +57,7 @@ def _isolate():
         w_class.method_table_changed()
     w_object_class.constants_w = baseline_consts
     w_object_class.const_version = VersionTag()
+    interp.global_entries.clear()
 
 
 class Output(object):

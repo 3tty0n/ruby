@@ -235,6 +235,12 @@ class Loader(object):
                 raise UnsupportedOperation(
                     "defineclass of a module or a singleton class in '%s' is "
                     "not supported" % raw.name)
+        if op == insns.GETGLOBAL or op == insns.SETGLOBAL:
+            name = self.sym_of(ops[0], op, raw)
+            if name in optable.CRUBY_GLOBALS:
+                raise UnsupportedOperation(
+                    "global variable %s in '%s' is not supported"
+                    % (name, raw.name))
         if op == insns.EXPANDARRAY:
             flag = self.int_of(ops[1], op, raw, 'flag')
             if flag != 0:

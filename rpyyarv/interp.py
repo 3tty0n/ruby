@@ -276,6 +276,23 @@ def send_op(w_recv, mid, args_w):
     return call_method(w_method, w_recv, args_w, None)
 
 
+class GlobalVar(object):
+    def __init__(self):
+        self.w_value = w_nil
+
+
+global_entries = {}
+
+
+@elidable
+def global_entry(mid):
+    w_var = global_entries.get(mid, None)
+    if w_var is None:
+        w_var = GlobalVar()
+        global_entries[mid] = w_var
+    return w_var
+
+
 def _uninitialized_constant(w_scope, mid):
     name = symbols.name_of(mid)
     if w_scope is not w_object_class:
@@ -463,6 +480,14 @@ def execute(iseq, frame):
             mid = code[pc]
             pc += 1
             frame.w_self.set_ivar(mid, frame.pop())
+        elif opcode == insns.GETGLOBAL:
+            mid = code[pc]
+            pc += 1
+            frame.push(global_entry(mid).w_value)
+        elif opcode == insns.SETGLOBAL:
+            mid = code[pc]
+            pc += 1
+            global_entry(mid).w_value = frame.pop()
         elif opcode == insns.DUP:
             w_x = frame.pop()
             frame.push(w_x)

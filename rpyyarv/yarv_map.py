@@ -32,6 +32,8 @@ EMIT = {
     'setlocal': [0, 1],
     'getinstancevariable': [0],     # IVC dropped
     'setinstancevariable': [0],
+    'getglobal': [0],
+    'setglobal': [0],
     'dup': [],
     'pop': [],
     'swap': [],
@@ -118,6 +120,16 @@ ENV_DATA_SIZE = 3
 SPECIAL_OBJECT_CONST_BASE = 3
 DEFINECLASS_TYPE_MASK = 0x07
 DEFINECLASS_FLAG_HAS_SUPERCLASS = 0x10
+
+# variable.c. The global variables CRuby defines itself, with hooks on reading
+# and writing, as global_variables lists them at startup.
+CRUBY_GLOBALS = frozenset([
+    '$!', '$"', '$$', '$&', "$'", '$*', '$+', '$,', '$-0', '$-F', '$-I',
+    '$-W', '$-a', '$-d', '$-i', '$-l', '$-p', '$-v', '$-w', '$.', '$/', '$0',
+    '$:', '$;', '$<', '$=', '$>', '$?', '$@', '$DEBUG', '$FILENAME',
+    '$LOADED_FEATURES', '$LOAD_PATH', '$PROGRAM_NAME', '$VERBOSE', '$\\',
+    '$_', '$`', '$stderr', '$stdin', '$stdout', '$~',
+])
 
 # vm_callinfo.h. Outside this mask (splat, block argument, keywords, super,
 # forwarding) the arguments reach the callee differently; ARGS_SIMPLE is
