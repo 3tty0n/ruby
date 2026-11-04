@@ -328,7 +328,7 @@ def _const_base(cref):
 
 def _define_class(w_cbase, mid, w_super, flags):
     if flags & optable.DEFINECLASS_FLAG_HAS_SUPERCLASS:
-        if not isinstance(w_super, W_Class):
+        if not isinstance(w_super, W_Class) or w_super.is_module:
             raise UnsupportedOperation(
                 'superclass must be an instance of Class (given an instance '
                 'of %s)' % w_super.getclass().name)
@@ -339,7 +339,7 @@ def _define_class(w_cbase, mid, w_super, flags):
                                    % w_cbase.repr())
     w_class = w_cbase.find_const(mid)
     if w_class is not None:
-        if not isinstance(w_class, W_Class):
+        if not isinstance(w_class, W_Class) or w_class.is_module:
             raise UnsupportedOperation('%s is not a class'
                                        % symbols.name_of(mid))
         if w_super is not None and w_class.w_superclass is not w_super:

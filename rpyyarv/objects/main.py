@@ -7,7 +7,8 @@ from rpyyarv.objects.base import W_Root
 from rpyyarv.objects.klass import (W_Class, w_array_class, w_class_class,
                                    w_enumerator_class, w_false_class,
                                    w_float_class, w_hash_class,
-                                   w_integer_class, w_nil_class,
+                                   w_integer_class, w_math_module,
+                                   w_module_class, w_nil_class,
                                    w_numeric_class, w_object_class,
                                    w_range_class, w_regexp_class,
                                    w_string_class, w_symbol_class,
@@ -16,6 +17,7 @@ from rpyyarv.objects import array as arraylib
 from rpyyarv.objects import enumerator as enumeratorlib
 from rpyyarv.objects import float as floatlib
 from rpyyarv.objects import hash as hashlib
+from rpyyarv.objects import mathmodule
 from rpyyarv.objects import numeric as numericlib
 from rpyyarv.objects import range as rangelib
 from rpyyarv.objects import regexp as regexplib
@@ -61,13 +63,13 @@ kernel.install_to_s(w_main_class)
 # not reach them
 for _w_class in (w_integer_class, w_float_class, w_nil_class, w_true_class,
                  w_false_class, w_string_class, w_symbol_class, w_hash_class,
-                 w_range_class, w_regexp_class, w_class_class):
+                 w_range_class, w_regexp_class, w_module_class):
     kernel.install_to_s(_w_class)
 for _w_class in (w_integer_class, w_float_class, w_nil_class, w_true_class,
                  w_false_class):
     kernel.install_inspect(_w_class)
 kernel.install_identity_eq(w_symbol_class)
-kernel.install_identity_eq(w_class_class)
+kernel.install_identity_eq(w_module_class)
 classlib.install(w_class_class)
 classlib.install_object(w_object_class)
 stringlib.install(w_string_class)
@@ -81,12 +83,13 @@ numericlib.install_integer(w_integer_class)
 floatlib.install(w_float_class)
 numericlib.install_operators(w_integer_class)
 numericlib.install_operators(w_float_class)
+mathmodule.install(w_math_module)
 
 for _w_class in (w_object_class, w_class_class, w_numeric_class,
                  w_integer_class, w_float_class, w_string_class,
                  w_symbol_class, w_array_class, w_hash_class, w_range_class,
                  w_enumerator_class, w_regexp_class, w_nil_class,
-                 w_true_class, w_false_class):
+                 w_true_class, w_false_class, w_module_class, w_math_module):
     w_object_class.set_const(symbols.intern(_w_class.name), _w_class)
 
 w_main = W_Main()

@@ -39,13 +39,16 @@ class VersionTag(object):
 
 
 class W_Class(W_Root):
-    _immutable_fields_ = ['name', 'w_superclass', 'builtin', 'version?',
-                          'const_version?', 'w_singleton?', 'redefined?']
+    _immutable_fields_ = ['name', 'w_superclass', 'builtin', 'is_module',
+                          'version?', 'const_version?', 'w_singleton?',
+                          'redefined?']
 
-    def __init__(self, name, w_superclass=None, builtin=False):
+    def __init__(self, name, w_superclass=None, builtin=False,
+                 is_module=False):
         self.name = name
         self.w_superclass = w_superclass
         self.builtin = builtin
+        self.is_module = is_module
         self.methods = MethodTable()
         self.subclasses_w = []
         self.version = VersionTag()
@@ -57,6 +60,8 @@ class W_Class(W_Root):
             w_superclass.subclasses_w.append(self)
 
     def getclass(self):
+        if self.is_module:
+            return w_module_class
         return w_class_class
 
     def lookup_class(self):
@@ -64,9 +69,12 @@ class W_Class(W_Root):
 
     def singleton_class(self):
         # Made on first use; its superclass is the superclass's own, so class
-        # methods are inherited, and Object's leads on to Class
+        # methods are inherited, and Object's leads on to Class, a module's to
+        # Module
         if self.w_singleton is None:
-            if self.w_superclass is None:
+            if self.is_module:
+                w_super = w_module_class
+            elif self.w_superclass is None:
                 w_super = w_class_class
             else:
                 w_super = self.w_superclass.singleton_class()
@@ -136,8 +144,9 @@ class W_Class(W_Root):
 
 
 w_object_class = W_Class('Object', None, True)
-# Ruby interposes Module between Class and Object; it owns nothing we call yet.
-w_class_class = W_Class('Class', w_object_class, True)
+w_module_class = W_Class('Module', w_object_class, True)
+w_class_class = W_Class('Class', w_module_class, True)
+w_math_module = W_Class('Math', None, True, True)
 w_numeric_class = W_Class('Numeric', w_object_class, True)
 w_integer_class = W_Class('Integer', w_numeric_class, True)
 w_float_class = W_Class('Float', w_numeric_class, True)

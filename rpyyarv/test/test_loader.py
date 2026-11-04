@@ -622,6 +622,14 @@ CRUBY_CASES = [
     ('range_map', 'puts "#{(1..3).collect { |i| i * 2 }}"\n'
                   'puts "#{(1...3).map { |i| i }}"\n'
                   'puts "#{(3..1).collect { 1 }}"\n'),
+    ('math', 'puts Math.sqrt(4)\nputs Math.sqrt(2.0)\n'
+             'puts Math.sqrt(-0.0)\nputs Math.sqrt(0)\n'
+             'puts Math.sqrt(1.0 / 0)\nputs Math.sqrt(0.0 / 0)\n'
+             'puts Math.sqrt(9007199254740993)\nputs Math.sin(0)\n'
+             'puts Math.sin(1.0)\nputs Math.sin(-0.0)\n'
+             'puts Math.sin(1.0 / 0)\nputs Math.cos(0)\n'
+             'puts Math.cos(Math::PI)\nputs Math.cos(-1.0 / 0)\n'
+             'puts Math::PI\nputs Math\nputs Math == Math\n'),
     ('int_step', 'puts(3.step(0, -1) { |i| puts i })\n'
                  '1.step(3) { |i| puts i }\n1.step(10, 4) { |i| puts i }\n'
                  '5.step(1, 2) { |i| puts i }\n'

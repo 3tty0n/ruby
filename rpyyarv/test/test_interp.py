@@ -1277,3 +1277,19 @@ def test_a_numeric_method_is_refused(source, msg, compile_source):
      'to_a after redefining Range#each is not supported yet')])
 def test_a_range_method_is_refused(source, msg, compile_source):
     expect_unsupported(loader.load_dump(compile_source(source)), None, msg)
+
+
+@pytest.mark.parametrize('source, msg', [
+    ('Math.sqrt(-1)\n', 'Numerical argument is out of domain - sqrt'),
+    ('Math.sqrt(:a)\n', "can't convert Symbol into Float"),
+    ('Math.sin(nil)\n', "can't convert nil into Float"),
+    ('Math.cos("1")\n', "can't convert String into Float"),
+    ('class Integer\n  def to_f\n  end\nend\nMath.sqrt(4)\n',
+     'Math.sqrt after redefining Integer#to_f is not supported yet'),
+    ('Math.new\n', "undefined method 'new' for Math"),
+    ('class X < Math\nend\n',
+     'superclass must be an instance of Class (given an instance of '
+     'Module)'),
+    ('class Math\nend\n', 'Math is not a class')])
+def test_math_is_refused_where_cruby_raises(source, msg, compile_source):
+    expect_unsupported(loader.load_dump(compile_source(source)), None, msg)
