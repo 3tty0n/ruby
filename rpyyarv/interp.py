@@ -514,6 +514,15 @@ def execute(iseq, frame):
             while i < n:
                 frame.push(frame.topn(n - 1))
                 i += 1
+        elif opcode == insns.OPT_REVERSE:
+            n = code[pc]
+            pc += 1
+            i = 0
+            while i < n // 2:
+                w_x = frame.topn(i)
+                frame.set_topn(i, frame.topn(n - 1 - i))
+                frame.set_topn(n - 1 - i, w_x)
+                i += 1
         elif opcode == insns.ADJUSTSTACK:
             n = code[pc]
             pc += 1

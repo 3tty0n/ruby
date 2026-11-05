@@ -149,12 +149,12 @@ def test_missing_instructions_are_reported_together():
 def test_missing_instructions_are_counted():
     text = patched(fixture('fib_rec.iseq'),
                    'insn\tputself\ninsn\tgetlocal_WC_0\ti:3',
-                   'insn\topt_reverse\ti:0\ninsn\topt_reverse\ti:0\n'
+                   'insn\tchecktype\ti:0\ninsn\tchecktype\ti:0\n'
                    'insn\tputstring\ts:x\n'
                    'insn\tputself\ninsn\tgetlocal_WC_0\ti:3')
     expect(UnsupportedOperation, text,
            '2 unimplemented instruction(s) in 3 occurrence(s): '
-           'opt_reverse x2, putstring x1')
+           'checktype x2, putstring x1')
 
 
 def test_a_block_local_names_its_enclosing_scope():
@@ -631,6 +631,10 @@ CRUBY_CASES = [
     ('range_map', 'puts "#{(1..3).collect { |i| i * 2 }}"\n'
                   'puts "#{(1...3).map { |i| i }}"\n'
                   'puts "#{(3..1).collect { 1 }}"\n'),
+    ('opt_reverse', 'def f(x, y)\n  a, b, c = x, y, 3\n  puts a, b, c\n'
+                    '  @p, @q, @r = x, y, 1\n  puts @p, @q, @r\n'
+                    '  a, b, c, d = x, y\n  puts a, b, c, d.inspect\n'
+                    '  a, b = x, y, 3\n  puts a, b\n  nil\nend\nf(7, 8)\n'),
     ('globals', 'puts $x == nil\n$x = 1\ndef f\n  $x += 1\nend\nf\nputs $x\n'
                 '[1, 2].each { |i| $y = i }\nputs $y\nputs($z = 5)\n'
                 'def g\n  $w = ($w || 0) + 1\nend\ng\nputs g\n'),
