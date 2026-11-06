@@ -84,6 +84,9 @@ rb_num2long = _ext('rpyyarv_num2long', [VALUE], rffi.LONG)
 rb_num2dbl = _ext('rpyyarv_num2dbl', [VALUE], rffi.DOUBLE)
 rb_hash_aref = _ext('rpyyarv_hash_aref', [VALUE, rffi.CCHARP], VALUE)
 rb_sym_cstr = _ext('rpyyarv_sym_cstr', [VALUE], rffi.CCHARP)
+rb_format_fixed = _ext('rpyyarv_format_fixed',
+                       [rffi.CCHARP, rffi.SIZE_T, rffi.INT, rffi.DOUBLE],
+                       rffi.INT)
 
 
 class RubyError(Exception):
@@ -177,6 +180,18 @@ def sym_of(v):
     if not p:
         raise RubyError('id2name')
     return rffi.charp2str(p)
+
+
+def format_fixed(x, precision):
+    prec = rffi.cast(rffi.INT, precision)
+    n = rffi.cast(lltype.Signed, rb_format_fixed(
+        lltype.nullptr(rffi.CCHARP.TO), rffi.cast(rffi.SIZE_T, 0), prec, x))
+    buf = lltype.malloc(rffi.CCHARP.TO, n + 1, flavor='raw')
+    try:
+        rb_format_fixed(buf, rffi.cast(rffi.SIZE_T, n + 1), prec, x)
+        return rffi.charpsize2str(buf, n)
+    finally:
+        lltype.free(buf, flavor='raw')
 
 
 def boot(argv):

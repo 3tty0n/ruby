@@ -6,13 +6,19 @@ try:
         set_user_param, TraceLimitTooHigh)
     from rpython.rlib.objectmodel import (
         UnboxedValue, compute_hash, compute_identity_hash, compute_unique_id,
-        fetch_translated_config, r_dict)
+        fetch_translated_config, r_dict, we_are_translated)
     from rpython.rlib.rstackovf import StackOverflow, check_stack_overflow
     from rpython.rlib.rfloat import formatd
     from rpython.rlib.rarithmetic import ovfcheck
 
     def float_repr(x):
         return formatd(x, 'r', 0)
+
+    def float_fixed(x, precision):
+        if not we_are_translated():
+            return _float_fixed_ctypes(x, precision)
+        from rpyyarv import boot
+        return boot.format_fixed(x, precision)
 
     def oswrite(fd, s):
         os.write(fd, s)
@@ -73,6 +79,9 @@ except ImportError:
     StackOverflow = RuntimeError
 
     float_repr = repr
+
+    def float_fixed(x, precision):
+        return _float_fixed_ctypes(x, precision)
 
     def ovfcheck(r):
         import sys
@@ -139,6 +148,23 @@ except ImportError:
 
     def now_ns():
         return time.monotonic_ns()
+
+
+# Untranslated, the shim is reached through ctypes: rffi would recompile it
+def _float_fixed_ctypes(x, precision):
+    import ctypes
+    here = os.path.dirname(os.path.abspath(__file__))
+    for ext in ('dylib', 'so'):
+        path = os.path.join(here, 'librpyyarv_boot.' + ext)
+        if os.path.exists(path):
+            fn = ctypes.CDLL(path).rpyyarv_format_fixed
+            break
+    fn.argtypes = [ctypes.c_char_p, ctypes.c_size_t, ctypes.c_int,
+                   ctypes.c_double]
+    n = fn(None, 0, precision, x)
+    buf = ctypes.create_string_buffer(n + 1)
+    fn(buf, n + 1, precision, x)
+    return str(buf.value.decode('ascii'))
 
 
 def tagged_ints_enabled():

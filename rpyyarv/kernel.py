@@ -8,7 +8,8 @@ from rpyyarv.methods import W_CFunc
 from rpyyarv.objects.klass import BOP_EQ
 from rpyyarv.objects.string import W_String
 from rpyyarv.objects.symbol import W_Symbol
-from rpyyarv.objects.transparent import newbool, newint, w_false, w_nil, w_true
+from rpyyarv.objects.transparent import (W_Integer, newbool, newint, w_false,
+                                         w_nil, w_true)
 from rpyyarv.rlib import now_ns
 
 
@@ -137,11 +138,26 @@ def install_inspect(w_class):
 def install_identity_eq(w_class):
     w_class.add_method(EQ, W_Equal(EQ, 1))
 
+
+class W_KernelInteger(W_CFunc):
+    def call(self, w_recv, args_w, w_block):
+        if len(args_w) != 1:
+            raise UnsupportedOperation(
+                'Integer() with a base or options is not supported yet')
+        w_arg = args_w[0]
+        if not isinstance(w_arg, W_Integer):
+            raise UnsupportedOperation('Integer() of %s is not supported yet'
+                                       % w_arg.getclass().name)
+        return w_arg
+
+
 def install(w_class):
     puts_id = symbols.intern('puts')
     w_class.add_method(puts_id, W_Puts(puts_id, -1, True))  # Kernel#puts is private
     to_s_id = symbols.intern('to_s')
     w_class.add_method(to_s_id, W_ToS(to_s_id, 0))
+    integer_id = symbols.intern('Integer')
+    w_class.add_method(integer_id, W_KernelInteger(integer_id, -1, True))
     now_id = symbols.intern('bench_now_ns')
     w_class.add_method(now_id, W_BenchNowNs(now_id, 0))
     for name, cls, arity in [('==', W_Equal, 1), ('!=', W_NotEqual, 1),

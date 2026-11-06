@@ -170,3 +170,9 @@ rpyyarv_sym_cstr(uintptr_t sym)
     if (!SYMBOL_P(v)) return NULL;
     return rb_id2name(SYM2ID(v));
 }
+
+int
+rpyyarv_format_fixed(char *buf, size_t size, int prec, double x)
+{
+    return ruby_snprintf(buf, size, "%.*f", prec, x);
+}

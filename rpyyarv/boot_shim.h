@@ -60,6 +60,10 @@ uintptr_t rpyyarv_hash_aref(uintptr_t hash, const char *key);
 /* Symbol#to_s without a rb_funcall round trip. */
 const char *rpyyarv_sym_cstr(uintptr_t sym);
 
+/* "%.<prec>f" % x as CRuby's String#% writes it, through its own dtoa,
+   which rounds near-ties to even unlike C's printf. snprintf's return. */
+int rpyyarv_format_fixed(char *buf, size_t size, int prec, double x);
+
 #ifdef __cplusplus
 }
 #endif

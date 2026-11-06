@@ -1304,3 +1304,14 @@ def test_math_is_refused_where_cruby_raises(source, msg, compile_source):
 def test_rest_parameters_are_refused_where_unsupported(source, msg,
                                                        compile_source):
     expect_unsupported(loader.load_dump(compile_source(source)), None, msg)
+
+
+@pytest.mark.parametrize('source, msg', [
+    ('"%d" % 1\n', 'format %d is not supported yet'),
+    ('"x%.2f" % 1.0\n', 'format x%.2f is not supported yet'),
+    ('"%.2f" % 1\n', 'format %.2f of Integer is not supported yet'),
+    ('Integer(3.7)\n', 'Integer() of Float is not supported yet'),
+    ('Integer("1", 2)\n',
+     'Integer() with a base or options is not supported yet')])
+def test_a_format_or_integer_call_is_refused(source, msg, compile_source):
+    expect_unsupported(loader.load_dump(compile_source(source)), None, msg)

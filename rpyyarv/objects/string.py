@@ -1,13 +1,16 @@
+import math
 import sys
 
 from rpyyarv import symbols
 from rpyyarv.methods import W_CFunc
 from rpyyarv.objects.array import W_Array
 from rpyyarv.objects.base import W_Root
+from rpyyarv.objects.float import W_Float
 from rpyyarv.objects.klass import w_string_class
 from rpyyarv.objects.regexp import W_Regexp
 from rpyyarv.objects.transparent import describe_conversion, newbool, newint
 from rpyyarv.error import UnsupportedOperation
+from rpyyarv.rlib import float_fixed
 
 class W_String(W_Root):
     # Immutable: nothing mutates a string yet, so frozen, chilled and
@@ -59,6 +62,44 @@ class W_StrPlus(W_CFunc):
                 % w_other.getclass().name)
         raise UnsupportedOperation('no implicit conversion of %s into String'
                                    % describe_conversion(w_other))
+
+
+def _fixed_precision(fmt):
+    i = 1
+    if i < len(fmt) and fmt[i] == '0':
+        i += 1
+    if not fmt.startswith('%') or i >= len(fmt) or fmt[i] != '.':
+        return -1
+    start = i + 1
+    end = start
+    while end < len(fmt) and fmt[end].isdigit():
+        end += 1
+    if end != len(fmt) - 1 or fmt[end] != 'f' or end - start > 3:
+        return -1
+    if end == start:
+        return 0
+    return int(fmt[start:end])
+
+
+class W_StrFormat(W_CFunc):
+    def call(self, w_recv, args_w, w_block):
+        assert isinstance(w_recv, W_String)
+        fmt = w_recv.strval
+        precision = _fixed_precision(fmt)
+        if precision < 0:
+            raise UnsupportedOperation('format %s is not supported yet' % fmt)
+        w_arg = args_w[0]
+        if not isinstance(w_arg, W_Float):
+            raise UnsupportedOperation('format %s of %s is not supported yet'
+                                       % (fmt, w_arg.getclass().name))
+        x = w_arg.floatval
+        if math.isnan(x):
+            return W_String('NaN')
+        if math.isinf(x):
+            if x > 0.0:
+                return W_String('Inf')
+            return W_String('-Inf')
+        return W_String(float_fixed(x, precision))
 
 
 class W_Length(W_CFunc):
@@ -209,3 +250,5 @@ def install(w_class):
     w_class.add_method(eq_id, W_StrEqual(eq_id, 1))
     plus_id = symbols.intern('+')
     w_class.add_method(plus_id, W_StrPlus(plus_id, 1))
+    format_id = symbols.intern('%')
+    w_class.add_method(format_id, W_StrFormat(format_id, 1))

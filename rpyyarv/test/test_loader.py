@@ -641,6 +641,11 @@ CRUBY_CASES = [
                     'g(*x)\nr = f(6)\nr.push(7)\nputs f(6).inspect\n'
                     'def h(*a)\n  return a.size if a.size > 2\n'
                     '  h(*a, 0)\nend\nputs h\n'),
+    ('format', 'puts "%.9f" % 1.5\nputs "%0.9f" % 0.1234567895\n'
+               'puts "%.9f" % -0.0\nputs "%.0f" % 2.5\nputs "%.f" % 3.5\n'
+               'puts "%.9f" % (1.0 / 0)\nputs "%.9f" % -(1.0 / 0)\n'
+               'puts "%.9f" % (0.0 / 0)\nputs "%.3f" % 1e300\n'
+               'puts Integer(3)\n'),
     ('globals', 'puts $x == nil\n$x = 1\ndef f\n  $x += 1\nend\nf\nputs $x\n'
                 '[1, 2].each { |i| $y = i }\nputs $y\nputs($z = 5)\n'
                 'def g\n  $w = ($w || 0) + 1\nend\ng\nputs g\n'),
