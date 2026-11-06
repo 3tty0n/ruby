@@ -38,10 +38,10 @@ class W_ISeq(W_Root):
     # The loader hands over finished lists; nothing appends afterwards, so the
     # JIT may fold code[pc] and consts[idx] away when pc and iseq are green.
     _immutable_fields_ = ['name', 'code[*]', 'consts[*]', 'nlocals',
-                          'stack_max', 'nparams', 'simple_params']
+                          'stack_max', 'nparams', 'simple_params', 'has_rest']
 
     def __init__(self, name, code, consts, nlocals, stack_max,
-                 nparams=0, simple_params=True):
+                 nparams=0, simple_params=True, has_rest=False):
         self.name = name
         self.code = code
         self.consts = consts
@@ -49,9 +49,11 @@ class W_ISeq(W_Root):
         self.stack_max = stack_max
         # Required parameters, which YARV puts in locals[0:nparams] in order.
         self.nparams = nparams
-        # False once the loader saw optional/rest/post/keyword/block
-        # parameters; the call path refuses those rather than guessing.
+        # False once the loader saw optional/post/keyword/block parameters,
+        # or a rest parameter outside a method; the call path refuses those
+        # rather than guessing.
         self.simple_params = simple_params
+        self.has_rest = has_rest
 
     def repr(self):
         return '<W_ISeq %s>' % self.name

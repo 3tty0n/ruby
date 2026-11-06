@@ -160,7 +160,8 @@ class Loader(object):
         if len(params) == 0 and nparams == 0:
             # a for loop's block has its one parameter without has_lead set
             nparams = raw.arg_size
-        if nparams > raw.nlocals:
+        has_rest = raw.type == 'method' and params == ['rest_start']
+        if nparams + int(has_rest) > raw.nlocals:
             raise LoadError("'%s' takes %d parameter(s) but has %d local(s)"
                             % (raw.name, nparams, raw.nlocals))
 
@@ -211,12 +212,12 @@ class Loader(object):
                                  tail_position(code, post_pc))
             code[slot] = pool.add(w_ci)
 
-        simple = len(params) == 0
+        simple = len(params) == 0 or has_rest
         if raw.type == 'block' and raw.lead_num == 1:
             # CRuby marks |a| ambiguous_param0; unmarked |a,| splats an Array
             simple = params == ['ambiguous_param0']
         w_iseq = W_ISeq(raw.name, code, [w for w in pool.consts], raw.nlocals,
-                        raw.stack_max, nparams, simple)
+                        raw.stack_max, nparams, simple, has_rest)
         self.w_iseqs[index] = w_iseq
         self.loading.pop()
         return w_iseq

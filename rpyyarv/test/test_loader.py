@@ -635,6 +635,12 @@ CRUBY_CASES = [
                     '  @p, @q, @r = x, y, 1\n  puts @p, @q, @r\n'
                     '  a, b, c, d = x, y\n  puts a, b, c, d.inspect\n'
                     '  a, b = x, y, 3\n  puts a, b\n  nil\nend\nf(7, 8)\n'),
+    ('rest_params', 'def f(*a)\n  a\nend\nputs f.inspect\n'
+                    'puts f(1, 2).inspect\ndef g(a, *r)\n  puts a\n'
+                    '  puts r.inspect\nend\ng(1)\ng(1, 2, 3)\nx = [4, 5]\n'
+                    'g(*x)\nr = f(6)\nr.push(7)\nputs f(6).inspect\n'
+                    'def h(*a)\n  return a.size if a.size > 2\n'
+                    '  h(*a, 0)\nend\nputs h\n'),
     ('globals', 'puts $x == nil\n$x = 1\ndef f\n  $x += 1\nend\nf\nputs $x\n'
                 '[1, 2].each { |i| $y = i }\nputs $y\nputs($z = 5)\n'
                 'def g\n  $w = ($w || 0) + 1\nend\ng\nputs g\n'),

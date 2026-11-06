@@ -1293,3 +1293,14 @@ def test_a_range_method_is_refused(source, msg, compile_source):
     ('class Math\nend\n', 'Math is not a class')])
 def test_math_is_refused_where_cruby_raises(source, msg, compile_source):
     expect_unsupported(loader.load_dump(compile_source(source)), None, msg)
+
+
+@pytest.mark.parametrize('source, msg', [
+    ('def f(a, *r)\nend\nf\n',
+     "wrong number of arguments to 'f' (given 0, expected 1+)"),
+    ('class A\n  def m(*a)\n  end\nend\nclass B < A\n  def m(*a)\n'
+     '    super\n  end\nend\nB.new.m(1)\n',
+     'super passes arguments RPyYARV does not support')])
+def test_rest_parameters_are_refused_where_unsupported(source, msg,
+                                                       compile_source):
+    expect_unsupported(loader.load_dump(compile_source(source)), None, msg)

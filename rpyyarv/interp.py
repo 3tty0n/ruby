@@ -80,8 +80,9 @@ def invoke(frame, iseq, w_ci, w_block, tail=False):
             raise UnsupportedOperation(
                 "method '%s' has parameters RPyYARV does not support"
                 % symbols.name_of(w_ci.mid))
-        _check_argc(w_ci.mid, argc, callee_iseq.nparams)
-        if (tail and callee_iseq is iseq and w_block is None
+        _check_params(w_ci.mid, argc, callee_iseq)
+        if (tail and callee_iseq is iseq and not iseq.has_rest
+                and w_block is None
                 and frame.w_block is None and w_method.cref is frame.cref
                 and not debug.is_enabled()):
             # The separate argument stack makes f(b, a) safe to copy in place.
@@ -98,17 +99,27 @@ def invoke(frame, iseq, w_ci, w_block, tail=False):
         callee = Frame(callee_iseq, w_recv, None, w_block, w_method.cref,
                        w_method)
         i = 0
-        while i < argc:
+        while i < callee_iseq.nparams:
             callee.setlocal(i, frame.peek(recv_at + 1 + i))
             i += 1
+        if callee_iseq.has_rest:
+            rest_w = []
+            while i < argc:
+                rest_w.append(frame.peek(recv_at + 1 + i))
+                i += 1
+            callee.setlocal(callee_iseq.nparams, W_Array(rest_w))
         _drop(frame, recv_at)
         if not debug.is_enabled():
             return execute(callee_iseq, callee)
         traced_w = []
         i = 0
-        while i < argc:
+        while i < callee_iseq.nparams:
             traced_w.append(callee.getlocal(i))
             i += 1
+        if callee_iseq.has_rest:
+            w_rest = callee.getlocal(callee_iseq.nparams)
+            assert isinstance(w_rest, W_Array)
+            traced_w.extend(w_rest.items_w)
         debug.trace_enter(w_ci.mid, traced_w)
         w_ret = execute(callee_iseq, callee)
         debug.trace_leave(w_ci.mid, w_ret)
@@ -143,13 +154,17 @@ def call_method(w_method, w_recv, args_w, w_block):
         raise UnsupportedOperation(
             "method '%s' has parameters RPyYARV does not support"
             % symbols.name_of(w_method.mid))
-    _check_argc(w_method.mid, len(args_w), callee_iseq.nparams)
+    _check_params(w_method.mid, len(args_w), callee_iseq)
     callee = Frame(callee_iseq, w_recv, None, w_block, w_method.cref,
                    w_method)
+    n = callee_iseq.nparams
     i = 0
-    while i < len(args_w):
+    while i < n:
         callee.setlocal(i, args_w[i])
         i += 1
+    if callee_iseq.has_rest:
+        assert n >= 0
+        callee.setlocal(n, W_Array(args_w[n:]))
     return execute(callee_iseq, callee)
 
 
@@ -223,6 +238,15 @@ def invoke_super(frame, w_ci, w_block):
                                    % (symbols.name_of(w_method.mid),
                                       w_recv.repr()))
     return call_method(w_target, w_recv, args_w, w_block)
+
+
+def _check_params(mid, argc, iseq):
+    if not iseq.has_rest:
+        _check_argc(mid, argc, iseq.nparams)
+    elif argc < iseq.nparams:
+        raise UnsupportedOperation(
+            "wrong number of arguments to '%s' (given %d, expected %d+)"
+            % (symbols.name_of(mid), argc, iseq.nparams))
 
 
 def _check_argc(mid, argc, want):

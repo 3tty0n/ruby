@@ -429,10 +429,12 @@ def check_loaded(program, l):
         if params == [] and nparams == 0:
             nparams = raw.arg_size
         assert w_iseq.nparams == nparams
+        has_rest = raw.type == 'method' and params == ['rest_start']
+        assert w_iseq.has_rest == has_rest
         if raw.type == 'block' and raw.lead_num == 1:
             assert w_iseq.simple_params == (params == ['ambiguous_param0'])
         else:
-            assert w_iseq.simple_params == (params == [])
+            assert w_iseq.simple_params == (params == [] or has_rest)
         decoded = decode(w_iseq)
         assert len(decoded) == len(raw.insns)
         starts = []
