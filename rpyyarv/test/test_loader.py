@@ -646,6 +646,19 @@ CRUBY_CASES = [
                'puts "%.9f" % (1.0 / 0)\nputs "%.9f" % -(1.0 / 0)\n'
                'puts "%.9f" % (0.0 / 0)\nputs "%.3f" % 1e300\n'
                'puts Integer(3)\n'),
+    ('array_shift', 'a = (1..20).to_a\n3.times { a.shift }\ndef show(a)\n'
+                    '  puts a.inspect\n  puts a.length, a[0], a[-1]\n'
+                    '  puts a.first, a.at(2), a.empty?\n  x, y = a\n'
+                    '  puts x, y\n  puts [*a].length\n'
+                    '  puts a.map { |i| i * 2 }.join(",")\n  s = 0\n'
+                    '  a.each { |i| s += i }\n  puts s\n  puts a == a.dup\n'
+                    '  puts a.shift(2).inspect\n  a[1] = 99\n  a.push(21)\n'
+                    '  puts a.pop\n  puts a.reverse.inspect\n'
+                    '  a.insert(1, 0)\n  puts a.slice!(0, 2).inspect\n'
+                    '  puts a.join(",")\nend\nshow(a)\nb = (1..20).to_a\n'
+                    '17.times { b.shift }\nshow(b)\nc = [1, 2]\nc.shift\n'
+                    'c.shift\nputs c.shift.inspect, c.empty?\nc.push(5)\n'
+                    'puts c.inspect\n'),
     ('globals', 'puts $x == nil\n$x = 1\ndef f\n  $x += 1\nend\nf\nputs $x\n'
                 '[1, 2].each { |i| $y = i }\nputs $y\nputs($z = 5)\n'
                 'def g\n  $w = ($w || 0) + 1\nend\ng\nputs g\n'),

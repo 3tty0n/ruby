@@ -9,9 +9,13 @@ from rpyyarv.objects.transparent import (W_Integer, describe_conversion,
 from rpyyarv.rlib import JitDriver
 
 
+SHIFT_SLACK = 16
+
+
 class W_Array(W_Root):
     def __init__(self, items_w):
         self.storage_w = items_w
+        self.start = 0
 
     def getclass(self):
         return w_array_class
@@ -20,13 +24,13 @@ class W_Array(W_Root):
         return '<W_Array %d>' % self.length()
 
     def length(self):
-        return len(self.storage_w)
+        return len(self.storage_w) - self.start
 
     def getitem(self, i):
-        return self.storage_w[i]
+        return self.storage_w[self.start + i]
 
     def setitem(self, i, w_value):
-        self.storage_w[i] = w_value
+        self.storage_w[self.start + i] = w_value
 
     def append(self, w_value):
         self.storage_w.append(w_value)
@@ -34,11 +38,27 @@ class W_Array(W_Root):
     def pop(self):
         return self.storage_w.pop()
 
+    def shift(self):
+        w_first = self.storage_w[self.start]
+        self.storage_w[self.start] = w_nil
+        self.start += 1
+        if (self.start >= SHIFT_SLACK
+                and 2 * self.start >= len(self.storage_w)):
+            self._compact()
+        return w_first
+
     def items(self):
+        self._compact()
         return self.storage_w
 
     def set_items(self, items_w):
         self.storage_w = items_w
+        self.start = 0
+
+    def _compact(self):
+        if self.start > 0:
+            del self.storage_w[:self.start]
+            self.start = 0
 
 def aref(w_ary, index):
     length = w_ary.length()
@@ -301,7 +321,8 @@ class W_First(W_CFunc):
 class W_Push(W_CFunc):
     def call(self, w_recv, args_w, w_block):
         assert isinstance(w_recv, W_Array)
-        w_recv.items().extend(args_w)
+        for w_item in args_w:
+            w_recv.append(w_item)
         return w_recv
 
 
@@ -328,11 +349,11 @@ class W_Shift(W_CFunc):
         assert isinstance(w_recv, W_Array)
         if len(args_w) > 1:
             raise arity_error('shift', len(args_w), '0..1')
-        items_w = w_recv.items()
         if len(args_w) == 0:
-            if len(items_w) == 0:
+            if w_recv.length() == 0:
                 return w_nil
-            return items_w.pop(0)
+            return w_recv.shift()
+        items_w = w_recv.items()
         stop = _size_of(args_w[0])
         if stop > len(items_w):
             stop = len(items_w)
