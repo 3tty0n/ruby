@@ -70,7 +70,7 @@ def invoke(frame, iseq, w_ci, w_block, tail=False):
         while i < argc - 1:
             args_w.append(frame.peek(recv_at + 1 + i))
             i += 1
-        args_w.extend(w_splat.items_w)
+        args_w.extend(w_splat.items())
         _drop(frame, recv_at)
         return call_method(w_method, w_recv, args_w, w_block)
 
@@ -119,7 +119,7 @@ def invoke(frame, iseq, w_ci, w_block, tail=False):
         if callee_iseq.has_rest:
             w_rest = callee.getlocal(callee_iseq.nparams)
             assert isinstance(w_rest, W_Array)
-            traced_w.extend(w_rest.items_w)
+            traced_w.extend(w_rest.items())
         debug.trace_enter(w_ci.mid, traced_w)
         w_ret = execute(callee_iseq, callee)
         debug.trace_leave(w_ci.mid, w_ret)
@@ -558,11 +558,10 @@ def execute(iseq, frame):
             if not isinstance(w_ary, W_Array):
                 raise UnsupportedOperation('expandarray needs an Array, got %s'
                                            % w_ary.repr())
-            items_w = w_ary.items_w
             i = n - 1
             while i >= 0:
-                if i < len(items_w):
-                    frame.push(items_w[i])
+                if i < w_ary.length():
+                    frame.push(w_ary.getitem(i))
                 else:
                     frame.push(w_nil)
                 i -= 1
@@ -669,7 +668,7 @@ def execute(iseq, frame):
             bop = BOP_LENGTH if opcode == insns.OPT_LENGTH else BOP_SIZE
             if (isinstance(w_recv, W_Array)
                     and w_array_class.redefined & bop == 0):
-                frame.push(newint(len(w_recv.items_w)))
+                frame.push(newint(w_recv.length()))
             elif opcode == insns.OPT_LENGTH:
                 frame.push(send_op(w_recv, LENGTH, []))
             else:
@@ -678,7 +677,7 @@ def execute(iseq, frame):
             w_recv = frame.pop()
             if (isinstance(w_recv, W_Array)
                     and w_array_class.redefined & BOP_EMPTY_P == 0):
-                frame.push(newbool(len(w_recv.items_w) == 0))
+                frame.push(newbool(w_recv.length() == 0))
             else:
                 frame.push(send_op(w_recv, EMPTY_P, []))
         elif opcode == insns.OBJTOSTRING:
@@ -708,7 +707,7 @@ def execute(iseq, frame):
             pc += 1
             w_ary = iseq.consts[idx]
             assert isinstance(w_ary, W_Array)
-            frame.push(W_Array(w_ary.items_w[:]))
+            frame.push(W_Array(w_ary.items()[:]))
         elif opcode == insns.NEWHASH:
             n = code[pc]
             pc += 1
@@ -736,7 +735,7 @@ def execute(iseq, frame):
                 if w_ary is None:
                     frame.push(W_Array([w_x]))
                 elif dup:
-                    frame.push(W_Array(w_ary.items_w[:]))
+                    frame.push(W_Array(w_ary.items()[:]))
                 else:
                     frame.push(w_ary)
         elif opcode == insns.PUSHTOARRAY:
@@ -746,7 +745,7 @@ def execute(iseq, frame):
             assert isinstance(w_ary, W_Array)
             i = n - 1
             while i >= 0:
-                w_ary.items_w.append(frame.topn(i))
+                w_ary.append(frame.topn(i))
                 i -= 1
             _drop(frame, frame.sp - n)
         elif opcode == insns.CONCATTOARRAY:
@@ -756,9 +755,9 @@ def execute(iseq, frame):
             if w_x is not w_nil:
                 w_tail = _check_to_array(w_x)
                 if w_tail is None:
-                    w_ary.items_w.append(w_x)
+                    w_ary.append(w_x)
                 else:
-                    w_ary.items_w.extend(w_tail.items_w)
+                    w_ary.items().extend(w_tail.items())
         elif opcode == insns.NEWRANGE:
             exclusive = code[pc] != 0
             pc += 1

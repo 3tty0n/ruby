@@ -11,40 +11,61 @@ from rpyyarv.rlib import JitDriver
 
 class W_Array(W_Root):
     def __init__(self, items_w):
-        self.items_w = items_w
+        self.storage_w = items_w
 
     def getclass(self):
         return w_array_class
 
     def repr(self):
-        return '<W_Array %d>' % len(self.items_w)
+        return '<W_Array %d>' % self.length()
+
+    def length(self):
+        return len(self.storage_w)
+
+    def getitem(self, i):
+        return self.storage_w[i]
+
+    def setitem(self, i, w_value):
+        self.storage_w[i] = w_value
+
+    def append(self, w_value):
+        self.storage_w.append(w_value)
+
+    def pop(self):
+        return self.storage_w.pop()
+
+    def items(self):
+        return self.storage_w
+
+    def set_items(self, items_w):
+        self.storage_w = items_w
 
 def aref(w_ary, index):
-    items_w = w_ary.items_w
+    length = w_ary.length()
     if index < 0:
-        index += len(items_w)
-    if 0 <= index < len(items_w):
-        return items_w[index]
+        index += length
+    if 0 <= index < length:
+        return w_ary.getitem(index)
     return w_nil
 
 
 def aset(w_ary, index, w_value):
-    items_w = w_ary.items_w
+    length = w_ary.length()
     if index < 0:
-        index += len(items_w)
+        index += length
         if index < 0:
             raise UnsupportedOperation(
                 "index %d too small for array; minimum: -%d"
-                % (index - len(items_w), len(items_w)))
-    if index >= len(items_w):
-        _grow(items_w, index)
-    items_w[index] = w_value
+                % (index - length, length))
+    if index >= length:
+        _grow(w_ary, index)
+    w_ary.setitem(index, w_value)
     return w_value
 
 
-def _grow(items_w, index):
-    while len(items_w) <= index:
-        items_w.append(w_nil)
+def _grow(w_ary, index):
+    while w_ary.length() <= index:
+        w_ary.append(w_nil)
 
 
 class W_Aref(W_CFunc):
@@ -62,7 +83,7 @@ class W_Aset(W_CFunc):
 class W_Length(W_CFunc):
     def call(self, w_recv, args_w, w_block):
         assert isinstance(w_recv, W_Array)
-        return newint(len(w_recv.items_w))
+        return newint(w_recv.length())
 
 
 def _each_location(w_iseq):
@@ -88,9 +109,9 @@ class W_Each(W_CFunc):
                 "each without a block (an Enumerator) is not supported yet")
         w_iseq = w_block.w_iseq
         i = 0
-        while i < len(w_recv.items_w):
+        while i < w_recv.length():
             each_driver.jit_merge_point(w_iseq=w_iseq)
-            interp.call_block(w_block, [w_recv.items_w[i]])
+            interp.call_block(w_block, [w_recv.getitem(i)])
             i += 1
         return w_recv
 
@@ -105,9 +126,9 @@ class W_Map(W_CFunc):
         w_iseq = w_block.w_iseq
         result_w = []
         i = 0
-        while i < len(w_recv.items_w):
+        while i < w_recv.length():
             map_driver.jit_merge_point(w_iseq=w_iseq)
-            result_w.append(interp.call_block(w_block, [w_recv.items_w[i]]))
+            result_w.append(interp.call_block(w_block, [w_recv.getitem(i)]))
             i += 1
         return W_Array(result_w)
 
@@ -119,7 +140,7 @@ _joining_w = []
 def _join(w_ary, sep):
     from rpyyarv import interp
     parts = []
-    for w_item in w_ary.items_w:
+    for w_item in w_ary.items():
         if isinstance(w_item, W_Array):
             if w_item is w_ary or w_item in _joining_w:
                 raise UnsupportedOperation(
@@ -161,7 +182,7 @@ class W_AryEqual(W_CFunc):
             return w_true
         if not isinstance(w_other, W_Array):
             return w_false
-        if len(w_other.items_w) != len(w_recv.items_w):
+        if w_other.length() != w_recv.length():
             return w_false
         i = 0
         while i < len(_comparing_w):
@@ -172,10 +193,10 @@ class W_AryEqual(W_CFunc):
         _comparing_w.append(w_other)
         try:
             i = 0
-            while i < len(w_recv.items_w):
-                if not kernel.equal(w_recv.items_w[i], w_other.items_w[i]):
+            while i < w_recv.length():
+                if not kernel.equal(w_recv.getitem(i), w_other.getitem(i)):
                     return w_false
-                if len(w_recv.items_w) != len(w_other.items_w):
+                if w_recv.length() != w_other.length():
                     return w_false
                 i += 1
             return w_true
@@ -231,18 +252,18 @@ class W_ArrayInitialize(W_CFunc):
                 "wrong number of arguments to 'initialize' (given %d, "
                 "expected 0..2)" % len(args_w))
         if len(args_w) == 0:
-            w_recv.items_w = []
+            w_recv.set_items([])
             return w_recv
         w_size = args_w[0]
         if len(args_w) == 1 and isinstance(w_size, W_Array):
-            w_recv.items_w = w_size.items_w[:]
+            w_recv.set_items(w_size.items()[:])
             return w_recv
         n = _size_of(w_size)
         if w_block is None:
             w_fill = w_nil
             if len(args_w) == 2:
                 w_fill = args_w[1]
-            w_recv.items_w = [w_fill] * n
+            w_recv.set_items([w_fill] * n)
             return w_recv
         w_iseq = w_block.w_iseq
         items_w = []
@@ -251,7 +272,7 @@ class W_ArrayInitialize(W_CFunc):
             new_driver.jit_merge_point(w_iseq=w_iseq)
             items_w.append(interp.call_block(w_block, [newint(i)]))
             i += 1
-        w_recv.items_w = items_w
+        w_recv.set_items(items_w)
         return w_recv
 
 
@@ -274,26 +295,26 @@ class W_First(W_CFunc):
             raise arity_error('first', len(args_w), '0..1')
         if len(args_w) == 0:
             return aref(w_recv, 0)
-        return W_Array(w_recv.items_w[:_size_of(args_w[0])])
+        return W_Array(w_recv.items()[:_size_of(args_w[0])])
 
 
 class W_Push(W_CFunc):
     def call(self, w_recv, args_w, w_block):
         assert isinstance(w_recv, W_Array)
-        w_recv.items_w.extend(args_w)
+        w_recv.items().extend(args_w)
         return w_recv
 
 
 class W_Pop(W_CFunc):
     def call(self, w_recv, args_w, w_block):
         assert isinstance(w_recv, W_Array)
-        items_w = w_recv.items_w
         if len(args_w) > 1:
             raise arity_error('pop', len(args_w), '0..1')
         if len(args_w) == 0:
-            if len(items_w) == 0:
+            if w_recv.length() == 0:
                 return w_nil
-            return items_w.pop()
+            return w_recv.pop()
+        items_w = w_recv.items()
         start = len(items_w) - _size_of(args_w[0])
         if start < 0:
             start = 0
@@ -305,9 +326,9 @@ class W_Pop(W_CFunc):
 class W_Shift(W_CFunc):
     def call(self, w_recv, args_w, w_block):
         assert isinstance(w_recv, W_Array)
-        items_w = w_recv.items_w
         if len(args_w) > 1:
             raise arity_error('shift', len(args_w), '0..1')
+        items_w = w_recv.items()
         if len(args_w) == 0:
             if len(items_w) == 0:
                 return w_nil
@@ -327,7 +348,7 @@ class W_Insert(W_CFunc):
             raise arity_error('insert', 0, '1+')
         if len(args_w) == 1:
             return w_recv
-        items_w = w_recv.items_w
+        items_w = w_recv.items()
         index = _to_int(args_w[0])
         at = index
         if index < 0:
@@ -337,21 +358,21 @@ class W_Insert(W_CFunc):
                     'index %d too small for array; minimum: -%d'
                     % (index, len(items_w) + 1))
         if at > len(items_w):
-            _grow(items_w, at - 1)
-        w_recv.items_w = items_w[:at] + args_w[1:] + items_w[at:]
+            _grow(w_recv, at - 1)
+        w_recv.set_items(items_w[:at] + args_w[1:] + items_w[at:])
         return w_recv
 
 
 class W_EmptyP(W_CFunc):
     def call(self, w_recv, args_w, w_block):
         assert isinstance(w_recv, W_Array)
-        return newbool(len(w_recv.items_w) == 0)
+        return newbool(w_recv.length() == 0)
 
 
 class W_Reverse(W_CFunc):
     def call(self, w_recv, args_w, w_block):
         assert isinstance(w_recv, W_Array)
-        items_w = w_recv.items_w[:]
+        items_w = w_recv.items()[:]
         items_w.reverse()
         return W_Array(items_w)
 
@@ -359,14 +380,14 @@ class W_Reverse(W_CFunc):
 class W_ReverseBang(W_CFunc):
     def call(self, w_recv, args_w, w_block):
         assert isinstance(w_recv, W_Array)
-        w_recv.items_w.reverse()
+        w_recv.items().reverse()
         return w_recv
 
 
 class W_SliceBang(W_CFunc):
     def call(self, w_recv, args_w, w_block):
         assert isinstance(w_recv, W_Array)
-        items_w = w_recv.items_w
+        items_w = w_recv.items()
         if len(args_w) == 0 or len(args_w) > 2:
             raise arity_error('slice!', len(args_w), '1..2')
         if args_w[0].getclass() is w_range_class:
@@ -398,7 +419,7 @@ class W_AryPlus(W_CFunc):
             raise UnsupportedOperation(
                 'no implicit conversion of %s into Array'
                 % describe_conversion(w_other))
-        return W_Array(w_recv.items_w + w_other.items_w)
+        return W_Array(w_recv.items() + w_other.items())
 
 
 class W_AryTimes(W_CFunc):
@@ -411,9 +432,9 @@ class W_AryTimes(W_CFunc):
         n = _to_int(w_other)
         if n < 0:
             raise UnsupportedOperation('negative argument')
-        if n > 0 and len(w_recv.items_w) > MAX_SIZE // n:
+        if n > 0 and w_recv.length() > MAX_SIZE // n:
             raise UnsupportedOperation('argument too big')
-        return W_Array(w_recv.items_w * n)
+        return W_Array(w_recv.items() * n)
 
 
 _inspecting_w = []
@@ -430,7 +451,7 @@ class W_AryInspect(W_CFunc):
         _inspecting_w.append(w_recv)
         try:
             parts = []
-            for w_item in w_recv.items_w:
+            for w_item in w_recv.items():
                 w_str = interp.send(w_item, INSPECT, [])
                 if not isinstance(w_str, W_String):
                     raise UnsupportedOperation(
@@ -451,7 +472,7 @@ class W_Inject(W_CFunc):
                 "inject without a block is not supported: RPyYARV has no "
                 "Symbol, so inject(:+) cannot work")
         w_acc = args_w[0]
-        for w_item in w_recv.items_w:
+        for w_item in w_recv.items():
             w_acc = interp.call_block(w_block, [w_acc, w_item])
         return w_acc
 

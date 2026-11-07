@@ -759,7 +759,7 @@ def test_split_on_empty_regexp():
         ])
         w_ary = interp.run(iseq)
         assert isinstance(w_ary, W_Array)
-        return [w.str_w() for w in w_ary.items_w]
+        return [w.str_w() for w in w_ary.items()]
 
     assert split_of('1021') == ['1', '0', '2', '1']
     assert split_of('') == []

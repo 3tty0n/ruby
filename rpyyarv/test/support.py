@@ -318,9 +318,9 @@ def _check_literal(w_x, raw_op):
         assert symbols.name_of(w_x.mid) == raw_op.strval
     elif kind == rawiseq.OP_ARRAY:
         assert isinstance(w_x, W_Array)
-        assert len(w_x.items_w) == len(raw_op.items)
+        assert w_x.length() == len(raw_op.items)
         for i in range(len(raw_op.items)):
-            _check_literal(w_x.items_w[i], raw_op.items[i])
+            _check_literal(w_x.getitem(i), raw_op.items[i])
     elif kind == rawiseq.OP_HASH:
         assert isinstance(w_x, W_Hash)
         assert len(w_x.keys_w) * 2 == len(raw_op.items)

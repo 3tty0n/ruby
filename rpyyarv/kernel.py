@@ -30,7 +30,7 @@ def _puts(w_arg):
             return
         _putting_w.append(w_arg)
         try:
-            for w_item in w_arg.items_w:
+            for w_item in w_arg.items():
                 _puts(w_item)
         finally:
             _putting_w.pop()
@@ -92,7 +92,7 @@ class W_Dup(W_CFunc):
                 or w_recv is w_nil or w_recv is w_true or w_recv is w_false):
             return w_recv
         if isinstance(w_recv, W_Array):
-            w_copy = W_Array(w_recv.items_w[:])
+            w_copy = W_Array(w_recv.items()[:])
         elif isinstance(w_recv, hashlib.W_Hash):
             w_copy = hashlib.copy(w_recv)
         elif isinstance(w_recv, W_String):
