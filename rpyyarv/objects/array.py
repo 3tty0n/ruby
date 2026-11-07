@@ -6,7 +6,7 @@ from rpyyarv.objects.klass import w_array_class, w_range_class
 from rpyyarv.objects.transparent import (W_Integer, describe_conversion,
                                          newbool, newint, w_false, w_nil,
                                          w_true)
-from rpyyarv.rlib import JitDriver
+from rpyyarv.rlib import JitDriver, unroll_safe
 
 
 SHIFT_SLACK = 16
@@ -319,6 +319,7 @@ class W_First(W_CFunc):
 
 
 class W_Push(W_CFunc):
+    @unroll_safe
     def call(self, w_recv, args_w, w_block):
         assert isinstance(w_recv, W_Array)
         for w_item in args_w:
