@@ -1315,3 +1315,16 @@ def test_rest_parameters_are_refused_where_unsupported(source, msg,
      'Integer() with a base or options is not supported yet')])
 def test_a_format_or_integer_call_is_refused(source, msg, compile_source):
     expect_unsupported(loader.load_dump(compile_source(source)), None, msg)
+
+
+@pytest.mark.parametrize('source, msg', [
+    ('2 ** -1\n', '2 ** -1 is a Rational: RPyYARV has no Rational yet'),
+    ('0 ** -1\n', 'divided by 0 (ZeroDivisionError)'),
+    ('3 ** 40\n', '3 ** 40 overflows a Fixnum: RPyYARV has no Bignum yet'),
+    ('(-8) ** 0.5\n',
+     '-8.0 ** 0.5 is a Complex: RPyYARV has no Complex yet'),
+    ('x = -9223372036854775807 - 1\n-x\n',
+     '-(-9223372036854775808) overflows a Fixnum: RPyYARV has no Bignum '
+     'yet')])
+def test_an_integer_power_or_negation_is_refused(source, msg, compile_source):
+    expect_unsupported(loader.load_dump(compile_source(source)), None, msg)

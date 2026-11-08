@@ -87,6 +87,16 @@ class W_Times(W_CFunc):
         return w_recv
 
 
+class W_Negate(W_CFunc):
+    def call(self, w_recv, args_w, w_block):
+        try:
+            return newint(ovfcheck(-w_recv.int_w()))
+        except OverflowError:
+            raise UnsupportedOperation(
+                '-(%s) overflows a Fixnum: RPyYARV has no Bignum yet'
+                % w_recv.repr())
+
+
 class W_ToF(W_CFunc):
     def call(self, w_recv, args_w, w_block):
         from rpyyarv.objects.float import W_Float
@@ -183,13 +193,17 @@ def install(w_class):
 
 
 def install_integer(w_class):
+    from rpyyarv import helpers
     _add_const(w_class, 'integer?', w_true)
     _add_self(w_class, 'numerator')
     _add_const(w_class, 'denominator', newint(1))
     for name, cls, arity in [('times', W_Times, 0), ('to_f', W_ToF, 0),
-                             ('upto', W_Upto, 1), ('step', W_Step, -1)]:
+                             ('upto', W_Upto, 1), ('step', W_Step, -1),
+                             ('-@', W_Negate, 0)]:
         mid = symbols.intern(name)
         w_class.add_method(mid, cls(mid, arity))
+    pow_id = symbols.intern('**')
+    w_class.add_method(pow_id, W_NumericOp(pow_id, helpers.w_int_pow, False))
 
 
 def install_operators(w_class):

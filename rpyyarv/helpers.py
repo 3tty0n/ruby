@@ -1,7 +1,7 @@
 import math
 
 from rpyyarv.error import UnsupportedOperation
-from rpyyarv.objects.float import W_Float
+from rpyyarv.objects.float import W_Float, w_pow
 from rpyyarv.objects.klass import w_float_class, w_integer_class
 from rpyyarv.objects.string import W_String
 from rpyyarv.objects.transparent import W_Integer, newbool, newint
@@ -76,6 +76,40 @@ def w_mul(w_a, w_b):
         r = ovfcheck(a * b)
     except OverflowError:
         raise _overflow(w_a, '*', w_b)
+    return newint(r)
+
+
+def w_int_pow(w_a, w_b):
+    if isinstance(w_b, W_Float):
+        return w_pow(W_Float(w_a.float_w()), w_b)
+    a = w_a.int_w()
+    b = w_b.int_w()
+    if a == 1:
+        return newint(1)
+    if a == -1:
+        return newint(-1 if b % 2 != 0 else 1)
+    if b < 0:
+        if a == 0:
+            raise UnsupportedOperation('divided by 0 (ZeroDivisionError)')
+        raise UnsupportedOperation(
+            '%s ** %s is a Rational: RPyYARV has no Rational yet'
+            % (w_a.repr(), w_b.repr()))
+    if b == 0:
+        return newint(1)
+    if b == 1:
+        return w_a
+    if a == 0:
+        return newint(0)
+    r = 1
+    try:
+        while b > 0:
+            if b & 1:
+                r = ovfcheck(r * a)
+            b >>= 1
+            if b > 0:
+                a = ovfcheck(a * a)
+    except OverflowError:
+        raise _overflow(w_a, '**', w_b)
     return newint(r)
 
 

@@ -659,6 +659,9 @@ CRUBY_CASES = [
                     '17.times { b.shift }\nshow(b)\nc = [1, 2]\nc.shift\n'
                     'c.shift\nputs c.shift.inspect, c.empty?\nc.push(5)\n'
                     'puts c.inspect\n'),
+    ('int_pow', 'puts 2 ** 10, 3 ** 39, (-2) ** 3, (-1) ** -3, 1 ** -5\n'
+                'puts 0 ** 0, 5 ** 0, 5 ** 1, 0 ** 3, 2 ** 0.5, 0 ** -0.5\n'
+                'puts 4 ** 0.5, -(5), -(-7)\nx = 3\nputs(-x)\n'),
     ('globals', 'puts $x == nil\n$x = 1\ndef f\n  $x += 1\nend\nf\nputs $x\n'
                 '[1, 2].each { |i| $y = i }\nputs $y\nputs($z = 5)\n'
                 'def g\n  $w = ($w || 0) + 1\nend\ng\nputs g\n'),
