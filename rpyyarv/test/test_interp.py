@@ -1413,3 +1413,23 @@ def test_print_without_arguments_is_refused(compile_source):
     expect_unsupported(loader.load_dump(compile_source('print\n')), None,
                        'print without arguments (it prints $_) is not '
                        'supported yet')
+
+
+@pytest.mark.parametrize('source, msg', [
+    ('pr = proc { break 1 }\npr.call\n',
+     'break from proc-closure (LocalJumpError)'),
+    ('pr = proc { break 1 }\n[1].each(&pr)\n',
+     'break from proc-closure (LocalJumpError)'),
+    ('[1].each { |x| return 1 }\n',
+     "throw 1 in 'block in <main>' is not supported"),
+    ('begin\n  1\nrescue\n  2\nend\n',
+     "'<main>' has a catch table (rescue), which RPyYARV does not support")])
+def test_a_break_or_catch_is_refused_where_unsupported(source, msg,
+                                                      compile_source):
+    from rpyyarv.error import UnsupportedOperation as Unsupported
+    try:
+        w_iseq = loader.load_dump(compile_source(source))
+    except Unsupported as e:
+        assert e.msg == msg
+        return
+    expect_unsupported(w_iseq, None, msg)

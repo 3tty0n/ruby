@@ -79,6 +79,7 @@ EMIT = {
     'opt_new': [0, 1],          # falls back to a plain send of new at 1
     'opt_getconstant_path': [0],
     'setconstant': [0],
+    'throw': [],                # state is checked, only a block's break
     'leave': [],
 }
 
@@ -127,6 +128,11 @@ SPECIAL_OBJECT_CBASE = 2
 SPECIAL_OBJECT_CONST_BASE = 3
 DEFINECLASS_TYPE_MASK = 0x07
 DEFINECLASS_FLAG_HAS_SUPERCLASS = 0x10
+
+# vm_core.h. throw's state for break out of a block; catch table entries of
+# these kinds need nothing at run time, since break is caught at the send.
+TAG_BREAK = 2
+CATCH_TYPES = frozenset(['break', 'next', 'redo'])
 
 # variable.c. The global variables CRuby defines itself, with hooks on reading
 # and writing, as global_variables lists them at startup.

@@ -17,7 +17,7 @@
 #   stackmax  <count>
 #   params    <lead_num> <other param keys, comma separated>
 #   argsize   <count>         -- misc[:arg_size]
-#   catch     <catch table size>
+#   catch     <catch table size> <entry types, comma separated>
 #   insn      <name> <operand>...
 #   label     <name>          -- sits in front of the next insn
 #   event     <name>          -- RUBY_EVENT_*
@@ -131,7 +131,7 @@ class Dumper
     row('params', params.fetch(:lead_num, 0),
         (params.keys - [:lead_num]).join(','))
     row('argsize', misc[:arg_size])
-    row('catch', catch_table.size)
+    row('catch', catch_table.size, catch_table.map { |c| c[0] }.join(','))
 
     body.each do |e|
       case e

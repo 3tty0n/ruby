@@ -26,6 +26,17 @@ from rpyyarv.objects.transparent import W_Integer, newbool, newint, w_nil
 from rpyyarv.rlib import JitDriver, elidable, promote, unroll_safe
 
 
+class BlockBreak(UnsupportedOperation):
+    # break in a block, caught at the send that passed that block literal;
+    # escaping all of them is CRuby's LocalJumpError
+    def __init__(self, home, w_iseq, w_value):
+        UnsupportedOperation.__init__(
+            self, 'break from proc-closure (LocalJumpError)')
+        self.home = home
+        self.w_iseq = w_iseq
+        self.w_value = w_value
+
+
 def _as_iseq(w_x):
     assert isinstance(w_x, W_ISeq)      # RPython downcast
     return w_x
@@ -190,7 +201,14 @@ def call_block(w_block, args_w):
     while i < len(args_w) and i < w_iseq.nparams:
         callee.setlocal(i, args_w[i])
         i += 1
-    return execute(w_iseq, callee)
+    if not w_block.is_lambda:
+        return execute(w_iseq, callee)
+    try:
+        return execute(w_iseq, callee)
+    except BlockBreak as e:
+        if e.home is not w_block.outer or e.w_iseq is not w_iseq:
+            raise
+        return e.w_value
 
 
 @unroll_safe
@@ -844,8 +862,16 @@ def execute(iseq, frame):
             w_ci = _callinfo(iseq, idx)
             if w_ci.blockarg:
                 w_block = proclib.block_of(frame.pop())
-            w_ret = invoke(frame, iseq, w_ci, w_block,
-                           _call_tail(iseq, w_ci, pc))
+            recv_at = frame.sp - w_ci.argc - 1
+            try:
+                w_ret = invoke(frame, iseq, w_ci, w_block,
+                               _call_tail(iseq, w_ci, pc))
+            except BlockBreak as e:
+                if (w_block is None or w_ci.blockarg or e.home is not frame
+                        or e.w_iseq is not w_block.w_iseq):
+                    raise
+                _drop(frame, recv_at)
+                w_ret = e.w_value
             if w_ret is None:
                 pc = 0
                 jitdriver.can_enter_jit(iseq=iseq, pc=pc, frame=frame)
@@ -910,6 +936,8 @@ def execute(iseq, frame):
                 raise UnsupportedOperation('%s is not a class/module'
                                            % w_cbase.repr())
             w_cbase.set_const(mid, w_value)
+        elif opcode == insns.THROW:
+            raise BlockBreak(frame.outer, iseq, frame.pop())
         elif opcode == insns.LEAVE:
             return frame.pop()
         else:

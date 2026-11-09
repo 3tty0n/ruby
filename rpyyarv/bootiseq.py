@@ -84,6 +84,7 @@ def _read_iseq(program, pending, ary):
         _int_or(boot.hash_aref(params, 'lead_num'), 0),
         _extra_params(params),
         boot.ary_len(boot.ary_entry(ary, I_CATCH)),
+        _catch_types(boot.ary_entry(ary, I_CATCH)),
         _int_or(boot.hash_aref(misc, 'arg_size'), 0))
     program.add_iseq(raw)
 
@@ -171,6 +172,17 @@ def _int_or(v, default):
     if boot.is_nil(v):
         return default
     return boot.num2long(v)
+
+
+def _catch_types(catch_table):
+    names = []
+    n = boot.ary_len(catch_table)
+    i = 0
+    while i < n:
+        names.append(boot.sym_of(boot.ary_entry(boot.ary_entry(catch_table, i),
+                                                0)))
+        i += 1
+    return ','.join(names)
 
 
 def _extra_params(params):

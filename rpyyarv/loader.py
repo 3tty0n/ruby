@@ -151,9 +151,11 @@ class Loader(object):
         raw = self.program.iseqs[index]
 
         if raw.catch_size > 0:
-            raise UnsupportedOperation(
-                "'%s' has a catch table (rescue/ensure/retry/next/break), "
-                "which RPyYARV does not support" % raw.name)
+            for kind in raw.catch_types.split(','):
+                if kind not in optable.CATCH_TYPES:
+                    raise UnsupportedOperation(
+                        "'%s' has a catch table (%s), which RPyYARV does not "
+                        "support" % (raw.name, kind))
         params = [p for p in raw.extra_params.split(',')
                   if p != '' and p != 'use_block']
         nparams = raw.lead_num
@@ -246,6 +248,11 @@ class Loader(object):
                 raise UnsupportedOperation(
                     "global variable %s in '%s' is not supported"
                     % (name, raw.name))
+        if op == insns.THROW:
+            state = self.int_of(ops[0], op, raw, 'state')
+            if state != optable.TAG_BREAK:
+                raise UnsupportedOperation("throw %d in '%s' is not supported"
+                                           % (state, raw.name))
         if op == insns.EXPANDARRAY:
             flag = self.int_of(ops[1], op, raw, 'flag')
             if flag != 0:

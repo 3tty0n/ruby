@@ -738,6 +738,15 @@ CRUBY_CASES = [
                     'puts self.class, -> { }.class, self.class == Object\n'
                     'class C\nend\nputs C.new.class.new.class\n'
                     'puts(print("x").inspect)\n'),
+    ('block_break', 'r = [1, 2, 3].each { |x| break x * 10 if x == 2 }\n'
+                    'puts r\ns = 0\n[1, 2, 3].each { |x| next if x == 2\n'
+                    '  s += x }\nputs s\nfor i in 0..5\n  break if i == 3\n'
+                    'end\nputs i\nputs((1..10).map { |x| break x if x > 4\n'
+                    '  x })\n[1, 2].each { |a| [3, 4].each { |b| break }\n'
+                    '  puts a }\nputs(3.times { |i| break }.inspect)\n'
+                    'l = -> { break 7 }\nputs l.call\ndef m\n'
+                    '  [1, 2, 3].each { |x| break x + 100 if x == 3 }\nend\n'
+                    'puts m\nputs [1, 2].each { |x| x }.inspect\n'),
     ('globals', 'puts $x == nil\n$x = 1\ndef f\n  $x += 1\nend\nf\nputs $x\n'
                 '[1, 2].each { |i| $y = i }\nputs $y\nputs($z = 5)\n'
                 'def g\n  $w = ($w || 0) + 1\nend\ng\nputs g\n'),
