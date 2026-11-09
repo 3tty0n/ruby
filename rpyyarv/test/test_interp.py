@@ -1349,3 +1349,16 @@ def test_alias_and_undef_follow_cruby(source, msg, compile_source):
 def test_case_equality_is_refused_where_unsupported(source, msg,
                                                     compile_source):
     expect_unsupported(loader.load_dump(compile_source(source)), None, msg)
+
+
+@pytest.mark.parametrize('source, msg', [
+    ('send\n', 'no method name given'),
+    ('send(1)\n', '1 is not a symbol nor a string'),
+    ('class C\n  def method_missing(m)\n  end\nend\nC.new.frozen?\n',
+     'Object#frozen? is not supported yet'),
+    ('def method_missing(m)\nend\n1.foo\n',
+     'method_missing on 1 is not supported yet'),
+    ('class C\nend\nC.new.foo\n', "undefined method 'foo' for #<C>")])
+def test_send_and_method_missing_are_refused_where_unsupported(
+        source, msg, compile_source):
+    expect_unsupported(loader.load_dump(compile_source(source)), None, msg)

@@ -136,6 +136,35 @@ CRUBY_GLOBALS = frozenset([
     '$_', '$`', '$stderr', '$stdin', '$stdout', '$~',
 ])
 
+# object.c and kernel.rb. What CRuby's Object answers, public or private, as
+# Object.instance_methods + Object.private_instance_methods lists them.
+CRUBY_OBJECT_METHODS = frozenset([
+    '!', '!=', '!~', '<=>', '==', '===', 'Array', 'Complex', 'Float', 'Hash',
+    'Integer', 'Pathname', 'Rational', 'String', '__callee__', '__dir__',
+    '__id__', '__method__', '__send__', '`', 'abort', 'at_exit', 'autoload',
+    'autoload?', 'binding', 'block_given?', 'caller', 'caller_locations',
+    'catch', 'class', 'clone', 'define_singleton_method', 'display', 'dup',
+    'enum_for', 'eql?', 'equal?', 'eval', 'exec', 'exit', 'exit!', 'extend',
+    'fail', 'fork', 'format', 'freeze', 'frozen?', 'gets', 'global_variables',
+    'hash', 'initialize', 'initialize_clone', 'initialize_copy',
+    'initialize_dup', 'inspect', 'instance_eval', 'instance_exec',
+    'instance_of?', 'instance_variable_defined?', 'instance_variable_get',
+    'instance_variable_set', 'instance_variables',
+    'instance_variables_to_inspect', 'is_a?', 'iterator?', 'itself',
+    'kind_of?', 'lambda', 'load', 'local_variables', 'loop', 'method',
+    'method_missing', 'methods', 'nil?', 'object_id', 'open', 'p', 'pp',
+    'print', 'printf', 'private_methods', 'proc', 'protected_methods',
+    'public_method', 'public_methods', 'public_send', 'putc', 'puts', 'raise',
+    'rand', 'readline', 'readlines', 'remove_instance_variable', 'require',
+    'require_relative', 'respond_to?', 'respond_to_missing?', 'select', 'send',
+    'set_trace_func', 'singleton_class', 'singleton_method',
+    'singleton_method_added', 'singleton_method_removed',
+    'singleton_method_undefined', 'singleton_methods', 'sleep', 'spawn',
+    'sprintf', 'srand', 'syscall', 'system', 'tap', 'test', 'then', 'throw',
+    'to_enum', 'to_s', 'trace_var', 'trap', 'untrace_var', 'warn',
+    'yield_self',
+])
+
 # vm_callinfo.h. Outside this mask (splat, block argument, keywords, super,
 # forwarding) the arguments reach the callee differently; ARGS_SIMPLE is
 # CRuby's own statement that none of them apply.

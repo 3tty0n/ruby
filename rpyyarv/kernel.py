@@ -2,12 +2,14 @@
 
 import os
 
+from rpyyarv import optable
 from rpyyarv import symbols
 from rpyyarv.error import UnsupportedOperation
 from rpyyarv.methods import W_CFunc
 from rpyyarv.objects.klass import BOP_EQ
 from rpyyarv.objects.string import W_String
-from rpyyarv.objects.symbol import W_Symbol
+from rpyyarv.objects.instance import W_Object
+from rpyyarv.objects.symbol import W_Symbol, newsymbol
 from rpyyarv.objects.transparent import (W_Integer, newbool, newint, w_false,
                                          w_nil, w_true)
 from rpyyarv.rlib import now_ns
@@ -155,6 +157,53 @@ def install_case_equal(w_class, cls=W_CaseEqual):
     w_class.add_method(EQQ, cls(EQQ, 1))
 
 
+METHOD_MISSING = symbols.intern('method_missing')
+
+
+class W_MethodMissing(W_CFunc):
+    _immutable_fields_ = ['w_target']
+
+    def __init__(self, mid, w_target):
+        W_CFunc.__init__(self, mid, -1)
+        self.w_target = w_target
+
+    def call(self, w_recv, args_w, w_block):
+        from rpyyarv import interp
+        return interp.call_method(self.w_target, w_recv,
+                                  [newsymbol(self.mid)] + args_w, w_block)
+
+
+def method_missing(w_recv, w_class, mid):
+    w_target = w_class.find_method(METHOD_MISSING)
+    if w_target is None:
+        raise w_recv.no_method_error(mid)
+    if not isinstance(w_recv, W_Object):
+        raise UnsupportedOperation('method_missing on %s is not supported yet'
+                                   % w_recv.repr())
+    # Lacking a method CRuby's Object has is RPyYARV's gap, not a miss
+    name = symbols.name_of(mid)
+    if name in optable.CRUBY_OBJECT_METHODS:
+        raise UnsupportedOperation('Object#%s is not supported yet' % name)
+    return W_MethodMissing(mid, w_target)
+
+
+class W_Send(W_CFunc):
+    def call(self, w_recv, args_w, w_block):
+        from rpyyarv import interp
+        if len(args_w) == 0:
+            raise UnsupportedOperation('no method name given')
+        w_name = args_w[0]
+        if isinstance(w_name, W_Symbol):
+            mid = w_name.mid
+        elif isinstance(w_name, W_String):
+            mid = symbols.intern(w_name.strval)
+        else:
+            raise UnsupportedOperation('%s is not a symbol nor a string'
+                                       % w_name.repr())
+        return interp.call_method(w_recv.lookup_method(mid), w_recv,
+                                  args_w[1:], w_block)
+
+
 class W_KernelInteger(W_CFunc):
     def call(self, w_recv, args_w, w_block):
         if len(args_w) != 1:
@@ -178,6 +227,7 @@ def install(w_class):
     w_class.add_method(now_id, W_BenchNowNs(now_id, 0))
     for name, cls, arity in [('==', W_Equal, 1), ('!=', W_NotEqual, 1),
                              ('!', W_Not, 0), ('dup', W_Dup, 0),
-                             ('clone', W_Dup, 0)]:
+                             ('clone', W_Dup, 0), ('send', W_Send, -1),
+                             ('__send__', W_Send, -1)]:
         mid = symbols.intern(name)
         w_class.add_method(mid, cls(mid, arity))

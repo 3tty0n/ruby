@@ -32,7 +32,8 @@ class W_Root(object):
         w_class = promote(self.lookup_class())
         w_method = w_class.find_method(mid)
         if w_method is None:
-            raise self.no_method_error(mid)
+            from rpyyarv import kernel
+            return kernel.method_missing(self, w_class, mid)
         return w_method
 
     def defines_private(self):

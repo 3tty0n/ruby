@@ -690,6 +690,15 @@ CRUBY_CASES = [
                   'class Integer\n  def ===(o)\n    puts "eqq"\n'
                   '    false\n  end\nend\ncase 1\n'
                   'when 1 then puts "no"\nelse puts "else"\nend\n'),
+    ('send_missing', 'class C\n  def m\n    :m\n  end\n  def two(a, b)\n'
+                     '    a + b\n  end\n  def method_missing(name, *args)\n'
+                     '    [name, args]\n  end\nend\no = C.new\n'
+                     'puts o.send(:m), o.__send__(:two, 1, 2), o.send("m")\n'
+                     'puts o.send(*[:two, 3, 4]), 1.__send__(:+, 2)\n'
+                     'o.send(:puts, "private via send")\n'
+                     'puts o.foo(1, 2)\nputs o.send(:bar, 5)\n'
+                     'class D\n  def method_missing(name)\n    name\n'
+                     '  end\nend\nputs D.new.baz\n'),
     ('globals', 'puts $x == nil\n$x = 1\ndef f\n  $x += 1\nend\nf\nputs $x\n'
                 '[1, 2].each { |i| $y = i }\nputs $y\nputs($z = 5)\n'
                 'def g\n  $w = ($w || 0) + 1\nend\ng\nputs g\n'),
