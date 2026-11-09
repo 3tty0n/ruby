@@ -56,12 +56,17 @@ def check(ary):
 
 def load(iseqw):
     """A RawProgram whose iseq 0 is iseqw."""
-    program = rawiseq.RawProgram('', _path(iseqw))
-    pending = [boot.call0(iseqw, 'to_a')]
-    i = 0
-    while i < len(pending):
-        _read_iseq(program, pending, pending[i])
-        i += 1
+    # CRuby's GC sees neither this RPython list nor these stack frames
+    boot.rb_gc_disable()
+    try:
+        program = rawiseq.RawProgram('', _path(iseqw))
+        pending = [boot.call0(iseqw, 'to_a')]
+        i = 0
+        while i < len(pending):
+            _read_iseq(program, pending, pending[i])
+            i += 1
+    finally:
+        boot.rb_gc_enable()
     return program
 
 

@@ -87,6 +87,8 @@ rb_sym_cstr = _ext('rpyyarv_sym_cstr', [VALUE], rffi.CCHARP)
 rb_format_fixed = _ext('rpyyarv_format_fixed',
                        [rffi.CCHARP, rffi.SIZE_T, rffi.INT, rffi.DOUBLE],
                        rffi.INT)
+rb_gc_disable = _ext('rb_gc_disable', [], VALUE)
+rb_gc_enable = _ext('rb_gc_enable', [], VALUE)
 
 
 class RubyError(Exception):
