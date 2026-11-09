@@ -1433,3 +1433,16 @@ def test_a_break_or_catch_is_refused_where_unsupported(source, msg,
         assert e.msg == msg
         return
     expect_unsupported(w_iseq, None, msg)
+
+
+@pytest.mark.parametrize('source, msg', [
+    ('1 & 1.5\n', '& with Float is not supported yet'),
+    ('1 << "a"\n', '<< with String is not supported yet'),
+    ('1 << (2 ** 64)\n', 'a shift by a Bignum is not supported yet'),
+    ('1 << (2 ** 40)\n', 'shift width too big (RangeError)'),
+    ('256.chr\n', '256 out of char range (RangeError)'),
+    ('(-1).chr\n', '-1 out of char range (RangeError)'),
+    ('"a" << "b"\n', 'undefined method \'<<\' for "a"')])
+def test_a_bit_operation_is_refused_where_cruby_raises_or_unsupported(
+        source, msg, compile_source):
+    expect_unsupported(loader.load_dump(compile_source(source)), None, msg)

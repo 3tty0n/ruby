@@ -140,6 +140,65 @@ def w_int_pow(w_a, w_b):
     return newint(r)
 
 
+def w_and(w_a, w_b):
+    if _bigs(w_a, w_b):
+        return newbig(bigint_of(w_a).and_(bigint_of(w_b)))
+    return newint(w_a.int_w() & w_b.int_w())
+
+
+def w_or(w_a, w_b):
+    if _bigs(w_a, w_b):
+        return newbig(bigint_of(w_a).or_(bigint_of(w_b)))
+    return newint(w_a.int_w() | w_b.int_w())
+
+
+def w_xor(w_a, w_b):
+    if _bigs(w_a, w_b):
+        return newbig(bigint_of(w_a).xor(bigint_of(w_b)))
+    return newint(w_a.int_w() ^ w_b.int_w())
+
+
+def _shift_width(w_b):
+    if isinstance(w_b, W_Bignum):
+        raise UnsupportedOperation('a shift by a Bignum is not supported yet')
+    return w_b.int_w()
+
+
+def _lshift(w_a, n):
+    # n < 0 only when negating the smallest width wrapped around
+    if n < 0 or n > BIGLEN_LIMIT:
+        raise UnsupportedOperation('shift width too big (RangeError)')
+    if not isinstance(w_a, W_Bignum) and n < 63:
+        a = w_a.int_w()
+        top = a >> (63 - n)
+        if top == 0 or top == -1:
+            return newint(a << n)
+    return newbig(bigint_of(w_a).lshift(n))
+
+
+def _rshift(w_a, n):
+    if isinstance(w_a, W_Bignum):
+        return newbig(w_a.big.rshift(n))
+    a = w_a.int_w()
+    if n >= 63 or n < 0:
+        return newint(-1 if a < 0 else 0)
+    return newint(a >> n)
+
+
+def w_lshift(w_a, w_b):
+    n = _shift_width(w_b)
+    if n < 0:
+        return _rshift(w_a, -n)
+    return _lshift(w_a, n)
+
+
+def w_rshift(w_a, w_b):
+    n = _shift_width(w_b)
+    if n < 0:
+        return _lshift(w_a, -n)
+    return _rshift(w_a, n)
+
+
 def _float_div(x, y):
     if y == 0.0:
         if x == 0.0 or math.isnan(x):

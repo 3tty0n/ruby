@@ -306,6 +306,9 @@ ALWAYS_PRIVATE = [symbols.intern(name) for name in [
     'initialize', 'initialize_copy', 'initialize_clone', 'initialize_dup',
     'respond_to_missing?']]
 MOD = symbols.intern('%')
+LTLT = symbols.intern('<<')
+AND = symbols.intern('&')
+OR = symbols.intern('|')
 SIZE = symbols.intern('size')
 EMPTY_P = symbols.intern('empty?')
 ASET = symbols.intern('[]=')
@@ -634,6 +637,16 @@ def execute(iseq, frame):
                 frame.push(helpers.w_mod(w_a, w_b))
             else:
                 frame.push(send_op(w_a, MOD, [w_b]))
+        elif (opcode == insns.OPT_LTLT or opcode == insns.OPT_AND
+              or opcode == insns.OPT_OR):
+            w_b = frame.pop()
+            w_a = frame.pop()
+            if opcode == insns.OPT_LTLT:
+                frame.push(send_op(w_a, LTLT, [w_b]))
+            elif opcode == insns.OPT_AND:
+                frame.push(send_op(w_a, AND, [w_b]))
+            else:
+                frame.push(send_op(w_a, OR, [w_b]))
         elif opcode == insns.OPT_LT:
             w_b = frame.pop()
             w_a = frame.pop()

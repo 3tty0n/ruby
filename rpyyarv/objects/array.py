@@ -528,6 +528,7 @@ def install(w_class):
                              ('insert', W_Insert, -1),
                              ('empty?', W_EmptyP, 0),
                              ('to_a', W_ToA, 0),
+                             ('<<', W_Push, 1),
                              ('reverse', W_Reverse, 0),
                              ('reverse!', W_ReverseBang, 0),
                              ('slice!', W_SliceBang, -1),

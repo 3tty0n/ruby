@@ -747,6 +747,13 @@ CRUBY_CASES = [
                     'l = -> { break 7 }\nputs l.call\ndef m\n'
                     '  [1, 2, 3].each { |x| break x + 100 if x == 3 }\nend\n'
                     'puts m\nputs [1, 2].each { |x| x }.inspect\n'),
+    ('bit_ops', 'puts 1 << 3, 1 << -1, -8 >> 1, -1 >> 100, 1 << 64\n'
+                'puts((1 << 64) >> 63, 5 & 3, 5 | 3, 5 ^ 3, -6 & 0xff)\n'
+                'puts((2 ** 70) & 0xff, (2 ** 70) | 1, -(2 ** 70) >> 3)\n'
+                'puts 3 << 61, 3 << 62, -1 << 63, 1 >> 64, 7 >> -2\n'
+                'puts 65.chr, 255.chr.length\na = [1]\nb = a << 2 << 3\n'
+                'puts b.inspect, a.inspect\nx = 0\nx = (x << 1) | 1\n'
+                'x <<= 2\nputs x\n'),
     ('globals', 'puts $x == nil\n$x = 1\ndef f\n  $x += 1\nend\nf\nputs $x\n'
                 '[1, 2].each { |i| $y = i }\nputs $y\nputs($z = 5)\n'
                 'def g\n  $w = ($w || 0) + 1\nend\ng\nputs g\n'),

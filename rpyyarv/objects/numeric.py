@@ -65,6 +65,31 @@ class W_NumericOp(W_CFunc):
                                    % (name, w_recv.getclass().name))
 
 
+class W_IntegerOp(W_CFunc):
+    _immutable_fields_ = ['func']
+
+    def __init__(self, mid, func):
+        W_CFunc.__init__(self, mid, 1)
+        self.func = func
+
+    def call(self, w_recv, args_w, w_block):
+        w_other = args_w[0]
+        if not isinstance(w_other, W_Integer):
+            raise UnsupportedOperation('%s with %s is not supported yet'
+                                       % (symbols.name_of(self.mid),
+                                          w_other.getclass().name))
+        return self.func(w_recv, w_other)
+
+
+class W_Chr(W_CFunc):
+    def call(self, w_recv, args_w, w_block):
+        from rpyyarv.objects.string import W_String
+        n = w_recv.int_w()
+        if n < 0 or n > 255:
+            raise UnsupportedOperation('%d out of char range (RangeError)' % n)
+        return W_String(chr(n))
+
+
 def _times_location(w_iseq):
     return 'times { %s }' % w_iseq.name
 
@@ -200,9 +225,14 @@ def install_integer(w_class):
     _add_const(w_class, 'denominator', newint(1))
     for name, cls, arity in [('times', W_Times, 0), ('to_f', W_ToF, 0),
                              ('upto', W_Upto, 1), ('step', W_Step, -1),
-                             ('-@', W_Negate, 0)]:
+                             ('-@', W_Negate, 0), ('chr', W_Chr, 0)]:
         mid = symbols.intern(name)
         w_class.add_method(mid, cls(mid, arity))
+    for name, func in [('<<', helpers.w_lshift), ('>>', helpers.w_rshift),
+                       ('&', helpers.w_and), ('|', helpers.w_or),
+                       ('^', helpers.w_xor)]:
+        mid = symbols.intern(name)
+        w_class.add_method(mid, W_IntegerOp(mid, func))
     pow_id = symbols.intern('**')
     w_class.add_method(pow_id, W_NumericOp(pow_id, helpers.w_int_pow, False))
 

@@ -136,6 +136,21 @@ except ImportError:
         def neg(self):
             return rbigint(-self.value)
 
+        def lshift(self, n):
+            return rbigint(self.value << n)
+
+        def rshift(self, n):
+            return rbigint(self.value >> n)
+
+        def and_(self, other):
+            return rbigint(self.value & other.value)
+
+        def or_(self, other):
+            return rbigint(self.value | other.value)
+
+        def xor(self, other):
+            return rbigint(self.value ^ other.value)
+
         def eq(self, other):
             return self.value == other.value
 
