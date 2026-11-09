@@ -721,6 +721,17 @@ CRUBY_CASES = [
                     'def g(&b)\n  [1, 2].map { |i| b.call(i) }\nend\n'
                     'puts g { |i| i * 3 }.inspect\ndef k(&b)\n  proc(&b)\n'
                     'end\nputs k(&x) == x\nputs m(&nil).inspect\n'),
+    ('bignum', 'a = 4611686018427387903\nb = a + a + 1\nputs b + 1, b - -1\n'
+               'puts -4611686018427387904 - 4611686018427387905\n'
+               'puts 3037000500 * 3037000500, 3 ** 40, 2 ** 100\n'
+               'x = -9223372036854775807 - 1\nputs(-x, x - 1, x * -1)\n'
+               'big = 2 ** 64\nputs big / 3, big % 7, -big / 3, -big % 7\n'
+               'puts big / -5, big - big, (big + 1) - big, big * big\n'
+               'puts big == 2 ** 64, big > 1, 1 < big, big == 2.0 ** 64\n'
+               'puts big < 1.0e30, big > 1.0e19, big.to_f, big * 1.5\n'
+               'puts 10 ** 20 / 10 ** 18, (-big).inspect, big + 0.5\n'
+               'f = 1\n1.upto(30) { |i| f *= i }\nputs f\n'
+               'puts f / f, (big ** 3) ** 2, big.to_s\n'),
     ('globals', 'puts $x == nil\n$x = 1\ndef f\n  $x += 1\nend\nf\nputs $x\n'
                 '[1, 2].each { |i| $y = i }\nputs $y\nputs($z = 5)\n'
                 'def g\n  $w = ($w || 0) + 1\nend\ng\nputs g\n'),

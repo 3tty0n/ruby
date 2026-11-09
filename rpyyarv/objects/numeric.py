@@ -4,7 +4,8 @@ from rpyyarv.methods import W_CFunc
 from rpyyarv.objects.array import arity_error
 from rpyyarv.objects.enumerator import W_Enumerator
 from rpyyarv.objects.klass import BOP_LT, w_integer_class
-from rpyyarv.objects.transparent import (W_Integer, describe_operand, newbool,
+from rpyyarv.objects.transparent import (W_Bignum, W_Integer, bigint_of,
+                                         describe_operand, newbig, newbool,
                                          newint, w_false, w_nil, w_true)
 from rpyyarv.rlib import JitDriver, ovfcheck
 
@@ -89,12 +90,12 @@ class W_Times(W_CFunc):
 
 class W_Negate(W_CFunc):
     def call(self, w_recv, args_w, w_block):
+        if isinstance(w_recv, W_Bignum):
+            return newbig(w_recv.big.neg())
         try:
             return newint(ovfcheck(-w_recv.int_w()))
         except OverflowError:
-            raise UnsupportedOperation(
-                '-(%s) overflows a Fixnum: RPyYARV has no Bignum yet'
-                % w_recv.repr())
+            return newbig(bigint_of(w_recv).neg())
 
 
 class W_ToF(W_CFunc):

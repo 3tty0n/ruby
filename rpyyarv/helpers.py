@@ -4,8 +4,9 @@ from rpyyarv.error import UnsupportedOperation
 from rpyyarv.objects.float import W_Float, w_pow
 from rpyyarv.objects.klass import w_float_class, w_integer_class
 from rpyyarv.objects.string import W_String
-from rpyyarv.objects.transparent import W_Integer, newbool, newint
-from rpyyarv.rlib import ovfcheck
+from rpyyarv.objects.transparent import (W_Bignum, W_Integer, bigint_of,
+                                         newbig, newbool, newint)
+from rpyyarv.rlib import ovfcheck, rbigint
 
 INF = float('inf')
 NAN = float('nan')
@@ -14,8 +15,8 @@ UNORDERED = 2
 
 # Interface contract C2: wrapped in, wrapped out. A Float operand makes both
 # sides Floats, as in CRuby; other non-integer operands make int_w() raise
-# UnsupportedOperation from W_Root. With no Bignum, an Integer result beyond
-# 64 bits raises UnsupportedOperation too.
+# UnsupportedOperation from W_Root. An Integer result beyond 64 bits becomes
+# a W_Bignum, and one that fits again a machine word.
 
 
 def is_number(w_x):
@@ -36,10 +37,8 @@ def _floats(w_a, w_b):
     return isinstance(w_a, W_Float) or isinstance(w_b, W_Float)
 
 
-def _overflow(w_a, op, w_b):
-    return UnsupportedOperation(
-        '%s %s %s overflows a Fixnum: RPyYARV has no Bignum yet'
-        % (w_a.repr(), op, w_b.repr()))
+def _bigs(w_a, w_b):
+    return isinstance(w_a, W_Bignum) or isinstance(w_b, W_Bignum)
 
 
 def w_add(w_a, w_b):
@@ -47,43 +46,71 @@ def w_add(w_a, w_b):
         return W_String(w_a.str_w() + w_b.str_w())
     if _floats(w_a, w_b):
         return W_Float(w_a.float_w() + w_b.float_w())
+    if _bigs(w_a, w_b):
+        return newbig(bigint_of(w_a).add(bigint_of(w_b)))
     a = w_a.int_w()
     b = w_b.int_w()
     try:
         r = ovfcheck(a + b)
     except OverflowError:
-        raise _overflow(w_a, '+', w_b)
+        return newbig(rbigint.fromint(a).add(rbigint.fromint(b)))
     return newint(r)
 
 def w_sub(w_a, w_b):
     if _floats(w_a, w_b):
         return W_Float(w_a.float_w() - w_b.float_w())
+    if _bigs(w_a, w_b):
+        return newbig(bigint_of(w_a).sub(bigint_of(w_b)))
     a = w_a.int_w()
     b = w_b.int_w()
     try:
         r = ovfcheck(a - b)
     except OverflowError:
-        raise _overflow(w_a, '-', w_b)
+        return newbig(rbigint.fromint(a).sub(rbigint.fromint(b)))
     return newint(r)
 
 
 def w_mul(w_a, w_b):
     if _floats(w_a, w_b):
         return W_Float(w_a.float_w() * w_b.float_w())
+    if _bigs(w_a, w_b):
+        return newbig(bigint_of(w_a).mul(bigint_of(w_b)))
     a = w_a.int_w()
     b = w_b.int_w()
     try:
         r = ovfcheck(a * b)
     except OverflowError:
-        raise _overflow(w_a, '*', w_b)
+        return newbig(rbigint.fromint(a).mul(rbigint.fromint(b)))
     return newint(r)
+
+
+# 1 << 34, rb_big_pow's limit on the result's bits on a 64-bit CRuby
+BIGLEN_LIMIT = 17179869184
+
+
+def _big_pow(w_a, b):
+    big = bigint_of(w_a)
+    bits = big.bit_length()
+    if bits > BIGLEN_LIMIT // b:
+        raise UnsupportedOperation('exponent is too large (ArgumentError)')
+    return newbig(big.pow(rbigint.fromint(b)))
 
 
 def w_int_pow(w_a, w_b):
     if isinstance(w_b, W_Float):
         return w_pow(W_Float(w_a.float_w()), w_b)
-    a = w_a.int_w()
+    if isinstance(w_b, W_Bignum):
+        raise UnsupportedOperation('exponent is too large (ArgumentError)')
     b = w_b.int_w()
+    if isinstance(w_a, W_Bignum):
+        if b < 0:
+            raise UnsupportedOperation(
+                '%s ** %s is a Rational: RPyYARV has no Rational yet'
+                % (w_a.repr(), w_b.repr()))
+        if b == 0:
+            return newint(1)
+        return _big_pow(w_a, b)
+    a = w_a.int_w()
     if a == 1:
         return newint(1)
     if a == -1:
@@ -109,7 +136,7 @@ def w_int_pow(w_a, w_b):
             if b > 0:
                 a = ovfcheck(a * a)
     except OverflowError:
-        raise _overflow(w_a, '**', w_b)
+        return _big_pow(w_a, w_b.int_w())
     return newint(r)
 
 
@@ -133,29 +160,33 @@ def _float_mod(x, y):
 
 
 def _zero_division(w_b):
-    if w_b.int_w() == 0:
+    if not isinstance(w_b, W_Bignum) and w_b.int_w() == 0:
         raise UnsupportedOperation('divided by 0 (ZeroDivisionError)')
 
 
 def w_div(w_a, w_b):
     if _floats(w_a, w_b):
         return W_Float(_float_div(w_a.float_w(), w_b.float_w()))
+    _zero_division(w_b)
+    if _bigs(w_a, w_b):
+        return newbig(bigint_of(w_a).floordiv(bigint_of(w_b)))
     a = w_a.int_w()
     b = w_b.int_w()
-    _zero_division(w_b)
     try:
         r = ovfcheck(a // b)
     except OverflowError:
-        raise _overflow(w_a, '/', w_b)
+        return newbig(rbigint.fromint(a).floordiv(rbigint.fromint(b)))
     return newint(r)
 
 
 def w_mod(w_a, w_b):
     if _floats(w_a, w_b):
         return W_Float(_float_mod(w_a.float_w(), w_b.float_w()))
+    _zero_division(w_b)
+    if _bigs(w_a, w_b):
+        return newbig(bigint_of(w_a).mod(bigint_of(w_b)))
     a = w_a.int_w()
     b = w_b.int_w()
-    _zero_division(w_b)
     if b == -1:
         return newint(0)
     return newint(a % b)
@@ -179,6 +210,46 @@ def _int_float_cmp(i, f):
     return 0
 
 
+def _big_float_cmp(big, f):
+    if math.isnan(f):
+        return UNORDERED
+    if math.isinf(f):
+        return -1 if f > 0.0 else 1
+    whole = math.floor(f)
+    w = rbigint.fromfloat(whole)
+    if big.lt(w):
+        return -1
+    if big.gt(w):
+        return 1
+    if f > whole:
+        return -1
+    return 0
+
+
+def _integer_float_cmp(w_i, f):
+    if isinstance(w_i, W_Bignum):
+        return _big_float_cmp(w_i.big, f)
+    return _int_float_cmp(w_i.int_w(), f)
+
+
+def _int_cmp(w_a, w_b):
+    if _bigs(w_a, w_b):
+        a = bigint_of(w_a)
+        b = bigint_of(w_b)
+        if a.lt(b):
+            return -1
+        if a.gt(b):
+            return 1
+        return 0
+    a = w_a.int_w()
+    b = w_b.int_w()
+    if a < b:
+        return -1
+    if a > b:
+        return 1
+    return 0
+
+
 def _float_cmp(w_a, w_b):
     a_float = isinstance(w_a, W_Float)
     if a_float and isinstance(w_b, W_Float):
@@ -192,40 +263,40 @@ def _float_cmp(w_a, w_b):
             return 0
         return UNORDERED
     if a_float:
-        c = _int_float_cmp(w_b.int_w(), w_a.float_w())
+        c = _integer_float_cmp(w_b, w_a.float_w())
         if c == UNORDERED:
             return c
         return -c
-    return _int_float_cmp(w_a.int_w(), w_b.float_w())
+    return _integer_float_cmp(w_a, w_b.float_w())
 
 
 def w_lt(w_a, w_b):
     if _floats(w_a, w_b):
         return newbool(_float_cmp(w_a, w_b) == -1)
-    return newbool(w_a.int_w() < w_b.int_w())
+    return newbool(_int_cmp(w_a, w_b) == -1)
 
 
 def w_gt(w_a, w_b):
     if _floats(w_a, w_b):
         return newbool(_float_cmp(w_a, w_b) == 1)
-    return newbool(w_a.int_w() > w_b.int_w())
+    return newbool(_int_cmp(w_a, w_b) == 1)
 
 
 def w_le(w_a, w_b):
     if _floats(w_a, w_b):
         c = _float_cmp(w_a, w_b)
         return newbool(c == -1 or c == 0)
-    return newbool(w_a.int_w() <= w_b.int_w())
+    return newbool(_int_cmp(w_a, w_b) <= 0)
 
 
 def w_ge(w_a, w_b):
     if _floats(w_a, w_b):
         c = _float_cmp(w_a, w_b)
         return newbool(c == 0 or c == 1)
-    return newbool(w_a.int_w() >= w_b.int_w())
+    return newbool(_int_cmp(w_a, w_b) >= 0)
 
 
 def w_eq(w_a, w_b):
     if _floats(w_a, w_b):
         return newbool(_float_cmp(w_a, w_b) == 0)
-    return newbool(w_a.int_w() == w_b.int_w())
+    return newbool(_int_cmp(w_a, w_b) == 0)

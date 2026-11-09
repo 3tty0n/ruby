@@ -999,18 +999,6 @@ def test_a_block_with_a_rest_parameter_is_refused(compile_source):
 
 
 @pytest.mark.parametrize('source, msg', [
-    ('a = 4611686018427387903\nb = a + a + 1\nb + 1\n',
-     '9223372036854775807 + 1'),
-    ('a = -4611686018427387904\nb = a + a\nb - 1\n',
-     '-9223372036854775808 - 1'),
-    ('3037000500 * 3037000500\n', '3037000500 * 3037000500')])
-def test_integer_overflow_is_refused(source, msg, compile_source):
-    w_iseq = loader.load_dump(compile_source(source))
-    expect_unsupported(w_iseq, None,
-                       msg + ' overflows a Fixnum: RPyYARV has no Bignum yet')
-
-
-@pytest.mark.parametrize('source, msg', [
     ('def !\n  1\nend\n!nil\n', "private method '!' called for nil"),
     ('def ==(o)\n  1\nend\nnil == 2\n',
      "private method '==' called for nil")])
@@ -1320,12 +1308,8 @@ def test_a_format_or_integer_call_is_refused(source, msg, compile_source):
 @pytest.mark.parametrize('source, msg', [
     ('2 ** -1\n', '2 ** -1 is a Rational: RPyYARV has no Rational yet'),
     ('0 ** -1\n', 'divided by 0 (ZeroDivisionError)'),
-    ('3 ** 40\n', '3 ** 40 overflows a Fixnum: RPyYARV has no Bignum yet'),
     ('(-8) ** 0.5\n',
-     '-8.0 ** 0.5 is a Complex: RPyYARV has no Complex yet'),
-    ('x = -9223372036854775807 - 1\n-x\n',
-     '-(-9223372036854775808) overflows a Fixnum: RPyYARV has no Bignum '
-     'yet')])
+     '-8.0 ** 0.5 is a Complex: RPyYARV has no Complex yet')])
 def test_an_integer_power_or_negation_is_refused(source, msg, compile_source):
     expect_unsupported(loader.load_dump(compile_source(source)), None, msg)
 
@@ -1411,3 +1395,15 @@ def test_a_block_argument_is_refused_where_cruby_raises_or_unsupported(
         assert e.msg == msg
         return
     expect_unsupported(w_iseq, None, msg)
+
+
+@pytest.mark.parametrize('source, msg', [
+    ('(2 ** 64).times { }\n',
+     'the Bignum 18446744073709551616 is not supported here yet'),
+    ('[1][2 ** 64]\n',
+     'the Bignum 18446744073709551616 is not supported here yet'),
+    ('2 ** (2 ** 64)\n', 'exponent is too large (ArgumentError)'),
+    ('(2 ** 64) ** -1\n',
+     '18446744073709551616 ** -1 is a Rational: RPyYARV has no Rational yet')])
+def test_a_bignum_is_refused_where_unsupported(source, msg, compile_source):
+    expect_unsupported(loader.load_dump(compile_source(source)), None, msg)

@@ -10,6 +10,7 @@ try:
     from rpython.rlib.rstackovf import StackOverflow, check_stack_overflow
     from rpython.rlib.rfloat import formatd
     from rpython.rlib.rarithmetic import ovfcheck
+    from rpython.rlib.rbigint import rbigint
 
     def float_repr(x):
         return formatd(x, 'r', 0)
@@ -88,6 +89,67 @@ except ImportError:
         if not -sys.maxsize - 1 <= r <= sys.maxsize:
             raise OverflowError
         return r
+
+    class rbigint(object):
+        # The part of rpython.rlib.rbigint's interface RPyYARV uses
+        def __init__(self, value):
+            self.value = value
+
+        @staticmethod
+        def fromint(value):
+            return rbigint(value)
+
+        @staticmethod
+        def fromfloat(value):
+            return rbigint(int(value))
+
+        def toint(self):
+            return ovfcheck(self.value)
+
+        def tofloat(self):
+            return float(self.value)
+
+        def str(self):
+            return str(self.value)
+
+        def bit_length(self):
+            return self.value.bit_length()
+
+        def add(self, other):
+            return rbigint(self.value + other.value)
+
+        def sub(self, other):
+            return rbigint(self.value - other.value)
+
+        def mul(self, other):
+            return rbigint(self.value * other.value)
+
+        def floordiv(self, other):
+            return rbigint(self.value // other.value)
+
+        def mod(self, other):
+            return rbigint(self.value % other.value)
+
+        def pow(self, other):
+            return rbigint(self.value ** other.value)
+
+        def neg(self):
+            return rbigint(-self.value)
+
+        def eq(self, other):
+            return self.value == other.value
+
+        def lt(self, other):
+            return self.value < other.value
+
+        def le(self, other):
+            return self.value <= other.value
+
+        def gt(self, other):
+            return self.value > other.value
+
+        def ge(self, other):
+            return self.value >= other.value
 
     def check_stack_overflow():
         pass
