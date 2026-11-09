@@ -1,7 +1,7 @@
 """Classes: the method tables that method lookup walks."""
 
 from rpyyarv import symbols
-from rpyyarv.methods import MethodTable
+from rpyyarv.methods import MethodTable, W_Undefined
 from rpyyarv.objects.base import W_Root
 from rpyyarv.rlib import elidable, unroll_safe
 
@@ -134,6 +134,8 @@ class W_Class(W_Root):
         w_class = self
         while w_class is not None:
             w_method = w_class.methods.lookup(mid)
+            if isinstance(w_method, W_Undefined):
+                return None
             if w_method is not None:
                 return w_method
             w_class = w_class.w_superclass
@@ -147,6 +149,7 @@ w_object_class = W_Class('Object', None, True)
 w_module_class = W_Class('Module', w_object_class, True)
 w_class_class = W_Class('Class', w_module_class, True)
 w_math_module = W_Class('Math', None, True, True)
+w_frozen_core_class = W_Class('FrozenCore', None, True)
 w_numeric_class = W_Class('Numeric', w_object_class, True)
 w_integer_class = W_Class('Integer', w_numeric_class, True)
 w_float_class = W_Class('Float', w_numeric_class, True)

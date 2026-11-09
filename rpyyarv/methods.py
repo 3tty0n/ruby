@@ -17,6 +17,10 @@ class W_Method(W_Root):
         return '<W_Method %s>' % symbols.name_of(self.mid)
 
 
+class W_Undefined(W_Method):
+    pass
+
+
 class W_ISeqMethod(W_Method):
     _immutable_fields_ = ['w_iseq', 'cref', 'w_owner']
 

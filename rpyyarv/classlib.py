@@ -1,14 +1,16 @@
 """Class#new: allocate an instance, then run the class's initialize.
 
-Also the attribute definitions a class body calls on itself.
+Also the attribute definitions a class body calls on itself, and alias and
+undef, which CRuby sends to its FrozenCore object.
 """
 
 from rpyyarv import symbols
 from rpyyarv.error import UnsupportedOperation
-from rpyyarv.methods import W_CFunc
+from rpyyarv.methods import W_CFunc, W_Undefined
 from rpyyarv.objects.array import W_Array
 from rpyyarv.objects.instance import W_Object
-from rpyyarv.objects.klass import W_Class, w_array_class, w_object_class
+from rpyyarv.objects.klass import (W_Class, w_array_class,
+                                   w_frozen_core_class, w_object_class)
 from rpyyarv.objects.string import W_String
 from rpyyarv.objects.symbol import W_Symbol, newsymbol
 from rpyyarv.objects.transparent import w_nil
@@ -108,6 +110,39 @@ class W_Attr(W_CFunc):
         return W_Array(defined_w)
 
 
+w_frozen_core = W_Object(w_frozen_core_class)
+
+
+def _method_name_error(w_cbase, mid):
+    kind = 'module' if w_cbase.is_module else 'class'
+    return UnsupportedOperation("undefined method '%s' for %s '%s'"
+                                % (symbols.name_of(mid), kind, w_cbase.name))
+
+
+class W_SetMethodAlias(W_CFunc):
+    def call(self, w_recv, args_w, w_block):
+        w_cbase, w_new, w_old = args_w[0], args_w[1], args_w[2]
+        assert isinstance(w_cbase, W_Class)
+        assert isinstance(w_new, W_Symbol)
+        assert isinstance(w_old, W_Symbol)
+        w_method = w_cbase.find_method(w_old.mid)
+        if w_method is None:
+            raise _method_name_error(w_cbase, w_old.mid)
+        w_cbase.add_user_method(w_new.mid, w_method)
+        return w_nil
+
+
+class W_UndefMethod(W_CFunc):
+    def call(self, w_recv, args_w, w_block):
+        w_cbase, w_name = args_w[0], args_w[1]
+        assert isinstance(w_cbase, W_Class)
+        assert isinstance(w_name, W_Symbol)
+        if w_cbase.find_method(w_name.mid) is None:
+            raise _method_name_error(w_cbase, w_name.mid)
+        w_cbase.add_user_method(w_name.mid, W_Undefined(w_name.mid))
+        return w_nil
+
+
 def install(w_class):
     mid = symbols.intern('new')
     w_class.add_method(mid, W_New(mid, -1))
@@ -120,3 +155,10 @@ def install(w_class):
 
 def install_object(w_class):
     w_class.add_method(INITIALIZE, W_Initialize(INITIALIZE, 0, True))
+
+
+def install_frozen_core(w_class):
+    for name, cls, arity in [('core#set_method_alias', W_SetMethodAlias, 3),
+                             ('core#undef_method', W_UndefMethod, 2)]:
+        mid = symbols.intern(name)
+        w_class.add_method(mid, cls(mid, arity))

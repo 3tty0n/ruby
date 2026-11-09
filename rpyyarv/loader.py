@@ -226,7 +226,9 @@ class Loader(object):
         """Operand values RPyYARV refuses, checked before it emits any."""
         if op == insns.PUTSPECIALOBJECT:
             kind = self.int_of(ops[0], op, raw, 'type')
-            if kind != optable.SPECIAL_OBJECT_CONST_BASE:
+            if (kind != optable.SPECIAL_OBJECT_VMCORE
+                    and kind != optable.SPECIAL_OBJECT_CBASE
+                    and kind != optable.SPECIAL_OBJECT_CONST_BASE):
                 raise UnsupportedOperation(
                     "putspecialobject %d in '%s' is not supported"
                     % (kind, raw.name))

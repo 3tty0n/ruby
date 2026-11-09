@@ -17,7 +17,7 @@ EMIT = {
     'nop': [],
     'putnil': [],
     'putself': [],
-    'putspecialobject': [],     # type is checked, only CONST_BASE
+    'putspecialobject': [0],    # type is checked: VMCORE, CBASE, CONST_BASE
     'putobject': [0],
     'putchilledstring': [0],
     'newarray': [0],
@@ -116,8 +116,11 @@ DISCARDED_OPERAND_TYPES = frozenset([
 #     slot = nlocals - operand + ENV_DATA_SIZE - 1
 ENV_DATA_SIZE = 3
 
-# vm_core.h. putspecialobject's CONST_BASE is where class and constant
-# definitions land; defineclass's flags give the kind of definition.
+# vm_core.h. putspecialobject's VMCORE receives alias and undef, CBASE is where
+# they apply and CONST_BASE where class and constant definitions land;
+# defineclass's flags give the kind of definition.
+SPECIAL_OBJECT_VMCORE = 1
+SPECIAL_OBJECT_CBASE = 2
 SPECIAL_OBJECT_CONST_BASE = 3
 DEFINECLASS_TYPE_MASK = 0x07
 DEFINECLASS_FLAG_HAS_SUPERCLASS = 0x10

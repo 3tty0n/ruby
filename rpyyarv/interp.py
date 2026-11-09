@@ -774,7 +774,12 @@ def execute(iseq, frame):
                 i -= 1
             frame.push(W_String(''.join(parts)))
         elif opcode == insns.PUTSPECIALOBJECT:
-            frame.push(_const_base(frame.cref))
+            kind = code[pc]
+            pc += 1
+            if kind == optable.SPECIAL_OBJECT_VMCORE:
+                frame.push(classlib.w_frozen_core)
+            else:
+                frame.push(_const_base(frame.cref))
         elif opcode == insns.DEFINECLASS:
             mid = code[pc]
             w_body = _as_iseq(iseq.consts[code[pc + 1]])

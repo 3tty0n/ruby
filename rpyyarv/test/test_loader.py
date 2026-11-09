@@ -662,6 +662,13 @@ CRUBY_CASES = [
     ('int_pow', 'puts 2 ** 10, 3 ** 39, (-2) ** 3, (-1) ** -3, 1 ** -5\n'
                 'puts 0 ** 0, 5 ** 0, 5 ** 1, 0 ** 3, 2 ** 0.5, 0 ** -0.5\n'
                 'puts 4 ** 0.5, -(5), -(-7)\nx = 3\nputs(-x)\n'),
+    ('alias_undef', 'alias say puts\nsay 1\ndef puts(x)\nend\nputs 2\n'
+                    'undef puts\nalias puts say\nputs 3\nclass C\n'
+                    '  def a\n    1\n  end\n  alias b a\n  def a\n    2\n'
+                    '  end\nend\nputs C.new.b, C.new.a\nclass P\n'
+                    '  def m\n    4\n  end\nend\nclass Q < P\n'
+                    '  def m\n    5\n  end\n  alias n m\nend\n'
+                    'puts Q.new.n\n'),
     ('globals', 'puts $x == nil\n$x = 1\ndef f\n  $x += 1\nend\nf\nputs $x\n'
                 '[1, 2].each { |i| $y = i }\nputs $y\nputs($z = 5)\n'
                 'def g\n  $w = ($w || 0) + 1\nend\ng\nputs g\n'),

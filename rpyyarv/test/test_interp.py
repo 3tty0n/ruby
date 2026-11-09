@@ -1328,3 +1328,16 @@ def test_a_format_or_integer_call_is_refused(source, msg, compile_source):
      'yet')])
 def test_an_integer_power_or_negation_is_refused(source, msg, compile_source):
     expect_unsupported(loader.load_dump(compile_source(source)), None, msg)
+
+
+@pytest.mark.parametrize('source, msg', [
+    ('undef foo\n', "undefined method 'foo' for class 'Object'"),
+    ('alias a b\n', "undefined method 'b' for class 'Object'"),
+    ('class C\n  undef foo\nend\n', "undefined method 'foo' for class 'C'"),
+    ('class C\n  def a\n  end\n  undef a\nend\nC.new.a\n',
+     "undefined method 'a' for #<C>"),
+    ('class P\n  def a\n  end\nend\nclass Q < P\n  undef a\nend\n'
+     'Q.new.a\n', "undefined method 'a' for #<Q>"),
+    ('alias say puts\nsay.say\n', "private method 'say' called for nil")])
+def test_alias_and_undef_follow_cruby(source, msg, compile_source):
+    expect_unsupported(loader.load_dump(compile_source(source)), None, msg)

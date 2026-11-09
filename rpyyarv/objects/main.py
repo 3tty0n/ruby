@@ -6,7 +6,8 @@ from rpyyarv import kernel
 from rpyyarv.objects.base import W_Root
 from rpyyarv.objects.klass import (W_Class, w_array_class, w_class_class,
                                    w_enumerator_class, w_false_class,
-                                   w_float_class, w_hash_class,
+                                   w_float_class, w_frozen_core_class,
+                                   w_hash_class,
                                    w_integer_class, w_math_module,
                                    w_module_class, w_nil_class,
                                    w_numeric_class, w_object_class,
@@ -72,6 +73,7 @@ kernel.install_identity_eq(w_symbol_class)
 kernel.install_identity_eq(w_module_class)
 classlib.install(w_class_class)
 classlib.install_object(w_object_class)
+classlib.install_frozen_core(w_frozen_core_class)
 stringlib.install(w_string_class)
 arraylib.install(w_array_class)
 hashlib.install(w_hash_class)
