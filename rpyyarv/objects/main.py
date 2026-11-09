@@ -53,6 +53,9 @@ class W_Main(W_Root):
     def method_owner(self):
         return w_object_class
 
+    def ruby_class(self):
+        return w_object_class
+
     def to_s_str(self):
         return 'main'
 

@@ -28,6 +28,9 @@ class W_Root(object):
     def lookup_class(self):
         return self.getclass()
 
+    def ruby_class(self):
+        return self.getclass()
+
     def lookup_method(self, mid):
         w_class = promote(self.lookup_class())
         w_method = w_class.find_method(mid)

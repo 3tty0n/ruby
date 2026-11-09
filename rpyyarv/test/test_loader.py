@@ -732,6 +732,12 @@ CRUBY_CASES = [
                'puts 10 ** 20 / 10 ** 18, (-big).inspect, big + 0.5\n'
                'f = 1\n1.upto(30) { |i| f *= i }\nputs f\n'
                'puts f / f, (big ** 3) ** 2, big.to_s\n'),
+    ('print_class', 'print 1, "a", nil, :s, 2.5\nprint "\\n"\n'
+                    'puts 1.class, nil.class, Integer.class, Math.class\n'
+                    'puts Object.new.class, (2 ** 70).class, [].class\n'
+                    'puts self.class, -> { }.class, self.class == Object\n'
+                    'class C\nend\nputs C.new.class.new.class\n'
+                    'puts(print("x").inspect)\n'),
     ('globals', 'puts $x == nil\n$x = 1\ndef f\n  $x += 1\nend\nf\nputs $x\n'
                 '[1, 2].each { |i| $y = i }\nputs $y\nputs($z = 5)\n'
                 'def g\n  $w = ($w || 0) + 1\nend\ng\nputs g\n'),

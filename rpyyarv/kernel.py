@@ -54,6 +54,23 @@ class W_Puts(W_CFunc):
             _puts(w_arg)
         return w_nil
 
+
+class W_Print(W_CFunc):
+    def call(self, w_recv, args_w, w_block):
+        from rpyyarv import interp
+        if len(args_w) == 0:
+            raise UnsupportedOperation(
+                'print without arguments (it prints $_) is not supported yet')
+        for w_arg in args_w:
+            write(interp.to_s_string(w_arg).str_w())
+        return w_nil
+
+
+class W_ObjectClass(W_CFunc):
+    def call(self, w_recv, args_w, w_block):
+        return w_recv.ruby_class()
+
+
 class W_ToS(W_CFunc):
     def call(self, w_recv, args_w, w_block):
         return W_String(w_recv.to_s_str())
@@ -219,6 +236,8 @@ class W_KernelInteger(W_CFunc):
 def install(w_class):
     puts_id = symbols.intern('puts')
     w_class.add_method(puts_id, W_Puts(puts_id, -1, True))  # Kernel#puts is private
+    print_id = symbols.intern('print')
+    w_class.add_method(print_id, W_Print(print_id, -1, True))
     to_s_id = symbols.intern('to_s')
     w_class.add_method(to_s_id, W_ToS(to_s_id, 0))
     integer_id = symbols.intern('Integer')
@@ -228,6 +247,7 @@ def install(w_class):
     for name, cls, arity in [('==', W_Equal, 1), ('!=', W_NotEqual, 1),
                              ('!', W_Not, 0), ('dup', W_Dup, 0),
                              ('clone', W_Dup, 0), ('send', W_Send, -1),
-                             ('__send__', W_Send, -1)]:
+                             ('__send__', W_Send, -1),
+                             ('class', W_ObjectClass, 0)]:
         mid = symbols.intern(name)
         w_class.add_method(mid, cls(mid, arity))

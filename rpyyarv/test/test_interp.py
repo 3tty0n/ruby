@@ -1407,3 +1407,9 @@ def test_a_block_argument_is_refused_where_cruby_raises_or_unsupported(
      '18446744073709551616 ** -1 is a Rational: RPyYARV has no Rational yet')])
 def test_a_bignum_is_refused_where_unsupported(source, msg, compile_source):
     expect_unsupported(loader.load_dump(compile_source(source)), None, msg)
+
+
+def test_print_without_arguments_is_refused(compile_source):
+    expect_unsupported(loader.load_dump(compile_source('print\n')), None,
+                       'print without arguments (it prints $_) is not '
+                       'supported yet')
