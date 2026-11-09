@@ -1362,3 +1362,21 @@ def test_case_equality_is_refused_where_unsupported(source, msg,
 def test_send_and_method_missing_are_refused_where_unsupported(
         source, msg, compile_source):
     expect_unsupported(loader.load_dump(compile_source(source)), None, msg)
+
+
+@pytest.mark.parametrize('source, msg', [
+    ('->(a, b) { a }.call(1)\n',
+     'wrong number of arguments (given 1, expected 2)'),
+    ('lambda { |a| a }.call(1, 2)\n',
+     'wrong number of arguments (given 2, expected 1)'),
+    ('lambda { |a, b| a }.call([4, 5])\n',
+     'wrong number of arguments (given 1, expected 2)'),
+    ('lambda\n', 'tried to create Proc object without a block'),
+    ('proc { |a, b| a }.call([4, 5])\n',
+     "block 'block in <main>' would splat its Array argument, which RPyYARV "
+     "does not support yet"),
+    ('f = -> { 1 }\nf.call { 2 }\n',
+     'calling a Proc with a block is not supported yet')])
+def test_a_proc_call_is_refused_where_cruby_raises_or_unsupported(
+        source, msg, compile_source):
+    expect_unsupported(loader.load_dump(compile_source(source)), None, msg)

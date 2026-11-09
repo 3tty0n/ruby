@@ -79,12 +79,13 @@ class W_CallInfo(W_Root):
                                            self.argc)
 
 class W_Block(W_Root):
-    _immutable_fields_ = ['w_iseq', 'w_self', 'outer']
+    _immutable_fields_ = ['w_iseq', 'w_self', 'outer', 'is_lambda']
 
-    def __init__(self, w_iseq, w_self, outer):
+    def __init__(self, w_iseq, w_self, outer, is_lambda=False):
         self.w_iseq = w_iseq
         self.w_self = w_self
         self.outer = outer
+        self.is_lambda = is_lambda
 
     def repr(self):
         return '<W_Block %s>' % self.w_iseq.name

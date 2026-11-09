@@ -174,6 +174,10 @@ def call_block(w_block, args_w):
     if not w_iseq.simple_params:
         raise UnsupportedOperation(
             "block '%s' has parameters RPyYARV does not support" % w_iseq.name)
+    if w_block.is_lambda and len(args_w) != w_iseq.nparams:
+        raise UnsupportedOperation(
+            'wrong number of arguments (given %d, expected %d)'
+            % (len(args_w), w_iseq.nparams))
     if (w_iseq.nparams > 1 and len(args_w) == 1
             and isinstance(args_w[0], W_Array)):
         raise UnsupportedOperation(

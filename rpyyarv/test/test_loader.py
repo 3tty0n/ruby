@@ -699,6 +699,15 @@ CRUBY_CASES = [
                      'puts o.foo(1, 2)\nputs o.send(:bar, 5)\n'
                      'class D\n  def method_missing(name)\n    name\n'
                      '  end\nend\nputs D.new.baz\n'),
+    ('procs', 'f = -> x { x + 1 }\nputs f[2], f.call(3), f.(4), f.yield(5)\n'
+              'puts(f === 9)\ng = lambda { |a, b| a + b }\nputs g.call(1, 2)\n'
+              'h = proc { |a, b| [a, b] }\nputs h.call(1).inspect\n'
+              'puts h.call(1, 2, 3).inspect\nk = 10\nadd = ->(x) { x + k }\n'
+              'k = 20\nputs add[1]\ncounter = 0\ninc = -> { counter += 1 }\n'
+              'inc.()\ninc.call\nputs counter\n'
+              'compose = ->(a, b) { ->(x) { b[a[x]] } }\n'
+              'puts compose[f, f][1]\ndef make(n)\n  ->(x) { x * n }\nend\n'
+              'puts make(3)[4]\n'),
     ('globals', 'puts $x == nil\n$x = 1\ndef f\n  $x += 1\nend\nf\nputs $x\n'
                 '[1, 2].each { |i| $y = i }\nputs $y\nputs($z = 5)\n'
                 'def g\n  $w = ($w || 0) + 1\nend\ng\nputs g\n'),
