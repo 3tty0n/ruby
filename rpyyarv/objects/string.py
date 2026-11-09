@@ -246,8 +246,9 @@ def install(w_class):
     for name in ['length', 'size']:
         mid = symbols.intern(name)
         w_class.add_method(mid, W_Length(mid, 0))
-    eq_id = symbols.intern('==')
-    w_class.add_method(eq_id, W_StrEqual(eq_id, 1))
+    for name in ['==', '===']:
+        mid = symbols.intern(name)
+        w_class.add_method(mid, W_StrEqual(mid, 1))
     plus_id = symbols.intern('+')
     w_class.add_method(plus_id, W_StrPlus(plus_id, 1))
     format_id = symbols.intern('%')

@@ -13,7 +13,7 @@ from rpyyarv.objects.klass import (W_Class, w_array_class,
                                    w_frozen_core_class, w_object_class)
 from rpyyarv.objects.string import W_String
 from rpyyarv.objects.symbol import W_Symbol, newsymbol
-from rpyyarv.objects.transparent import w_nil
+from rpyyarv.objects.transparent import w_false, w_nil, w_true
 
 INITIALIZE = symbols.intern('initialize')
 
@@ -151,6 +151,21 @@ def install(w_class):
                                  ('attr_accessor', True, True)]:
         mid = symbols.intern(name)
         w_class.add_method(mid, W_Attr(mid, reader, writer))
+
+
+class W_ModuleCaseEqual(W_CFunc):
+    def call(self, w_recv, args_w, w_block):
+        w_class = args_w[0].getclass()
+        while w_class is not None:
+            if w_class is w_recv:
+                return w_true
+            w_class = w_class.w_superclass
+        return w_false
+
+
+def install_module(w_class):
+    mid = symbols.intern('===')
+    w_class.add_method(mid, W_ModuleCaseEqual(mid, 1))
 
 
 def install_object(w_class):

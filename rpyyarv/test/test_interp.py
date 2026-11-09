@@ -1341,3 +1341,11 @@ def test_an_integer_power_or_negation_is_refused(source, msg, compile_source):
     ('alias say puts\nsay.say\n', "private method 'say' called for nil")])
 def test_alias_and_undef_follow_cruby(source, msg, compile_source):
     expect_unsupported(loader.load_dump(compile_source(source)), None, msg)
+
+
+@pytest.mark.parametrize('source, msg', [
+    ('case 2\nwhen (1..3) then 1\nend\n', 'Range#=== is not supported yet'),
+    ('case "a"\nwhen /a/ then 1\nend\n', 'Regexp#=== is not supported yet')])
+def test_case_equality_is_refused_where_unsupported(source, msg,
+                                                    compile_source):
+    expect_unsupported(loader.load_dump(compile_source(source)), None, msg)

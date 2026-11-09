@@ -70,8 +70,14 @@ for _w_class in (w_integer_class, w_float_class, w_nil_class, w_true_class,
                  w_false_class):
     kernel.install_inspect(_w_class)
 kernel.install_identity_eq(w_symbol_class)
+for _w_class in (w_object_class, w_nil_class, w_true_class, w_false_class):
+    kernel.install_case_equal(_w_class)
+kernel.install_case_equal(w_symbol_class, kernel.W_Equal)
+for _w_class in (w_range_class, w_regexp_class):
+    kernel.install_case_equal(_w_class, kernel.W_CaseEqualNotYet)
 kernel.install_identity_eq(w_module_class)
 classlib.install(w_class_class)
+classlib.install_module(w_module_class)
 classlib.install_object(w_object_class)
 classlib.install_frozen_core(w_frozen_core_class)
 stringlib.install(w_string_class)

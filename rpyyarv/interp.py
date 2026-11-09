@@ -680,6 +680,8 @@ def execute(iseq, frame):
                 frame.push(newbool(w_recv.length() == 0))
             else:
                 frame.push(send_op(w_recv, EMPTY_P, []))
+        elif opcode == insns.OPT_CASE_DISPATCH:
+            frame.pop()
         elif opcode == insns.OBJTOSTRING:
             w_x = frame.pop()
             if isinstance(w_x, W_String):

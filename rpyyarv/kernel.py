@@ -72,12 +72,24 @@ class W_NotEqual(W_CFunc):
         return newbool(not interp.send(w_recv, EQ, args_w).is_true())
 
 
+class W_CaseEqual(W_CFunc):
+    def call(self, w_recv, args_w, w_block):
+        return newbool(equal(w_recv, args_w[0]))
+
+
+class W_CaseEqualNotYet(W_CFunc):
+    def call(self, w_recv, args_w, w_block):
+        raise UnsupportedOperation('%s#=== is not supported yet'
+                                   % w_recv.getclass().name)
+
+
 class W_Not(W_CFunc):
     def call(self, w_recv, args_w, w_block):
         return newbool(not w_recv.is_true())
 
 
 EQ = symbols.intern('==')
+EQQ = symbols.intern('===')
 INITIALIZE_COPY = symbols.intern('initialize_copy')
 
 
@@ -137,6 +149,10 @@ def install_inspect(w_class):
 
 def install_identity_eq(w_class):
     w_class.add_method(EQ, W_Equal(EQ, 1))
+
+
+def install_case_equal(w_class, cls=W_CaseEqual):
+    w_class.add_method(EQQ, cls(EQQ, 1))
 
 
 class W_KernelInteger(W_CFunc):

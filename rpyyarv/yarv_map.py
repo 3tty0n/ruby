@@ -61,6 +61,7 @@ EMIT = {
     'opt_size': [],
     'opt_empty_p': [],
     'objtostring': [],      # CALL_DATA dropped: to_s is resolved inline
+    'opt_case_dispatch': [],    # table dropped: the === sends after it decide
     'anytostring': [],
     'concatstrings': [0],
     'jump': [0],

@@ -219,5 +219,6 @@ def install_operators(w_class):
                                 ('>=', helpers.w_ge, True)]:
         mid = symbols.intern(name)
         w_class.add_method(mid, W_NumericOp(mid, func, compare))
-    eq_id = symbols.intern('==')
-    w_class.add_method(eq_id, W_NumEqual(eq_id, 1))
+    for name in ['==', '===']:
+        mid = symbols.intern(name)
+        w_class.add_method(mid, W_NumEqual(mid, 1))
