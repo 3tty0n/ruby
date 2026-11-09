@@ -1380,3 +1380,12 @@ def test_send_and_method_missing_are_refused_where_unsupported(
 def test_a_proc_call_is_refused_where_cruby_raises_or_unsupported(
         source, msg, compile_source):
     expect_unsupported(loader.load_dump(compile_source(source)), None, msg)
+
+
+@pytest.mark.parametrize('source, msg', [
+    ('"abc"[1, 2]\n', '[] with 2 arguments is not supported yet'),
+    ('"abc"["b"]\n', '[] with String is not supported yet'),
+    ('"abc".slice(1.5)\n', 'slice with Float is not supported yet')])
+def test_a_string_index_is_refused_where_unsupported(source, msg,
+                                                     compile_source):
+    expect_unsupported(loader.load_dump(compile_source(source)), None, msg)

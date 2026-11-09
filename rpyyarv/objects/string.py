@@ -8,7 +8,8 @@ from rpyyarv.objects.base import W_Root
 from rpyyarv.objects.float import W_Float
 from rpyyarv.objects.klass import w_string_class
 from rpyyarv.objects.regexp import W_Regexp
-from rpyyarv.objects.transparent import describe_conversion, newbool, newint
+from rpyyarv.objects.transparent import (W_Integer, describe_conversion,
+                                         newbool, newint, w_nil)
 from rpyyarv.error import UnsupportedOperation
 from rpyyarv.rlib import float_fixed
 
@@ -37,6 +38,33 @@ def char_count(s):
         i += _char_width(s, i)
         n += 1
     return n
+
+
+class W_StrAref(W_CFunc):
+    def call(self, w_recv, args_w, w_block):
+        assert isinstance(w_recv, W_String)
+        if len(args_w) != 1:
+            raise UnsupportedOperation(
+                '%s with %d arguments is not supported yet'
+                % (symbols.name_of(self.mid), len(args_w)))
+        w_index = args_w[0]
+        if not isinstance(w_index, W_Integer):
+            raise UnsupportedOperation('%s with %s is not supported yet'
+                                       % (symbols.name_of(self.mid),
+                                          w_index.getclass().name))
+        s = w_recv.strval
+        index = w_index.int_w()
+        if index < 0:
+            index += char_count(s)
+            if index < 0:
+                return w_nil
+        i = 0
+        while i < len(s) and index > 0:
+            i += _char_width(s, i)
+            index -= 1
+        if i >= len(s):
+            return w_nil
+        return W_String(s[i:i + _char_width(s, i)])
 
 
 class W_StrEqual(W_CFunc):
@@ -249,6 +277,9 @@ def install(w_class):
     for name in ['==', '===']:
         mid = symbols.intern(name)
         w_class.add_method(mid, W_StrEqual(mid, 1))
+    for name in ['[]', 'slice']:
+        mid = symbols.intern(name)
+        w_class.add_method(mid, W_StrAref(mid, -1))
     plus_id = symbols.intern('+')
     w_class.add_method(plus_id, W_StrPlus(plus_id, 1))
     format_id = symbols.intern('%')

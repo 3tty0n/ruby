@@ -385,6 +385,11 @@ class W_Insert(W_CFunc):
         return w_recv
 
 
+class W_ToA(W_CFunc):
+    def call(self, w_recv, args_w, w_block):
+        return w_recv
+
+
 class W_EmptyP(W_CFunc):
     def call(self, w_recv, args_w, w_block):
         assert isinstance(w_recv, W_Array)
@@ -522,6 +527,7 @@ def install(w_class):
                              ('shift', W_Shift, -1),
                              ('insert', W_Insert, -1),
                              ('empty?', W_EmptyP, 0),
+                             ('to_a', W_ToA, 0),
                              ('reverse', W_Reverse, 0),
                              ('reverse!', W_ReverseBang, 0),
                              ('slice!', W_SliceBang, -1),

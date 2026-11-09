@@ -708,6 +708,10 @@ CRUBY_CASES = [
               'compose = ->(a, b) { ->(x) { b[a[x]] } }\n'
               'puts compose[f, f][1]\ndef make(n)\n  ->(x) { x * n }\nend\n'
               'puts make(3)[4]\n'),
+    ('string_aref', 'puts "abc"[1], "abc"[-1], "abc"[3].inspect\n'
+                    'puts "abc"[-4].inspect, "abc".slice(0), "a\u00e9b"[1]\n'
+                    'puts "a\u00e9b"[2], "a\u00e9b"[-2], ""[0].inspect\n'
+                    'a = [1, 2]\nb = a.to_a\nb.push(3)\nputs a.inspect\n'),
     ('globals', 'puts $x == nil\n$x = 1\ndef f\n  $x += 1\nend\nf\nputs $x\n'
                 '[1, 2].each { |i| $y = i }\nputs $y\nputs($z = 5)\n'
                 'def g\n  $w = ($w || 0) + 1\nend\ng\nputs g\n'),
