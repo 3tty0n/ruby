@@ -11,6 +11,7 @@ from rpyyarv.iseq import (W_Block, W_CallInfo, W_ConstPath, W_ISeq,
 from rpyyarv.methods import W_CFunc, W_ISeqMethod
 from rpyyarv.objects import array as arraylib
 from rpyyarv.objects import hash as hashlib
+from rpyyarv.objects import proc as proclib
 from rpyyarv.objects import range as rangelib
 from rpyyarv.objects.array import W_Array
 from rpyyarv.objects.hash import W_Hash
@@ -508,6 +509,15 @@ def execute(iseq, frame):
             mid = code[pc]
             pc += 1
             frame.w_self.set_ivar(mid, frame.pop())
+        elif (opcode == insns.GETBLOCKPARAM
+              or opcode == insns.GETBLOCKPARAMPROXY):
+            level = code[pc]
+            pc += 1
+            owner = frame if level == 0 else frame.outer_at(level)
+            if owner.w_block is None:
+                frame.push(w_nil)
+            else:
+                frame.push(proclib.block_proc(owner.w_block))
         elif opcode == insns.GETGLOBAL:
             mid = code[pc]
             pc += 1
@@ -832,6 +842,8 @@ def execute(iseq, frame):
             w_block = _literal_block(iseq, frame, code[pc + 1])
             pc += 2
             w_ci = _callinfo(iseq, idx)
+            if w_ci.blockarg:
+                w_block = proclib.block_of(frame.pop())
             w_ret = invoke(frame, iseq, w_ci, w_block,
                            _call_tail(iseq, w_ci, pc))
             if w_ret is None:

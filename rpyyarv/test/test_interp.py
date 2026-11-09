@@ -1143,7 +1143,7 @@ def test_a_range_operation_is_refused(source, msg, compile_source):
     ('3.times.map\n',
      'map without a block (an Enumerator) is not supported yet'),
     ('3.times.map(&:to_s)\n',
-     "call to 'map' passes arguments RPyYARV does not support"),
+     '&Symbol through to_proc is not supported yet'),
     ('3.times.to_h\n',
      "undefined method 'to_h' for #<Enumerator: 3:times>")])
 def test_a_times_enumerator_operation_is_refused(source, msg,
@@ -1389,3 +1389,25 @@ def test_a_proc_call_is_refused_where_cruby_raises_or_unsupported(
 def test_a_string_index_is_refused_where_unsupported(source, msg,
                                                      compile_source):
     expect_unsupported(loader.load_dump(compile_source(source)), None, msg)
+
+
+@pytest.mark.parametrize('source, msg', [
+    ('def y\n  yield 1, 2\nend\nl = ->(a) { a }\ny(&l)\n',
+     'wrong number of arguments (given 2, expected 1)'),
+    ('def k(&b)\n  lambda(&b)\nend\nk { }\n',
+     'the lambda method requires a literal block'),
+    ('def m(&b)\nend\nm(&1)\n',
+     'no implicit conversion of Integer into Proc'),
+    ('def m(&b)\nend\nm(&:itself)\n',
+     '&Symbol through to_proc is not supported yet'),
+    ('def q(&b)\n  b = 1\nend\n', '1 unimplemented instruction(s) in 1 '
+     'occurrence(s): setblockparam x1')])
+def test_a_block_argument_is_refused_where_cruby_raises_or_unsupported(
+        source, msg, compile_source):
+    from rpyyarv.error import UnsupportedOperation as Unsupported
+    try:
+        w_iseq = loader.load_dump(compile_source(source))
+    except Unsupported as e:
+        assert e.msg == msg
+        return
+    expect_unsupported(w_iseq, None, msg)

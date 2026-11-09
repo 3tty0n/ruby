@@ -160,6 +160,8 @@ class Loader(object):
         if len(params) == 0 and nparams == 0:
             # a for loop's block has its one parameter without has_lead set
             nparams = raw.arg_size
+        if raw.type == 'method':
+            params = [p for p in params if p != 'block_start']
         has_rest = raw.type == 'method' and params == ['rest_start']
         if nparams + int(has_rest) > raw.nlocals:
             raise LoadError("'%s' takes %d parameter(s) but has %d local(s)"
@@ -370,14 +372,17 @@ class Loader(object):
             allowed |= optable.SUPER_CALL_FLAGS
         if op == insns.SEND or op == insns.OPT_SEND_WITHOUT_BLOCK:
             allowed |= optable.SPLAT_CALL_FLAGS
+        if op == insns.SEND:
+            allowed |= optable.CALL_FLAG_ARGS_BLOCKARG
         splat = (flags & optable.CALL_FLAG_ARGS_SPLAT) != 0
+        blockarg = (flags & optable.CALL_FLAG_ARGS_BLOCKARG) != 0
         simple = (not operand.has_kwarg
                   and (flags & ~allowed) == 0
                   and ((flags & optable.CALL_FLAG_ARGS_SIMPLE) != 0
-                       or has_block or splat))
+                       or has_block or splat or blockarg))
         return W_CallInfo(symbols.intern(operand.strval), operand.intval,
                           simple, (flags & optable.CALL_FLAG_FCALL) != 0,
-                          tail, splat)
+                          tail, splat, blockarg)
 
     def const_path(self, operand, op, raw):
         if operand.kind != rawiseq.OP_ARRAY:

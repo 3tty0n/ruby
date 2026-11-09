@@ -30,6 +30,8 @@ EMIT = {
     'newrange': [0],
     'getlocal': [0, 1],
     'setlocal': [0, 1],
+    'getblockparam': [1],       # index dropped: the Proc is the frame's block
+    'getblockparamproxy': [1],
     'getinstancevariable': [0],     # IVC dropped
     'setinstancevariable': [0],
     'getglobal': [0],
@@ -169,6 +171,7 @@ CRUBY_OBJECT_METHODS = frozenset([
 # forwarding) the arguments reach the callee differently; ARGS_SIMPLE is
 # CRuby's own statement that none of them apply.
 CALL_FLAG_ARGS_SPLAT = 0x01
+CALL_FLAG_ARGS_BLOCKARG = 0x02
 CALL_FLAG_FCALL = 0x04
 CALL_FLAG_VCALL = 0x08
 CALL_FLAG_ARGS_SIMPLE = 0x10

@@ -60,10 +60,11 @@ class W_ISeq(W_Root):
 
 
 class W_CallInfo(W_Root):
-    _immutable_fields_ = ['mid', 'argc', 'simple', 'fcall', 'tail', 'splat']
+    _immutable_fields_ = ['mid', 'argc', 'simple', 'fcall', 'tail', 'splat',
+                          'blockarg']
 
     def __init__(self, mid, argc, simple=True, fcall=True, tail=None,
-                 splat=False):
+                 splat=False, blockarg=False):
         self.mid = mid
         self.argc = argc
         # False once the loader saw call flags outside SIMPLE_CALL_FLAGS.
@@ -73,6 +74,8 @@ class W_CallInfo(W_Root):
         # None for hand-built ISeqs.
         self.tail = tail
         self.splat = splat
+        # The block is the value on top of the arguments, as in f(&b).
+        self.blockarg = blockarg
 
     def repr(self):
         return '<W_CallInfo %s argc=%d>' % (symbols.name_of(self.mid),
@@ -86,6 +89,8 @@ class W_Block(W_Root):
         self.w_self = w_self
         self.outer = outer
         self.is_lambda = is_lambda
+        # The Proc this block became, which f(&pr) and &b must hand back
+        self.w_proc = None
 
     def repr(self):
         return '<W_Block %s>' % self.w_iseq.name

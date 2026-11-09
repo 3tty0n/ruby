@@ -712,6 +712,15 @@ CRUBY_CASES = [
                     'puts "abc"[-4].inspect, "abc".slice(0), "a\u00e9b"[1]\n'
                     'puts "a\u00e9b"[2], "a\u00e9b"[-2], ""[0].inspect\n'
                     'a = [1, 2]\nb = a.to_a\nb.push(3)\nputs a.inspect\n'),
+    ('block_param', 'def m(&b)\n  b\nend\nputs m.inspect\nputs m { 1 }.call\n'
+                    'def c(&b)\n  b.call(2)\nend\nputs c { |x| x * 10 }\n'
+                    'x = proc { |v| v + 1 }\nputs c(&x)\nputs m(&x) == x\n'
+                    'def t(&b)\n  [b, b]\nend\na = t { }\nputs a[0] == a[1]\n'
+                    'def n(a, *r, &b)\n  yield a\nend\ndef o(&b)\n'
+                    '  n(5, &b)\nend\nputs o { |v| v + 1 }\n'
+                    'def g(&b)\n  [1, 2].map { |i| b.call(i) }\nend\n'
+                    'puts g { |i| i * 3 }.inspect\ndef k(&b)\n  proc(&b)\n'
+                    'end\nputs k(&x) == x\nputs m(&nil).inspect\n'),
     ('globals', 'puts $x == nil\n$x = 1\ndef f\n  $x += 1\nend\nf\nputs $x\n'
                 '[1, 2].each { |i| $y = i }\nputs $y\nputs($z = 5)\n'
                 'def g\n  $w = ($w || 0) + 1\nend\ng\nputs g\n'),

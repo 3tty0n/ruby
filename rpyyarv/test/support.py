@@ -381,13 +381,18 @@ def _check_operand_values(raw, w_iseq, decoded, labels, l, scope_of):
                     allowed |= optable.SUPER_CALL_FLAGS
                 if op == insns.SEND or op == insns.OPT_SEND_WITHOUT_BLOCK:
                     allowed |= optable.SPLAT_CALL_FLAGS
+                if op == insns.SEND:
+                    allowed |= optable.CALL_FLAG_ARGS_BLOCKARG
                 splat = (raw_op.flag & optable.CALL_FLAG_ARGS_SPLAT) != 0
+                blockarg = (raw_op.flag
+                            & optable.CALL_FLAG_ARGS_BLOCKARG) != 0
                 simple = (not raw_op.has_kwarg
                           and (raw_op.flag & ~allowed) == 0
                           and ((raw_op.flag & optable.CALL_FLAG_ARGS_SIMPLE)
-                               != 0 or has_block or splat))
+                               != 0 or has_block or splat or blockarg))
                 assert w_ci.simple == simple
                 assert w_ci.splat == splat
+                assert w_ci.blockarg == blockarg
             elif t == insns.T_VALUE:
                 assert 0 <= got < len(w_iseq.consts)
                 _check_literal(w_iseq.consts[got], raw_op)
@@ -429,6 +434,8 @@ def check_loaded(program, l):
         if params == [] and nparams == 0:
             nparams = raw.arg_size
         assert w_iseq.nparams == nparams
+        if raw.type == 'method':
+            params = [p for p in params if p != 'block_start']
         has_rest = raw.type == 'method' and params == ['rest_start']
         assert w_iseq.has_rest == has_rest
         if raw.type == 'block' and raw.lead_num == 1:
