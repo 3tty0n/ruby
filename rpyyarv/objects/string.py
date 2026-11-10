@@ -3,7 +3,7 @@ import sys
 
 from rpyyarv import symbols
 from rpyyarv.methods import W_CFunc
-from rpyyarv.objects.array import W_Array
+from rpyyarv.objects.array import W_Array, num2long
 from rpyyarv.objects.base import W_Root
 from rpyyarv.objects.float import W_Float
 from rpyyarv.objects.klass import w_string_class
@@ -90,6 +90,17 @@ class W_StrPlus(W_CFunc):
                 % w_other.getclass().name)
         raise UnsupportedOperation('no implicit conversion of %s into String'
                                    % describe_conversion(w_other))
+
+
+class W_StrTimes(W_CFunc):
+    def call(self, w_recv, args_w, w_block):
+        assert isinstance(w_recv, W_String)
+        n = num2long(args_w[0])
+        if n < 0:
+            raise UnsupportedOperation('negative argument')
+        if n > 0 and len(w_recv.strval) > sys.maxsize // n:
+            raise UnsupportedOperation('argument too big')
+        return W_String(w_recv.strval * n)
 
 
 def _fixed_precision(fmt):
@@ -282,5 +293,7 @@ def install(w_class):
         w_class.add_method(mid, W_StrAref(mid, -1))
     plus_id = symbols.intern('+')
     w_class.add_method(plus_id, W_StrPlus(plus_id, 1))
+    times_id = symbols.intern('*')
+    w_class.add_method(times_id, W_StrTimes(times_id, 1))
     format_id = symbols.intern('%')
     w_class.add_method(format_id, W_StrFormat(format_id, 1))

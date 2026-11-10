@@ -712,6 +712,8 @@ CRUBY_CASES = [
                     'puts "abc"[-4].inspect, "abc".slice(0), "a\u00e9b"[1]\n'
                     'puts "a\u00e9b"[2], "a\u00e9b"[-2], ""[0].inspect\n'
                     'a = [1, 2]\nb = a.to_a\nb.push(3)\nputs a.inspect\n'),
+    ('string_times', 'puts "ab" * 3, "ab" * 2.7, ("ab" * 0).length\n'
+                     'puts "\u00e9" * 2\n'),
     ('block_param', 'def m(&b)\n  b\nend\nputs m.inspect\nputs m { 1 }.call\n'
                     'def c(&b)\n  b.call(2)\nend\nputs c { |x| x * 10 }\n'
                     'x = proc { |v| v + 1 }\nputs c(&x)\nputs m(&x) == x\n'

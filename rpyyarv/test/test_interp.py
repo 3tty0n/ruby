@@ -1230,6 +1230,8 @@ def test_an_array_new_or_dup_is_refused(source, msg, compile_source):
      'index -9 too small for array; minimum: -3'),
     ('[1] + 1\n', 'no implicit conversion of Integer into Array'),
     ('[1] * -1\n', 'negative argument'),
+    ('"a" * -1\n', 'negative argument'),
+    ('"ab" * (2 ** 62)\n', 'argument too big'),
     ('[1] * nil\n', 'no implicit conversion from nil to integer'),
     ('[1, 2].slice!(0..1)\n', 'slice! with a Range is not supported yet'),
     ('[1].pop(1, 2)\n',
