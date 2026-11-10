@@ -291,20 +291,12 @@ def _integer_float_cmp(w_i, f):
     return _int_float_cmp(w_i.int_w(), f)
 
 
-def _int_cmp(w_a, w_b):
-    if _bigs(w_a, w_b):
-        a = bigint_of(w_a)
-        b = bigint_of(w_b)
-        if a.lt(b):
-            return -1
-        if a.gt(b):
-            return 1
-        return 0
-    a = w_a.int_w()
-    b = w_b.int_w()
-    if a < b:
+def _big_cmp(w_a, w_b):
+    a = bigint_of(w_a)
+    b = bigint_of(w_b)
+    if a.lt(b):
         return -1
-    if a > b:
+    if a.gt(b):
         return 1
     return 0
 
@@ -332,30 +324,40 @@ def _float_cmp(w_a, w_b):
 def w_lt(w_a, w_b):
     if _floats(w_a, w_b):
         return newbool(_float_cmp(w_a, w_b) == -1)
-    return newbool(_int_cmp(w_a, w_b) == -1)
+    if _bigs(w_a, w_b):
+        return newbool(_big_cmp(w_a, w_b) == -1)
+    return newbool(w_a.int_w() < w_b.int_w())
 
 
 def w_gt(w_a, w_b):
     if _floats(w_a, w_b):
         return newbool(_float_cmp(w_a, w_b) == 1)
-    return newbool(_int_cmp(w_a, w_b) == 1)
+    if _bigs(w_a, w_b):
+        return newbool(_big_cmp(w_a, w_b) == 1)
+    return newbool(w_a.int_w() > w_b.int_w())
 
 
 def w_le(w_a, w_b):
     if _floats(w_a, w_b):
         c = _float_cmp(w_a, w_b)
         return newbool(c == -1 or c == 0)
-    return newbool(_int_cmp(w_a, w_b) <= 0)
+    if _bigs(w_a, w_b):
+        return newbool(_big_cmp(w_a, w_b) <= 0)
+    return newbool(w_a.int_w() <= w_b.int_w())
 
 
 def w_ge(w_a, w_b):
     if _floats(w_a, w_b):
         c = _float_cmp(w_a, w_b)
         return newbool(c == 0 or c == 1)
-    return newbool(_int_cmp(w_a, w_b) >= 0)
+    if _bigs(w_a, w_b):
+        return newbool(_big_cmp(w_a, w_b) >= 0)
+    return newbool(w_a.int_w() >= w_b.int_w())
 
 
 def w_eq(w_a, w_b):
     if _floats(w_a, w_b):
         return newbool(_float_cmp(w_a, w_b) == 0)
-    return newbool(_int_cmp(w_a, w_b) == 0)
+    if _bigs(w_a, w_b):
+        return newbool(_big_cmp(w_a, w_b) == 0)
+    return newbool(w_a.int_w() == w_b.int_w())
