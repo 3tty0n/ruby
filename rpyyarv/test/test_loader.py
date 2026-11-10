@@ -714,6 +714,13 @@ CRUBY_CASES = [
                     'a = [1, 2]\nb = a.to_a\nb.push(3)\nputs a.inspect\n'),
     ('string_times', 'puts "ab" * 3, "ab" * 2.7, ("ab" * 0).length\n'
                      'puts "\u00e9" * 2\n'),
+    ('string_binary', 'b = 195.chr + 169.chr\nputs b.length, b == "\u00e9", b[1] == 169.chr\n'
+                      'puts b[-1].length, (b * 2).length, b.to_s.length\n'
+                      'puts "a" == 97.chr, ("a" + b).length, (b + "a").length\n'
+                      'h = {b => 1}\nputs h["\u00e9"].inspect, h[b], {"a" => 2}[97.chr]\n'
+                      'puts [b, "a"].join.length, [b, b].join(",").length\n'
+                      'puts "#{b}x".length, "\u00e9#{1}".length, b.dup.length\n'),
+    ('string_us_ascii_source', '# coding: us-ascii\nputs "\\xC3\\xA9".length, "a".length\n'),
     ('block_param', 'def m(&b)\n  b\nend\nputs m.inspect\nputs m { 1 }.call\n'
                     'def c(&b)\n  b.call(2)\nend\nputs c { |x| x * 10 }\n'
                     'x = proc { |v| v + 1 }\nputs c(&x)\nputs m(&x) == x\n'

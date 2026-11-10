@@ -73,6 +73,8 @@ class W_ObjectClass(W_CFunc):
 
 class W_ToS(W_CFunc):
     def call(self, w_recv, args_w, w_block):
+        if isinstance(w_recv, W_String):
+            return w_recv
         return W_String(w_recv.to_s_str())
 
 class W_BenchNowNs(W_CFunc):
@@ -127,7 +129,7 @@ class W_Dup(W_CFunc):
         elif isinstance(w_recv, hashlib.W_Hash):
             w_copy = hashlib.copy(w_recv)
         elif isinstance(w_recv, W_String):
-            w_copy = W_String(w_recv.strval)
+            w_copy = w_recv.copy()
         elif isinstance(w_recv, W_Object):
             w_copy = W_Object(w_recv.w_class)
             w_copy.ivars_w = w_recv.ivars_w.copy()

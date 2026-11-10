@@ -13,6 +13,7 @@ from rpyyarv.objects import array as arraylib
 from rpyyarv.objects import hash as hashlib
 from rpyyarv.objects import proc as proclib
 from rpyyarv.objects import range as rangelib
+from rpyyarv.objects import string as stringlib
 from rpyyarv.objects.array import W_Array
 from rpyyarv.objects.hash import W_Hash
 from rpyyarv.objects.string import W_String
@@ -503,7 +504,9 @@ def execute(iseq, frame):
         elif opcode == insns.PUTCHILLEDSTRING:
             idx = code[pc]
             pc += 1
-            frame.push(W_String(iseq.consts[idx].str_w())) 
+            w_lit = iseq.consts[idx]
+            assert isinstance(w_lit, W_String)
+            frame.push(w_lit.copy())
         elif opcode == insns.GETLOCAL:
             idx = code[pc]
             level = code[pc + 1]
@@ -814,12 +817,15 @@ def execute(iseq, frame):
         elif opcode == insns.CONCATSTRINGS:
             n = code[pc]
             pc += 1
-            parts = [''] * n
+            parts_w = [None] * n
             i = n - 1
             while i >= 0:
-                parts[i] = frame.pop().str_w()
+                w_part = frame.pop()
+                if not isinstance(w_part, W_String):
+                    raise UnsupportedOperation('not a string')
+                parts_w[i] = w_part
                 i -= 1
-            frame.push(W_String(''.join(parts)))
+            frame.push(stringlib.concat(parts_w))
         elif opcode == insns.PUTSPECIALOBJECT:
             kind = code[pc]
             pc += 1

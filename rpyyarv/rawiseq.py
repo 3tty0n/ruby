@@ -12,7 +12,7 @@ OP_NIL = 1
 OP_TRUE = 2
 OP_FALSE = 3
 OP_SYM = 4
-OP_STR = 5
+OP_STR = 5      # intval is 1 if the String is BINARY
 OP_ISEQ = 6     # intval indexes RawProgram.iseqs
 OP_CALL = 7     # intval=orig_argc, flag=flags, strval=mid
 OP_OTHER = 8

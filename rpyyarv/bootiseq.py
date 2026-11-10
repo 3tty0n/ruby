@@ -131,7 +131,7 @@ def _operand(pending, v):
     if boot.is_symbol(v):
         return rawiseq.RawOperand(rawiseq.OP_SYM, 0, boot.sym_of(v))
     if boot.is_string(v):
-        return rawiseq.RawOperand(rawiseq.OP_STR, 0, boot.str_of(v))
+        return rawiseq.RawOperand(rawiseq.OP_STR, _binary(v), boot.str_of(v))
     if boot.is_array(v):
         if is_iseq(v):
             pending.append(v)
@@ -171,6 +171,15 @@ def _operand(pending, v):
             [_operand(pending, boot.call0(v, 'begin')),
              _operand(pending, boot.call0(v, 'end'))])
     return rawiseq.RawOperand(rawiseq.OP_OTHER, 0, boot.inspect(v))
+
+
+def _binary(v):
+    name = boot.str_of(boot.call0(boot.call0(v, 'encoding'), 'to_s'))
+    if name == 'UTF-8' or name == 'US-ASCII':
+        return 0
+    if name == 'ASCII-8BIT':
+        return 1
+    raise LoadError('a String in %s is not supported' % name)
 
 
 def _int_or(v, default):

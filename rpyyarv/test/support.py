@@ -22,7 +22,7 @@ from rpyyarv.objects.hash import W_Hash
 from rpyyarv.objects.main import W_Main
 from rpyyarv.objects.range import W_Range
 from rpyyarv.objects.regexp import W_Regexp
-from rpyyarv.objects.string import W_String
+from rpyyarv.objects.string import ENC_BINARY, ENC_UTF8, W_String
 from rpyyarv.objects.symbol import W_Symbol
 from rpyyarv.objects.transparent import W_Fixnum, w_false, w_nil, w_true
 
@@ -313,6 +313,7 @@ def _check_literal(w_x, raw_op):
     elif kind == rawiseq.OP_STR:
         assert isinstance(w_x, W_String)
         assert w_x.str_w() == raw_op.strval
+        assert w_x.encoding == (ENC_BINARY if raw_op.intval else ENC_UTF8)
     elif kind == rawiseq.OP_SYM:
         assert isinstance(w_x, W_Symbol)
         assert symbols.name_of(w_x.mid) == raw_op.strval

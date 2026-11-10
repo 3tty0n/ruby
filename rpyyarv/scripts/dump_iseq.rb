@@ -29,7 +29,9 @@
 #   i:<int>   Integer          n:  nil        t:  true       f:  false
 #   d:<float> Float, as Float#inspect spells it
 #   y:<name>  Symbol: an ID, a Symbol literal, or a label reference
-#   s:<text>  String
+#   s:<text>  String in UTF-8 or US-ASCII
+#   b:<text>  String in BINARY
+#   e:<name>  String in another encoding, which the loader refuses
 #   q:<index> nested ISeq
 #   a:<item>,<item>...  Array; each item is a token whose backslashes and
 #             commas are escaped again, so nesting stays unambiguous
@@ -38,7 +40,7 @@
 #   c:<argc>,<flags>,<kwarg?>,<mid>   CALL_DATA
 #   x:<text>  anything else, verbatim, so a refusal can name it
 #
-# In y:/s:/x: text, backslash, tab, newline and return are backslash-escaped.
+# In y:/s:/b:/x: text, backslash, tab, newline and return are backslash-escaped.
 
 FORMAT_VERSION = 1
 ISEQ_MAGIC = 'YARVInstructionSequence/SimpleDataFormat'
@@ -156,7 +158,12 @@ class Dumper
     when true    then 't:'
     when false   then 'f:'
     when Symbol  then "y:#{esc(obj.to_s)}"
-    when String  then "s:#{esc(obj)}"
+    when String
+      case obj.encoding.name
+      when 'UTF-8', 'US-ASCII' then "s:#{esc(obj)}"
+      when 'ASCII-8BIT' then "b:#{esc(obj)}"
+      else "e:#{obj.encoding}"
+      end
     when Array
       if iseq_array?(obj)
         "q:#{intern(obj)}"

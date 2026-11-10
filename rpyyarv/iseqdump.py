@@ -105,6 +105,10 @@ def _operand(token):
         return rawiseq.RawOperand(rawiseq.OP_SYM, 0, _unescape(body))
     if kind == 's':
         return rawiseq.RawOperand(rawiseq.OP_STR, 0, _unescape(body))
+    if kind == 'b':
+        return rawiseq.RawOperand(rawiseq.OP_STR, 1, _unescape(body))
+    if kind == 'e':
+        raise LoadError('a String in %s is not supported' % body)
     if kind == 'q':
         return rawiseq.RawOperand(rawiseq.OP_ISEQ, _int(body, 'iseq index'))
     if kind == 'a' or kind == 'h':

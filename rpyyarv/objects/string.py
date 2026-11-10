@@ -13,11 +13,16 @@ from rpyyarv.objects.transparent import (W_Integer, describe_conversion,
 from rpyyarv.error import UnsupportedOperation
 from rpyyarv.rlib import float_fixed
 
+ENC_UTF8 = 0
+ENC_BINARY = 1
+ENC_NAMES = ['UTF-8', 'BINARY (ASCII-8BIT)']
+
 class W_String(W_Root):
     # Immutable: nothing mutates a string yet, so frozen, chilled and
     # ordinary literals are all the same object here.
-    def __init__(self, strval):
+    def __init__(self, strval, encoding=ENC_UTF8):
         self.strval = strval
+        self.encoding = encoding
 
     def getclass(self):
         return w_string_class
@@ -30,6 +35,55 @@ class W_String(W_Root):
 
     def repr(self):
         return '"%s"' % self.strval
+
+    def copy(self):
+        return W_String(self.strval, self.encoding)
+
+
+def is_ascii(s):
+    for c in s:
+        if ord(c) >= 0x80:
+            return False
+    return True
+
+
+def _incompatible(enc_a, enc_b):
+    return UnsupportedOperation('incompatible character encodings: %s and %s'
+                                % (ENC_NAMES[enc_a], ENC_NAMES[enc_b]))
+
+
+def concat2(w_a, w_b):
+    """w_a + w_b in the encoding rb_enc_compatible gives them."""
+    enc = w_a.encoding
+    if w_b.encoding != enc and not is_ascii(w_b.strval):
+        if not is_ascii(w_a.strval):
+            raise _incompatible(enc, w_b.encoding)
+        enc = w_b.encoding
+    return W_String(w_a.strval + w_b.strval, enc)
+
+
+def concat(parts_w):
+    """parts_w joined, as appending them one by one to an empty String."""
+    enc = ENC_UTF8
+    i = 0
+    while i < len(parts_w):
+        w_part = parts_w[i]
+        if w_part.encoding != enc and not is_ascii(w_part.strval):
+            j = 0
+            while j < i:
+                if not is_ascii(parts_w[j].strval):
+                    raise _incompatible(enc, w_part.encoding)
+                j += 1
+            enc = w_part.encoding
+        i += 1
+    return W_String(''.join([w.strval for w in parts_w]), enc)
+
+
+def str_eql(w_a, w_b):
+    """rb_str_hash_cmp: the same bytes, in comparable encodings."""
+    return w_a.strval == w_b.strval and (w_a.encoding == w_b.encoding
+                                         or is_ascii(w_a.strval))
+
 
 def char_count(s):
     n = 0
@@ -54,10 +108,15 @@ class W_StrAref(W_CFunc):
                                           w_index.getclass().name))
         s = w_recv.strval
         index = w_index.int_w()
+        binary = w_recv.encoding == ENC_BINARY
         if index < 0:
-            index += char_count(s)
+            index += len(s) if binary else char_count(s)
             if index < 0:
                 return w_nil
+        if binary:
+            if index >= len(s):
+                return w_nil
+            return W_String(s[index], ENC_BINARY)
         i = 0
         while i < len(s) and index > 0:
             i += _char_width(s, i)
@@ -72,7 +131,7 @@ class W_StrEqual(W_CFunc):
         assert isinstance(w_recv, W_String)
         w_other = args_w[0]
         return newbool(isinstance(w_other, W_String)
-                       and w_other.strval == w_recv.strval)
+                       and str_eql(w_recv, w_other))
 
 
 TO_STR = symbols.intern('to_str')
@@ -83,7 +142,7 @@ class W_StrPlus(W_CFunc):
         assert isinstance(w_recv, W_String)
         w_other = args_w[0]
         if isinstance(w_other, W_String):
-            return W_String(w_recv.strval + w_other.strval)
+            return concat2(w_recv, w_other)
         if w_other.lookup_class().find_method(TO_STR) is not None:
             raise UnsupportedOperation(
                 '+ with %s through to_str is not supported yet'
@@ -100,7 +159,7 @@ class W_StrTimes(W_CFunc):
             raise UnsupportedOperation('negative argument')
         if n > 0 and len(w_recv.strval) > _MAX_FIXNUM // n:
             raise UnsupportedOperation('argument too big')
-        return W_String(w_recv.strval * n)
+        return W_String(w_recv.strval * n, w_recv.encoding)
 
 
 def _fixed_precision(fmt):
@@ -144,6 +203,8 @@ class W_StrFormat(W_CFunc):
 class W_Length(W_CFunc):
     def call(self, w_recv, args_w, w_block):
         assert isinstance(w_recv, W_String)
+        if w_recv.encoding == ENC_BINARY:
+            return newint(len(w_recv.strval))
         return newint(char_count(w_recv.strval))
 
 _MAX_FIXNUM = sys.maxsize
@@ -238,6 +299,9 @@ class W_Split(W_CFunc):
     def call(self, w_recv, args_w, w_block):
         assert isinstance(w_recv, W_String)
         w_pattern = args_w[0]
+        if w_recv.encoding == ENC_BINARY:
+            raise UnsupportedOperation(
+                'split on a BINARY String is not supported yet')
         if isinstance(w_pattern, W_Regexp) and w_pattern.pattern == '':
             s = w_recv.strval
             n = len(s)

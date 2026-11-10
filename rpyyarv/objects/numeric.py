@@ -83,11 +83,11 @@ class W_IntegerOp(W_CFunc):
 
 class W_Chr(W_CFunc):
     def call(self, w_recv, args_w, w_block):
-        from rpyyarv.objects.string import W_String
+        from rpyyarv.objects.string import ENC_BINARY, ENC_UTF8, W_String
         n = w_recv.int_w()
         if n < 0 or n > 255:
             raise UnsupportedOperation('%d out of char range (RangeError)' % n)
-        return W_String(chr(n))
+        return W_String(chr(n), ENC_BINARY if n >= 0x80 else ENC_UTF8)
 
 
 def _times_location(w_iseq):

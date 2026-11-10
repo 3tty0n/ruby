@@ -4,7 +4,7 @@ from rpyyarv.methods import W_CFunc
 from rpyyarv.objects.array import W_Array
 from rpyyarv.objects.base import W_Root
 from rpyyarv.objects.klass import w_hash_class
-from rpyyarv.objects.string import W_String
+from rpyyarv.objects.string import W_String, str_eql
 from rpyyarv.objects.symbol import W_Symbol
 from rpyyarv.objects.transparent import (W_Integer, newbool, newint, w_false,
                                          w_nil, w_true)
@@ -16,7 +16,7 @@ def _key_eq(w_a, w_b):
     if isinstance(w_a, W_Integer) and isinstance(w_b, W_Integer):
         return w_a.int_w() == w_b.int_w()
     if isinstance(w_a, W_String) and isinstance(w_b, W_String):
-        return w_a.strval == w_b.strval
+        return str_eql(w_a, w_b)
     return w_a is w_b
 
 

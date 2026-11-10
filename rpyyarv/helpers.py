@@ -3,7 +3,7 @@ import math
 from rpyyarv.error import UnsupportedOperation
 from rpyyarv.objects.float import W_Float, w_pow
 from rpyyarv.objects.klass import w_float_class, w_integer_class
-from rpyyarv.objects.string import W_String
+from rpyyarv.objects.string import W_String, concat2
 from rpyyarv.objects.transparent import (W_Bignum, W_Integer, bigint_of,
                                          newbig, newbool, newint)
 from rpyyarv.rlib import ovfcheck, rbigint
@@ -43,7 +43,7 @@ def _bigs(w_a, w_b):
 
 def w_add(w_a, w_b):
     if isinstance(w_a, W_String) and isinstance(w_b, W_String):
-        return W_String(w_a.str_w() + w_b.str_w())
+        return concat2(w_a, w_b)
     if _floats(w_a, w_b):
         return W_Float(w_a.float_w() + w_b.float_w())
     if _bigs(w_a, w_b):

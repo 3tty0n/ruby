@@ -157,22 +157,25 @@ class W_Map(W_CFunc):
 _joining_w = []
 
 
-def _join(w_ary, sep):
+def _join(w_ary, w_sep):
     from rpyyarv import interp
-    parts = []
+    from rpyyarv.objects.string import concat
+    parts_w = []
     for w_item in w_ary.items():
+        if w_sep is not None and parts_w:
+            parts_w.append(w_sep)
         if isinstance(w_item, W_Array):
             if w_item is w_ary or w_item in _joining_w:
                 raise UnsupportedOperation(
                     'recursive array join (ArgumentError)')
             _joining_w.append(w_item)
             try:
-                parts.append(_join(w_item, sep))
+                parts_w.append(_join(w_item, w_sep))
             finally:
                 _joining_w.pop()
         else:
-            parts.append(interp.to_s_string(w_item).str_w())
-    return sep.join(parts)
+            parts_w.append(interp.to_s_string(w_item))
+    return concat(parts_w)
 
 
 class W_Join(W_CFunc):
@@ -183,10 +186,14 @@ class W_Join(W_CFunc):
             raise UnsupportedOperation(
                 "wrong number of arguments to 'join' (given %d, expected 0..1)"
                 % len(args_w))
-        sep = ''
+        w_sep = None
         if len(args_w) == 1 and args_w[0] is not w_nil:
-            sep = args_w[0].str_w()
-        return W_String(_join(w_recv, sep))
+            w_sep = args_w[0]
+            if not isinstance(w_sep, W_String):
+                raise UnsupportedOperation(
+                    'no implicit conversion of %s into String'
+                    % describe_conversion(w_sep))
+        return _join(w_recv, w_sep)
 
 
 # Pairs Array#== is comparing, as rb_exec_recursive_paired tracks them
@@ -455,7 +462,7 @@ class W_AryTimes(W_CFunc):
         assert isinstance(w_recv, W_Array)
         w_other = args_w[0]
         if isinstance(w_other, W_String):
-            return W_String(_join(w_recv, w_other.strval))
+            return _join(w_recv, w_other)
         n = num2long(w_other)
         if n < 0:
             raise UnsupportedOperation('negative argument')
