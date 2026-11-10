@@ -98,7 +98,7 @@ class W_StrTimes(W_CFunc):
         n = num2long(args_w[0])
         if n < 0:
             raise UnsupportedOperation('negative argument')
-        if n > 0 and len(w_recv.strval) > sys.maxsize // n:
+        if n > 0 and len(w_recv.strval) > _MAX_FIXNUM // n:
             raise UnsupportedOperation('argument too big')
         return W_String(w_recv.strval * n)
 
