@@ -71,10 +71,21 @@ class W_ObjectClass(W_CFunc):
         return w_recv.ruby_class()
 
 
+NIL_TO_S = W_String('', frozen=True)
+TRUE_TO_S = W_String('true', frozen=True)
+FALSE_TO_S = W_String('false', frozen=True)
+
+
 class W_ToS(W_CFunc):
     def call(self, w_recv, args_w, w_block):
         if isinstance(w_recv, W_String):
             return w_recv
+        if w_recv is w_nil:
+            return NIL_TO_S
+        if w_recv is w_true:
+            return TRUE_TO_S
+        if w_recv is w_false:
+            return FALSE_TO_S
         return W_String(w_recv.to_s_str())
 
 class W_BenchNowNs(W_CFunc):
@@ -112,6 +123,7 @@ class W_Not(W_CFunc):
 EQ = symbols.intern('==')
 EQQ = symbols.intern('===')
 INITIALIZE_COPY = symbols.intern('initialize_copy')
+CLONE = symbols.intern('clone')
 
 
 class W_Dup(W_CFunc):
@@ -130,6 +142,8 @@ class W_Dup(W_CFunc):
             w_copy = hashlib.copy(w_recv)
         elif isinstance(w_recv, W_String):
             w_copy = w_recv.copy()
+            if self.mid == CLONE:
+                w_copy.frozen = w_recv.frozen
         elif isinstance(w_recv, W_Object):
             w_copy = W_Object(w_recv.w_class)
             w_copy.ivars_w = w_recv.ivars_w.copy()

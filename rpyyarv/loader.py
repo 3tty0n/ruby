@@ -306,7 +306,8 @@ class Loader(object):
             return w_false
         if kind == rawiseq.OP_STR:
             return W_String(operand.strval,
-                            ENC_BINARY if operand.intval else ENC_UTF8)
+                            ENC_BINARY if operand.intval else ENC_UTF8,
+                            frozen=True)
         if kind == rawiseq.OP_SYM:
             return newsymbol(symbols.intern(operand.strval))
         if kind == rawiseq.OP_OTHER:

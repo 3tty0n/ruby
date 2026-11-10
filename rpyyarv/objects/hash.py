@@ -59,6 +59,8 @@ def aset(w_hash, w_key, w_value):
     if w_hash.iterating > 0:
         raise UnsupportedOperation(
             "can't add a new key into hash during iteration")
+    if isinstance(w_key, W_String) and not w_key.frozen:
+        w_key = W_String(w_key.strval, w_key.encoding, frozen=True)
     w_hash.positions[w_key] = len(w_hash.keys_w)
     w_hash.keys_w.append(w_key)
     w_hash.values_w.append(w_value)

@@ -18,11 +18,12 @@ ENC_BINARY = 1
 ENC_NAMES = ['UTF-8', 'BINARY (ASCII-8BIT)']
 
 class W_String(W_Root):
-    # Immutable: nothing mutates a string yet, so frozen, chilled and
-    # ordinary literals are all the same object here.
-    def __init__(self, strval, encoding=ENC_UTF8):
+    # Nothing mutates a String yet; frozen marks the ones CRuby hands out
+    # frozen.
+    def __init__(self, strval, encoding=ENC_UTF8, frozen=False):
         self.strval = strval
         self.encoding = encoding
+        self.frozen = frozen
 
     def getclass(self):
         return w_string_class

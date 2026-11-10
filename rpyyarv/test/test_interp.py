@@ -1006,6 +1006,30 @@ def test_a_private_operator_method_is_refused(source, msg, compile_source):
     expect_unsupported(loader.load_dump(compile_source(source)), None, msg)
 
 
+@pytest.mark.parametrize('source, frozen', [
+    ('"x"\n', [False]),
+    ('# frozen_string_literal: true\n"x"\n', [True]),
+    ('k = "q"\nh = {}\nh[k] = 1\n[k, h.keys[0]]\n', [False, True]),
+    ('{"k" => 1}.keys\n', [True]),
+    ('[nil.to_s, true.to_s, false.to_s, 1.to_s, :s.to_s]\n',
+     [True, True, True, False, False]),
+    ('[nil.to_s.dup, nil.to_s.clone, "a".clone, "#{1}", "a" + "b"]\n',
+     [False, True, False, False, False]),
+])
+def test_strings_are_frozen_where_cruby_freezes_them(source, frozen,
+                                                     compile_source):
+    w_x = run_dump(compile_source(source))
+    strings_w = w_x.items() if isinstance(w_x, W_Array) else [w_x]
+    assert [w.frozen for w in strings_w] == frozen
+
+
+def test_a_hash_key_is_a_frozen_copy(compile_source):
+    w_x = run_dump(compile_source('k = "q"\nh = {}\nh[k] = 1\n'
+                                  'h[k] = 2\n[k, h.keys[0], h.size]\n'))
+    w_k, w_key, w_size = w_x.items()
+    assert w_key is not w_k and w_key.str_w() == 'q' and w_size.int_w() == 1
+
+
 @pytest.mark.parametrize('source', [
     'a = [0]\na[0] = a\na.join(",")\n',
     'a = [0]\nb = [a]\na[0] = b\na.join(",")\n',
