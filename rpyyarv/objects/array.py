@@ -229,7 +229,7 @@ class W_AryEqual(W_CFunc):
 MAX_SIZE = 1 << 60
 
 
-def _to_int(w_x):
+def num2long(w_x):
     from rpyyarv.objects.float import W_Float
     if isinstance(w_x, W_Integer):
         return w_x.int_w()
@@ -247,7 +247,7 @@ def _to_int(w_x):
 
 
 def _size_of(w_size):
-    n = _to_int(w_size)
+    n = num2long(w_size)
     if n < 0:
         raise UnsupportedOperation('negative array size')
     if n > MAX_SIZE:
@@ -305,7 +305,7 @@ def arity_error(name, given, expected):
 class W_At(W_CFunc):
     def call(self, w_recv, args_w, w_block):
         assert isinstance(w_recv, W_Array)
-        return aref(w_recv, _to_int(args_w[0]))
+        return aref(w_recv, num2long(args_w[0]))
 
 
 class W_First(W_CFunc):
@@ -371,7 +371,7 @@ class W_Insert(W_CFunc):
         if len(args_w) == 1:
             return w_recv
         items_w = w_recv.items()
-        index = _to_int(args_w[0])
+        index = num2long(args_w[0])
         at = index
         if index < 0:
             at = index + len(items_w) + 1
@@ -420,14 +420,14 @@ class W_SliceBang(W_CFunc):
         if args_w[0].getclass() is w_range_class:
             raise UnsupportedOperation(
                 'slice! with a Range is not supported yet')
-        start = _to_int(args_w[0])
+        start = num2long(args_w[0])
         if start < 0:
             start += len(items_w)
         if len(args_w) == 1:
             if start < 0 or start >= len(items_w):
                 return w_nil
             return items_w.pop(start)
-        length = _to_int(args_w[1])
+        length = num2long(args_w[1])
         if length < 0 or start < 0 or start > len(items_w):
             return w_nil
         stop = len(items_w)
@@ -456,7 +456,7 @@ class W_AryTimes(W_CFunc):
         w_other = args_w[0]
         if isinstance(w_other, W_String):
             return W_String(_join(w_recv, w_other.strval))
-        n = _to_int(w_other)
+        n = num2long(w_other)
         if n < 0:
             raise UnsupportedOperation('negative argument')
         if n > 0 and w_recv.length() > MAX_SIZE // n:
