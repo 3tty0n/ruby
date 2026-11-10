@@ -491,7 +491,7 @@ class W_AryInspect(W_CFunc):
                     raise UnsupportedOperation(
                         'inspect on %s did not return a String'
                         % w_item.repr())
-                parts.append(w_str.strval)
+                parts.append(w_str.str_w())
             return W_String('[' + ', '.join(parts) + ']')
         finally:
             _inspecting_w.pop()

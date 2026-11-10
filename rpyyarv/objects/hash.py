@@ -24,7 +24,7 @@ def _key_hash(w_key):
     if isinstance(w_key, W_Integer):
         return w_key.int_w()
     if isinstance(w_key, W_String):
-        return compute_hash(w_key.strval)
+        return compute_hash(w_key.str_w())
     return compute_identity_hash(w_key)
 
 
@@ -60,7 +60,7 @@ def aset(w_hash, w_key, w_value):
         raise UnsupportedOperation(
             "can't add a new key into hash during iteration")
     if isinstance(w_key, W_String) and not w_key.frozen:
-        w_key = W_String(w_key.strval, w_key.encoding, frozen=True)
+        w_key = W_String(w_key.str_w(), w_key.encoding, frozen=True)
     w_hash.positions[w_key] = len(w_hash.keys_w)
     w_hash.keys_w.append(w_key)
     w_hash.values_w.append(w_value)

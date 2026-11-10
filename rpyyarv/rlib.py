@@ -11,6 +11,7 @@ try:
     from rpython.rlib.rfloat import formatd
     from rpython.rlib.rarithmetic import ovfcheck
     from rpython.rlib.rbigint import rbigint
+    from rpython.rlib.rstring import StringBuilder
 
     def float_repr(x):
         return formatd(x, 'r', 0)
@@ -165,6 +166,16 @@ except ImportError:
 
         def ge(self, other):
             return self.value >= other.value
+
+    class StringBuilder(object):
+        def __init__(self):
+            self.parts = []
+
+        def append(self, s):
+            self.parts.append(s)
+
+        def build(self):
+            return ''.join(self.parts)
 
     def check_stack_overflow():
         pass

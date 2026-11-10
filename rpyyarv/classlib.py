@@ -70,7 +70,7 @@ def _attr_name(w_name):
     if isinstance(w_name, W_Symbol):
         name = symbols.name_of(w_name.mid)
     elif isinstance(w_name, W_String):
-        name = w_name.strval
+        name = w_name.str_w()
     else:
         raise UnsupportedOperation('%s is not a symbol nor a string'
                                    % w_name.repr())

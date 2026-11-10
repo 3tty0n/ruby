@@ -720,6 +720,15 @@ CRUBY_CASES = [
                       'h = {b => 1}\nputs h["\u00e9"].inspect, h[b], {"a" => 2}[97.chr]\n'
                       'puts [b, "a"].join.length, [b, b].join(",").length\n'
                       'puts "#{b}x".length, "\u00e9#{1}".length, b.dup.length\n'),
+    ('string_append', 's = "a"\nt = s\nr = s << "b"\nputs s, t, r\ns << s\nputs s\n'
+                      'k = "key"\nh = {k => 1}\nk << "x"\n'
+                      'puts h["key"], h["keyx"].inspect, k\n'
+                      'u = "a"\nu << 200.chr\nputs u.length\n'
+                      'w = "\u00e9"\nw << "\u00e9"\nputs w.length\n'
+                      'v = ""\n3.times { v << "ab" }\nputs v, v.length\n'
+                      'x = "a" * 3\nx << "b"\nputs x, x.dup << "c", x\n'
+                      'STUFF = "hello\\n"\nhello = ""\n'
+                      '1000.times { hello << STUFF }\nputs hello.length\n'),
     ('string_us_ascii_source', '# coding: us-ascii\nputs "\\xC3\\xA9".length, "a".length\n'),
     ('block_param', 'def m(&b)\n  b\nend\nputs m.inspect\nputs m { 1 }.call\n'
                     'def c(&b)\n  b.call(2)\nend\nputs c { |x| x * 10 }\n'

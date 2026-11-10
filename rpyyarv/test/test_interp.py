@@ -1255,6 +1255,15 @@ def test_an_array_new_or_dup_is_refused(source, msg, compile_source):
     ('[1] + 1\n', 'no implicit conversion of Integer into Array'),
     ('[1] * -1\n', 'negative argument'),
     ('"a" * -1\n', 'negative argument'),
+    ('# frozen_string_literal: true\n"x" << "y"\n',
+     'can\'t modify frozen String: "x"'),
+    ('# frozen_string_literal: true\n"x" << nil\n',
+     'no implicit conversion of nil into String'),
+    ('nil.to_s << "a"\n', 'can\'t modify frozen String: ""'),
+    ('{"k" => 1}.keys[0] << "a"\n', 'can\'t modify frozen String: "k"'),
+    ('"a" << 1\n', '<< with an Integer is not supported yet'),
+    ('"\u00e9" << 200.chr\n',
+     'incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)'),
     ('"\u00e9" + 200.chr\n',
      'incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)'),
     ('"#{200.chr}\u00e9"\n',
@@ -1476,7 +1485,7 @@ def test_a_break_or_catch_is_refused_where_unsupported(source, msg,
     ('1 << (2 ** 40)\n', 'shift width too big (RangeError)'),
     ('256.chr\n', '256 out of char range (RangeError)'),
     ('(-1).chr\n', '-1 out of char range (RangeError)'),
-    ('"a" << "b"\n', 'undefined method \'<<\' for "a"')])
+    ('nil << 1\n', "undefined method '<<' for nil")])
 def test_a_bit_operation_is_refused_where_cruby_raises_or_unsupported(
         source, msg, compile_source):
     expect_unsupported(loader.load_dump(compile_source(source)), None, msg)
