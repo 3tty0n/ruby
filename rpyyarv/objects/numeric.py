@@ -150,16 +150,30 @@ def _step(i, last, step, w_block):
 
 
 class W_Upto(W_CFunc):
+    step = 1
+
     def call(self, w_recv, args_w, w_block):
+        name = symbols.name_of(self.mid)
         if w_block is None:
             raise UnsupportedOperation(
-                "upto without a block (an Enumerator) is not supported yet")
+                "%s without a block (an Enumerator) is not supported yet"
+                % name)
         w_last = args_w[0]
         if not isinstance(w_last, W_Integer):
-            raise UnsupportedOperation('upto to %s is not supported yet'
-                                       % w_last.getclass().name)
-        _step(w_recv.int_w(), w_last.int_w(), 1, w_block)
+            raise UnsupportedOperation('%s to %s is not supported yet'
+                                       % (name, w_last.getclass().name))
+        _step(w_recv.int_w(), w_last.int_w(), self.step, w_block)
         return w_recv
+
+
+class W_Downto(W_Upto):
+    step = -1
+
+
+class W_IntZero(W_CFunc):
+    def call(self, w_recv, args_w, w_block):
+        return newbool(not isinstance(w_recv, W_Bignum)
+                       and w_recv.int_w() == 0)
 
 
 class W_Step(W_CFunc):
@@ -224,7 +238,8 @@ def install_integer(w_class):
     _add_self(w_class, 'numerator')
     _add_const(w_class, 'denominator', newint(1))
     for name, cls, arity in [('times', W_Times, 0), ('to_f', W_ToF, 0),
-                             ('upto', W_Upto, 1), ('step', W_Step, -1),
+                             ('upto', W_Upto, 1), ('downto', W_Downto, 1),
+                             ('zero?', W_IntZero, 0), ('step', W_Step, -1),
                              ('-@', W_Negate, 0), ('chr', W_Chr, 0)]:
         mid = symbols.intern(name)
         w_class.add_method(mid, cls(mid, arity))

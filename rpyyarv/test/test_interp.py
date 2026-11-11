@@ -1291,6 +1291,9 @@ def test_an_array_method_is_refused(source, msg, compile_source):
      'step without a limit (an endless loop) is not supported yet'),
     ('1.step(3, 1.5) { }\n', 'step by Float is not supported yet'),
     ('1.upto(2.5) { }\n', 'upto to Float is not supported yet'),
+    ('5.downto(2.5) { }\n', 'downto to Float is not supported yet'),
+    ('5.downto(3)\n',
+     'downto without a block (an Enumerator) is not supported yet'),
     ('(-8.0) ** 0.5\n',
      '-8.0 ** 0.5 is a Complex: RPyYARV has no Complex yet'),
     ('2.0 ** "a"\n', "String can't be coerced into Float")])

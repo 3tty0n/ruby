@@ -729,6 +729,10 @@ CRUBY_CASES = [
                       'x = "a" * 3\nx << "b"\nputs x, x.dup << "c", x\n'
                       'STUFF = "hello\\n"\nhello = ""\n'
                       '1000.times { hello << STUFF }\nputs hello.length\n'),
+    ('downto_zero', 'r = 5.downto(3) { |i| print i }\nputs\n'
+                    'puts r, 3.downto(5) { puts :x }\n'
+                    'puts(5.downto(2) { |i| break i * 10 if i == 3 })\n'
+                    'puts 0.zero?, 5.zero?, (2 ** 70).zero?, (-1).zero?\n'),
     ('string_us_ascii_source', '# coding: us-ascii\nputs "\\xC3\\xA9".length, "a".length\n'),
     ('block_param', 'def m(&b)\n  b\nend\nputs m.inspect\nputs m { 1 }.call\n'
                     'def c(&b)\n  b.call(2)\nend\nputs c { |x| x * 10 }\n'
