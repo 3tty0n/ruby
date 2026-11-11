@@ -1,20 +1,25 @@
 """Unit tests for the interpreter loop: instructions, calls, classes."""
 
+import pytest
+
 from rpyyarv import insns
 from rpyyarv import interp
+from rpyyarv import loader
 from rpyyarv import symbols
 from rpyyarv.error import UnsupportedOperation
 from rpyyarv.frame import Frame
 from rpyyarv.iseq import W_CallInfo, NO_BLOCK_ISEQ
 from rpyyarv.methods import W_CFunc, W_ISeqMethod
 from rpyyarv.objects.instance import W_Object
-from rpyyarv.objects.klass import W_Class, w_class_class, w_object_class
+from rpyyarv.objects.klass import (W_Class, w_array_class, w_class_class,
+                                   w_float_class, w_integer_class,
+                                   w_object_class, w_string_class)
 from rpyyarv.objects.main import W_Main, w_main
 from rpyyarv.objects.string import W_String
 from rpyyarv.objects.array import W_Array
 from rpyyarv.objects.regexp import W_Regexp
 from rpyyarv.objects.transparent import W_Fixnum, w_nil, w_true, w_false
-from rpyyarv.test.support import asm, capture, expect_unsupported
+from rpyyarv.test.support import asm, capture, expect_unsupported, run_dump
 
 
 
@@ -37,12 +42,12 @@ def test_arith():
 def test_locals():
     iseq = asm([W_Fixnum(42)], 2, 4, [
         insns.PUTOBJECT, 0,
-        insns.SETLOCAL, 1,
-        insns.GETLOCAL, 1,
+        insns.SETLOCAL, 1, 0,
+        insns.GETLOCAL, 1, 0,
         insns.LEAVE,
     ])
     assert interp.run(iseq).int_w() == 42
-    iseq2 = asm([], 2, 4, [insns.GETLOCAL, 0, insns.LEAVE])
+    iseq2 = asm([], 2, 4, [insns.GETLOCAL, 0, 0, insns.LEAVE])
     assert interp.run(iseq2) is w_nil
 
 
@@ -72,25 +77,25 @@ def test_loop_sum():
     # local 0 = i, local 1 = sum
     iseq = asm([W_Fixnum(0), W_Fixnum(1), W_Fixnum(100)], 2, 4, [
         insns.PUTOBJECT, 0,
-        insns.SETLOCAL, 1,
+        insns.SETLOCAL, 1, 0,
         insns.PUTOBJECT, 1,
-        insns.SETLOCAL, 0,
+        insns.SETLOCAL, 0, 0,
         ':loop',
-        insns.GETLOCAL, 0,
+        insns.GETLOCAL, 0, 0,
         insns.PUTOBJECT, 2,
         insns.OPT_LE,
         insns.BRANCHUNLESS, 'end',
-        insns.GETLOCAL, 1,
-        insns.GETLOCAL, 0,
+        insns.GETLOCAL, 1, 0,
+        insns.GETLOCAL, 0, 0,
         insns.OPT_PLUS,
-        insns.SETLOCAL, 1,
-        insns.GETLOCAL, 0,
+        insns.SETLOCAL, 1, 0,
+        insns.GETLOCAL, 0, 0,
         insns.PUTOBJECT, 1,
         insns.OPT_PLUS,
-        insns.SETLOCAL, 0,
+        insns.SETLOCAL, 0, 0,
         insns.JUMP, 'loop',
         ':end',
-        insns.GETLOCAL, 1,
+        insns.GETLOCAL, 1, 0,
         insns.LEAVE,
     ])
     assert interp.run(iseq).int_w() == 5050
@@ -100,31 +105,31 @@ def test_fib_iter():
     # locals: 0 = a, 1 = b, 2 = i, 3 = t
     iseq = asm([W_Fixnum(0), W_Fixnum(1), W_Fixnum(30)], 4, 4, [
         insns.PUTOBJECT, 0,
-        insns.SETLOCAL, 0,
+        insns.SETLOCAL, 0, 0,
         insns.PUTOBJECT, 1,
-        insns.SETLOCAL, 1,
+        insns.SETLOCAL, 1, 0,
         insns.PUTOBJECT, 0,
-        insns.SETLOCAL, 2,
+        insns.SETLOCAL, 2, 0,
         ':loop',
-        insns.GETLOCAL, 2,
+        insns.GETLOCAL, 2, 0,
         insns.PUTOBJECT, 2,
         insns.OPT_LT,
         insns.BRANCHUNLESS, 'end',
-        insns.GETLOCAL, 0,
-        insns.GETLOCAL, 1,
+        insns.GETLOCAL, 0, 0,
+        insns.GETLOCAL, 1, 0,
         insns.OPT_PLUS,
-        insns.SETLOCAL, 3,
-        insns.GETLOCAL, 1,
-        insns.SETLOCAL, 0,
-        insns.GETLOCAL, 3,
-        insns.SETLOCAL, 1,
-        insns.GETLOCAL, 2,
+        insns.SETLOCAL, 3, 0,
+        insns.GETLOCAL, 1, 0,
+        insns.SETLOCAL, 0, 0,
+        insns.GETLOCAL, 3, 0,
+        insns.SETLOCAL, 1, 0,
+        insns.GETLOCAL, 2, 0,
         insns.PUTOBJECT, 1,
         insns.OPT_PLUS,
-        insns.SETLOCAL, 2,
+        insns.SETLOCAL, 2, 0,
         insns.JUMP, 'loop',
         ':end',
-        insns.GETLOCAL, 0,
+        insns.GETLOCAL, 0, 0,
         insns.LEAVE,
     ])
     assert interp.run(iseq).int_w() == 832040
@@ -140,7 +145,7 @@ def test_unsupported():
     try:
         interp.run(iseq)
     except UnsupportedOperation as e:
-        assert e.msg == 'not an integer'
+        assert e.msg == "undefined method '+' for nil"
     else:
         raise AssertionError('expected UnsupportedOperation')
 
@@ -185,8 +190,8 @@ def test_putself():
 def _add_iseq():
     # def add(a, b) = a + b
     return asm([], 2, 2, [
-        insns.GETLOCAL, 0,
-        insns.GETLOCAL, 1,
+        insns.GETLOCAL, 0, 0,
+        insns.GETLOCAL, 1, 0,
         insns.OPT_PLUS,
         insns.LEAVE,
     ], name='add', nparams=2)
@@ -195,8 +200,8 @@ def _add_iseq():
 def _sub_iseq():
     # def sub(a, b) = a - b
     return asm([], 2, 2, [
-        insns.GETLOCAL, 0,
-        insns.GETLOCAL, 1,
+        insns.GETLOCAL, 0, 0,
+        insns.GETLOCAL, 1, 0,
         insns.OPT_MINUS,
         insns.LEAVE,
     ], name='sub', nparams=2)
@@ -247,20 +252,20 @@ def _fib_program(n):
     """What CRuby compiles for `def fib(n) ... end; fib(n)`."""
     fib_id = symbols.intern('fib')
     w_body = asm([W_Fixnum(2), W_Fixnum(1), W_CallInfo(fib_id, 1)], 1, 6, [
-        insns.GETLOCAL, 0,
+        insns.GETLOCAL, 0, 0,
         insns.PUTOBJECT, 0,
         insns.OPT_LT,
         insns.BRANCHUNLESS, 'rec',
-        insns.GETLOCAL, 0,
+        insns.GETLOCAL, 0, 0,
         insns.LEAVE,
         ':rec',
         insns.PUTSELF,
-        insns.GETLOCAL, 0,
+        insns.GETLOCAL, 0, 0,
         insns.PUTOBJECT, 1,
         insns.OPT_MINUS,
         insns.OPT_SEND_WITHOUT_BLOCK, 2,
         insns.PUTSELF,
-        insns.GETLOCAL, 0,
+        insns.GETLOCAL, 0, 0,
         insns.PUTOBJECT, 0,
         insns.OPT_MINUS,
         insns.OPT_SEND_WITHOUT_BLOCK, 2,
@@ -303,7 +308,7 @@ def test_send_without_block():
     assert interp.execute(iseq, Frame(iseq, W_Main())).int_w() == 42
 
 
-def test_send_with_block_unsupported():
+def test_an_iseq_method_takes_a_block_it_never_yields_to():
     add_id = symbols.intern('add')
     w_block = asm([], 0, 1, [insns.PUTNIL, insns.LEAVE], name='block in add')
     iseq = asm([_add_iseq(), W_Fixnum(1), W_Fixnum(2),
@@ -315,8 +320,7 @@ def test_send_with_block_unsupported():
         insns.SEND, 3, 4,
         insns.LEAVE,
     ])
-    expect_unsupported(iseq, W_Main(),
-                       "send with a block is not supported: 'add'")
+    assert interp.execute(iseq, Frame(iseq, W_Main())).int_w() == 3
 
 
 def test_a_block_runs_under_the_self_it_was_written_in():
@@ -338,32 +342,43 @@ def test_a_block_runs_under_the_self_it_was_written_in():
     assert interp.execute(iseq, Frame(iseq, w_self)) is w_self
 
 
-def test_block_arity_is_checked():
+def _yield_one(w_arg):
+    """call_it { |a, b| b } where the builtin call_it yields only w_arg."""
     class W_CallIt(W_CFunc):
         def call(self, w_recv, args_w, w_block):
-            return interp.call_block(w_block, [w_nil])
+            return interp.call_block(w_block, [w_arg])
 
     call_id = symbols.intern('call_it')
     w_self = W_Main()
     w_self.define_method(call_id, W_CallIt(call_id, 0))
-    w_block = asm([], 2, 2, [insns.PUTNIL, insns.LEAVE],
+    w_block = asm([], 2, 1, [insns.GETLOCAL, 1, 0, insns.LEAVE],
                   name='block in test', nparams=2)
-    # call_it { |a, b| nil } -- but the builtin yields only one value
     iseq = asm([W_CallInfo(call_id, 0), w_block], 0, 2, [
         insns.PUTSELF,
         insns.SEND, 0, 1,
         insns.LEAVE,
     ])
+    return iseq, w_self
+
+
+def test_a_missing_block_argument_is_nil():
+    iseq, w_self = _yield_one(W_Fixnum(7))
+    assert interp.execute(iseq, Frame(iseq, w_self)) is w_nil
+
+
+def test_a_block_does_not_splat_an_array_yet():
+    iseq, w_self = _yield_one(W_Array([W_Fixnum(1), W_Fixnum(2)]))
     expect_unsupported(iseq, w_self,
-                       "block 'block in test' takes 2 argument(s), given 1")
+                       "block 'block in test' would splat its Array "
+                       "argument, which RPyYARV does not support yet")
 
 
 
 def test_inject_with_an_initial_value():
     inject_id = symbols.intern('inject')
     w_block = asm([], 2, 2, [
-        insns.GETLOCAL, 0,
-        insns.GETLOCAL, 1,
+        insns.GETLOCAL, 0, 0,
+        insns.GETLOCAL, 1, 0,
         insns.OPT_PLUS,
         insns.LEAVE,
     ], name='block in test', nparams=2)
@@ -434,7 +449,7 @@ def test_unsupported_call_shapes():
                        "support")
 
     opt_id = symbols.intern('opt')
-    w_body = asm([], 2, 2, [insns.GETLOCAL, 0, insns.LEAVE],
+    w_body = asm([], 2, 2, [insns.GETLOCAL, 0, 0, insns.LEAVE],
                  name='opt', nparams=1, simple_params=False)
     iseq2 = asm([w_body, W_Fixnum(1), W_CallInfo(opt_id, 1)], 0, 4, [
         insns.DEFINEMETHOD, opt_id, 0,
@@ -744,7 +759,7 @@ def test_split_on_empty_regexp():
         ])
         w_ary = interp.run(iseq)
         assert isinstance(w_ary, W_Array)
-        return [w.str_w() for w in w_ary.items_w]
+        return [w.str_w() for w in w_ary.items()]
 
     assert split_of('1021') == ['1', '0', '2', '1']
     assert split_of('') == []
@@ -821,8 +836,8 @@ def test_a_block_reaches_a_cfunc():
     w_self = W_Main()
     w_self.define_method(twice_id, W_Twice(twice_id, 1))
     w_block = asm([], 1, 2, [
-        insns.GETLOCAL, 0,
-        insns.GETLOCAL, 0,
+        insns.GETLOCAL, 0, 0,
+        insns.GETLOCAL, 0, 0,
         insns.OPT_PLUS,
         insns.LEAVE,
     ], name='block in test', nparams=1)
@@ -888,7 +903,7 @@ def test_new_without_initialize_rejects_arguments():
     try:
         _send_new(w_class, [W_Fixnum(1)])
     except UnsupportedOperation as e:
-        assert e.msg == ("wrong number of arguments to 'new' "
+        assert e.msg == ("wrong number of arguments to 'initialize' "
                          "(given 1, expected 0)")
     else:
         raise AssertionError('expected UnsupportedOperation')
@@ -902,7 +917,7 @@ def test_instance_method_is_found_through_its_class():
     w_class.add_method(bar_id, W_ISeqMethod(bar_id, body))
     w_obj = _send_new(w_class, [])
     iseq = asm([W_CallInfo(bar_id, 0)], 1, 2, [
-        insns.GETLOCAL, 0,
+        insns.GETLOCAL, 0, 0,
         insns.OPT_SEND_WITHOUT_BLOCK, 0,
         insns.LEAVE,
     ])
@@ -916,7 +931,7 @@ def test_new_is_not_inherited_by_instances():
     w_obj = _send_new(w_class, [])
     new_id = symbols.intern('new')
     iseq = asm([W_CallInfo(new_id, 0)], 1, 2, [
-        insns.GETLOCAL, 0,
+        insns.GETLOCAL, 0, 0,
         insns.OPT_SEND_WITHOUT_BLOCK, 0,
         insns.LEAVE,
     ])
@@ -965,7 +980,7 @@ def test_method_in_a_class_body_is_public():
 def _send_new(w_class, args_w):
     """Foo.new(*args) through the interpreter's own dispatch."""
     new_id = symbols.intern('new')
-    items = [insns.GETLOCAL, 0]
+    items = [insns.GETLOCAL, 0, 0]
     consts = [W_CallInfo(new_id, len(args_w))]
     for i in range(len(args_w)):
         consts.append(args_w[i])
@@ -977,3 +992,514 @@ def _send_new(w_class, args_w):
     return interp.execute(iseq, frame)
 
 
+def test_a_block_with_a_rest_parameter_is_refused(compile_source):
+    w_iseq = loader.load_dump(compile_source('1.times { |*a| a }\n'))
+    expect_unsupported(w_iseq, None, "block 'block in <main>' has parameters "
+                       "RPyYARV does not support")
+
+
+@pytest.mark.parametrize('source, msg', [
+    ('def !\n  1\nend\n!nil\n', "private method '!' called for nil"),
+    ('def ==(o)\n  1\nend\nnil == 2\n',
+     "private method '==' called for nil")])
+def test_a_private_operator_method_is_refused(source, msg, compile_source):
+    expect_unsupported(loader.load_dump(compile_source(source)), None, msg)
+
+
+@pytest.mark.parametrize('source, frozen', [
+    ('"x"\n', [False]),
+    ('# frozen_string_literal: true\n"x"\n', [True]),
+    ('k = "q"\nh = {}\nh[k] = 1\n[k, h.keys[0]]\n', [False, True]),
+    ('{"k" => 1}.keys\n', [True]),
+    ('[nil.to_s, true.to_s, false.to_s, 1.to_s, :s.to_s]\n',
+     [True, True, True, False, False]),
+    ('[nil.to_s.dup, nil.to_s.clone, "a".clone, "#{1}", "a" + "b"]\n',
+     [False, True, False, False, False]),
+])
+def test_strings_are_frozen_where_cruby_freezes_them(source, frozen,
+                                                     compile_source):
+    w_x = run_dump(compile_source(source))
+    strings_w = w_x.items() if isinstance(w_x, W_Array) else [w_x]
+    assert [w.frozen for w in strings_w] == frozen
+
+
+def test_a_hash_key_is_a_frozen_copy(compile_source):
+    w_x = run_dump(compile_source('k = "q"\nh = {}\nh[k] = 1\n'
+                                  'h[k] = 2\n[k, h.keys[0], h.size]\n'))
+    w_k, w_key, w_size = w_x.items()
+    assert w_key is not w_k and w_key.str_w() == 'q' and w_size.int_w() == 1
+
+
+@pytest.mark.parametrize('source', [
+    'a = [0]\na[0] = a\na.join(",")\n',
+    'a = [0]\nb = [a]\na[0] = b\na.join(",")\n',
+    'a = [0]\na[0] = [[a]]\na.join(",")\n'])
+def test_a_recursive_join_is_refused(source, compile_source):
+    expect_unsupported(loader.load_dump(compile_source(source)), None,
+                       'recursive array join (ArgumentError)')
+
+
+def test_a_tail_call_without_a_block_drops_the_callers_block(compile_source):
+    source = ('def t(n)\n  if n == 0 then yield else t(n - 1) end\nend\n'
+              't(1) { puts 1 }\n')
+    expect_unsupported(loader.load_dump(compile_source(source)), None,
+                       'no block given (yield)')
+
+
+def test_aset_below_the_start_is_refused(compile_source):
+    expect_unsupported(
+        loader.load_dump(compile_source('a = [1, 2, 3]\na[-5] = 0\n')), None,
+        'index -5 too small for array; minimum: -3')
+
+
+@pytest.mark.parametrize('source, msg', [
+    ('class Foo < Array\nend\n',
+     'subclassing the built-in class Array is not supported yet'),
+    ('class A\nend\nclass B\nend\nclass C < A\nend\nclass C < B\nend\n',
+     'superclass mismatch for class C'),
+    ('class A < 3\nend\n',
+     'superclass must be an instance of Class (given an instance of Integer)'),
+    ('X = 1\nclass X\nend\n', 'X is not a class')])
+def test_a_class_definition_is_refused(source, msg, compile_source):
+    expect_unsupported(loader.load_dump(compile_source(source)), None, msg)
+
+
+@pytest.mark.parametrize('source, msg', [
+    ('class Foo\n  puts X\nend\n', 'uninitialized constant Foo::X'),
+    ('class Foo\nend\nputs Foo::Array\n',
+     'uninitialized constant Foo::Array'),
+    ('X = 1\nY = X::Z\n', '1 is not a class/module')])
+def test_a_constant_lookup_is_refused(source, msg, compile_source):
+    expect_unsupported(loader.load_dump(compile_source(source)), None, msg)
+
+
+@pytest.mark.parametrize('source, msg', [
+    ('class Foo\n  def initialize\n  end\nend\nFoo.new.initialize\n',
+     "private method 'initialize' called for #<Foo>"),
+    ('class Foo\n  def initialize(a, b)\n  end\nend\nFoo.new(1)\n',
+     "wrong number of arguments to 'initialize' (given 1, expected 2)"),
+    ('puts Hash.new.length\n', 'Hash.new is not supported yet')])
+def test_an_instance_creation_is_refused(source, msg, compile_source):
+    expect_unsupported(loader.load_dump(compile_source(source)), None, msg)
+
+
+@pytest.mark.parametrize('source, msg', [
+    ('class Foo\n  attr_reader 1\nend\n', '1 is not a symbol nor a string'),
+    ('class Foo\n  attr_reader :a?\nend\n', "invalid attribute name 'a?'"),
+    ('attr_reader :x\n', "undefined method 'attr_reader' for main")])
+def test_an_attribute_definition_is_refused(source, msg, compile_source):
+    expect_unsupported(loader.load_dump(compile_source(source)), None, msg)
+
+
+@pytest.mark.parametrize('source, msg', [
+    ('class K\n  def self.a\n    1\n  end\nend\nK.new.a\n',
+     "undefined method 'a' for #<K>"),
+    ('class K\n  def self.a\n    1\n  end\nend\nclass L\nend\nL.a\n',
+     "undefined method 'a' for L"),
+    ('s = Object.new\ndef s.hi\n  1\nend\n',
+     'a singleton method on #<Object> is not supported yet')])
+def test_a_singleton_method_is_refused(source, msg, compile_source):
+    expect_unsupported(loader.load_dump(compile_source(source)), None, msg)
+
+
+@pytest.mark.parametrize('source, msg', [
+    ('class A\n  def f\n    super\n  end\nend\nA.new.f\n',
+     "super: no superclass method 'f' for #<A>"),
+    ('def g\n  super\nend\ng\n', "super: no superclass method 'g' for main")])
+def test_a_super_call_is_refused(source, msg, compile_source):
+    expect_unsupported(loader.load_dump(compile_source(source)), None, msg)
+
+
+@pytest.mark.parametrize('source, msg', [
+    ('h = {}\nh[1.5] = 1\n', 'a Hash key of class Float is not supported yet'),
+    ('h = {1 => 2}\nh[[1]]\n',
+     'a Hash key of class Array is not supported yet'),
+    ('h = {1 => 2}\nh.each { |k, v| h[k + 1] = v }\n',
+     "can't add a new key into hash during iteration"),
+    ('{1 => 2}.each\n',
+     'each without a block (an Enumerator) is not supported yet')])
+def test_a_hash_operation_is_refused(source, msg, compile_source):
+    expect_unsupported(loader.load_dump(compile_source(source)), None, msg)
+
+
+@pytest.mark.parametrize('source, msg', [
+    ('def f(a)\nend\nf(*[1, 2])\n',
+     "wrong number of arguments to 'f' (given 2, expected 1)"),
+    ('class U\n  def to_a\n    1\n  end\nend\n[*U.new]\n',
+     "can't convert U to Array (U#to_a gives Integer)"),
+    ('def f\n  yield(*[1])\nend\nf { |x| x }\n',
+     'yield passes arguments RPyYARV does not support'),
+    ('class A\n  def f(x)\n  end\nend\nclass B < A\n  def f(x)\n'
+     '    super(*[x])\n  end\nend\nB.new.f(1)\n',
+     'super passes arguments RPyYARV does not support')])
+def test_a_splat_is_refused(source, msg, compile_source):
+    expect_unsupported(loader.load_dump(compile_source(source)), None, msg)
+
+
+@pytest.mark.parametrize('source, msg', [
+    ("x = 'a'\n(1..x)\n", 'bad value for range'),
+    ('x = []\n(x..x)\n', 'a Range of Array is not supported yet'),
+    ('(1.0..2.0).each { }\n', 'each over Float..Float is not supported yet'),
+    ("('a'..'c').each { }\n",
+     'each over String..String is not supported yet'),
+    ('(1..).to_a\n', 'to_a over Integer..NilClass is not supported yet'),
+    ('(0..10).step(0) { }\n', "step can't be 0"),
+    ('(0..10).step(2)\n',
+     'step without a block (an ArithmeticSequence) is not supported yet'),
+    ('(0..1).step(0.5) { }\n', 'step by Float is not supported yet')])
+def test_a_range_operation_is_refused(source, msg, compile_source):
+    expect_unsupported(loader.load_dump(compile_source(source)), None, msg)
+
+
+@pytest.mark.parametrize('source, msg', [
+    ('3.times.map\n',
+     'map without a block (an Enumerator) is not supported yet'),
+    ('3.times.map(&:to_s)\n',
+     '&Symbol through to_proc is not supported yet'),
+    ('3.times.to_h\n',
+     "undefined method 'to_h' for #<Enumerator: 3:times>")])
+def test_a_times_enumerator_operation_is_refused(source, msg,
+                                                 compile_source):
+    expect_unsupported(loader.load_dump(compile_source(source)), None, msg)
+
+
+@pytest.mark.parametrize('source, msg', [
+    ('1 + "a"\n', "String can't be coerced into Integer"),
+    ('1 - nil\n', "nil can't be coerced into Integer"),
+    ('1.0 * :a\n', ":a can't be coerced into Float"),
+    ('class C\nend\n1 / C.new\n', "C can't be coerced into Integer"),
+    ('1 < "a"\n', 'comparison of Integer with String failed'),
+    ('1.5 >= true\n', 'comparison of Float with true failed'),
+    ('class K\n  def coerce(o)\n    [o, 1]\n  end\nend\n1 + K.new\n',
+     '+ with K through coerce is not supported yet'),
+    ('"a" + 1\n', 'no implicit conversion of Integer into String'),
+    ('"a" + nil\n', 'no implicit conversion of nil into String'),
+    ('"a" + :b\n', 'no implicit conversion of Symbol into String'),
+    ('class S\n  def to_str\n    "s"\n  end\nend\n"a" + S.new\n',
+     '+ with S through to_str is not supported yet')])
+def test_an_operator_on_a_wrong_type_is_refused(source, msg, compile_source):
+    expect_unsupported(loader.load_dump(compile_source(source)), None, msg)
+
+
+class W_Redefined(W_CFunc):
+    def call(self, w_recv, args_w, w_block):
+        return W_String('redefined')
+
+
+@pytest.fixture
+def redefine():
+    """Defines a method on a built-in class as Ruby code would, then
+    undoes it."""
+    saved = []
+
+    def define(w_class, name):
+        saved.append((w_class, w_class.methods.methods.copy(),
+                      w_class.redefined))
+        mid = symbols.intern(name)
+        w_class.add_user_method(mid, W_Redefined(mid, -1))
+    yield define
+    for w_class, methods, redefined in reversed(saved):
+        w_class.methods.methods = methods
+        w_class.redefined = redefined
+        w_class.method_table_changed()
+
+
+@pytest.mark.parametrize('w_class, name, source, expected', [
+    (w_integer_class, '+', 'puts 1 + 2\n', 'redefined\n'),
+    (w_integer_class, '<', 'puts 1 < 2\n', 'redefined\n'),
+    (w_float_class, '*', 'puts 1.5 * 2\n', 'redefined\n'),
+    (w_float_class, '*', 'puts 3 * 2\n', '6\n'),
+    (w_integer_class, '==', 'puts 1 == 2\nputs [1] == [2]\n',
+     'redefined\ntrue\n'),
+    (w_integer_class, '!=', 'puts 1 != 2\n', 'redefined\n'),
+    (w_string_class, '+', 'puts "a" + "b"\n', 'redefined\n'),
+    (w_array_class, '[]', 'puts [1][0]\n', 'redefined\n'),
+    (w_array_class, '[]=', 'a = [1]\na[0] = 2\nputs a[0]\n', '1\n'),
+    (w_array_class, 'length', 'puts [1].length\nputs [1].size\n',
+     'redefined\n1\n'),
+    (w_array_class, 'size', 'puts [1].size\n', 'redefined\n')])
+def test_a_redefined_builtin_method_is_called(w_class, name, source, expected,
+                                              redefine, compile_source):
+    redefine(w_class, name)
+    out, _ = capture(lambda: run_dump(compile_source(source)))
+    assert out == expected
+
+
+@pytest.mark.parametrize('source, msg', [
+    ('class Integer\n  def mark\n    @m = 1\n  end\nend\n1.mark\n',
+     "cannot set instance variable '@m' on 1"),
+    ('class Array\n  attr_writer :tag\nend\n[].tag = 1\n',
+     "cannot set instance variable '@tag' on <W_Array 0>"),
+    ('class Integer < Object\nend\n', 'superclass mismatch for class Integer')])
+def test_reopening_a_builtin_class_is_refused_where_unsupported(
+        source, msg, compile_source):
+    expect_unsupported(loader.load_dump(compile_source(source)), None, msg)
+
+
+@pytest.mark.parametrize('source, msg', [
+    ('Array.new(-1)\n', 'negative array size'),
+    ('Array.new("a")\n', 'no implicit conversion of String into Integer'),
+    ('Array.new(nil)\n', 'no implicit conversion from nil to integer'),
+    ('Array.new(1, 2, 3)\n',
+     "wrong number of arguments to 'initialize' (given 3, expected 0..2)"),
+    ('(1..2).dup\n', 'dup of <W_Range 1..2> is not supported yet')])
+def test_an_array_new_or_dup_is_refused(source, msg, compile_source):
+    expect_unsupported(loader.load_dump(compile_source(source)), None, msg)
+
+
+@pytest.mark.parametrize('source, msg', [
+    ('[1].at("x")\n', 'no implicit conversion of String into Integer'),
+    ('[1].first(-1)\n', 'negative array size'),
+    ('[1, 2].insert(-9, 0)\n',
+     'index -9 too small for array; minimum: -3'),
+    ('[1] + 1\n', 'no implicit conversion of Integer into Array'),
+    ('[1] * -1\n', 'negative argument'),
+    ('"a" * -1\n', 'negative argument'),
+    ('# frozen_string_literal: true\n"x" << "y"\n',
+     'can\'t modify frozen String: "x"'),
+    ('# frozen_string_literal: true\n"x" << nil\n',
+     'no implicit conversion of nil into String'),
+    ('nil.to_s << "a"\n', 'can\'t modify frozen String: ""'),
+    ('{"k" => 1}.keys[0] << "a"\n', 'can\'t modify frozen String: "k"'),
+    ('"a" << 1\n', '<< with an Integer is not supported yet'),
+    ('"\u00e9" << 200.chr\n',
+     'incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)'),
+    ('"\u00e9" + 200.chr\n',
+     'incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)'),
+    ('"#{200.chr}\u00e9"\n',
+     'incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8'),
+    ('[200.chr, "\u00e9"].join\n',
+     'incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8'),
+    ('[1].join(2)\n', 'no implicit conversion of Integer into String'),
+    ('200.chr.split(//)\n', 'split on a BINARY String is not supported yet'),
+    ('"ab" * (2 ** 62)\n', 'argument too big'),
+    ('[1] * nil\n', 'no implicit conversion from nil to integer'),
+    ('[1][0, nil]\n', 'no implicit conversion from nil to integer'),
+    ('[1][0, 1, 2]\n',
+     "wrong number of arguments to '[]' (given 3, expected 1..2)"),
+    ('[1, 2].slice!(0..1)\n', 'slice! with a Range is not supported yet'),
+    ('[1].pop(1, 2)\n',
+     "wrong number of arguments to 'pop' (given 2, expected 0..1)"),
+    ('puts ["a"].inspect\n', "undefined method 'inspect' for \"a\"")])
+def test_an_array_method_is_refused(source, msg, compile_source):
+    expect_unsupported(loader.load_dump(compile_source(source)), None, msg)
+
+
+@pytest.mark.parametrize('source, msg', [
+    ('1.step(3, nil) { }\n', 'step must be numeric'),
+    ('1.step(3, 0.0) { }\n', "step can't be 0"),
+    ('1.step(3, 1, 1) { }\n',
+     "wrong number of arguments to 'step' (given 3, expected 0..2)"),
+    ('1.step(nil) { }\n',
+     'step without a limit (an endless loop) is not supported yet'),
+    ('1.step(3, 1.5) { }\n', 'step by Float is not supported yet'),
+    ('1.upto(2.5) { }\n', 'upto to Float is not supported yet'),
+    ('5.downto(2.5) { }\n', 'downto to Float is not supported yet'),
+    ('"ab".unpack("C*")\n', 'unpack("C*") is not supported yet'),
+    ('"ab".unpack("c*") { }\n', 'unpack with a block is not supported yet'),
+    ('"ab".unpack(nil)\n', 'no implicit conversion of nil into String'),
+    ('5.downto(3)\n',
+     'downto without a block (an Enumerator) is not supported yet'),
+    ('(-8.0) ** 0.5\n',
+     '-8.0 ** 0.5 is a Complex: RPyYARV has no Complex yet'),
+    ('2.0 ** "a"\n', "String can't be coerced into Float")])
+def test_a_numeric_method_is_refused(source, msg, compile_source):
+    expect_unsupported(loader.load_dump(compile_source(source)), None, msg)
+
+
+@pytest.mark.parametrize('source, msg', [
+    ('(1..3).collect\n',
+     'collect without a block (an Enumerator) is not supported yet'),
+    ('(1..).map { }\n', 'map over Integer..NilClass is not supported yet'),
+    ('class Range\n  def each\n  end\nend\n(1..3).map { }\n',
+     'map after redefining Range#each is not supported yet'),
+    ('class Range\n  def each\n  end\nend\n(1..3).to_a\n',
+     'to_a after redefining Range#each is not supported yet')])
+def test_a_range_method_is_refused(source, msg, compile_source):
+    expect_unsupported(loader.load_dump(compile_source(source)), None, msg)
+
+
+@pytest.mark.parametrize('source, msg', [
+    ('Math.sqrt(-1)\n', 'Numerical argument is out of domain - sqrt'),
+    ('Math.sqrt(:a)\n', "can't convert Symbol into Float"),
+    ('Math.sin(nil)\n', "can't convert nil into Float"),
+    ('Math.cos("1")\n', "can't convert String into Float"),
+    ('class Integer\n  def to_f\n  end\nend\nMath.sqrt(4)\n',
+     'Math.sqrt after redefining Integer#to_f is not supported yet'),
+    ('Math.new\n', "undefined method 'new' for Math"),
+    ('class X < Math\nend\n',
+     'superclass must be an instance of Class (given an instance of '
+     'Module)'),
+    ('class Math\nend\n', 'Math is not a class')])
+def test_math_is_refused_where_cruby_raises(source, msg, compile_source):
+    expect_unsupported(loader.load_dump(compile_source(source)), None, msg)
+
+
+@pytest.mark.parametrize('source, msg', [
+    ('def f(a, *r)\nend\nf\n',
+     "wrong number of arguments to 'f' (given 0, expected 1+)"),
+    ('class A\n  def m(*a)\n  end\nend\nclass B < A\n  def m(*a)\n'
+     '    super\n  end\nend\nB.new.m(1)\n',
+     'super passes arguments RPyYARV does not support')])
+def test_rest_parameters_are_refused_where_unsupported(source, msg,
+                                                       compile_source):
+    expect_unsupported(loader.load_dump(compile_source(source)), None, msg)
+
+
+@pytest.mark.parametrize('source, msg', [
+    ('"%.2f" % 1\n', 'format %.2f of Integer is not supported yet'),
+    ('"%d" % 1.5\n', 'format %d of Float is not supported yet'),
+    ('"%.3d" % 5\n', 'format %.3d is not supported yet'),
+    ('"%5s" % "a"\n', 'format %5s is not supported yet'),
+    ('"%d %d" % [1]\n', 'too few arguments'),
+    ('"%" % 1\n', 'incomplete format specifier; use %% (double %) instead'),
+    ('"%9999999999d" % 1\n', 'width too big (ArgumentError)'),
+    ('printf(1, "x")\n', 'printf to Integer is not supported yet'),
+    ('Integer(3.7)\n', 'Integer() of Float is not supported yet'),
+    ('Integer("1", 2)\n',
+     'Integer() with a base or options is not supported yet')])
+def test_a_format_or_integer_call_is_refused(source, msg, compile_source):
+    expect_unsupported(loader.load_dump(compile_source(source)), None, msg)
+
+
+@pytest.mark.parametrize('source, msg', [
+    ('2 ** -1\n', '2 ** -1 is a Rational: RPyYARV has no Rational yet'),
+    ('0 ** -1\n', 'divided by 0 (ZeroDivisionError)'),
+    ('(-8) ** 0.5\n',
+     '-8.0 ** 0.5 is a Complex: RPyYARV has no Complex yet')])
+def test_an_integer_power_or_negation_is_refused(source, msg, compile_source):
+    expect_unsupported(loader.load_dump(compile_source(source)), None, msg)
+
+
+@pytest.mark.parametrize('source, msg', [
+    ('undef foo\n', "undefined method 'foo' for class 'Object'"),
+    ('alias a b\n', "undefined method 'b' for class 'Object'"),
+    ('class C\n  undef foo\nend\n', "undefined method 'foo' for class 'C'"),
+    ('class C\n  def a\n  end\n  undef a\nend\nC.new.a\n',
+     "undefined method 'a' for #<C>"),
+    ('class P\n  def a\n  end\nend\nclass Q < P\n  undef a\nend\n'
+     'Q.new.a\n', "undefined method 'a' for #<Q>"),
+    ('alias say puts\nsay.say\n', "private method 'say' called for nil")])
+def test_alias_and_undef_follow_cruby(source, msg, compile_source):
+    expect_unsupported(loader.load_dump(compile_source(source)), None, msg)
+
+
+@pytest.mark.parametrize('source, msg', [
+    ('case 2\nwhen (1..3) then 1\nend\n', 'Range#=== is not supported yet'),
+    ('case "a"\nwhen /a/ then 1\nend\n', 'Regexp#=== is not supported yet')])
+def test_case_equality_is_refused_where_unsupported(source, msg,
+                                                    compile_source):
+    expect_unsupported(loader.load_dump(compile_source(source)), None, msg)
+
+
+@pytest.mark.parametrize('source, msg', [
+    ('send\n', 'no method name given'),
+    ('send(1)\n', '1 is not a symbol nor a string'),
+    ('class C\n  def method_missing(m)\n  end\nend\nC.new.frozen?\n',
+     'Object#frozen? is not supported yet'),
+    ('def method_missing(m)\nend\n1.foo\n',
+     'method_missing on 1 is not supported yet'),
+    ('class C\nend\nC.new.foo\n', "undefined method 'foo' for #<C>")])
+def test_send_and_method_missing_are_refused_where_unsupported(
+        source, msg, compile_source):
+    expect_unsupported(loader.load_dump(compile_source(source)), None, msg)
+
+
+@pytest.mark.parametrize('source, msg', [
+    ('->(a, b) { a }.call(1)\n',
+     'wrong number of arguments (given 1, expected 2)'),
+    ('lambda { |a| a }.call(1, 2)\n',
+     'wrong number of arguments (given 2, expected 1)'),
+    ('lambda { |a, b| a }.call([4, 5])\n',
+     'wrong number of arguments (given 1, expected 2)'),
+    ('lambda\n', 'tried to create Proc object without a block'),
+    ('proc { |a, b| a }.call([4, 5])\n',
+     "block 'block in <main>' would splat its Array argument, which RPyYARV "
+     "does not support yet"),
+    ('f = -> { 1 }\nf.call { 2 }\n',
+     'calling a Proc with a block is not supported yet')])
+def test_a_proc_call_is_refused_where_cruby_raises_or_unsupported(
+        source, msg, compile_source):
+    expect_unsupported(loader.load_dump(compile_source(source)), None, msg)
+
+
+@pytest.mark.parametrize('source, msg', [
+    ('"abc"[1, 2]\n', '[] with 2 arguments is not supported yet'),
+    ('"abc"["b"]\n', '[] with String is not supported yet'),
+    ('"abc".slice(1.5)\n', 'slice with Float is not supported yet')])
+def test_a_string_index_is_refused_where_unsupported(source, msg,
+                                                     compile_source):
+    expect_unsupported(loader.load_dump(compile_source(source)), None, msg)
+
+
+@pytest.mark.parametrize('source, msg', [
+    ('def y\n  yield 1, 2\nend\nl = ->(a) { a }\ny(&l)\n',
+     'wrong number of arguments (given 2, expected 1)'),
+    ('def k(&b)\n  lambda(&b)\nend\nk { }\n',
+     'the lambda method requires a literal block'),
+    ('def m(&b)\nend\nm(&1)\n',
+     'no implicit conversion of Integer into Proc'),
+    ('def m(&b)\nend\nm(&:itself)\n',
+     '&Symbol through to_proc is not supported yet'),
+    ('def q(&b)\n  b = 1\nend\n', '1 unimplemented instruction(s) in 1 '
+     'occurrence(s): setblockparam x1')])
+def test_a_block_argument_is_refused_where_cruby_raises_or_unsupported(
+        source, msg, compile_source):
+    from rpyyarv.error import UnsupportedOperation as Unsupported
+    try:
+        w_iseq = loader.load_dump(compile_source(source))
+    except Unsupported as e:
+        assert e.msg == msg
+        return
+    expect_unsupported(w_iseq, None, msg)
+
+
+@pytest.mark.parametrize('source, msg', [
+    ('(2 ** 64).times { }\n',
+     'the Bignum 18446744073709551616 is not supported here yet'),
+    ('[1][2 ** 64]\n',
+     'the Bignum 18446744073709551616 is not supported here yet'),
+    ('2 ** (2 ** 64)\n', 'exponent is too large (ArgumentError)'),
+    ('(2 ** 64) ** -1\n',
+     '18446744073709551616 ** -1 is a Rational: RPyYARV has no Rational yet')])
+def test_a_bignum_is_refused_where_unsupported(source, msg, compile_source):
+    expect_unsupported(loader.load_dump(compile_source(source)), None, msg)
+
+
+def test_print_without_arguments_is_refused(compile_source):
+    expect_unsupported(loader.load_dump(compile_source('print\n')), None,
+                       'print without arguments (it prints $_) is not '
+                       'supported yet')
+
+
+@pytest.mark.parametrize('source, msg', [
+    ('pr = proc { break 1 }\npr.call\n',
+     'break from proc-closure (LocalJumpError)'),
+    ('pr = proc { break 1 }\n[1].each(&pr)\n',
+     'break from proc-closure (LocalJumpError)'),
+    ('[1].each { |x| return 1 }\n',
+     "throw 1 in 'block in <main>' is not supported"),
+    ('begin\n  1\nrescue\n  2\nend\n',
+     "'<main>' has a catch table (rescue), which RPyYARV does not support")])
+def test_a_break_or_catch_is_refused_where_unsupported(source, msg,
+                                                      compile_source):
+    from rpyyarv.error import UnsupportedOperation as Unsupported
+    try:
+        w_iseq = loader.load_dump(compile_source(source))
+    except Unsupported as e:
+        assert e.msg == msg
+        return
+    expect_unsupported(w_iseq, None, msg)
+
+
+@pytest.mark.parametrize('source, msg', [
+    ('1 & 1.5\n', '& with Float is not supported yet'),
+    ('1 << "a"\n', '<< with String is not supported yet'),
+    ('1 << (2 ** 64)\n', 'a shift by a Bignum is not supported yet'),
+    ('1 << (2 ** 40)\n', 'shift width too big (RangeError)'),
+    ('256.chr\n', '256 out of char range (RangeError)'),
+    ('(-1).chr\n', '-1 out of char range (RangeError)'),
+    ('nil << 1\n', "undefined method '<<' for nil")])
+def test_a_bit_operation_is_refused_where_cruby_raises_or_unsupported(
+        source, msg, compile_source):
+    expect_unsupported(loader.load_dump(compile_source(source)), None, msg)

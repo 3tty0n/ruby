@@ -49,7 +49,7 @@ def test_disasm_decodes_every_operand_kind():
     mid = symbols.intern('each')
     w_body = W_ISeq('body', [insns.LEAVE], [], 0, 1)
     iseq = W_ISeq('<test>', [insns.PUTOBJECT, 0,
-                             insns.GETLOCAL, 1,
+                             insns.GETLOCAL, 1, 0,
                              insns.JUMP, 8,
                              insns.SEND, 1, NO_BLOCK_ISEQ,
                              insns.DEFINEMETHOD, mid, 2,

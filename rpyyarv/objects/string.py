@@ -1,31 +1,345 @@
+import math
 import sys
 
 from rpyyarv import symbols
 from rpyyarv.methods import W_CFunc
-from rpyyarv.objects.array import W_Array
+from rpyyarv.objects.array import W_Array, num2long
 from rpyyarv.objects.base import W_Root
+from rpyyarv.objects.float import W_Float
 from rpyyarv.objects.klass import w_string_class
 from rpyyarv.objects.regexp import W_Regexp
-from rpyyarv.objects.transparent import newint
+from rpyyarv.objects.transparent import (W_Integer, describe_conversion,
+                                         newbool, newint, w_nil)
 from rpyyarv.error import UnsupportedOperation
+from rpyyarv.rlib import StringBuilder, float_fixed
+
+ENC_UTF8 = 0
+ENC_BINARY = 1
+ENC_NAMES = ['UTF-8', 'BINARY (ASCII-8BIT)']
 
 class W_String(W_Root):
-    # Immutable: nothing mutates a string yet, so frozen, chilled and
-    # ordinary literals are all the same object here.
-    def __init__(self, strval):
+    # While builder holds what << appended, strval is stale: read str_w()
+    def __init__(self, strval, encoding=ENC_UTF8, frozen=False):
         self.strval = strval
+        self.encoding = encoding
+        self.frozen = frozen
+        self.builder = None
 
     def getclass(self):
         return w_string_class
 
     def str_w(self):
+        if self.builder is not None:
+            self.strval = self.builder.build()
+            self.builder = None
         return self.strval
 
     def to_s_str(self):
-        return self.strval
+        return self.str_w()
 
     def repr(self):
-        return '"%s"' % self.strval
+        return '"%s"' % self.str_w()
+
+    def copy(self):
+        return W_String(self.str_w(), self.encoding)
+
+    def append(self, s):
+        if self.builder is None:
+            self.builder = StringBuilder()
+            self.builder.append(self.strval)
+        self.builder.append(s)
+
+
+def is_ascii(s):
+    for c in s:
+        if ord(c) >= 0x80:
+            return False
+    return True
+
+
+def _incompatible(enc_a, enc_b):
+    return UnsupportedOperation('incompatible character encodings: %s and %s'
+                                % (ENC_NAMES[enc_a], ENC_NAMES[enc_b]))
+
+
+def _compatible(w_a, w_b):
+    """The encoding rb_enc_compatible gives w_a and w_b."""
+    enc = w_a.encoding
+    if w_b.encoding != enc and not is_ascii(w_b.str_w()):
+        if not is_ascii(w_a.str_w()):
+            raise _incompatible(enc, w_b.encoding)
+        enc = w_b.encoding
+    return enc
+
+
+def concat2(w_a, w_b):
+    return W_String(w_a.str_w() + w_b.str_w(), _compatible(w_a, w_b))
+
+
+def concat(parts_w):
+    """parts_w joined, as appending them one by one to an empty String."""
+    enc = ENC_UTF8
+    i = 0
+    while i < len(parts_w):
+        w_part = parts_w[i]
+        if w_part.encoding != enc and not is_ascii(w_part.str_w()):
+            j = 0
+            while j < i:
+                if not is_ascii(parts_w[j].str_w()):
+                    raise _incompatible(enc, w_part.encoding)
+                j += 1
+            enc = w_part.encoding
+        i += 1
+    return W_String(''.join([w.str_w() for w in parts_w]), enc)
+
+
+def str_eql(w_a, w_b):
+    """rb_str_hash_cmp: the same bytes, in comparable encodings."""
+    return w_a.str_w() == w_b.str_w() and (w_a.encoding == w_b.encoding
+                                           or is_ascii(w_a.str_w()))
+
+
+def char_count(s):
+    n = 0
+    i = 0
+    while i < len(s):
+        i += _char_width(s, i)
+        n += 1
+    return n
+
+
+class W_StrAref(W_CFunc):
+    def call(self, w_recv, args_w, w_block):
+        assert isinstance(w_recv, W_String)
+        if len(args_w) != 1:
+            raise UnsupportedOperation(
+                '%s with %d arguments is not supported yet'
+                % (symbols.name_of(self.mid), len(args_w)))
+        w_index = args_w[0]
+        if not isinstance(w_index, W_Integer):
+            raise UnsupportedOperation('%s with %s is not supported yet'
+                                       % (symbols.name_of(self.mid),
+                                          w_index.getclass().name))
+        s = w_recv.str_w()
+        index = w_index.int_w()
+        binary = w_recv.encoding == ENC_BINARY
+        if index < 0:
+            index += len(s) if binary else char_count(s)
+            if index < 0:
+                return w_nil
+        if binary:
+            if index >= len(s):
+                return w_nil
+            return W_String(s[index], ENC_BINARY)
+        i = 0
+        while i < len(s) and index > 0:
+            i += _char_width(s, i)
+            index -= 1
+        if i >= len(s):
+            return w_nil
+        return W_String(s[i:i + _char_width(s, i)])
+
+
+class W_StrEqual(W_CFunc):
+    def call(self, w_recv, args_w, w_block):
+        assert isinstance(w_recv, W_String)
+        w_other = args_w[0]
+        return newbool(isinstance(w_other, W_String)
+                       and str_eql(w_recv, w_other))
+
+
+TO_STR = symbols.intern('to_str')
+
+
+def _string_arg(name, w_other):
+    if isinstance(w_other, W_String):
+        return w_other
+    if w_other.lookup_class().find_method(TO_STR) is not None:
+        raise UnsupportedOperation(
+            '%s with %s through to_str is not supported yet'
+            % (name, w_other.getclass().name))
+    raise UnsupportedOperation('no implicit conversion of %s into String'
+                               % describe_conversion(w_other))
+
+
+class W_StrPlus(W_CFunc):
+    def call(self, w_recv, args_w, w_block):
+        assert isinstance(w_recv, W_String)
+        return concat2(w_recv, _string_arg('+', args_w[0]))
+
+
+class W_StrAppend(W_CFunc):
+    def call(self, w_recv, args_w, w_block):
+        assert isinstance(w_recv, W_String)
+        w_other = args_w[0]
+        if not isinstance(w_other, W_Integer):
+            w_other = _string_arg('<<', w_other)
+        if w_recv.frozen:
+            raise UnsupportedOperation("can't modify frozen String: %s"
+                                       % w_recv.repr())
+        if not isinstance(w_other, W_String):
+            raise UnsupportedOperation('<< with an Integer is not supported yet')
+        w_recv.encoding = _compatible(w_recv, w_other)
+        w_recv.append(w_other.str_w())
+        return w_recv
+
+
+class W_Unpack(W_CFunc):
+    def call(self, w_recv, args_w, w_block):
+        assert isinstance(w_recv, W_String)
+        fmt = _string_arg('unpack', args_w[0]).str_w()
+        if fmt != 'c*':
+            raise UnsupportedOperation('unpack("%s") is not supported yet'
+                                       % fmt)
+        if w_block is not None:
+            raise UnsupportedOperation('unpack with a block is not supported '
+                                       'yet')
+        items_w = []
+        for c in w_recv.str_w():
+            n = ord(c)
+            if n >= 0x80:
+                n -= 0x100
+            items_w.append(newint(n))
+        return W_Array(items_w)
+
+
+class W_StrTimes(W_CFunc):
+    def call(self, w_recv, args_w, w_block):
+        assert isinstance(w_recv, W_String)
+        n = num2long(args_w[0])
+        if n < 0:
+            raise UnsupportedOperation('negative argument')
+        if n > 0 and len(w_recv.str_w()) > _MAX_FIXNUM // n:
+            raise UnsupportedOperation('argument too big')
+        return W_String(w_recv.str_w() * n, w_recv.encoding)
+
+
+class _Spec(object):
+    """One %-directive: flags, width, precision and conversion."""
+    def __init__(self, text, conv, minus, plus, space, zero, width,
+                 precision):
+        self.text = text
+        self.conv = conv
+        self.minus = minus
+        self.plus = plus
+        self.space = space
+        self.zero = zero
+        self.width = width
+        self.precision = precision
+
+
+def _number_at(fmt, i, what):
+    j = i
+    while j < len(fmt) and fmt[j].isdigit():
+        j += 1
+    if j - i > 9:
+        raise UnsupportedOperation('%s too big (ArgumentError)' % what)
+    return (int(fmt[i:j]) if j > i else 0), j
+
+
+def _parse_spec(fmt, start):
+    """The directive at fmt[start] == '%', or refuse what is not supported."""
+    i = start + 1
+    minus = plus = space = zero = False
+    while i < len(fmt) and fmt[i] in '-+ 0':
+        minus = minus or fmt[i] == '-'
+        plus = plus or fmt[i] == '+'
+        space = space or fmt[i] == ' '
+        zero = zero or fmt[i] == '0'
+        i += 1
+    width, i = _number_at(fmt, i, 'width')
+    precision = -1
+    if i < len(fmt) and fmt[i] == '.':
+        precision, i = _number_at(fmt, i + 1, 'precision')
+    if i == len(fmt):
+        raise UnsupportedOperation('incomplete format specifier; use %% '
+                                   '(double %) instead')
+    conv = fmt[i]
+    text = fmt[start:i + 1]
+    plain = len(text) == 2
+    if not ((conv == 'd' and precision < 0) or conv == 'f'
+            or (conv in 's%' and plain)):
+        raise UnsupportedOperation('format %s is not supported yet' % text)
+    return _Spec(text, conv, minus, plus, space, zero, width, precision)
+
+
+def _pad(sign, body, width, minus, zero):
+    fill = width - len(sign) - len(body)
+    if fill <= 0:
+        return sign + body
+    if minus:
+        return sign + body + ' ' * fill
+    if zero:
+        return sign + '0' * fill + body
+    return ' ' * fill + sign + body
+
+
+def _convert(spec, w_arg):
+    """w_arg written as spec says."""
+    from rpyyarv import interp
+    if spec.conv == 's':
+        return interp.to_s_string(w_arg)
+    if not (isinstance(w_arg, W_Integer) if spec.conv == 'd'
+            else isinstance(w_arg, W_Float)):
+        raise UnsupportedOperation('format %s of %s is not supported yet'
+                                   % (spec.text, w_arg.getclass().name))
+    zero = spec.zero
+    if spec.conv == 'd':
+        body = w_arg.to_s_str()
+    else:
+        x = w_arg.float_w()
+        if math.isnan(x) or math.isinf(x):
+            zero = False
+            body = 'NaN' if math.isnan(x) else '-Inf' if x < 0 else 'Inf'
+        else:
+            body = float_fixed(x, 6 if spec.precision < 0 else spec.precision)
+    sign = '+' if spec.plus else (' ' if spec.space else '')
+    if body.startswith('-'):
+        sign = '-'
+        body = body[1:]
+    return W_String(_pad(sign, body, spec.width, spec.minus, zero))
+
+
+def sprintf(w_fmt, args_w):
+    """sprintf for %d, %f, %s and %%, the conversions benchmarks use."""
+    fmt = w_fmt.str_w()
+    parts_w = []
+    argi = 0
+    lit = 0
+    i = fmt.find('%')
+    while i >= 0:
+        if i > lit:
+            parts_w.append(W_String(fmt[lit:i], w_fmt.encoding))
+        spec = _parse_spec(fmt, i)
+        if spec.conv == '%':
+            parts_w.append(W_String('%'))
+        else:
+            if argi >= len(args_w):
+                raise UnsupportedOperation('too few arguments')
+            parts_w.append(_convert(spec, args_w[argi]))
+            argi += 1
+        lit = i + len(spec.text)
+        i = fmt.find('%', lit)
+    if lit < len(fmt):
+        parts_w.append(W_String(fmt[lit:], w_fmt.encoding))
+    return concat(parts_w)
+
+
+class W_StrFormat(W_CFunc):
+    def call(self, w_recv, args_w, w_block):
+        assert isinstance(w_recv, W_String)
+        w_arg = args_w[0]
+        if isinstance(w_arg, W_Array):
+            return sprintf(w_recv, w_arg.items()[:])
+        return sprintf(w_recv, [w_arg])
+
+
+class W_Length(W_CFunc):
+    def call(self, w_recv, args_w, w_block):
+        assert isinstance(w_recv, W_String)
+        if w_recv.encoding == ENC_BINARY:
+            return newint(len(w_recv.str_w()))
+        return newint(char_count(w_recv.str_w()))
 
 _MAX_FIXNUM = sys.maxsize
 
@@ -66,12 +380,7 @@ def string_to_i(s):
 class W_ToI(W_CFunc):
     def call(self, w_recv, args_w, w_block):
         assert isinstance(w_recv, W_String)
-        try:
-            return newint(int(w_recv.strval))
-        except ValueError:
-            raise UnsupportedOperation(
-                "to_i on %s: RPyYARV only supports a plain integer string, "
-                "not Ruby's full parsing" % w_recv.repr())
+        return newint(string_to_i(w_recv.str_w()))
 
 def _char_width(s, i):
     """Bytes in the UTF-8 character at s[i]; a broken one is a byte on its
@@ -124,8 +433,11 @@ class W_Split(W_CFunc):
     def call(self, w_recv, args_w, w_block):
         assert isinstance(w_recv, W_String)
         w_pattern = args_w[0]
+        if w_recv.encoding == ENC_BINARY:
+            raise UnsupportedOperation(
+                'split on a BINARY String is not supported yet')
         if isinstance(w_pattern, W_Regexp) and w_pattern.pattern == '':
-            s = w_recv.strval
+            s = w_recv.str_w()
             n = len(s)
             chars_w = []
             i = 0
@@ -168,3 +480,22 @@ def install(w_class):
     w_class.add_method(mid, W_ToI(mid, 0))  # arity=0
     split_id = symbols.intern('split')
     w_class.add_method(split_id, W_Split(split_id, 1))  # arity=1: 0 arguments and 2 arguments(with limit) are not supported yet
+    for name in ['length', 'size']:
+        mid = symbols.intern(name)
+        w_class.add_method(mid, W_Length(mid, 0))
+    for name in ['==', '===']:
+        mid = symbols.intern(name)
+        w_class.add_method(mid, W_StrEqual(mid, 1))
+    for name in ['[]', 'slice']:
+        mid = symbols.intern(name)
+        w_class.add_method(mid, W_StrAref(mid, -1))
+    plus_id = symbols.intern('+')
+    w_class.add_method(plus_id, W_StrPlus(plus_id, 1))
+    append_id = symbols.intern('<<')
+    w_class.add_method(append_id, W_StrAppend(append_id, 1))
+    unpack_id = symbols.intern('unpack')
+    w_class.add_method(unpack_id, W_Unpack(unpack_id, 1))
+    times_id = symbols.intern('*')
+    w_class.add_method(times_id, W_StrTimes(times_id, 1))
+    format_id = symbols.intern('%')
+    w_class.add_method(format_id, W_StrFormat(format_id, 1))

@@ -1,7 +1,10 @@
+from rpyyarv.error import UnsupportedOperation
 from rpyyarv.objects.base import W_Root
 from rpyyarv.objects.klass import (w_false_class, w_integer_class,
                                    w_nil_class, w_true_class)
-from rpyyarv.rlib import UnboxedValue, elidable, tagged_ints_enabled
+from rpyyarv.objects.symbol import W_Symbol
+from rpyyarv.rlib import (UnboxedValue, elidable, rbigint,
+                          tagged_ints_enabled)
 
 
 class W_Integer(W_Root):
@@ -13,6 +16,9 @@ class W_Integer(W_Root):
 
     def getclass(self):
         return w_integer_class
+
+    def float_w(self):
+        return float(self.int_w())
 
     def to_s_str(self):
         return str(self.int_w())
@@ -47,6 +53,49 @@ def newint(value):
         return W_SmallFixnum(value)
     except OverflowError:
         return W_Fixnum(value)
+
+
+INF = float('inf')
+
+
+# An Integer beyond 64 bits. int_w() refuses it, so every place that takes
+# an Integer as a machine word stops instead of using a wrong value.
+class W_Bignum(W_Integer):
+    _immutable_fields_ = ['big']
+
+    def __init__(self, big):
+        self.big = big
+
+    def int_w(self):
+        raise UnsupportedOperation('the Bignum %s is not supported here yet'
+                                   % self.big.str())
+
+    def float_w(self):
+        try:
+            return self.big.tofloat()
+        except OverflowError:
+            if self.big.lt(rbigint.fromint(0)):
+                return -INF
+            return INF
+
+    def to_s_str(self):
+        return self.big.str()
+
+    def repr(self):
+        return self.big.str()
+
+
+def newbig(big):
+    try:
+        return newint(big.toint())
+    except OverflowError:
+        return W_Bignum(big)
+
+
+def bigint_of(w_int):
+    if isinstance(w_int, W_Bignum):
+        return w_int.big
+    return rbigint.fromint(w_int.int_w())
 
 
 class W_Nil(W_Root):
@@ -97,3 +146,16 @@ def newbool(flag):
     if flag:
         return w_true
     return w_false
+
+
+def describe_operand(w_x):
+    if (w_x is w_nil or w_x is w_true or w_x is w_false
+            or isinstance(w_x, W_Symbol)):
+        return w_x.repr()
+    return w_x.getclass().name
+
+
+def describe_conversion(w_x):
+    if w_x is w_nil or w_x is w_true or w_x is w_false:
+        return w_x.repr()
+    return w_x.getclass().name

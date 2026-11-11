@@ -38,10 +38,10 @@ class W_ISeq(W_Root):
     # The loader hands over finished lists; nothing appends afterwards, so the
     # JIT may fold code[pc] and consts[idx] away when pc and iseq are green.
     _immutable_fields_ = ['name', 'code[*]', 'consts[*]', 'nlocals',
-                          'stack_max', 'nparams', 'simple_params']
+                          'stack_max', 'nparams', 'simple_params', 'has_rest']
 
     def __init__(self, name, code, consts, nlocals, stack_max,
-                 nparams=0, simple_params=True):
+                 nparams=0, simple_params=True, has_rest=False):
         self.name = name
         self.code = code
         self.consts = consts
@@ -49,18 +49,22 @@ class W_ISeq(W_Root):
         self.stack_max = stack_max
         # Required parameters, which YARV puts in locals[0:nparams] in order.
         self.nparams = nparams
-        # False once the loader saw optional/rest/post/keyword/block
-        # parameters; the call path refuses those rather than guessing.
+        # False once the loader saw optional/post/keyword/block parameters,
+        # or a rest parameter outside a method; the call path refuses those
+        # rather than guessing.
         self.simple_params = simple_params
+        self.has_rest = has_rest
 
     def repr(self):
         return '<W_ISeq %s>' % self.name
 
 
 class W_CallInfo(W_Root):
-    _immutable_fields_ = ['mid', 'argc', 'simple', 'fcall', 'tail']
+    _immutable_fields_ = ['mid', 'argc', 'simple', 'fcall', 'tail', 'splat',
+                          'blockarg']
 
-    def __init__(self, mid, argc, simple=True, fcall=True, tail=None):
+    def __init__(self, mid, argc, simple=True, fcall=True, tail=None,
+                 splat=False, blockarg=False):
         self.mid = mid
         self.argc = argc
         # False once the loader saw call flags outside SIMPLE_CALL_FLAGS.
@@ -69,17 +73,37 @@ class W_CallInfo(W_Root):
         self.fcall = fcall
         # None for hand-built ISeqs.
         self.tail = tail
+        self.splat = splat
+        # The block is the value on top of the arguments, as in f(&b).
+        self.blockarg = blockarg
 
     def repr(self):
         return '<W_CallInfo %s argc=%d>' % (symbols.name_of(self.mid),
                                            self.argc)
 
 class W_Block(W_Root):
-    _immutable_fields_ = ['w_iseq', 'w_self']
+    _immutable_fields_ = ['w_iseq', 'w_self', 'outer', 'is_lambda']
 
-    def __init__(self, w_iseq, w_self):
+    def __init__(self, w_iseq, w_self, outer, is_lambda=False):
         self.w_iseq = w_iseq
         self.w_self = w_self
+        self.outer = outer
+        self.is_lambda = is_lambda
+        # The Proc this block became, which f(&pr) and &b must hand back
+        self.w_proc = None
 
     def repr(self):
         return '<W_Block %s>' % self.w_iseq.name
+
+
+class W_ConstPath(W_Root):
+    _immutable_fields_ = ['mids[*]', 'absolute']
+
+    def __init__(self, mids, absolute=False):
+        self.mids = mids
+        # ::A starts at Object instead of the lexical scope
+        self.absolute = absolute
+
+    def repr(self):
+        return '<W_ConstPath %s>' % '::'.join(
+            [symbols.name_of(mid) for mid in self.mids])

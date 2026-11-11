@@ -17,12 +17,18 @@ class W_Method(W_Root):
         return '<W_Method %s>' % symbols.name_of(self.mid)
 
 
-class W_ISeqMethod(W_Method):
-    _immutable_fields_ = ['w_iseq']
+class W_Undefined(W_Method):
+    pass
 
-    def __init__(self, mid, w_iseq, private=False):
+
+class W_ISeqMethod(W_Method):
+    _immutable_fields_ = ['w_iseq', 'cref', 'w_owner']
+
+    def __init__(self, mid, w_iseq, private=False, cref=None, w_owner=None):
         W_Method.__init__(self, mid, private)
         self.w_iseq = w_iseq
+        self.cref = cref
+        self.w_owner = w_owner
 
     def repr(self):
         return '<W_ISeqMethod %s>' % self.w_iseq.name

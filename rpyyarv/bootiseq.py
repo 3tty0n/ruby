@@ -56,12 +56,17 @@ def check(ary):
 
 def load(iseqw):
     """A RawProgram whose iseq 0 is iseqw."""
-    program = rawiseq.RawProgram('', _path(iseqw))
-    pending = [boot.call0(iseqw, 'to_a')]
-    i = 0
-    while i < len(pending):
-        _read_iseq(program, pending, pending[i])
-        i += 1
+    # CRuby's GC sees neither this RPython list nor these stack frames
+    boot.rb_gc_disable()
+    try:
+        program = rawiseq.RawProgram('', _path(iseqw))
+        pending = [boot.call0(iseqw, 'to_a')]
+        i = 0
+        while i < len(pending):
+            _read_iseq(program, pending, pending[i])
+            i += 1
+    finally:
+        boot.rb_gc_enable()
     return program
 
 
@@ -83,7 +88,9 @@ def _read_iseq(program, pending, ary):
         _int_or(boot.hash_aref(misc, 'stack_max'), 0),
         _int_or(boot.hash_aref(params, 'lead_num'), 0),
         _extra_params(params),
-        boot.ary_len(boot.ary_entry(ary, I_CATCH)))
+        boot.ary_len(boot.ary_entry(ary, I_CATCH)),
+        _catch_types(boot.ary_entry(ary, I_CATCH)),
+        _int_or(boot.hash_aref(misc, 'arg_size'), 0))
     program.add_iseq(raw)
 
     body = boot.ary_entry(ary, I_BODY)
@@ -113,6 +120,8 @@ def _insn(pending, e):
 def _operand(pending, v):
     if boot.is_fixnum(v):
         return rawiseq.int_operand(boot.num2long(v))
+    if boot.is_float(v):
+        return rawiseq.float_operand(boot.num2dbl(v))
     if boot.is_nil(v):
         return rawiseq.RawOperand(rawiseq.OP_NIL)
     if boot.is_true(v):
@@ -122,7 +131,7 @@ def _operand(pending, v):
     if boot.is_symbol(v):
         return rawiseq.RawOperand(rawiseq.OP_SYM, 0, boot.sym_of(v))
     if boot.is_string(v):
-        return rawiseq.RawOperand(rawiseq.OP_STR, 0, boot.str_of(v))
+        return rawiseq.RawOperand(rawiseq.OP_STR, _binary(v), boot.str_of(v))
     if boot.is_array(v):
         if is_iseq(v):
             pending.append(v)
@@ -137,18 +146,57 @@ def _operand(pending, v):
     if boot.is_hash(v):
         mid = boot.hash_aref(v, 'mid')
         argc = boot.hash_aref(v, 'orig_argc')
-        if boot.is_symbol(mid) and not boot.is_nil(argc):
+        if (boot.is_symbol(mid) or boot.is_nil(mid)) and not boot.is_nil(argc):
+            name = ''
+            if boot.is_symbol(mid):
+                name = boot.sym_of(mid)
             return rawiseq.RawOperand(
-                rawiseq.OP_CALL, boot.num2long(argc), boot.sym_of(mid),
+                rawiseq.OP_CALL, boot.num2long(argc), name,
                 _int_or(boot.hash_aref(v, 'flag'), 0),
                 not boot.is_nil(boot.hash_aref(v, 'kw_arg')))
+        pairs = boot.call0(v, 'to_a')
+        items = []
+        n = boot.ary_len(pairs)
+        i = 0
+        while i < n:
+            pair = boot.ary_entry(pairs, i)
+            items.append(_operand(pending, boot.ary_entry(pair, 0)))
+            items.append(_operand(pending, boot.ary_entry(pair, 1)))
+            i += 1
+        return rawiseq.RawOperand(rawiseq.OP_HASH, 0, '', 0, False, items)
+    if boot.inspect(boot.call0(v, 'class')) == 'Range':
+        exclusive = boot.is_true(boot.call0(v, 'exclude_end?'))
+        return rawiseq.RawOperand(
+            rawiseq.OP_RANGE, 1 if exclusive else 0, '', 0, False,
+            [_operand(pending, boot.call0(v, 'begin')),
+             _operand(pending, boot.call0(v, 'end'))])
     return rawiseq.RawOperand(rawiseq.OP_OTHER, 0, boot.inspect(v))
+
+
+def _binary(v):
+    name = boot.str_of(boot.call0(boot.call0(v, 'encoding'), 'to_s'))
+    if name == 'UTF-8' or name == 'US-ASCII':
+        return 0
+    if name == 'ASCII-8BIT':
+        return 1
+    raise LoadError('a String in %s is not supported' % name)
 
 
 def _int_or(v, default):
     if boot.is_nil(v):
         return default
     return boot.num2long(v)
+
+
+def _catch_types(catch_table):
+    names = []
+    n = boot.ary_len(catch_table)
+    i = 0
+    while i < n:
+        names.append(boot.sym_of(boot.ary_entry(boot.ary_entry(catch_table, i),
+                                                0)))
+        i += 1
+    return ','.join(names)
 
 
 def _extra_params(params):

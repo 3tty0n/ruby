@@ -6,17 +6,35 @@ from rpyyarv.rlib import hint, unroll_safe
 _EMPTY_SLOTS = []
 
 
+class Cref(object):
+    """The class bodies a piece of code is written in, innermost first.
+
+    None stands for the top level, whose class is Object.
+    """
+    _immutable_fields_ = ['w_class', 'parent']
+
+    def __init__(self, w_class, parent):
+        self.w_class = w_class
+        self.parent = parent
+
+
 class Frame(object):
     # Keep small frames in one allocation; larger ones use overflow slots.
     _virtualizable_ = ['sp', 'slot0', 'slot1', 'slot2', 'slot3',
                       'slot4', 'slot5', 'slot6', 'slot7', 'extra[*]']
+    _immutable_fields_ = ['outer', 'w_block', 'cref', 'w_method']
 
     @unroll_safe
-    def __init__(self, iseq, w_self=w_main):
+    def __init__(self, iseq, w_self=w_main, outer=None, w_block=None,
+                 cref=None, w_method=None):
         self = hint(self, access_directly=True, fresh_virtualizable=True)
         # sp is absolute: the operand stack starts after the locals.
         self.sp = iseq.nlocals
         self.w_self = w_self
+        self.outer = outer
+        self.w_block = w_block
+        self.cref = cref
+        self.w_method = w_method
         self.slot0 = w_nil if iseq.nlocals > 0 else None
         self.slot1 = w_nil if iseq.nlocals > 1 else None
         self.slot2 = w_nil if iseq.nlocals > 2 else None
@@ -43,8 +61,22 @@ class Frame(object):
     def setlocal(self, index, w_x):
         self._setslot(index, w_x)
 
+    @unroll_safe
+    def outer_at(self, level):
+        outer = self.outer
+        while level > 1:
+            outer = outer.outer
+            level -= 1
+        return outer
+
     def peek(self, index):
         return self._getslot(index)
+
+    def topn(self, n):
+        return self._getslot(self.sp - 1 - n)
+
+    def set_topn(self, n, w_x):
+        self._setslot(self.sp - 1 - n, w_x)
 
     def push(self, w_x):
         sp = self.sp

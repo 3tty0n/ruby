@@ -4,8 +4,23 @@ try:
     from rpython.rlib.jit import (
         JitDriver, elidable, promote, unroll_safe, dont_look_inside, hint,
         set_user_param, TraceLimitTooHigh)
-    from rpython.rlib.objectmodel import UnboxedValue, fetch_translated_config
+    from rpython.rlib.objectmodel import (
+        UnboxedValue, compute_hash, compute_identity_hash, compute_unique_id,
+        fetch_translated_config, r_dict, we_are_translated)
     from rpython.rlib.rstackovf import StackOverflow, check_stack_overflow
+    from rpython.rlib.rfloat import formatd
+    from rpython.rlib.rarithmetic import ovfcheck
+    from rpython.rlib.rbigint import rbigint
+    from rpython.rlib.rstring import StringBuilder
+
+    def float_repr(x):
+        return formatd(x, 'r', 0)
+
+    def float_fixed(x, precision):
+        if not we_are_translated():
+            return _float_fixed_ctypes(x, precision)
+        from rpyyarv import boot
+        return boot.format_fixed(x, precision)
 
     def oswrite(fd, s):
         os.write(fd, s)
@@ -65,6 +80,103 @@ except ImportError:
 
     StackOverflow = RuntimeError
 
+    float_repr = repr
+
+    def float_fixed(x, precision):
+        return _float_fixed_ctypes(x, precision)
+
+    def ovfcheck(r):
+        import sys
+        if not -sys.maxsize - 1 <= r <= sys.maxsize:
+            raise OverflowError
+        return r
+
+    class rbigint(object):
+        # The part of rpython.rlib.rbigint's interface RPyYARV uses
+        def __init__(self, value):
+            self.value = value
+
+        @staticmethod
+        def fromint(value):
+            return rbigint(value)
+
+        @staticmethod
+        def fromfloat(value):
+            return rbigint(int(value))
+
+        def toint(self):
+            return ovfcheck(self.value)
+
+        def tofloat(self):
+            return float(self.value)
+
+        def str(self):
+            return str(self.value)
+
+        def bit_length(self):
+            return self.value.bit_length()
+
+        def add(self, other):
+            return rbigint(self.value + other.value)
+
+        def sub(self, other):
+            return rbigint(self.value - other.value)
+
+        def mul(self, other):
+            return rbigint(self.value * other.value)
+
+        def floordiv(self, other):
+            return rbigint(self.value // other.value)
+
+        def mod(self, other):
+            return rbigint(self.value % other.value)
+
+        def pow(self, other):
+            return rbigint(self.value ** other.value)
+
+        def neg(self):
+            return rbigint(-self.value)
+
+        def lshift(self, n):
+            return rbigint(self.value << n)
+
+        def rshift(self, n):
+            return rbigint(self.value >> n)
+
+        def and_(self, other):
+            return rbigint(self.value & other.value)
+
+        def or_(self, other):
+            return rbigint(self.value | other.value)
+
+        def xor(self, other):
+            return rbigint(self.value ^ other.value)
+
+        def eq(self, other):
+            return self.value == other.value
+
+        def lt(self, other):
+            return self.value < other.value
+
+        def le(self, other):
+            return self.value <= other.value
+
+        def gt(self, other):
+            return self.value > other.value
+
+        def ge(self, other):
+            return self.value >= other.value
+
+    class StringBuilder(object):
+        def __init__(self):
+            self.parts = []
+
+        def append(self, s):
+            self.parts.append(s)
+
+        def build(self):
+            return ''.join(self.parts)
+
     def check_stack_overflow():
         pass
 
@@ -76,6 +188,35 @@ except ImportError:
 
     def promote(x):
         return x
+
+    def compute_unique_id(x):
+        return id(x)
+
+    compute_hash = hash
+    compute_identity_hash = id
+
+    class _DictKey(object):
+        def __init__(self, d, key):
+            self.d = d
+            self.key = key
+
+        def __eq__(self, other):
+            return self.d.key_eq(self.key, other.key)
+
+        def __hash__(self):
+            return self.d.key_hash(self.key)
+
+    class r_dict(object):
+        def __init__(self, key_eq, key_hash):
+            self.key_eq = key_eq
+            self.key_hash = key_hash
+            self.entries = {}
+
+        def get(self, key, default):
+            return self.entries.get(_DictKey(self, key), default)
+
+        def __setitem__(self, key, value):
+            self.entries[_DictKey(self, key)] = value
 
     def unroll_safe(func):
         return func
@@ -95,6 +236,23 @@ except ImportError:
 
     def now_ns():
         return time.monotonic_ns()
+
+
+# Untranslated, the shim is reached through ctypes: rffi would recompile it
+def _float_fixed_ctypes(x, precision):
+    import ctypes
+    here = os.path.dirname(os.path.abspath(__file__))
+    for ext in ('dylib', 'so'):
+        path = os.path.join(here, 'librpyyarv_boot.' + ext)
+        if os.path.exists(path):
+            fn = ctypes.CDLL(path).rpyyarv_format_fixed
+            break
+    fn.argtypes = [ctypes.c_char_p, ctypes.c_size_t, ctypes.c_int,
+                   ctypes.c_double]
+    n = fn(None, 0, precision, x)
+    buf = ctypes.create_string_buffer(n + 1)
+    fn(buf, n + 1, precision, x)
+    return str(buf.value.decode('ascii'))
 
 
 def tagged_ints_enabled():

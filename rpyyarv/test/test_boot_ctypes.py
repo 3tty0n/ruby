@@ -31,12 +31,14 @@ SIGNATURES = {
     "rpyyarv_is_array": ([VALUE], ctypes.c_int),
     "rpyyarv_is_symbol": ([VALUE], ctypes.c_int),
     "rpyyarv_is_fixnum": ([VALUE], ctypes.c_int),
+    "rpyyarv_is_float": ([VALUE], ctypes.c_int),
     "rpyyarv_is_string": ([VALUE], ctypes.c_int),
     "rpyyarv_is_hash": ([VALUE], ctypes.c_int),
     "rpyyarv_is_nil": ([VALUE], ctypes.c_int),
     "rpyyarv_is_true": ([VALUE], ctypes.c_int),
     "rpyyarv_is_false": ([VALUE], ctypes.c_int),
     "rpyyarv_num2long": ([VALUE], ctypes.c_long),
+    "rpyyarv_num2dbl": ([VALUE], ctypes.c_double),
     "rpyyarv_hash_aref": ([VALUE, ctypes.c_char_p], VALUE),
     "rpyyarv_sym_cstr": ([VALUE], ctypes.c_char_p),
 }
@@ -130,8 +132,12 @@ def check_frontend_helpers(lib, call0, ary, script):
     """The shim calls bootiseq.py makes, exercised without RPython."""
     check_layout(lib, ary, "<main>")
     misc = lib.rpyyarv_ary_entry(ary, to_a_layout.I_MISC)
-    assert lib.rpyyarv_num2long(
-        lib.rpyyarv_hash_aref(misc, b"stack_max")) > 0, "misc[:stack_max]"
+    stack_max = lib.rpyyarv_hash_aref(misc, b"stack_max")
+    assert lib.rpyyarv_num2long(stack_max) > 0, "misc[:stack_max]"
+    # fib.rb has no Float literal, so make one
+    flo = call0(stack_max, "to_f")
+    assert lib.rpyyarv_is_float(flo) and not lib.rpyyarv_is_float(stack_max)
+    assert lib.rpyyarv_num2dbl(flo) == float(lib.rpyyarv_num2long(stack_max))
     assert lib.rpyyarv_is_nil(lib.rpyyarv_hash_aref(misc, b"nope"))
     # ruby_options yields ISEQ_TYPE_MAIN where compile_file yields :top
     assert sym(lib, lib.rpyyarv_ary_entry(ary, to_a_layout.I_TYPE)) \

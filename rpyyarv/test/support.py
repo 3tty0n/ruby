@@ -15,11 +15,15 @@ from rpyyarv import rawiseq
 from rpyyarv import symbols
 from rpyyarv.error import UnsupportedOperation
 from rpyyarv.frame import Frame
-from rpyyarv.iseq import W_CallInfo, W_ISeq, NO_BLOCK_ISEQ
+from rpyyarv.iseq import W_CallInfo, W_ConstPath, W_ISeq, NO_BLOCK_ISEQ
 from rpyyarv.objects.array import W_Array
+from rpyyarv.objects.float import W_Float
+from rpyyarv.objects.hash import W_Hash
 from rpyyarv.objects.main import W_Main
+from rpyyarv.objects.range import W_Range
 from rpyyarv.objects.regexp import W_Regexp
-from rpyyarv.objects.string import W_String
+from rpyyarv.objects.string import ENC_BINARY, ENC_UTF8, W_String
+from rpyyarv.objects.symbol import W_Symbol
 from rpyyarv.objects.transparent import W_Fixnum, w_false, w_nil, w_true
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -271,10 +275,11 @@ def _check_code_references(w_iseq):
                     '%s in %s jumps outside the code'
                     % (insns.NAMES[op], w_iseq.name))
             elif t == insns.T_LINDEX_T:
-                assert 0 <= value < w_iseq.nlocals
+                assert 0 <= value and (operands[1] > 0
+                                       or value < w_iseq.nlocals)
             elif t == insns.T_ISEQ:
                 if value == NO_BLOCK_ISEQ:
-                    assert op == insns.SEND
+                    assert op == insns.SEND or op == insns.INVOKESUPER
                 else:
                     assert 0 <= value < len(w_iseq.consts)
                     assert isinstance(w_iseq.consts[value], W_ISeq)
@@ -283,6 +288,8 @@ def _check_code_references(w_iseq):
                 assert isinstance(w_iseq.consts[value], W_CallInfo)
             elif t == insns.T_VALUE:
                 assert 0 <= value < len(w_iseq.consts)
+            elif t == insns.T_IC:
+                assert isinstance(w_iseq.consts[value], W_ConstPath)
             elif t == insns.T_ID or t == insns.T_RB_NUM_T:
                 pass
             else:
@@ -294,6 +301,9 @@ def _check_literal(w_x, raw_op):
     if kind == rawiseq.OP_INT:
         assert isinstance(w_x, W_Fixnum)
         assert w_x.int_w() == raw_op.intval
+    elif kind == rawiseq.OP_FLOAT:
+        assert isinstance(w_x, W_Float)
+        assert repr(w_x.float_w()) == repr(raw_op.floatval)    # tells -0.0 apart
     elif kind == rawiseq.OP_NIL:
         assert w_x is w_nil
     elif kind == rawiseq.OP_TRUE:
@@ -303,11 +313,26 @@ def _check_literal(w_x, raw_op):
     elif kind == rawiseq.OP_STR:
         assert isinstance(w_x, W_String)
         assert w_x.str_w() == raw_op.strval
+        assert w_x.encoding == (ENC_BINARY if raw_op.intval else ENC_UTF8)
+    elif kind == rawiseq.OP_SYM:
+        assert isinstance(w_x, W_Symbol)
+        assert symbols.name_of(w_x.mid) == raw_op.strval
     elif kind == rawiseq.OP_ARRAY:
         assert isinstance(w_x, W_Array)
-        assert len(w_x.items_w) == len(raw_op.items)
+        assert w_x.length() == len(raw_op.items)
         for i in range(len(raw_op.items)):
-            _check_literal(w_x.items_w[i], raw_op.items[i])
+            _check_literal(w_x.getitem(i), raw_op.items[i])
+    elif kind == rawiseq.OP_HASH:
+        assert isinstance(w_x, W_Hash)
+        assert len(w_x.keys_w) * 2 == len(raw_op.items)
+        for i in range(len(w_x.keys_w)):
+            _check_literal(w_x.keys_w[i], raw_op.items[2 * i])
+            _check_literal(w_x.values_w[i], raw_op.items[2 * i + 1])
+    elif kind == rawiseq.OP_RANGE:
+        assert isinstance(w_x, W_Range)
+        assert w_x.exclusive == (raw_op.intval != 0)
+        _check_literal(w_x.w_begin, raw_op.items[0])
+        _check_literal(w_x.w_end, raw_op.items[1])
     elif kind == rawiseq.OP_OTHER:
         # The pattern itself is checked by the regexp tests.
         assert isinstance(w_x, W_Regexp)
@@ -315,7 +340,7 @@ def _check_literal(w_x, raw_op):
         raise AssertionError('unexpected literal kind %r' % kind)
 
 
-def _check_operand_values(raw, w_iseq, decoded, labels, l):
+def _check_operand_values(raw, w_iseq, decoded, labels, l, scope_of):
     for (_, op, operands), insn in zip(decoded, raw.insns):
         raw_ops = _raw_operands(insn, op)
         for i, pos in enumerate(optable.EMIT_POSITIONS[op]):
@@ -327,8 +352,10 @@ def _check_operand_values(raw, w_iseq, decoded, labels, l):
                 assert got == labels[raw_op.strval]
             elif t == insns.T_LINDEX_T:
                 assert raw_op.kind == rawiseq.OP_INT
-                assert got == (raw.nlocals - raw_op.intval
+                scope = scope_of(raw_ops[1].intval)
+                assert got == (scope.nlocals - raw_op.intval
                                + optable.ENV_DATA_SIZE - 1)
+                assert 0 <= got < scope.nlocals
             elif t == insns.T_RB_NUM_T:
                 assert raw_op.kind == rawiseq.OP_INT
                 assert got == raw_op.intval
@@ -348,22 +375,53 @@ def _check_operand_values(raw, w_iseq, decoded, labels, l):
                 assert w_ci.argc == raw_op.intval
                 assert w_ci.fcall == (
                     (raw_op.flag & optable.CALL_FLAG_FCALL) != 0)
-                has_block = (op == insns.SEND
+                has_block = ((op == insns.SEND or op == insns.INVOKESUPER)
                              and raw_ops[1].kind == rawiseq.OP_ISEQ)
+                allowed = optable.SIMPLE_CALL_FLAGS
+                if op == insns.INVOKESUPER:
+                    allowed |= optable.SUPER_CALL_FLAGS
+                if op == insns.SEND or op == insns.OPT_SEND_WITHOUT_BLOCK:
+                    allowed |= optable.SPLAT_CALL_FLAGS
+                if op == insns.SEND:
+                    allowed |= optable.CALL_FLAG_ARGS_BLOCKARG
+                splat = (raw_op.flag & optable.CALL_FLAG_ARGS_SPLAT) != 0
+                blockarg = (raw_op.flag
+                            & optable.CALL_FLAG_ARGS_BLOCKARG) != 0
                 simple = (not raw_op.has_kwarg
-                          and (raw_op.flag & ~optable.SIMPLE_CALL_FLAGS) == 0
+                          and (raw_op.flag & ~allowed) == 0
                           and ((raw_op.flag & optable.CALL_FLAG_ARGS_SIMPLE)
-                               != 0 or has_block))
+                               != 0 or has_block or splat or blockarg))
                 assert w_ci.simple == simple
+                assert w_ci.splat == splat
+                assert w_ci.blockarg == blockarg
             elif t == insns.T_VALUE:
                 assert 0 <= got < len(w_iseq.consts)
                 _check_literal(w_iseq.consts[got], raw_op)
+            elif t == insns.T_IC:
+                w_path = w_iseq.consts[got]
+                names = [symbols.name_of(mid) for mid in w_path.mids]
+                assert names == [item.strval for item in raw_op.items
+                                 if item.strval != '']
+                assert w_path.absolute == (raw_op.items[0].strval == '')
             else:
                 raise AssertionError('unexpected operand type %r' % t)
 
 
 def check_loaded(program, l):
     assert set(l.w_iseqs) <= set(range(len(program.iseqs)))
+    parent = {}
+    for index, raw in enumerate(program.iseqs):
+        for insn in raw.insns:
+            for operand in insn.operands:
+                if operand.kind == rawiseq.OP_ISEQ:
+                    parent[operand.intval] = index
+
+    def scope_of(index, level):
+        while level > 0:
+            index = parent[index]
+            level -= 1
+        return program.iseqs[index]
+
     for index, raw in enumerate(program.iseqs):
         if index not in l.w_iseqs:
             continue
@@ -371,8 +429,20 @@ def check_loaded(program, l):
         assert w_iseq.name == raw.name
         assert w_iseq.nlocals == raw.nlocals
         assert w_iseq.stack_max == raw.stack_max
-        assert w_iseq.nparams == raw.lead_num
-        assert w_iseq.simple_params == (raw.extra_params == '')
+        params = [p for p in raw.extra_params.split(',')
+                  if p != '' and p != 'use_block']
+        nparams = raw.lead_num
+        if params == [] and nparams == 0:
+            nparams = raw.arg_size
+        assert w_iseq.nparams == nparams
+        if raw.type == 'method':
+            params = [p for p in params if p != 'block_start']
+        has_rest = raw.type == 'method' and params == ['rest_start']
+        assert w_iseq.has_rest == has_rest
+        if raw.type == 'block' and raw.lead_num == 1:
+            assert w_iseq.simple_params == (params == ['ambiguous_param0'])
+        else:
+            assert w_iseq.simple_params == (params == [] or has_rest)
         decoded = decode(w_iseq)
         assert len(decoded) == len(raw.insns)
         starts = []
@@ -389,4 +459,5 @@ def check_loaded(program, l):
             assert op == _base_opcode(insn)
         assert len(w_iseq.code) == pc
         _check_code_references(w_iseq)
-        _check_operand_values(raw, w_iseq, decoded, labels, l)
+        _check_operand_values(raw, w_iseq, decoded, labels, l,
+                              lambda level: scope_of(index, level))

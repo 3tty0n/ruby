@@ -13,6 +13,9 @@ class W_Root(object):
     def int_w(self):
         raise UnsupportedOperation('not an integer')
 
+    def float_w(self):
+        raise UnsupportedOperation('not a number')
+
     def str_w(self):
         raise UnsupportedOperation('not a string')
 
@@ -22,19 +25,38 @@ class W_Root(object):
     def getclass(self):
         raise UnsupportedOperation('no class for %s' % self.repr())
 
+    def lookup_class(self):
+        return self.getclass()
+
+    def ruby_class(self):
+        return self.getclass()
+
     def lookup_method(self, mid):
-        w_class = promote(self.getclass())
+        w_class = promote(self.lookup_class())
         w_method = w_class.find_method(mid)
         if w_method is None:
-            raise self.no_method_error(mid)
+            from rpyyarv import kernel
+            return kernel.method_missing(self, w_class, mid)
         return w_method
 
     def defines_private(self):
         return False
 
-    def define_method(self, mid, w_method):
+    def method_owner(self):
         raise UnsupportedOperation(
             'cannot define a method on %s' % self.repr())
+
+    def define_method(self, mid, w_method):
+        self.method_owner().add_method(mid, w_method)
+
+    def get_ivar(self, mid):
+        from rpyyarv.objects.transparent import w_nil
+        return w_nil
+
+    def set_ivar(self, mid, w_value):
+        raise UnsupportedOperation(
+            "cannot set instance variable '%s' on %s"
+            % (symbols.name_of(mid), self.repr()))
 
     def no_method_error(self, mid):
         return UnsupportedOperation("undefined method '%s' for %s"

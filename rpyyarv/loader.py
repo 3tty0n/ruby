@@ -6,9 +6,14 @@ from rpyyarv import optable
 from rpyyarv import rawiseq
 from rpyyarv import symbols
 from rpyyarv.error import LoadError, UnsupportedOperation
-from rpyyarv.iseq import W_CallInfo, W_ISeq, NO_BLOCK_ISEQ, tail_position
+from rpyyarv.iseq import (W_CallInfo, W_ConstPath, W_ISeq, NO_BLOCK_ISEQ,
+                          tail_position)
 from rpyyarv.objects.array import W_Array
-from rpyyarv.objects.string import W_String
+from rpyyarv.objects.float import W_Float
+from rpyyarv.objects import hash as hashlib
+from rpyyarv.objects import range as rangelib
+from rpyyarv.objects.string import ENC_BINARY, ENC_UTF8, W_String
+from rpyyarv.objects.symbol import newsymbol
 from rpyyarv.objects.regexp import W_Regexp
 from rpyyarv.objects.transparent import newint, w_nil, w_true, w_false
 
@@ -55,6 +60,7 @@ class Loader(object):
         self.missing = {}           # unimplemented name -> occurrences
         self.missing_names = []     # first seen first, for a stable report
         self.w_iseqs = {}           # program index -> W_ISeq
+        self.loading = []
 
     def load(self):
         self.scan()
@@ -145,13 +151,25 @@ class Loader(object):
         raw = self.program.iseqs[index]
 
         if raw.catch_size > 0:
-            raise UnsupportedOperation(
-                "'%s' has a catch table (rescue/ensure/retry/next/break), "
-                "which RPyYARV does not support" % raw.name)
-        if raw.lead_num > raw.nlocals:
+            for kind in raw.catch_types.split(','):
+                if kind not in optable.CATCH_TYPES:
+                    raise UnsupportedOperation(
+                        "'%s' has a catch table (%s), which RPyYARV does not "
+                        "support" % (raw.name, kind))
+        params = [p for p in raw.extra_params.split(',')
+                  if p != '' and p != 'use_block']
+        nparams = raw.lead_num
+        if len(params) == 0 and nparams == 0:
+            # a for loop's block has its one parameter without has_lead set
+            nparams = raw.arg_size
+        if raw.type == 'method':
+            params = [p for p in params if p != 'block_start']
+        has_rest = raw.type == 'method' and params == ['rest_start']
+        if nparams + int(has_rest) > raw.nlocals:
             raise LoadError("'%s' takes %d parameter(s) but has %d local(s)"
-                            % (raw.name, raw.lead_num, raw.nlocals))
+                            % (raw.name, nparams, raw.nlocals))
 
+        self.loading.append(raw)
         # Widths first: a jump needs the pc of a later instruction.
         opcodes = []
         operands = []
@@ -198,21 +216,44 @@ class Loader(object):
                                  tail_position(code, post_pc))
             code[slot] = pool.add(w_ci)
 
+        simple = len(params) == 0 or has_rest
+        if raw.type == 'block' and raw.lead_num == 1:
+            # CRuby marks |a| ambiguous_param0; unmarked |a,| splats an Array
+            simple = params == ['ambiguous_param0']
         w_iseq = W_ISeq(raw.name, code, [w for w in pool.consts], raw.nlocals,
-                        raw.stack_max, raw.lead_num, raw.extra_params == '')
+                        raw.stack_max, nparams, simple, has_rest)
         self.w_iseqs[index] = w_iseq
+        self.loading.pop()
         return w_iseq
 
     def check_dropped(self, op, ops, raw):
-        """Operand positions yarv_map.py does not emit, checked here."""
-        if op == insns.GETLOCAL or op == insns.SETLOCAL:
-            level = self.int_of(ops[1], op, raw, 'level')
-            if level > optable.MAX_LOCAL_LEVEL:
+        """Operand values RPyYARV refuses, checked before it emits any."""
+        if op == insns.PUTSPECIALOBJECT:
+            kind = self.int_of(ops[0], op, raw, 'type')
+            if (kind != optable.SPECIAL_OBJECT_VMCORE
+                    and kind != optable.SPECIAL_OBJECT_CBASE
+                    and kind != optable.SPECIAL_OBJECT_CONST_BASE):
                 raise UnsupportedOperation(
-                    "%s at level %d in '%s' reaches an enclosing scope, which "
-                    "RPyYARV does not support"
-                    % (insns.NAMES[op], level, raw.name))
-        elif op == insns.EXPANDARRAY:
+                    "putspecialobject %d in '%s' is not supported"
+                    % (kind, raw.name))
+        if op == insns.DEFINECLASS:
+            flags = self.int_of(ops[2], op, raw, 'flags')
+            if (flags & optable.DEFINECLASS_TYPE_MASK) != 0:
+                raise UnsupportedOperation(
+                    "defineclass of a module or a singleton class in '%s' is "
+                    "not supported" % raw.name)
+        if op == insns.GETGLOBAL or op == insns.SETGLOBAL:
+            name = self.sym_of(ops[0], op, raw)
+            if name in optable.CRUBY_GLOBALS:
+                raise UnsupportedOperation(
+                    "global variable %s in '%s' is not supported"
+                    % (name, raw.name))
+        if op == insns.THROW:
+            state = self.int_of(ops[0], op, raw, 'state')
+            if state != optable.TAG_BREAK:
+                raise UnsupportedOperation("throw %d in '%s' is not supported"
+                                           % (state, raw.name))
+        if op == insns.EXPANDARRAY:
             flag = self.int_of(ops[1], op, raw, 'flag')
             if flag != 0:
                 raise UnsupportedOperation(
@@ -225,13 +266,15 @@ class Loader(object):
         if t == insns.T_VALUE:
             return self.literal(operand, op, raw, pool)
         if t == insns.T_LINDEX_T:
-            return self.local_slot(operand, op, raw)
+            return self.local_slot(operand, op, ops, raw)
         if t == insns.T_RB_NUM_T:
             return self.int_of(operand, op, raw, 'operand')
         if t == insns.T_OFFSET:
             return self.label(operand, op, raw, labels)
         if t == insns.T_ID:
             return symbols.intern(self.sym_of(operand, op, raw))
+        if t == insns.T_IC:
+            return pool.add(self.const_path(operand, op, raw))
         if t == insns.T_ISEQ:
             if operand.kind == rawiseq.OP_NIL:
                 return NO_BLOCK_ISEQ      # no block at this call site
@@ -253,6 +296,8 @@ class Loader(object):
         kind = operand.kind
         if kind == rawiseq.OP_INT:
             return newint(operand.intval)
+        if kind == rawiseq.OP_FLOAT:
+            return W_Float(operand.floatval)
         if kind == rawiseq.OP_NIL:
             return w_nil
         if kind == rawiseq.OP_TRUE:
@@ -260,7 +305,11 @@ class Loader(object):
         if kind == rawiseq.OP_FALSE:
             return w_false
         if kind == rawiseq.OP_STR:
-            return W_String(operand.strval)
+            return W_String(operand.strval,
+                            ENC_BINARY if operand.intval else ENC_UTF8,
+                            frozen=True)
+        if kind == rawiseq.OP_SYM:
+            return newsymbol(symbols.intern(operand.strval))
         if kind == rawiseq.OP_OTHER:
             s = operand.strval
             if s and s[0] == '/':
@@ -274,18 +323,38 @@ class Loader(object):
             for item in operand.items:
                 items_w.append(self.literal_value(item, op, raw))
             return W_Array(items_w)
+        if kind == rawiseq.OP_HASH:
+            w_hash = hashlib.W_Hash()
+            for i in range(0, len(operand.items), 2):
+                hashlib.aset(w_hash,
+                             self.literal_value(operand.items[i], op, raw),
+                             self.literal_value(operand.items[i + 1], op, raw))
+            return w_hash
+        if kind == rawiseq.OP_RANGE:
+            return rangelib.newrange(
+                self.literal_value(operand.items[0], op, raw),
+                self.literal_value(operand.items[1], op, raw),
+                operand.intval != 0)
 
         raise UnsupportedOperation(
             "%s of %s in '%s': RPyYARV has no such object yet"
             % (insns.NAMES[op], operand.describe(), raw.name))
 
-    def local_slot(self, operand, op, raw):
+    def local_slot(self, operand, op, ops, raw):
         idx = self.int_of(operand, op, raw, 'local index')
-        slot = raw.nlocals - idx + optable.ENV_DATA_SIZE - 1
-        if slot < 0 or slot >= raw.nlocals:
-            raise LoadError("%s in '%s' names local index %d, outside its %d "
-                            "local(s)"
-                            % (insns.NAMES[op], raw.name, idx, raw.nlocals))
+        level = self.int_of(ops[1], op, raw, 'level')
+        if level < 0 or level >= len(self.loading):
+            raise LoadError("%s in '%s' reaches level %d, but it is nested "
+                            "only %d deep"
+                            % (insns.NAMES[op], raw.name, level,
+                               len(self.loading) - 1))
+        scope = self.loading[len(self.loading) - 1 - level]
+        slot = scope.nlocals - idx + optable.ENV_DATA_SIZE - 1
+        if slot < 0 or slot >= scope.nlocals:
+            raise LoadError("%s in '%s' names local index %d, outside the %d "
+                            "local(s) of '%s'"
+                            % (insns.NAMES[op], raw.name, idx, scope.nlocals,
+                               scope.name))
         return slot
 
     def label(self, operand, op, raw, labels):
@@ -305,14 +374,38 @@ class Loader(object):
         flags = operand.flag
         # CRuby never sets ARGS_SIMPLE on a call site with a block literal,
         # so the literal itself stands in for it.
-        has_block = op == insns.SEND and ops[1].kind == rawiseq.OP_ISEQ
+        has_block = ((op == insns.SEND or op == insns.INVOKESUPER)
+                     and ops[1].kind == rawiseq.OP_ISEQ)
+        allowed = optable.SIMPLE_CALL_FLAGS
+        if op == insns.INVOKESUPER:
+            allowed |= optable.SUPER_CALL_FLAGS
+        if op == insns.SEND or op == insns.OPT_SEND_WITHOUT_BLOCK:
+            allowed |= optable.SPLAT_CALL_FLAGS
+        if op == insns.SEND:
+            allowed |= optable.CALL_FLAG_ARGS_BLOCKARG
+        splat = (flags & optable.CALL_FLAG_ARGS_SPLAT) != 0
+        blockarg = (flags & optable.CALL_FLAG_ARGS_BLOCKARG) != 0
         simple = (not operand.has_kwarg
-                  and (flags & ~optable.SIMPLE_CALL_FLAGS) == 0
+                  and (flags & ~allowed) == 0
                   and ((flags & optable.CALL_FLAG_ARGS_SIMPLE) != 0
-                       or has_block))
+                       or has_block or splat or blockarg))
         return W_CallInfo(symbols.intern(operand.strval), operand.intval,
                           simple, (flags & optable.CALL_FLAG_FCALL) != 0,
-                          tail)
+                          tail, splat, blockarg)
+
+    def const_path(self, operand, op, raw):
+        if operand.kind != rawiseq.OP_ARRAY:
+            raise LoadError("%s in '%s' wants constant names, got %s"
+                            % (insns.NAMES[op], raw.name, operand.describe()))
+        mids = []
+        absolute = False
+        for item in operand.items:
+            name = self.sym_of(item, op, raw)
+            if name == '':
+                absolute = True
+            else:
+                mids.append(symbols.intern(name))
+        return W_ConstPath(mids, absolute)
 
     def int_of(self, operand, op, raw, what):
         if operand.kind != rawiseq.OP_INT:

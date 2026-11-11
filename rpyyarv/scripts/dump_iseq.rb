@@ -16,7 +16,8 @@
 #   locals    <count>
 #   stackmax  <count>
 #   params    <lead_num> <other param keys, comma separated>
-#   catch     <catch table size>
+#   argsize   <count>         -- misc[:arg_size]
+#   catch     <catch table size> <entry types, comma separated>
 #   insn      <name> <operand>...
 #   label     <name>          -- sits in front of the next insn
 #   event     <name>          -- RUBY_EVENT_*
@@ -26,15 +27,20 @@
 # Operand tokens, one per to_a operand:
 #
 #   i:<int>   Integer          n:  nil        t:  true       f:  false
+#   d:<float> Float, as Float#inspect spells it
 #   y:<name>  Symbol: an ID, a Symbol literal, or a label reference
-#   s:<text>  String
+#   s:<text>  String in UTF-8 or US-ASCII
+#   b:<text>  String in BINARY
+#   e:<name>  String in another encoding, which the loader refuses
 #   q:<index> nested ISeq
 #   a:<item>,<item>...  Array; each item is a token whose backslashes and
 #             commas are escaped again, so nesting stays unambiguous
+#   h:<key>,<value>,...  Hash, its pairs flattened and escaped as in a:
+#   r:<begin>,<end>,<t:|f:>  Range; the last item says whether it excludes end
 #   c:<argc>,<flags>,<kwarg?>,<mid>   CALL_DATA
 #   x:<text>  anything else, verbatim, so a refusal can name it
 #
-# In y:/s:/x: text, backslash, tab, newline and return are backslash-escaped.
+# In y:/s:/b:/x: text, backslash, tab, newline and return are backslash-escaped.
 
 FORMAT_VERSION = 1
 ISEQ_MAGIC = 'YARVInstructionSequence/SimpleDataFormat'
@@ -126,7 +132,8 @@ class Dumper
     row('stackmax', misc[:stack_max])
     row('params', params.fetch(:lead_num, 0),
         (params.keys - [:lead_num]).join(','))
-    row('catch', catch_table.size)
+    row('argsize', misc[:arg_size])
+    row('catch', catch_table.size, catch_table.map { |c| c[0] }.join(','))
 
     body.each do |e|
       case e
@@ -146,11 +153,17 @@ class Dumper
   def operand(obj)
     case obj
     when Integer then "i:#{obj}"
+    when Float   then "d:#{obj.inspect}"
     when nil     then 'n:'
     when true    then 't:'
     when false   then 'f:'
     when Symbol  then "y:#{esc(obj.to_s)}"
-    when String  then "s:#{esc(obj)}"
+    when String
+      case obj.encoding.name
+      when 'UTF-8', 'US-ASCII' then "s:#{esc(obj)}"
+      when 'ASCII-8BIT' then "b:#{esc(obj)}"
+      else "e:#{obj.encoding}"
+      end
     when Array
       if iseq_array?(obj)
         "q:#{intern(obj)}"
@@ -162,8 +175,11 @@ class Dumper
         "c:#{obj[:orig_argc]},#{obj[:flag]},#{obj[:kw_arg] ? 1 : 0}," \
           "#{esc(obj[:mid].to_s)}"
       else
-        "x:#{esc(obj.inspect)}"
+        "h:" + obj.to_a.flatten(1).map { |o| esc_item(operand(o)) }.join(',')
       end
+    when Range
+      "r:" + [obj.begin, obj.end, obj.exclude_end?]
+             .map { |o| esc_item(operand(o)) }.join(',')
     else
       "x:#{esc(obj.inspect)}"
     end

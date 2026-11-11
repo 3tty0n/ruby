@@ -12,25 +12,30 @@ OP_NIL = 1
 OP_TRUE = 2
 OP_FALSE = 3
 OP_SYM = 4
-OP_STR = 5
+OP_STR = 5      # intval is 1 if the String is BINARY
 OP_ISEQ = 6     # intval indexes RawProgram.iseqs
 OP_CALL = 7     # intval=orig_argc, flag=flags, strval=mid
 OP_OTHER = 8
 OP_ARRAY = 9    # items holds the elements
+OP_FLOAT = 10
+OP_HASH = 11    # items holds key, value, key, value, ...
+OP_RANGE = 12   # items holds begin and end; intval is 1 if end is excluded
 
 KIND_NAMES = ['Integer', 'nil', 'true', 'false', 'Symbol', 'String',
-              'ISeq', 'call data', 'object', 'Array']
+              'ISeq', 'call data', 'object', 'Array', 'Float', 'Hash',
+              'Range']
 
 
 class RawOperand(object):
     def __init__(self, kind, intval=0, strval='', flag=0, has_kwarg=False,
-                 items=None):
+                 items=None, floatval=0.0):
         self.kind = kind
         self.intval = intval
         self.strval = strval
         self.flag = flag
         self.has_kwarg = has_kwarg
         self.items = items if items is not None else []
+        self.floatval = floatval
 
     def describe(self):
         if self.kind == OP_ARRAY:
@@ -47,6 +52,10 @@ def int_operand(value):
     return RawOperand(OP_INT, value)
 
 
+def float_operand(value):
+    return RawOperand(OP_FLOAT, floatval=value)
+
+
 class RawInsn(object):
     def __init__(self, name, operands):
         self.name = name            # CRuby's spelling, e.g. 'getlocal_WC_0'
@@ -55,7 +64,7 @@ class RawInsn(object):
 
 class RawISeq(object):
     def __init__(self, name, type_, nlocals, stack_max, lead_num,
-                 extra_params, catch_size):
+                 extra_params, catch_size, catch_types, arg_size):
         self.name = name
         self.type = type_
         self.nlocals = nlocals
@@ -64,6 +73,9 @@ class RawISeq(object):
         # Names of the other parameter kinds CRuby reported, if any.
         self.extra_params = extra_params
         self.catch_size = catch_size
+        # The kinds of its catch table entries, comma separated
+        self.catch_types = catch_types
+        self.arg_size = arg_size
         self.insns = []
         # label name -> index into insns; the loader turns it into a pc.
         self.labels = {}

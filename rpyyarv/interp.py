@@ -1,15 +1,41 @@
+from rpyyarv import classlib
 from rpyyarv import debug
 from rpyyarv import insns
 from rpyyarv import helpers
+from rpyyarv import optable
 from rpyyarv import symbols
 from rpyyarv.error import UnsupportedOperation
-from rpyyarv.frame import Frame
-from rpyyarv.iseq import W_Block, W_CallInfo, W_ISeq, NO_BLOCK_ISEQ, tail_position
+from rpyyarv.frame import Cref, Frame
+from rpyyarv.iseq import (W_Block, W_CallInfo, W_ConstPath, W_ISeq,
+                          NO_BLOCK_ISEQ, tail_position)
 from rpyyarv.methods import W_CFunc, W_ISeqMethod
+from rpyyarv.objects import array as arraylib
+from rpyyarv.objects import hash as hashlib
+from rpyyarv.objects import proc as proclib
+from rpyyarv.objects import range as rangelib
+from rpyyarv.objects import string as stringlib
 from rpyyarv.objects.array import W_Array
+from rpyyarv.objects.hash import W_Hash
 from rpyyarv.objects.string import W_String
-from rpyyarv.objects.transparent import w_nil
-from rpyyarv.rlib import JitDriver, elidable, unroll_safe
+from rpyyarv.objects.klass import (BOP_AREF, BOP_ASET, BOP_DIV, BOP_EMPTY_P,
+                                   BOP_EQ, BOP_GE, BOP_GT, BOP_LE, BOP_LENGTH,
+                                   BOP_LT, BOP_MINUS, BOP_MOD, BOP_MULT,
+                                   BOP_NEQ, BOP_PLUS, BOP_SIZE, W_Class,
+                                   w_array_class, w_object_class,
+                                   w_string_class)
+from rpyyarv.objects.transparent import W_Integer, newbool, newint, w_nil
+from rpyyarv.rlib import JitDriver, elidable, promote, unroll_safe
+
+
+class BlockBreak(UnsupportedOperation):
+    # break in a block, caught at the send that passed that block literal;
+    # escaping all of them is CRuby's LocalJumpError
+    def __init__(self, home, w_iseq, w_value):
+        UnsupportedOperation.__init__(
+            self, 'break from proc-closure (LocalJumpError)')
+        self.home = home
+        self.w_iseq = w_iseq
+        self.w_value = w_value
 
 
 def _as_iseq(w_x):
@@ -21,6 +47,12 @@ def _callinfo(iseq, idx):
     w_ci = iseq.consts[idx]
     assert isinstance(w_ci, W_CallInfo)
     return w_ci
+
+
+def _literal_block(iseq, frame, idx):
+    if idx == NO_BLOCK_ISEQ:
+        return None
+    return W_Block(_as_iseq(iseq.consts[idx]), frame.w_self, frame)
 
 
 @unroll_safe
@@ -43,18 +75,29 @@ def invoke(frame, iseq, w_ci, w_block, tail=False):
         raise UnsupportedOperation("private method '%s' called for %s"
                                    % (symbols.name_of(w_ci.mid), w_recv.repr()))
 
+    if w_ci.splat:
+        w_splat = frame.peek(frame.sp - 1)
+        assert isinstance(w_splat, W_Array)
+        args_w = []
+        i = 0
+        while i < argc - 1:
+            args_w.append(frame.peek(recv_at + 1 + i))
+            i += 1
+        args_w.extend(w_splat.items())
+        _drop(frame, recv_at)
+        return call_method(w_method, w_recv, args_w, w_block)
+
     if isinstance(w_method, W_ISeqMethod):
-        if w_block is not None:
-            raise UnsupportedOperation(
-                "send with a block is not supported: '%s'"
-                % symbols.name_of(w_ci.mid))
         callee_iseq = w_method.w_iseq
         if not callee_iseq.simple_params:
             raise UnsupportedOperation(
                 "method '%s' has parameters RPyYARV does not support"
                 % symbols.name_of(w_ci.mid))
-        _check_argc(w_ci.mid, argc, callee_iseq.nparams)
-        if tail and callee_iseq is iseq and not debug.is_enabled():
+        _check_params(w_ci.mid, argc, callee_iseq)
+        if (tail and callee_iseq is iseq and not iseq.has_rest
+                and w_block is None
+                and frame.w_block is None and w_method.cref is frame.cref
+                and not debug.is_enabled()):
             # The separate argument stack makes f(b, a) safe to copy in place.
             i = 0
             while i < argc:
@@ -66,19 +109,30 @@ def invoke(frame, iseq, w_ci, w_block, tail=False):
             _drop(frame, iseq.nlocals)
             frame.w_self = w_recv
             return None
-        callee = Frame(callee_iseq, w_recv)
+        callee = Frame(callee_iseq, w_recv, None, w_block, w_method.cref,
+                       w_method)
         i = 0
-        while i < argc:
+        while i < callee_iseq.nparams:
             callee.setlocal(i, frame.peek(recv_at + 1 + i))
             i += 1
+        if callee_iseq.has_rest:
+            rest_w = []
+            while i < argc:
+                rest_w.append(frame.peek(recv_at + 1 + i))
+                i += 1
+            callee.setlocal(callee_iseq.nparams, W_Array(rest_w))
         _drop(frame, recv_at)
         if not debug.is_enabled():
             return execute(callee_iseq, callee)
         traced_w = []
         i = 0
-        while i < argc:
+        while i < callee_iseq.nparams:
             traced_w.append(callee.getlocal(i))
             i += 1
+        if callee_iseq.has_rest:
+            w_rest = callee.getlocal(callee_iseq.nparams)
+            assert isinstance(w_rest, W_Array)
+            traced_w.extend(w_rest.items())
         debug.trace_enter(w_ci.mid, traced_w)
         w_ret = execute(callee_iseq, callee)
         debug.trace_leave(w_ci.mid, w_ret)
@@ -108,38 +162,116 @@ def call_method(w_method, w_recv, args_w, w_block):
         return w_method.call(w_recv, args_w, w_block)
 
     assert isinstance(w_method, W_ISeqMethod)
-
-    if w_block is not None:
-        raise UnsupportedOperation(
-            "send with a block is not supported: '%s'"
-            % symbols.name_of(w_method.mid))
-
     callee_iseq = w_method.w_iseq
     if not callee_iseq.simple_params:
         raise UnsupportedOperation(
             "method '%s' has parameters RPyYARV does not support"
             % symbols.name_of(w_method.mid))
-    _check_argc(w_method.mid, len(args_w), callee_iseq.nparams)
-    callee = Frame(callee_iseq, w_recv)
+    _check_params(w_method.mid, len(args_w), callee_iseq)
+    callee = Frame(callee_iseq, w_recv, None, w_block, w_method.cref,
+                   w_method)
+    n = callee_iseq.nparams
     i = 0
-    while i < len(args_w):
+    while i < n:
         callee.setlocal(i, args_w[i])
         i += 1
+    if callee_iseq.has_rest:
+        assert n >= 0
+        callee.setlocal(n, W_Array(args_w[n:]))
     return execute(callee_iseq, callee)
 
 
+@unroll_safe
 def call_block(w_block, args_w):
     w_iseq = w_block.w_iseq
-    if len(args_w) != w_iseq.nparams:
+    if not w_iseq.simple_params:
         raise UnsupportedOperation(
-            "block '%s' takes %d argument(s), given %d"
-            % (w_iseq.name, w_iseq.nparams, len(args_w)))
-    callee = Frame(w_iseq, w_block.w_self)
+            "block '%s' has parameters RPyYARV does not support" % w_iseq.name)
+    if w_block.is_lambda and len(args_w) != w_iseq.nparams:
+        raise UnsupportedOperation(
+            'wrong number of arguments (given %d, expected %d)'
+            % (len(args_w), w_iseq.nparams))
+    if (w_iseq.nparams > 1 and len(args_w) == 1
+            and isinstance(args_w[0], W_Array)):
+        raise UnsupportedOperation(
+            "block '%s' would splat its Array argument, which RPyYARV does "
+            "not support yet" % w_iseq.name)
+    callee = Frame(w_iseq, w_block.w_self, w_block.outer, None,
+                   w_block.outer.cref)
     i = 0
-    while i < len(args_w):
+    while i < len(args_w) and i < w_iseq.nparams:
         callee.setlocal(i, args_w[i])
         i += 1
-    return execute(w_iseq, callee)
+    if not w_block.is_lambda:
+        return execute(w_iseq, callee)
+    try:
+        return execute(w_iseq, callee)
+    except BlockBreak as e:
+        if e.home is not w_block.outer or e.w_iseq is not w_iseq:
+            raise
+        return e.w_value
+
+
+@unroll_safe
+def _method_frame(frame):
+    while frame.outer is not None:
+        frame = frame.outer
+    return frame
+
+
+@unroll_safe
+def yield_block(frame, w_ci):
+    if not w_ci.simple:
+        raise UnsupportedOperation(
+            "yield passes arguments RPyYARV does not support")
+    w_block = _method_frame(frame).w_block
+    if w_block is None:
+        raise UnsupportedOperation('no block given (yield)')
+    argc = w_ci.argc
+    args_w = [w_nil] * argc
+    i = argc - 1
+    while i >= 0:
+        args_w[i] = frame.pop()
+        i -= 1
+    return call_block(w_block, args_w)
+
+
+@unroll_safe
+def invoke_super(frame, w_ci, w_block):
+    if not w_ci.simple:
+        raise UnsupportedOperation(
+            "super passes arguments RPyYARV does not support")
+    method_frame = _method_frame(frame)
+    w_method = method_frame.w_method
+    if w_method is None or w_method.w_owner is None:
+        raise UnsupportedOperation('super called outside of method')
+    if w_block is None:
+        w_block = method_frame.w_block
+    args_w = [w_nil] * w_ci.argc
+    i = w_ci.argc - 1
+    while i >= 0:
+        args_w[i] = frame.pop()
+        i -= 1
+    w_recv = frame.pop()
+    w_target = None
+    w_super = w_method.w_owner.w_superclass
+    if w_super is not None:
+        w_target = w_super.find_method(w_method.mid)
+    if w_target is None:
+        raise UnsupportedOperation("super: no superclass method '%s' for %s"
+                                   % (symbols.name_of(w_method.mid),
+                                      w_recv.repr()))
+    return call_method(w_target, w_recv, args_w, w_block)
+
+
+def _check_params(mid, argc, iseq):
+    if not iseq.has_rest:
+        _check_argc(mid, argc, iseq.nparams)
+    elif argc < iseq.nparams:
+        raise UnsupportedOperation(
+            "wrong number of arguments to '%s' (given %d, expected %d+)"
+            % (symbols.name_of(mid), argc, iseq.nparams))
+
 
 def _check_argc(mid, argc, want):
     if argc != want:
@@ -155,17 +287,167 @@ def _drop(frame, sp):
 
 
 TO_S = symbols.intern('to_s')
+TO_A = symbols.intern('to_a')
+AREF = symbols.intern('[]')
+LENGTH = symbols.intern('length')
+EQ = symbols.intern('==')
+NEQ = symbols.intern('!=')
+NOT = symbols.intern('!')
+DIV = symbols.intern('/')
+PLUS = symbols.intern('+')
+MINUS = symbols.intern('-')
+MULT = symbols.intern('*')
+LT = symbols.intern('<')
+GT = symbols.intern('>')
+LE = symbols.intern('<=')
+GE = symbols.intern('>=')
+NEW = symbols.intern('new')
+# vm_method.c makes these private wherever they are defined
+ALWAYS_PRIVATE = [symbols.intern(name) for name in [
+    'initialize', 'initialize_copy', 'initialize_clone', 'initialize_dup',
+    'respond_to_missing?']]
+MOD = symbols.intern('%')
+LTLT = symbols.intern('<<')
+AND = symbols.intern('&')
+OR = symbols.intern('|')
+SIZE = symbols.intern('size')
+EMPTY_P = symbols.intern('empty?')
+ASET = symbols.intern('[]=')
 
 
-def _to_s(w_x):
-    if isinstance(w_x, W_String):
+def send(w_recv, mid, args_w):
+    return call_method(w_recv.lookup_method(mid), w_recv, args_w, None)
+
+
+def send_op(w_recv, mid, args_w):
+    w_method = w_recv.lookup_method(mid)
+    if w_method.private:
+        raise UnsupportedOperation("private method '%s' called for %s"
+                                   % (symbols.name_of(mid), w_recv.repr()))
+    return call_method(w_method, w_recv, args_w, None)
+
+
+class GlobalVar(object):
+    def __init__(self):
+        self.w_value = w_nil
+
+
+global_entries = {}
+
+
+@elidable
+def global_entry(mid):
+    w_var = global_entries.get(mid, None)
+    if w_var is None:
+        w_var = GlobalVar()
+        global_entries[mid] = w_var
+    return w_var
+
+
+def _uninitialized_constant(w_scope, mid):
+    name = symbols.name_of(mid)
+    if w_scope is not w_object_class:
+        name = w_scope.name + '::' + name
+    return UnsupportedOperation('uninitialized constant %s' % name)
+
+
+@unroll_safe
+def _lexical_const(cref, mid):
+    scope = cref
+    while scope is not None:
+        w_value = scope.w_class.find_const(mid)
+        if w_value is not None:
+            return w_value
+        scope = scope.parent
+    w_class = _const_base(cref)
+    w_value = w_class.find_const_in_ancestors(mid, False)
+    if w_value is None:
+        raise _uninitialized_constant(w_class, mid)
+    return w_value
+
+
+@unroll_safe
+def _const(cref, w_path):
+    i = 0
+    if w_path.absolute:
+        w_scope = w_object_class
+    else:
+        w_scope = _lexical_const(cref, w_path.mids[0])
+        i = 1
+    while i < len(w_path.mids):
+        mid = w_path.mids[i]
+        if not isinstance(w_scope, W_Class):
+            raise UnsupportedOperation('%s is not a class/module'
+                                       % w_scope.repr())
+        w_value = w_scope.find_const_in_ancestors(
+            mid, w_scope is not w_object_class)
+        if w_value is None:
+            raise _uninitialized_constant(w_scope, mid)
+        w_scope = w_value
+        i += 1
+    return w_scope
+
+
+def _const_base(cref):
+    if cref is None:
+        return w_object_class
+    return cref.w_class
+
+
+def _define_class(w_cbase, mid, w_super, flags):
+    if flags & optable.DEFINECLASS_FLAG_HAS_SUPERCLASS:
+        if not isinstance(w_super, W_Class) or w_super.is_module:
+            raise UnsupportedOperation(
+                'superclass must be an instance of Class (given an instance '
+                'of %s)' % w_super.getclass().name)
+    else:
+        w_super = None
+    if not isinstance(w_cbase, W_Class):
+        raise UnsupportedOperation('%s is not a class/module'
+                                   % w_cbase.repr())
+    w_class = w_cbase.find_const(mid)
+    if w_class is not None:
+        if not isinstance(w_class, W_Class) or w_class.is_module:
+            raise UnsupportedOperation('%s is not a class'
+                                       % symbols.name_of(mid))
+        if w_super is not None and w_class.w_superclass is not w_super:
+            raise UnsupportedOperation('superclass mismatch for class %s'
+                                       % symbols.name_of(mid))
+        return w_class
+    if w_super is None:
+        w_super = w_object_class
+    if w_super.builtin and w_super is not w_object_class:
+        raise UnsupportedOperation(
+            'subclassing the built-in class %s is not supported yet'
+            % w_super.name)
+    name = symbols.name_of(mid)
+    if w_cbase is not w_object_class:
+        name = w_cbase.name + '::' + name
+    w_class = W_Class(name, w_super)
+    w_cbase.set_const(mid, w_class)
+    return w_class
+
+
+def _check_to_array(w_x):
+    if isinstance(w_x, W_Array):
         return w_x
-    return call_method(w_x.lookup_method(TO_S), w_x, [], None)
+    w_to_a = w_x.lookup_class().find_method(TO_A)
+    if w_to_a is None:
+        return None
+    w_ary = call_method(w_to_a, w_x, [], None)
+    if not isinstance(w_ary, W_Array):
+        name = w_x.getclass().name
+        raise UnsupportedOperation(
+            "can't convert %s to Array (%s#to_a gives %s)"
+            % (name, name, w_ary.getclass().name))
+    return w_ary
 
 
 def to_s_string(w_x):
     """w_x.to_s as a String, as Kernel#puts takes it."""
-    w_str = _to_s(w_x)
+    if isinstance(w_x, W_String):
+        return w_x
+    w_str = send(w_x, TO_S, [])
     if not isinstance(w_str, W_String):
         raise UnsupportedOperation('to_s on %s did not return a String'
                                    % w_x.repr())
@@ -193,7 +475,7 @@ def get_printable_location(pc, iseq):
 
 
 jitdriver = JitDriver(greens=['pc', 'iseq'], reds=['frame'],
-                      virtualizables=['frame'],
+                      virtualizables=['frame'], is_recursive=True,
                       get_printable_location=get_printable_location)
 
 
@@ -222,17 +504,52 @@ def execute(iseq, frame):
         elif opcode == insns.PUTCHILLEDSTRING:
             idx = code[pc]
             pc += 1
-            frame.push(W_String(iseq.consts[idx].str_w())) 
+            w_lit = iseq.consts[idx]
+            assert isinstance(w_lit, W_String)
+            frame.push(w_lit.copy())
         elif opcode == insns.GETLOCAL:
             idx = code[pc]
-            pc += 1
+            level = code[pc + 1]
+            pc += 2
             assert idx >= 0
-            frame.push(frame.getlocal(idx))
+            if level == 0:
+                frame.push(frame.getlocal(idx))
+            else:
+                frame.push(frame.outer_at(level).getlocal(idx))
         elif opcode == insns.SETLOCAL:
             idx = code[pc]
-            pc += 1
+            level = code[pc + 1]
+            pc += 2
             assert idx >= 0
-            frame.setlocal(idx, frame.pop())
+            if level == 0:
+                frame.setlocal(idx, frame.pop())
+            else:
+                frame.outer_at(level).setlocal(idx, frame.pop())
+        elif opcode == insns.GETINSTANCEVARIABLE:
+            mid = code[pc]
+            pc += 1
+            frame.push(frame.w_self.get_ivar(mid))
+        elif opcode == insns.SETINSTANCEVARIABLE:
+            mid = code[pc]
+            pc += 1
+            frame.w_self.set_ivar(mid, frame.pop())
+        elif (opcode == insns.GETBLOCKPARAM
+              or opcode == insns.GETBLOCKPARAMPROXY):
+            level = code[pc]
+            pc += 1
+            owner = frame if level == 0 else frame.outer_at(level)
+            if owner.w_block is None:
+                frame.push(w_nil)
+            else:
+                frame.push(proclib.block_proc(owner.w_block))
+        elif opcode == insns.GETGLOBAL:
+            mid = code[pc]
+            pc += 1
+            frame.push(global_entry(mid).w_value)
+        elif opcode == insns.SETGLOBAL:
+            mid = code[pc]
+            pc += 1
+            global_entry(mid).w_value = frame.pop()
         elif opcode == insns.DUP:
             w_x = frame.pop()
             frame.push(w_x)
@@ -244,6 +561,34 @@ def execute(iseq, frame):
             w_b = frame.pop()
             frame.push(w_a)
             frame.push(w_b)
+        elif opcode == insns.TOPN:
+            n = code[pc]
+            pc += 1
+            frame.push(frame.topn(n))
+        elif opcode == insns.SETN:
+            n = code[pc]
+            pc += 1
+            frame.set_topn(n, frame.topn(0))
+        elif opcode == insns.DUPN:
+            n = code[pc]
+            pc += 1
+            i = 0
+            while i < n:
+                frame.push(frame.topn(n - 1))
+                i += 1
+        elif opcode == insns.OPT_REVERSE:
+            n = code[pc]
+            pc += 1
+            i = 0
+            while i < n // 2:
+                w_x = frame.topn(i)
+                frame.set_topn(i, frame.topn(n - 1 - i))
+                frame.set_topn(n - 1 - i, w_x)
+                i += 1
+        elif opcode == insns.ADJUSTSTACK:
+            n = code[pc]
+            pc += 1
+            _drop(frame, frame.sp - n)
         elif opcode == insns.EXPANDARRAY:
             n = code[pc]
             pc += 1
@@ -251,48 +596,146 @@ def execute(iseq, frame):
             if not isinstance(w_ary, W_Array):
                 raise UnsupportedOperation('expandarray needs an Array, got %s'
                                            % w_ary.repr())
-            items_w = w_ary.items_w
             i = n - 1
             while i >= 0:
-                if i < len(items_w):
-                    frame.push(items_w[i])
+                if i < w_ary.length():
+                    frame.push(w_ary.getitem(i))
                 else:
                     frame.push(w_nil)
                 i -= 1
         elif opcode == insns.OPT_PLUS:
             w_b = frame.pop()
             w_a = frame.pop()
-            frame.push(helpers.w_add(w_a, w_b))
+            if helpers.numeric_fast(w_a, w_b, BOP_PLUS) or (
+                    isinstance(w_a, W_String) and isinstance(w_b, W_String)
+                    and w_string_class.redefined & BOP_PLUS == 0):
+                frame.push(helpers.w_add(w_a, w_b))
+            else:
+                frame.push(send_op(w_a, PLUS, [w_b]))
         elif opcode == insns.OPT_MINUS:
             w_b = frame.pop()
             w_a = frame.pop()
-            frame.push(helpers.w_sub(w_a, w_b))
+            if helpers.numeric_fast(w_a, w_b, BOP_MINUS):
+                frame.push(helpers.w_sub(w_a, w_b))
+            else:
+                frame.push(send_op(w_a, MINUS, [w_b]))
         elif opcode == insns.OPT_MULT:
             w_b = frame.pop()
             w_a = frame.pop()
-            frame.push(helpers.w_mul(w_a, w_b))
+            if helpers.numeric_fast(w_a, w_b, BOP_MULT):
+                frame.push(helpers.w_mul(w_a, w_b))
+            else:
+                frame.push(send_op(w_a, MULT, [w_b]))
+        elif opcode == insns.OPT_DIV:
+            w_b = frame.pop()
+            w_a = frame.pop()
+            if helpers.numeric_fast(w_a, w_b, BOP_DIV):
+                frame.push(helpers.w_div(w_a, w_b))
+            else:
+                frame.push(send_op(w_a, DIV, [w_b]))
+        elif opcode == insns.OPT_MOD:
+            w_b = frame.pop()
+            w_a = frame.pop()
+            if helpers.numeric_fast(w_a, w_b, BOP_MOD):
+                frame.push(helpers.w_mod(w_a, w_b))
+            else:
+                frame.push(send_op(w_a, MOD, [w_b]))
+        elif (opcode == insns.OPT_LTLT or opcode == insns.OPT_AND
+              or opcode == insns.OPT_OR):
+            w_b = frame.pop()
+            w_a = frame.pop()
+            if opcode == insns.OPT_LTLT:
+                frame.push(send_op(w_a, LTLT, [w_b]))
+            elif opcode == insns.OPT_AND:
+                frame.push(send_op(w_a, AND, [w_b]))
+            else:
+                frame.push(send_op(w_a, OR, [w_b]))
         elif opcode == insns.OPT_LT:
             w_b = frame.pop()
             w_a = frame.pop()
-            frame.push(helpers.w_lt(w_a, w_b))
+            if helpers.numeric_fast(w_a, w_b, BOP_LT):
+                frame.push(helpers.w_lt(w_a, w_b))
+            else:
+                frame.push(send_op(w_a, LT, [w_b]))
         elif opcode == insns.OPT_GT:
             w_b = frame.pop()
             w_a = frame.pop()
-            frame.push(helpers.w_gt(w_a, w_b))
+            if helpers.numeric_fast(w_a, w_b, BOP_GT):
+                frame.push(helpers.w_gt(w_a, w_b))
+            else:
+                frame.push(send_op(w_a, GT, [w_b]))
         elif opcode == insns.OPT_LE:
             w_b = frame.pop()
             w_a = frame.pop()
-            frame.push(helpers.w_le(w_a, w_b))
+            if helpers.numeric_fast(w_a, w_b, BOP_LE):
+                frame.push(helpers.w_le(w_a, w_b))
+            else:
+                frame.push(send_op(w_a, LE, [w_b]))
         elif opcode == insns.OPT_GE:
             w_b = frame.pop()
             w_a = frame.pop()
-            frame.push(helpers.w_ge(w_a, w_b))
+            if helpers.numeric_fast(w_a, w_b, BOP_GE):
+                frame.push(helpers.w_ge(w_a, w_b))
+            else:
+                frame.push(send_op(w_a, GE, [w_b]))
         elif opcode == insns.OPT_EQ:
             w_b = frame.pop()
             w_a = frame.pop()
-            frame.push(helpers.w_eq(w_a, w_b))
+            if helpers.numeric_fast(w_a, w_b, BOP_EQ):
+                frame.push(helpers.w_eq(w_a, w_b))
+            else:
+                frame.push(send_op(w_a, EQ, [w_b]))
+        elif opcode == insns.OPT_NEQ:
+            w_b = frame.pop()
+            w_a = frame.pop()
+            if helpers.numeric_fast(w_a, w_b, BOP_EQ | BOP_NEQ):
+                frame.push(newbool(not helpers.w_eq(w_a, w_b).is_true()))
+            else:
+                frame.push(send_op(w_a, NEQ, [w_b]))
+        elif opcode == insns.OPT_NOT:
+            frame.push(send_op(frame.pop(), NOT, []))
+        elif opcode == insns.OPT_AREF:
+            w_key = frame.pop()
+            w_recv = frame.pop()
+            if (isinstance(w_recv, W_Array) and isinstance(w_key, W_Integer)
+                    and w_array_class.redefined & BOP_AREF == 0):
+                frame.push(arraylib.aref(w_recv, w_key.int_w()))
+            else:
+                frame.push(send_op(w_recv, AREF, [w_key]))
+        elif opcode == insns.OPT_ASET:
+            w_value = frame.pop()
+            w_key = frame.pop()
+            w_recv = frame.pop()
+            if (isinstance(w_recv, W_Array) and isinstance(w_key, W_Integer)
+                    and w_array_class.redefined & BOP_ASET == 0):
+                frame.push(arraylib.aset(w_recv, w_key.int_w(), w_value))
+            else:
+                frame.push(send_op(w_recv, ASET, [w_key, w_value]))
+        elif opcode == insns.OPT_LENGTH or opcode == insns.OPT_SIZE:
+            w_recv = frame.pop()
+            bop = BOP_LENGTH if opcode == insns.OPT_LENGTH else BOP_SIZE
+            if (isinstance(w_recv, W_Array)
+                    and w_array_class.redefined & bop == 0):
+                frame.push(newint(w_recv.length()))
+            elif opcode == insns.OPT_LENGTH:
+                frame.push(send_op(w_recv, LENGTH, []))
+            else:
+                frame.push(send_op(w_recv, SIZE, []))
+        elif opcode == insns.OPT_EMPTY_P:
+            w_recv = frame.pop()
+            if (isinstance(w_recv, W_Array)
+                    and w_array_class.redefined & BOP_EMPTY_P == 0):
+                frame.push(newbool(w_recv.length() == 0))
+            else:
+                frame.push(send_op(w_recv, EMPTY_P, []))
+        elif opcode == insns.OPT_CASE_DISPATCH:
+            frame.pop()
         elif opcode == insns.OBJTOSTRING:
-            frame.push(_to_s(frame.pop()))
+            w_x = frame.pop()
+            if isinstance(w_x, W_String):
+                frame.push(w_x)
+            else:
+                frame.push(send(w_x, TO_S, []))
         elif opcode == insns.ANYTOSTRING:
             w_str = frame.pop()
             w_val = frame.pop()
@@ -300,22 +743,126 @@ def execute(iseq, frame):
                 raise UnsupportedOperation('to_s on %s did not return a String'
                                            % w_val.repr())
             frame.push(w_str)
+        elif opcode == insns.NEWARRAY:
+            n = code[pc]
+            pc += 1
+            items_w = [w_nil] * n
+            i = n - 1
+            while i >= 0:
+                items_w[i] = frame.pop()
+                i -= 1
+            frame.push(W_Array(items_w))
+        elif opcode == insns.DUPARRAY:
+            idx = code[pc]
+            pc += 1
+            w_ary = iseq.consts[idx]
+            assert isinstance(w_ary, W_Array)
+            frame.push(W_Array(w_ary.items()[:]))
+        elif opcode == insns.NEWHASH:
+            n = code[pc]
+            pc += 1
+            w_hash = W_Hash()
+            i = n
+            while i > 0:
+                hashlib.aset(w_hash, frame.topn(i - 1), frame.topn(i - 2))
+                i -= 2
+            _drop(frame, frame.sp - n)
+            frame.push(w_hash)
+        elif opcode == insns.DUPHASH:
+            idx = code[pc]
+            pc += 1
+            w_template = iseq.consts[idx]
+            assert isinstance(w_template, W_Hash)
+            frame.push(hashlib.copy(w_template))
+        elif opcode == insns.SPLATARRAY:
+            dup = iseq.consts[code[pc]].is_true()
+            pc += 1
+            w_x = frame.pop()
+            if w_x is w_nil:
+                frame.push(W_Array([]))
+            else:
+                w_ary = _check_to_array(w_x)
+                if w_ary is None:
+                    frame.push(W_Array([w_x]))
+                elif dup:
+                    frame.push(W_Array(w_ary.items()[:]))
+                else:
+                    frame.push(w_ary)
+        elif opcode == insns.PUSHTOARRAY:
+            n = code[pc]
+            pc += 1
+            w_ary = frame.topn(n)
+            assert isinstance(w_ary, W_Array)
+            i = n - 1
+            while i >= 0:
+                w_ary.append(frame.topn(i))
+                i -= 1
+            _drop(frame, frame.sp - n)
+        elif opcode == insns.CONCATTOARRAY:
+            w_x = frame.pop()
+            w_ary = frame.topn(0)
+            assert isinstance(w_ary, W_Array)
+            if w_x is not w_nil:
+                w_tail = _check_to_array(w_x)
+                if w_tail is None:
+                    w_ary.append(w_x)
+                else:
+                    w_ary.items().extend(w_tail.items())
+        elif opcode == insns.NEWRANGE:
+            exclusive = code[pc] != 0
+            pc += 1
+            w_end = frame.pop()
+            w_begin = frame.pop()
+            frame.push(rangelib.newrange(w_begin, w_end, exclusive))
         elif opcode == insns.CONCATSTRINGS:
             n = code[pc]
             pc += 1
-            parts = [''] * n
+            parts_w = [None] * n
             i = n - 1
             while i >= 0:
-                parts[i] = frame.pop().str_w()
+                w_part = frame.pop()
+                if not isinstance(w_part, W_String):
+                    raise UnsupportedOperation('not a string')
+                parts_w[i] = w_part
                 i -= 1
-            frame.push(W_String(''.join(parts)))
+            frame.push(stringlib.concat(parts_w))
+        elif opcode == insns.PUTSPECIALOBJECT:
+            kind = code[pc]
+            pc += 1
+            if kind == optable.SPECIAL_OBJECT_VMCORE:
+                frame.push(classlib.w_frozen_core)
+            else:
+                frame.push(_const_base(frame.cref))
+        elif opcode == insns.DEFINECLASS:
+            mid = code[pc]
+            w_body = _as_iseq(iseq.consts[code[pc + 1]])
+            flags = code[pc + 2]
+            pc += 3
+            w_super = frame.pop()
+            w_class = _define_class(frame.pop(), mid, w_super, flags)
+            frame.push(execute(w_body, Frame(w_body, w_class, None, None,
+                                             Cref(w_class, frame.cref))))
         elif opcode == insns.DEFINEMETHOD:
             mid = code[pc]
             w_body = iseq.consts[code[pc + 1]]
             pc += 2
             w_self = frame.w_self
-            w_self.define_method(mid, W_ISeqMethod(
-                mid, _as_iseq(w_body), w_self.defines_private()))
+            private = w_self.defines_private() or mid in ALWAYS_PRIVATE
+            w_owner = w_self.method_owner()
+            w_owner.add_user_method(mid, W_ISeqMethod(
+                mid, _as_iseq(w_body), private, frame.cref, w_owner))
+        elif opcode == insns.DEFINESMETHOD:
+            mid = code[pc]
+            w_body = iseq.consts[code[pc + 1]]
+            pc += 2
+            w_obj = frame.pop()
+            if not isinstance(w_obj, W_Class):
+                raise UnsupportedOperation(
+                    'a singleton method on %s is not supported yet'
+                    % w_obj.repr())
+            w_owner = w_obj.singleton_class()
+            w_owner.add_method(mid, W_ISeqMethod(
+                mid, _as_iseq(w_body), False, frame.cref, w_owner))
         elif opcode == insns.OPT_SEND_WITHOUT_BLOCK:
             idx = code[pc]
             pc += 1
@@ -329,15 +876,21 @@ def execute(iseq, frame):
                 frame.push(w_ret)
         elif opcode == insns.SEND:
             idx = code[pc]
-            block = code[pc + 1]
+            w_block = _literal_block(iseq, frame, code[pc + 1])
             pc += 2
             w_ci = _callinfo(iseq, idx)
-            if block == NO_BLOCK_ISEQ:
-                w_block = None
-            else:
-                w_block = W_Block(_as_iseq(iseq.consts[block]), frame.w_self)
-            w_ret = invoke(frame, iseq, w_ci, w_block,
-                           _call_tail(iseq, w_ci, pc))
+            if w_ci.blockarg:
+                w_block = proclib.block_of(frame.pop())
+            recv_at = frame.sp - w_ci.argc - 1
+            try:
+                w_ret = invoke(frame, iseq, w_ci, w_block,
+                               _call_tail(iseq, w_ci, pc))
+            except BlockBreak as e:
+                if (w_block is None or w_ci.blockarg or e.home is not frame
+                        or e.w_iseq is not w_block.w_iseq):
+                    raise
+                _drop(frame, recv_at)
+                w_ret = e.w_value
             if w_ret is None:
                 pc = 0
                 jitdriver.can_enter_jit(iseq=iseq, pc=pc, frame=frame)
@@ -366,6 +919,44 @@ def execute(iseq, frame):
                 pc = target
                 if backward:
                     jitdriver.can_enter_jit(iseq=iseq, pc=pc, frame=frame)
+        elif opcode == insns.INVOKESUPER:
+            w_ci = _callinfo(iseq, code[pc])
+            w_block = _literal_block(iseq, frame, code[pc + 1])
+            pc += 2
+            frame.push(invoke_super(frame, w_ci, w_block))
+        elif opcode == insns.INVOKEBLOCK:
+            w_ci = _callinfo(iseq, code[pc])
+            pc += 1
+            frame.push(yield_block(frame, w_ci))
+        elif opcode == insns.OPT_NEW:
+            w_ci = _callinfo(iseq, code[pc])
+            target = code[pc + 1]
+            pc += 2
+            # Below the arguments: the class, then a nil slot for the result
+            w_class = frame.topn(w_ci.argc)
+            if (isinstance(w_class, W_Class) and isinstance(
+                    w_class.lookup_method(NEW), classlib.W_New)):
+                w_obj = classlib.allocate(w_class)
+                frame.set_topn(w_ci.argc, w_obj)
+                frame.set_topn(w_ci.argc + 1, w_obj)
+            else:
+                pc = target
+        elif opcode == insns.OPT_GETCONSTANT_PATH:
+            w_path = iseq.consts[code[pc]]
+            pc += 1
+            assert isinstance(w_path, W_ConstPath)
+            frame.push(_const(promote(frame.cref), w_path))
+        elif opcode == insns.SETCONSTANT:
+            mid = code[pc]
+            pc += 1
+            w_cbase = frame.pop()
+            w_value = frame.pop()
+            if not isinstance(w_cbase, W_Class):
+                raise UnsupportedOperation('%s is not a class/module'
+                                           % w_cbase.repr())
+            w_cbase.set_const(mid, w_value)
+        elif opcode == insns.THROW:
+            raise BlockBreak(frame.outer, iseq, frame.pop())
         elif opcode == insns.LEAVE:
             return frame.pop()
         else:

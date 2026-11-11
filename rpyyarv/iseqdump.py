@@ -8,6 +8,8 @@ from rpyyarv.error import LoadError
 
 FORMAT_VERSION = 1
 
+_INF = float('inf')
+
 _SEP = '\t'
 
 
@@ -16,6 +18,18 @@ def _int(field, what):
         return int(field)
     except ValueError:
         raise LoadError('%s is not a number: %s' % (what, field))
+
+
+def _float(field):
+    # Float#inspect spells infinity out; 1e400 is such a literal
+    if field == 'Infinity':
+        return _INF
+    if field == '-Infinity':
+        return -_INF
+    try:
+        return float(field)
+    except ValueError:
+        raise LoadError('Float is not a number: %s' % field)
 
 
 def _unescape(text):
@@ -79,6 +93,8 @@ def _operand(token):
     body = token[2:]
     if kind == 'i':
         return rawiseq.int_operand(_int(body, 'operand'))
+    if kind == 'd':
+        return rawiseq.float_operand(_float(body))
     if kind == 'n':
         return rawiseq.RawOperand(rawiseq.OP_NIL)
     if kind == 't':
@@ -89,13 +105,25 @@ def _operand(token):
         return rawiseq.RawOperand(rawiseq.OP_SYM, 0, _unescape(body))
     if kind == 's':
         return rawiseq.RawOperand(rawiseq.OP_STR, 0, _unescape(body))
+    if kind == 'b':
+        return rawiseq.RawOperand(rawiseq.OP_STR, 1, _unescape(body))
+    if kind == 'e':
+        raise LoadError('a String in %s is not supported' % body)
     if kind == 'q':
         return rawiseq.RawOperand(rawiseq.OP_ISEQ, _int(body, 'iseq index'))
-    if kind == 'a':
+    if kind == 'a' or kind == 'h':
         items = []
         for item in _split_items(body):
             items.append(_operand(item))
-        return rawiseq.RawOperand(rawiseq.OP_ARRAY, 0, '', 0, False, items)
+        op_kind = rawiseq.OP_ARRAY if kind == 'a' else rawiseq.OP_HASH
+        return rawiseq.RawOperand(op_kind, 0, '', 0, False, items)
+    if kind == 'r':
+        parts = _split_items(body)
+        if len(parts) != 3 or (parts[2] != 't:' and parts[2] != 'f:'):
+            raise LoadError('malformed range: %s' % token)
+        return rawiseq.RawOperand(rawiseq.OP_RANGE,
+                                  1 if parts[2] == 't:' else 0, '', 0, False,
+                                  [_operand(parts[0]), _operand(parts[1])])
     if kind == 'x':
         return rawiseq.RawOperand(rawiseq.OP_OTHER, 0, _unescape(body))
     if kind == 'c':
@@ -124,6 +152,8 @@ def parse(text):
     nlocals = -1
     stack_max = -1
     catch_size = 0
+    catch_types = ''
+    arg_size = 0
     pending = None
     lineno = 0
 
@@ -157,6 +187,8 @@ def parse(text):
             lead_num = 0
             extra_params = ''
             catch_size = 0
+            catch_types = ''
+            arg_size = 0
             raw = None
         elif kind == 'locals':
             nlocals = _int(_field(fields, 1, 'local count'), 'locals')
@@ -165,14 +197,18 @@ def parse(text):
         elif kind == 'params':
             lead_num = _int(_field(fields, 1, 'lead_num'), 'lead_num')
             extra_params = fields[2] if len(fields) > 2 else ''
+        elif kind == 'argsize':
+            arg_size = _int(_field(fields, 1, 'argument count'), 'argsize')
         elif kind == 'catch':
             catch_size = _int(_field(fields, 1, 'catch table size'), 'catch')
+            catch_types = fields[2] if len(fields) > 2 else ''
             if pending is None or nlocals < 0 or stack_max < 0:
                 raise LoadError('line %d: incomplete iseq header' % lineno)
             raw = rawiseq.RawISeq(_field(pending, 3, 'label'),
                                   _field(pending, 2, 'type'),
                                   nlocals, stack_max, lead_num,
-                                  extra_params, catch_size)
+                                  extra_params, catch_size, catch_types,
+                                  arg_size)
             program.add_iseq(raw)
             pending = None
         elif kind == 'insn':

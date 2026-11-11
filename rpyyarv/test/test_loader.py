@@ -93,11 +93,11 @@ def test_local_slots_are_remapped():
     assert w_body.nlocals == 3
     assert w_body.nparams == 2
     assert [(op, operands) for _, op, operands in decode(w_body)] == [
-        (insns.GETLOCAL, [0]),
-        (insns.GETLOCAL, [1]),
+        (insns.GETLOCAL, [0, 0]),
+        (insns.GETLOCAL, [1, 0]),
         (insns.OPT_MINUS, []),
-        (insns.SETLOCAL, [2]),
-        (insns.GETLOCAL, [2]),
+        (insns.SETLOCAL, [2, 0]),
+        (insns.GETLOCAL, [2, 0]),
         (insns.LEAVE, []),
     ]
 
@@ -134,33 +134,40 @@ def test_equal_fixnum_literals_share_a_pool_slot():
 
 def test_missing_instructions_are_reported_together():
     text = patched(fixture('fib_rec.iseq'), 'insn\tputself\ninsn\tputobject',
-                   'insn\tputstring\ts:x\ninsn\tnewhash\ti:0\n'
+                   'insn\tputstring\ts:x\ninsn\tintern\n'
                    'insn\tputstring\ts:y\n'
                    'insn\tputself\ninsn\tputobject')
     l = loader.Loader(iseqdump.parse(text))
     l.scan()
-    assert l.missing == {'putstring': 2, 'newhash': 1}
-    assert l.missing_names == ['putstring', 'newhash']
+    assert l.missing == {'putstring': 2, 'intern': 1}
+    assert l.missing_names == ['putstring', 'intern']
     expect(UnsupportedOperation, text,
            '2 unimplemented instruction(s) in 3 occurrence(s): '
-           'putstring x2, newhash x1')
+           'putstring x2, intern x1')
 
 
 def test_missing_instructions_are_counted():
     text = patched(fixture('fib_rec.iseq'),
                    'insn\tputself\ninsn\tgetlocal_WC_0\ti:3',
-                   'insn\tnewarray\ti:0\ninsn\tnewarray\ti:0\n'
+                   'insn\tchecktype\ti:0\ninsn\tchecktype\ti:0\n'
                    'insn\tputstring\ts:x\n'
                    'insn\tputself\ninsn\tgetlocal_WC_0\ti:3')
     expect(UnsupportedOperation, text,
            '2 unimplemented instruction(s) in 3 occurrence(s): '
-           'newarray x2, putstring x1')
+           'checktype x2, putstring x1')
 
 
-def test_local_level_rejected():
-    expect(UnsupportedOperation, fixture('block.iseq'),
-           "getlocal at level 1 in 'block in <main>' reaches an enclosing "
-           "scope, which RPyYARV does not support")
+def test_a_block_local_names_its_enclosing_scope():
+    w_block = loader.load_dump(fixture('block.iseq')).consts[1]
+    _, operands = only_insn(w_block, insns.GETLOCAL)
+    assert operands == [0, 1]
+
+
+def test_a_level_beyond_the_nesting_is_refused():
+    text = patched(fixture('block.iseq'), 'insn\tgetlocal_WC_1\ti:3',
+                   'insn\tgetlocal\ti:3\ti:2')
+    expect(LoadError, text, "getlocal in 'block in <main>' reaches level 2, "
+           "but it is nested only 1 deep")
 
 
 def test_blockless_send_encoding():
@@ -219,10 +226,53 @@ def test_operand_shape_is_checked():
 
 def test_unsupported_literal():
     text = patched(fixture('fib_rec.iseq'), 'insn\tputobject\ti:20',
-                   'insn\tputobject\ty:a_symbol')
+                   'insn\tputobject\tx:1..2')
     expect(UnsupportedOperation, text,
-           "putobject of Symbol a_symbol in '<main>': RPyYARV has no such "
+           "putobject of object 1..2 in '<main>': RPyYARV has no such "
            "object yet")
+
+
+def test_equal_symbol_literals_are_one_object(compile_source):
+    w_iseq = loader.load_dump(compile_source(
+        'def f\n  :abc\nend\ndef g\n  :abc\nend\n'))
+    w_f = defined_method(w_iseq, 'f')
+    w_g = defined_method(w_iseq, 'g')
+    _, (f_idx,) = only_insn(w_f, insns.PUTOBJECT)
+    _, (g_idx,) = only_insn(w_g, insns.PUTOBJECT)
+    assert w_f.consts[f_idx] is w_g.consts[g_idx]
+
+
+@pytest.mark.parametrize('params, simple', [
+    ('', True), ('|e|', True), ('|a, b|', True), ('|a, |', False),
+    ('|*a|', False), ('|a, b = 5|', False)])
+def test_block_params_are_simple_only_when_plain(params, simple,
+                                                 compile_source):
+    w_iseq = loader.load_dump(compile_source('1.times { %s nil }\n' % params))
+    _, (_, block_idx) = only_insn(w_iseq, insns.SEND)
+    assert w_iseq.consts[block_idx].simple_params == simple
+
+
+def test_a_hash_literal_with_an_unsupported_key_is_refused(compile_source):
+    expect(UnsupportedOperation, compile_source('{1.5 => 1}\n'),
+           'a Hash key of class Float is not supported yet')
+
+
+@pytest.mark.parametrize('source', ['module M\nend\n',
+                                    'class << self\nend\n'])
+def test_a_module_or_singleton_class_is_refused_at_load(source,
+                                                        compile_source):
+    expect(UnsupportedOperation, compile_source(source),
+           "defineclass of a module or a singleton class in '<main>' is not "
+           "supported")
+
+
+@pytest.mark.parametrize('source, msg', [
+    ('puts $stdout\n', "global variable $stdout in '<main>' is not supported"),
+    ('$0 = "x"\n', "global variable $0 in '<main>' is not supported"),
+    ('def f\n  $;\nend\n', "global variable $; in 'f' is not supported")])
+def test_a_cruby_global_variable_is_refused_at_load(source, msg,
+                                                    compile_source):
+    expect(UnsupportedOperation, compile_source(source), msg)
 
 
 def test_malformed_dump():
@@ -264,6 +314,510 @@ CRUBY_CASES = [
                    'puts a\nputs b\nputs c\nputs d\n'),
     ('nil_true_false', 'puts nil\nputs true\nputs false\n'),
     ('comparison', 'puts 1 == 1\nputs 2 <= 3\nputs 3 >= 2\n'),
+    ('float_to_s', 'puts 4.2\nputs 100.0\nputs 1e15\nputs 1.5e16\n'
+                   'puts 1234567890123456.7\nputs 0.0001\nputs 0.00001\n'
+                   'puts 2.5e-10\nputs -0.0\nputs -3.25\nputs 1e400\n'
+                   'puts -1e400\nputs 1e100\n'),
+    ('float_arith', 'puts 1 + 2.5\nputs 0.1 + 0.2\nputs 2.5 * 4\n'
+                    'puts 1.5 - 3\nputs 3 - 1.5\nputs "#{1.5}"\n'),
+    ('float_compare', 'puts 1 < 1.5\nputs 1.5 > 2\nputs 2.0 <= 2\n'
+                      'puts 2 >= 2.5\nputs 2.0 == 2\nputs 0.1 + 0.2 == 0.3\n'),
+    ('numeric_methods', 'puts 42.real?\nputs 4.2.real?\nputs 42.real\n'
+                        'puts 4.2.real\nputs 42.imag\nputs 4.2.imag\n'
+                        'puts 42.conj\nputs 4.2.conj\nputs 42.integer?\n'
+                        'puts 4.2.integer?\nputs 42.finite?\n'
+                        'puts 42.infinite?\nputs 42.numerator\n'
+                        'puts 42.denominator\n'),
+    ('float_methods', 'f = 4.2\nn = -4.2\nz = -0.0\nputs f.to_f\n'
+                      'puts n.abs\nputs n.magnitude\nputs z.abs\nputs -f\n'
+                      'puts -z\nputs 0.0.zero?\nputs z.zero?\nputs f.zero?\n'
+                      'puts n.negative?\nputs z.negative?\nputs f.positive?\n'
+                      'puts 0.0.positive?\nputs f.finite?\nputs f.infinite?\n'),
+    ('float_special', 'inf = 1e400\nninf = -inf\nnan = inf - inf\n'
+                      'puts inf.finite?\nputs nan.finite?\n'
+                      'puts inf.infinite?\nputs ninf.infinite?\n'
+                      'puts nan.infinite?\nputs nan.zero?\n'
+                      'puts nan.positive?\nputs nan.negative?\n'
+                      'puts nan.abs\nputs ninf.abs\n'),
+    ('symbol', 'puts :abc\nx = :foo\nputs "a#{x}b"\nputs :abc.to_s\n'),
+    ('times', '3.times { |i| puts i }\nputs 3.times { }\n'
+              '0.times { puts 1 }\n2.times { puts "x" }\n'
+              '2.times { |a, b| puts a\n  puts b }\n'),
+    ('int_beyond_fixnum', 'puts 4611686018427387903 + 1\n'
+                          'puts -4611686018427387904 - 1\n'
+                          'puts 3037000499 * 3037000499\n'),
+    ('block_reads_outer', 'x = 5\n1.times { puts x }\n'),
+    ('block_writes_outer', 'sum = 0\n4.times { |i| sum += i }\nputs sum\n'),
+    ('nested_blocks', 'a = 1\n1.times { b = 2\n  1.times { puts a + b\n'
+                      '    a = 10 } }\nputs a\n'),
+    ('block_in_method', 'def f(n)\n  t = 0\n  n.times { |i| t += i }\n'
+                        '  t\nend\nputs f(5)\n'),
+    ('array_literals', 'a = 1\nb = [a, a + 1, 3]\n'
+                       'puts b.inject(0) { |s, x| s + x }\n'
+                       'c = [1, 2]\nputs c.inject(10) { |s, x| s + x }\n'),
+    ('array_index', 'a = [1, 2, 3]\nputs a[0]\nputs a[-1]\nputs a[5]\n'
+                    'a[1] = 20\na[5] = 6\nputs a[1]\nputs a[4]\nputs a[5]\n'),
+    ('stack_shuffles', 'a = [1, 2]\nputs(a[0] = 7)\na[1] += 10\nputs a[0]\n'
+                       'puts a[1]\nb = a[0] = 3\nputs b\n'),
+    ('length_size', 'a = [1, 2, 3]\nputs a.length\nputs a.size\n'
+                    'puts "abc".size\nputs "a\\u00e9\\u20ac".length\n'
+                    'puts [].size\nputs "\\xE3\\x81".length\n'
+                    'puts "\\x80ab\\xF0\\x9F\\x98".size\n'),
+    ('array_each_map_join', 'a = [1, 2, 3]\nt = 0\nr = a.each { |x| t += x }\n'
+                            'puts t\nputs r.size\n'
+                            'puts a.map { |x| x * 2 }.join(",")\n'
+                            'puts [1, [2, [3, nil]], "s"].join("-")\n'
+                            'puts a.join\n'),
+    ('array_join_nested', 'puts [1, [], 2].join("-")\nputs [1, []].join(",")\n'
+                          'puts [[[]]].join(",")\n'
+                          'puts [1, [2, []], 3].join("-")\n'
+                          'puts [1, 2].join(nil)\n'),
+    ('array_mutated_in_loop', 'a = [1, 2]\nr = []\n'
+                              'a.each { |x| r[r.size] = x\n'
+                              '  a[a.size] = 9 if a.size < 4 }\n'
+                              'puts r.join(",")\nb = [1, 2, 3]\n'
+                              'puts b.map { |x| b[2] = 7 if x == 1\n  x }.join(",")\n'),
+    ('equality', 'puts 1 == 1.0\nputs 1 != 2\nputs 1 == nil\nputs nil == nil\n'
+                 'puts "a" == "a"\nputs "a" != "b"\nputs :a == :a\n'
+                 'puts [1, "x", [2]] == [1, "x", [2]]\nputs [1] == [2]\n'
+                 'puts [1] != [1]\nputs !nil\nputs !1\nputs !!false\n'
+                 'puts "a" == 1\n'),
+    ('equality_identity', 'n = 0.0 / 0\nputs n == n\nputs [n] == [n]\n'
+                          'puts [n] != [n]\nputs [0.0 / 0] == [0.0 / 0]\n'),
+    ('equality_recursive', 'a = [0]\na[0] = a\nb = [0]\nb[0] = b\n'
+                           'puts a == a\nputs a == b\nputs a != b\n'),
+    ('equality_num_reverses', 'def ==(o)\n  true\nend\nputs 1 == nil\n'
+                              'puts 1.0 == nil\nputs 1 != nil\n'),
+    ('equality_resized', 'def ==(o)\n  @a[3] = 0\n  true\nend\n@a = [self]\n'
+                         'puts @a == [nil]\n'),
+    ('join_repeated', 'a = [1, 2]\nputs [a, a].join(",")\n'
+                      'puts [[a], a].join("-")\n'),
+    ('float_mod_inf', 'i = 1.0 / 0\nputs i % 2\nputs -i % 2\nputs i % i\n'
+                      'puts 5 % i\nputs -1.0 % i\n'),
+    ('int_mod_min', 'a = -4611686018427387904\nb = a + a\nputs b % -1\n'
+                    'puts b % 3\n'),
+    ('duparray_copies', '2.times { a = [1, 2]; a[0] += 10; puts a[0] }\n'),
+    ('attr_op_assign', 'def foo\n  @foo\nend\ndef foo=(v)\n  @foo = v\nend\n'
+                       '@foo = 1\nself.foo += 4\nputs foo\n'),
+    ('aset_or_assign', 'a = [1, nil]\na[0] ||= 5\na[1] ||= 6\nputs a[0]\n'
+                       'puts a[1]\nx = (a[0] ||= 9)\nputs x\n'),
+    ('class_definition', 'x = class Foo\n  puts self\n  def hi\n    1\n  end\n'
+                         '  42\nend\nputs x\nclass Foo\n  puts 1\nend\n'
+                         'class Bar < Foo\nend\nputs Bar\nputs Foo == Bar\n'
+                         'class Foo\n  class Inner\n    puts self\n  end\n'
+                         'end\nputs Foo::Inner\n'
+                         'puts((class Baz; end) == nil)\n'
+                         'class Bar < Foo\n  puts 2\nend\n'
+                         '[1].each { class Qux; puts self; end }\n'),
+    ('constant_set', 'X = 1\nputs X\nY = X + 1\nputs Y\nputs ::X\n'
+                     'class Foo\nend\nFoo::K = 7\nputs Foo::K\nF = Foo\n'
+                     'class F\n  puts self\nend\n'),
+    ('constant_lexical', 'A = 1\nclass Outer\n  A = 2\n  class Inner\n'
+                         '    puts A\n  end\n  puts A\n  class Array\n  end\n'
+                         '  puts Array\n  puts ::Array\n'
+                         '  [1].each { |x| puts A + x }\nend\nputs A\n'
+                         'puts Array\nputs Outer::Inner\n'),
+    ('constant_ancestors', 'class Base\n  K = :base\nend\nK = :top\n'
+                           'class Sub < Base\n  puts K\nend\n'
+                           'class Outer\n  K = :outer\n'
+                           '  class Sub2 < Base\n    puts K\n  end\nend\n'
+                           'puts Sub::K\ndef top_k\n  K\nend\nputs top_k\n'),
+    ('new_initialize',
+     'class Point\n  def initialize(x, y)\n    @x = x\n    @y = y\n  end\n'
+     '  def sum\n    @x + @y\n  end\nend\np = Point.new(3, 4)\nputs p.sum\n'
+     'q = Point.new(10, 20)\nputs q.sum\nputs p.sum\n'
+     'class Foo\n  def hi\n    :hi\n  end\nend\nputs Foo.new.hi\n'
+     'class B < Point\nend\nputs B.new(1, 2).sum\nf = Foo.new\n'
+     'puts f == f\nputs f == Foo.new\nputs Object.new == nil\n'
+     'puts Foo.new.to_s.length\n'),
+    ('new_in_loop_and_block',
+     'class C\n  def initialize(i)\n    @i = yield(i)\n  end\n'
+     '  def i\n    @i\n  end\nend\ns = 0\n'
+     '10.times { |i| s += C.new(i) { |x| x * 2 }.i }\nputs s\n'),
+    ('user_operators',
+     'class V\n  def initialize(x)\n    @x = x\n  end\n  def x\n    @x\n  end\n'
+     '  def +(o)\n    V.new(@x + o.x)\n  end\n  def -(o)\n    V.new(@x - o.x)\n'
+     '  end\n  def *(o)\n    V.new(@x * o.x)\n  end\n  def <(o)\n    @x < o.x\n'
+     '  end\n  def >=(o)\n    @x >= o.x\n  end\nend\n'
+     'puts (V.new(1) + V.new(2)).x\nputs (V.new(5) - V.new(2)).x\n'
+     'puts (V.new(3) * V.new(4)).x\nputs V.new(1) < V.new(2)\n'
+     'puts V.new(1) >= V.new(2)\n'),
+    ('attr_accessors',
+     'class P\n  attr_accessor :x, "y"\n  attr_reader :r\n  attr_writer :w\n'
+     '  def initialize\n    @r = 9\n  end\n  def w_value\n    @w\n  end\nend\n'
+     'p = P.new\nputs p.x == nil\np.x = 5\nputs p.x\np.y = 6\nputs p.y\n'
+     'puts p.r\np.w = 7\nputs p.w_value\nputs((p.x = 8))\nputs p.x\n'
+     'p.x += 1\nputs p.x\nclass T < P\nend\nt = T.new\nt.x = 4\nputs t.x\n'),
+    ('attr_return_values',
+     'class Q\n  a = attr_accessor :a, "b"\n  puts a.length\n  puts a[1]\n'
+     '  puts attr_reader(:c)[0]\n  puts attr_writer(:d)[0]\n'
+     '  attr_accessor :A\nend\nq = Q.new\nq.A = 1\nputs q.A\n'),
+    ('class_methods',
+     'class Point\n  attr_reader :x\n  V = 5\n  def initialize(x)\n'
+     '    @x = x\n  end\n  def self.origin\n    new(0)\n  end\n'
+     '  def self.twice(n)\n    n * 2 + v\n  end\n  def self.v\n    V\n'
+     '  end\nend\nputs Point.origin.x\nputs Point.twice(21)\n'
+     'puts(def Point.three; 3; end)\nputs Point.three\n'
+     'def Integer.half(n)\n  n / 2\nend\nputs Integer.half(9)\n'),
+    ('class_methods_inherited',
+     'class A\n  def self.make\n    new\n  end\n  def self.name_of\n    :a\n'
+     '  end\nend\nclass B < A\n  def self.name_of\n    :b\n  end\nend\n'
+     'puts B.make == nil\nputs A.name_of\nputs B.name_of\n'
+     'class C < B\nend\nputs C.name_of\ndef A.late\n  :late\nend\n'
+     'puts C.late\nclass Foo\n  def self.new(x)\n    x * 10\n  end\nend\n'
+     'puts Foo.new(4)\n'),
+    ('super_calls',
+     'class A\n  attr_reader :a\n  def initialize(a)\n    super()\n'
+     '    @a = a\n  end\n  def f(x)\n    x * 10\n  end\n'
+     '  def self.make\n    :a\n  end\nend\nclass B < A\n'
+     '  def initialize(a, b)\n    super(a)\n    @b = b\n  end\n'
+     '  def f(x)\n    r = super(x + 1) + super\n    x = 7\n    r + super\n'
+     '  end\n  def self.make\n    [super, :b].join("+")\n  end\nend\n'
+     'class C < B\nend\nclass D < C\n  def f(x)\n    super * 2\n  end\n'
+     'end\nputs B.new(1, 2).a\nputs B.new(1, 2).f(2)\nputs D.new(1, 2).f(2)\n'
+     'puts B.make\nputs D.make\n'),
+    ('super_blocks',
+     'class A\n  def f(x)\n    yield(x) + 1\n  end\nend\nclass B < A\n'
+     '  def f(x)\n    super + super(x) { |v| v * 100 }\n  end\nend\n'
+     'class C < A\n  def f(x)\n    r = 0\n    [1].each { |i| r = super(x + i) }\n'
+     '    r\n  end\nend\nputs B.new.f(2) { |v| v }\n'
+     'puts C.new.f(1) { |v| v * 3 }\n'),
+    ('class_scoped', 'class Base\n  class X\n  end\nend\nclass Sub < Base\n'
+                     'end\nclass Sub::X\n  puts self\nend\n'
+                     'puts Sub::X == Base::X\nclass Top\nend\n'
+                     'class Sub::Top\nend\nputs Sub::Top == Top\n'
+                     'class Sub::X\n  puts 1\nend\n'),
+    ('yield_tail_new_block', 'def u(n)\n  if n == 0 then yield else '
+                             'u(n - 1) { puts n } end\nend\nu(1) { puts 9 }\n'),
+    ('yield_through_iseq_block', 'def inner\n  yield 2\nend\ndef outer_m\n'
+                                 '  inner { |x| yield x * 3 }\nend\n'
+                                 'outer_m { |y| puts y }\n'),
+    ('int_float_exact', 'a = 9007199254740993\nf = 9007199254740992.0\n'
+                        'puts a == f\nputs a > f\nputs f < a\nputs a <= f\n'
+                        'puts a != f\nputs 1 == 1.0\nputs -0.0 == 0\n'
+                        'nan = 0.0 / 0\nputs 1 < nan\nputs 1 >= nan\n'
+                        'puts 1 != nan\nputs 4611686018427387903 < 1e19\n'
+                        'puts 1 > -1e400\nputs 2.5 > 2\nputs 2 >= 2.0\n'),
+    ('div_mod', 'puts 7 / 2\nputs -7 / 2\nputs 7 / -2\nputs 7 % 3\n'
+                'puts -7 % 3\nputs 7 % -3\nputs 7.0 / 2\nputs 7 / 2.0\n'
+                'puts 1.0 / 0\nputs -1.0 / 0\nputs 0.0 / 0\nputs 1.0 / -0.0\n'
+                'puts 7.5 % 2\nputs -7.5 % 2\nputs 7.5 % -2\n'),
+    ('ivars_on_main', '@a = 1\n@a += 2\nputs @a\nputs @b\n'
+                      'def f\n  @a * 10\nend\nputs f\n'),
+    ('constants', 'puts Array\nputs ::Integer\nputs Object\nx = Float\n'
+                  'puts x == Float\nputs Array == Integer\n'),
+    ('yield', 'def f\n  yield 1, 2\nend\nf { |a, b| puts a + b }\n'
+              'def g(n)\n  n.times { |i| yield i * 10 }\nend\n'
+              'g(3) { |x| puts x }\ndef h\n  yield\nend\nputs h { 5 }\n'
+              'def c(x)\n  x\nend\nputs c(7) { 1 }\n'),
+    ('hash', 'h = {1 => :a, "s" => 2, nil => 3, true => 4, :k => false}\n'
+             'puts h[1]\nputs h["s"]\nputs h[nil]\nputs h[true]\n'
+             'puts h[:k]\nputs h[:none]\nputs h.size\nputs h.length\n'
+             'puts h.key?("s")\nputs h.key?(2)\nputs h.keys[4]\n'
+             'puts h.values[1]\nputs({} == {})\n'),
+    ('hash_order', 'x = 3\ng = {x => 1, "a" => x, x => 2}\ng[9] = 1\n'
+                   'g[3] = 5\nputs g.size\ng.each { |k, v| puts k\n'
+                   '  puts v }\ng.each { |pair| puts pair[0] }\n'
+                   'g.each { |k, v| g[k] = 0 }\nputs g.values[2]\n'),
+    ('hash_equal', 'puts({1 => 2} == {1 => 2})\nputs({1 => 2} == {1 => 3})\n'
+                   'puts({1 => 2} == {2 => 2})\nputs({1 => 2} == {})\n'
+                   'puts({1 => 1} == {1 => 1.0})\nputs({} == [])\n'
+                   'puts({1 => 2} != {1 => 2})\na = {}\na[1] = a\nb = {}\n'
+                   'b[1] = b\nputs a == b\n'),
+    ('splat_call', 'def f(x, y, z)\n  puts x + y * z\nend\na = [2, 3]\n'
+                   'f(1, *a)\nf(*a, 4)\nf(*[1, 2, 3])\nputs(*a)\n'
+                   'class C\n  def initialize(x, y)\n    @s = x - y\n  end\n'
+                   '  def s\n    @s\n  end\nend\nputs C.new(*a).s\n'
+                   'def h(x)\n  yield x\nend\nh(*[5]) { |v| puts v }\n'),
+    ('splat_array', 'a = [1, 2]\nb = 3\nx = [*a]\nx[0] = 9\nputs a[0]\n'
+                    'puts [*a, b].join(",")\nputs [b, *a].join(",")\n'
+                    'puts [*a, *a].join(",")\nputs [b, *a, b].join(",")\n'
+                    'puts([*nil].size)\nputs [*1].join(",")\n'
+                    'puts [*a, *nil].size\nputs [*a, *b].join(",")\n'
+                    'class T\n  def to_a\n    [7, 8]\n  end\nend\n'
+                    'puts [*T.new].join(",")\nputs [0, *T.new].join(",")\n'
+                    'h = {1 => 2, 3 => 4}\nputs [*h][1].join(",")\n'
+                    'puts h.to_a.size\n'),
+    ('for_loop', 'for x in [7, 8] do puts x end\nputs x\n'
+                 'for y in [[1, 2]] do puts y.size end\n'),
+    ('numeric_equal', 'class E\n  def ==(o)\n    true\n  end\nend\n'
+                      'puts(1 == E.new)\nputs(1.5 == E.new)\nputs(1 == 1.0)\n'
+                      'puts(2.0 != 2)\n'),
+    ('reopen_integer', 'class Integer\n  def double\n    self * 2\n  end\n'
+                       '  def +(o)\n    42\n  end\nend\nputs 3.double\n'
+                       'puts 1 + 2\nputs 1.5 + 2\nputs 3 - 1\n'),
+    ('reopen_array', 'class Array\n  def size\n    -1\n  end\n'
+                     '  attr_reader :tag\nend\nputs [1, 2].size\n'
+                     'puts [1].length\nputs [1].tag\n'),
+    ('reopen_operators', 'class Integer\n  def <(o)\n    :lt\n  end\n'
+                         '  def ==(o)\n    :eq\n  end\nend\n'
+                         'class Float\n  def *(o)\n    :mul\n  end\nend\n'
+                         'class String\n  def +(o)\n    :plus\n  end\nend\n'
+                         'class Array\n  def [](i)\n    :aref\n  end\n'
+                         '  def []=(i, v)\n    :aset\n  end\n'
+                         '  def length\n    :length\n  end\nend\n'
+                         'puts 1 < 2\nputs 1 == 2\nputs 1 != 1\n'
+                         'puts([1] == [2])\nputs 1.5 * 2\nputs 3 * 2\n'
+                         'puts "a" + "b"\nputs [1][0]\na = [1]\na[0] = 2\n'
+                         'puts a.size\nputs a.length\n'),
+    ('reopen_string', 'class String\n  def to_s\n    "S"\n  end\nend\n'
+                      's = "a"\nputs "#{s}"\nputs s\n'),
+    ('reopen_object', 'class Object\n  def to_s\n    "obj"\n  end\n'
+                      '  def ==(o)\n    true\n  end\nend\nputs Integer\n'
+                      'puts [1].join\nputs(:a == :b)\nputs(1.5 == 2.5)\n'
+                      'puts(nil == 1)\nputs(Integer == Float)\n'),
+    ('array_new', 'puts Array.new.size\nputs Array.new(2).size\n'
+                  'puts Array.new(2, 0).join(",")\n'
+                  'puts Array.new(3) { |i| i * i }.join(",")\n'
+                  'puts Array.new(2, 0) { |i| i }.join(",")\n'
+                  'b = [1, 2]\nc = Array.new(b)\nc[0] = 9\nputs b[0]\n'
+                  'puts Array.new(2.7).size\no = Object.new\n'
+                  'd = Array.new(2, o)\nputs d[0] == o\nputs d[1] == o\n'
+                  'puts Array.new(0).size\n'),
+    ('dup_clone', 'a = [1, 2]\nb = a.dup\nb[0] = 9\nputs a[0]\n'
+                  'h = {1 => 2}\ng = h.dup\ng[1] = 3\nputs h[1]\n'
+                  'puts "x".dup\nputs 1.dup\nputs :a.clone\nputs 1.5.dup\n'
+                  'class P\n  attr_accessor :v\n  def initialize_copy(o)\n'
+                  '    @v = 7\n  end\nend\nx = P.new\nx.v = 1\ny = x.dup\n'
+                  'puts x.v\nputs y.v\nputs [1, 2].clone.join(",")\n'
+                  'class Q\n  attr_accessor :w\nend\nq = Q.new\nq.w = 4\n'
+                  'r = q.clone\nr.w = 5\nputs q.w\nputs r.w\n'),
+    ('array_methods', 'a = [1, 2, 3, 4]\n'
+                      'puts "#{[a.at(0), a.at(-1), a.at(9), a.at(1.9)]}"\n'
+                      'puts "#{[a.first, [].first, a.first(2), a.first(9)]}"\n'
+                      'b = [1]\nputs "#{[b.push(2, 3), b.push]}"\n'
+                      'b = [1, 2, 3]\nputs "#{[b.pop, b.pop(2), b, [].pop]}"\n'
+                      'b = [1, 2, 3]\n'
+                      'puts "#{[b.shift, b.shift(5), b, [].shift]}"\n'
+                      'b = [1, 2]\nputs "#{b.insert(1, 9)}"\n'
+                      'puts "#{b.insert(-1, 8)}"\nputs "#{b.insert(6, 7)}"\n'
+                      'puts "#{b.insert(0)}"\n'
+                      'puts "#{[[].empty?, [1].empty?]}"\n'
+                      'b = [1, 2]\nc = b.reverse\nputs "#{[c, b]}"\n'
+                      'puts "#{[b.reverse!, b]}"\n'
+                      'b = [1, 2, 3, 4]\nputs "#{[b.slice!(0, 2), b]}"\n'
+                      'b = [1, 2, 3]\nputs "#{[b.slice!(1), b]}"\n'
+                      'puts "#{[[1, 2].slice!(5), [1, 2].slice!(2, 1)]}"\n'
+                      'puts "#{[[1, 2].slice!(3, 1), [1, 2].slice!(-1, 5)]}"\n'
+                      'puts "#{[1, 2].slice!(0, -1)}"\n'
+                      'puts "#{[[1] + [2], [1] + []]}"\n'
+                      'puts "#{[[1, 2] * 2, [1] * 0]}"\nputs [1, 2] * ","\n'
+                      'puts [1, 2.5, nil, true, false, [3]].inspect\n'
+                      'puts [].to_s\nd = [1]\nd[1] = d\nputs d.inspect\n'),
+    ('puts_arrays', 'puts [1, 2]\nputs []\nputs [[], 1]\n'
+                    'puts [[2, [3]], nil]\nb = [1]\nb[1] = b\nputs b\n'
+                    'puts 1, [2], 3\n'),
+    ('regexp_equal', 'puts(/a/ == /a/)\nputs(/a/ == /b/)\nputs(/a/ == "a")\n'
+                     'r = /x/\nputs(r == r)\nputs(/a/ != /a/)\n'),
+    ('times_enumerator', 'puts 5.times.to_a.join(",")\n'
+                         'puts 3.times.map { |i| i * 2 }.join(",")\n'
+                         'e = 3.times\nputs(e.each { |i| puts i })\n'
+                         'puts(e.each == e)\nputs((-1).times.to_a.size)\n'
+                         'puts 0.times.map { 1 }.size\n'),
+    ('range', 'r = (1..4)\nr.each { |i| puts i }\n(2...4).each { |i| puts i }\n'
+              'n = 3\n(1..n).each { |i| puts i * 10 }\n'
+              '(1...n).each { |i| puts i }\nfor i in 1..n do puts i end\n'
+              'puts i\nputs((1..n).to_a.join(","))\nputs((5..1).to_a.size)\n'
+              'puts((1...1).to_a.size)\n(0..10).step(4) { |i| puts i }\n'
+              '(10..0).step(-3) { |i| puts i }\n'
+              '(0..10).step(-1) { |i| puts i }\n'
+              '(1...10).step(3) { |i| puts i }\nputs(r.each { } == r)\n'
+              'puts((0..2).step(1) { } == (0..2))\n'),
+    ('range_equal', 'puts((1..2) == (1..2))\nputs((1..2) == (1...2))\n'
+                    'puts((1..2) == (1..2.0))\nputs((1..2) == (1..3))\n'
+                    'puts((1..2) == [1, 2])\nputs((1..) == (1..))\n'
+                    'puts(("a".."c") == ("a".."c"))\nx = 2\n'
+                    'puts((..x) == (..2))\n'),
+    ('range_map', 'puts "#{(1..3).collect { |i| i * 2 }}"\n'
+                  'puts "#{(1...3).map { |i| i }}"\n'
+                  'puts "#{(3..1).collect { 1 }}"\n'),
+    ('opt_reverse', 'def f(x, y)\n  a, b, c = x, y, 3\n  puts a, b, c\n'
+                    '  @p, @q, @r = x, y, 1\n  puts @p, @q, @r\n'
+                    '  a, b, c, d = x, y\n  puts a, b, c, d.inspect\n'
+                    '  a, b = x, y, 3\n  puts a, b\n  nil\nend\nf(7, 8)\n'),
+    ('rest_params', 'def f(*a)\n  a\nend\nputs f.inspect\n'
+                    'puts f(1, 2).inspect\ndef g(a, *r)\n  puts a\n'
+                    '  puts r.inspect\nend\ng(1)\ng(1, 2, 3)\nx = [4, 5]\n'
+                    'g(*x)\nr = f(6)\nr.push(7)\nputs f(6).inspect\n'
+                    'def h(*a)\n  return a.size if a.size > 2\n'
+                    '  h(*a, 0)\nend\nputs h\n'),
+    ('format', 'puts "%.9f" % 1.5\nputs "%0.9f" % 0.1234567895\n'
+               'puts "%.9f" % -0.0\nputs "%.0f" % 2.5\nputs "%.f" % 3.5\n'
+               'puts "%.9f" % (1.0 / 0)\nputs "%.9f" % -(1.0 / 0)\n'
+               'puts "%.9f" % (0.0 / 0)\nputs "%.3f" % 1e300\n'
+               'puts Integer(3)\n'),
+    ('array_shift', 'a = (1..20).to_a\n3.times { a.shift }\ndef show(a)\n'
+                    '  puts a.inspect\n  puts a.length, a[0], a[-1]\n'
+                    '  puts a.first, a.at(2), a.empty?\n  x, y = a\n'
+                    '  puts x, y\n  puts [*a].length\n'
+                    '  puts a.map { |i| i * 2 }.join(",")\n  s = 0\n'
+                    '  a.each { |i| s += i }\n  puts s\n  puts a == a.dup\n'
+                    '  puts a.shift(2).inspect\n  a[1] = 99\n  a.push(21)\n'
+                    '  puts a.pop\n  puts a.reverse.inspect\n'
+                    '  a.insert(1, 0)\n  puts a.slice!(0, 2).inspect\n'
+                    '  puts a.join(",")\nend\nshow(a)\nb = (1..20).to_a\n'
+                    '17.times { b.shift }\nshow(b)\nc = [1, 2]\nc.shift\n'
+                    'c.shift\nputs c.shift.inspect, c.empty?\nc.push(5)\n'
+                    'puts c.inspect\n'),
+    ('int_pow', 'puts 2 ** 10, 3 ** 39, (-2) ** 3, (-1) ** -3, 1 ** -5\n'
+                'puts 0 ** 0, 5 ** 0, 5 ** 1, 0 ** 3, 2 ** 0.5, 0 ** -0.5\n'
+                'puts 4 ** 0.5, -(5), -(-7)\nx = 3\nputs(-x)\n'),
+    ('alias_undef', 'alias say puts\nsay 1\ndef puts(x)\nend\nputs 2\n'
+                    'undef puts\nalias puts say\nputs 3\nclass C\n'
+                    '  def a\n    1\n  end\n  alias b a\n  def a\n    2\n'
+                    '  end\nend\nputs C.new.b, C.new.a\nclass P\n'
+                    '  def m\n    4\n  end\nend\nclass Q < P\n'
+                    '  def m\n    5\n  end\n  alias n m\nend\n'
+                    'puts Q.new.n\n'),
+    ('case_when', 'case :foo\nwhen :bar then puts 1\n'
+                  'when :foo then puts "foo"\nend\nx = 2\ncase x\n'
+                  'when 1, 2 then puts "a"\nelse puts "b"\nend\n'
+                  'case 1.0\nwhen 1 then puts "float is int"\nend\n'
+                  'case 7\nwhen 0.1 then puts 0\n'
+                  'when 7.0 then puts "7.0"\nend\ncase "s"\n'
+                  'when "s" then puts "str"\nend\ncase false\n'
+                  'when nil then puts "nil"\n'
+                  'when false then puts "false"\nend\ncase [1, 2]\n'
+                  'when Hash then puts "hash"\n'
+                  'when [1, 2] then puts "array eq"\nend\ncase :foo\n'
+                  'when Hash then puts 1\nwhen Array then puts 2\n'
+                  'else puts "neither"\nend\ncase 3\n'
+                  'when Numeric then puts "numeric"\nend\nclass Foo\n'
+                  'end\ncase Foo.new\nwhen Object then puts "foo"\n'
+                  'end\ncase Integer\nwhen Class then puts "class"\n'
+                  'end\ncase Math\nwhen Module then puts "module"\n'
+                  'end\nputs(case 5 when 6 then 1 end.inspect)\n'
+                  'class Integer\n  def ===(o)\n    puts "eqq"\n'
+                  '    false\n  end\nend\ncase 1\n'
+                  'when 1 then puts "no"\nelse puts "else"\nend\n'),
+    ('send_missing', 'class C\n  def m\n    :m\n  end\n  def two(a, b)\n'
+                     '    a + b\n  end\n  def method_missing(name, *args)\n'
+                     '    [name, args]\n  end\nend\no = C.new\n'
+                     'puts o.send(:m), o.__send__(:two, 1, 2), o.send("m")\n'
+                     'puts o.send(*[:two, 3, 4]), 1.__send__(:+, 2)\n'
+                     'o.send(:puts, "private via send")\n'
+                     'puts o.foo(1, 2)\nputs o.send(:bar, 5)\n'
+                     'class D\n  def method_missing(name)\n    name\n'
+                     '  end\nend\nputs D.new.baz\n'),
+    ('procs', 'f = -> x { x + 1 }\nputs f[2], f.call(3), f.(4), f.yield(5)\n'
+              'puts(f === 9)\ng = lambda { |a, b| a + b }\nputs g.call(1, 2)\n'
+              'h = proc { |a, b| [a, b] }\nputs h.call(1).inspect\n'
+              'puts h.call(1, 2, 3).inspect\nk = 10\nadd = ->(x) { x + k }\n'
+              'k = 20\nputs add[1]\ncounter = 0\ninc = -> { counter += 1 }\n'
+              'inc.()\ninc.call\nputs counter\n'
+              'compose = ->(a, b) { ->(x) { b[a[x]] } }\n'
+              'puts compose[f, f][1]\ndef make(n)\n  ->(x) { x * n }\nend\n'
+              'puts make(3)[4]\n'),
+    ('string_aref', 'puts "abc"[1], "abc"[-1], "abc"[3].inspect\n'
+                    'puts "abc"[-4].inspect, "abc".slice(0), "a\u00e9b"[1]\n'
+                    'puts "a\u00e9b"[2], "a\u00e9b"[-2], ""[0].inspect\n'
+                    'a = [1, 2]\nb = a.to_a\nb.push(3)\nputs a.inspect\n'),
+    ('string_times', 'puts "ab" * 3, "ab" * 2.7, ("ab" * 0).length\n'
+                     'puts "\u00e9" * 2\n'),
+    ('string_binary', 'b = 195.chr + 169.chr\nputs b.length, b == "\u00e9", b[1] == 169.chr\n'
+                      'puts b[-1].length, (b * 2).length, b.to_s.length\n'
+                      'puts "a" == 97.chr, ("a" + b).length, (b + "a").length\n'
+                      'h = {b => 1}\nputs h["\u00e9"].inspect, h[b], {"a" => 2}[97.chr]\n'
+                      'puts [b, "a"].join.length, [b, b].join(",").length\n'
+                      'puts "#{b}x".length, "\u00e9#{1}".length, b.dup.length\n'),
+    ('string_append', 's = "a"\nt = s\nr = s << "b"\nputs s, t, r\ns << s\nputs s\n'
+                      'k = "key"\nh = {k => 1}\nk << "x"\n'
+                      'puts h["key"], h["keyx"].inspect, k\n'
+                      'u = "a"\nu << 200.chr\nputs u.length\n'
+                      'w = "\u00e9"\nw << "\u00e9"\nputs w.length\n'
+                      'v = ""\n3.times { v << "ab" }\nputs v, v.length\n'
+                      'x = "a" * 3\nx << "b"\nputs x, x.dup << "c", x\n'
+                      'STUFF = "hello\\n"\nhello = ""\n'
+                      '1000.times { hello << STUFF }\nputs hello.length\n'),
+    ('downto_zero', 'r = 5.downto(3) { |i| print i }\nputs\n'
+                    'puts r, 3.downto(5) { puts :x }\n'
+                    'puts(5.downto(2) { |i| break i * 10 if i == 3 })\n'
+                    'puts 0.zero?, 5.zero?, (2 ** 70).zero?, (-1).zero?\n'),
+    ('unpack_c', 'puts "\\x01\\xFF\\x80a".unpack("c*").inspect\n'
+                 'puts "".unpack("c*").inspect, "\u00e9".unpack("c*").inspect\n'
+                 'puts 200.chr.unpack("c*").inspect\n'
+                 'puts ("\\x1" * 3).unpack("c*").inspect\n'),
+    ('array_aref_start_length', 'a = [1, 2, 3, 4, 5]\n'
+                                'puts a[1, 2].inspect, a[-2, 5].inspect, a[5, 1].inspect\n'
+                                'puts a[6, 1].inspect, a[1, -1].inspect, a[0, 0].inspect\n'
+                                'puts a[-6, 1].inspect, a[1.9, 2.5].inspect\n'
+                                'puts a[0, 2 ** 62].inspect\nb = a[0, 2]\nb << 9\n'
+                                'puts a.inspect, b.inspect\n'),
+    ('sprintf', 'puts "%8d|" % 42, "%8d|" % -42, "%-8d|" % -42, "%08d|" % -42\n'
+                'puts "%+d %d" % [5, 2 ** 70], "% d" % 5, "%2d|" % 123\n'
+                'puts "%d" % [1, 2], "%d%%" % 100, "a%sb" % "x"\n'
+                'puts "%8.2f|" % -1.5, "%-8.2f|" % 1.5, "%08.2f|" % -1.5\n'
+                'puts "%+.1f" % 1.0, "%f" % 1.5, "%8.2f|" % (1.0 / 0)\n'
+                'puts "%08.2f|" % -(1.0 / 0), "%+f" % (0.0 / 0)\n'
+                'puts "%s|%s|%s|" % ["\u00e9", 12, nil]\n'
+                'printf("Primes up to %8d %8d\\n", 5120000, 3)\nprintf\n'
+                'puts printf("%d\\n", 7).inspect\n'),
+    ('string_us_ascii_source', '# coding: us-ascii\nputs "\\xC3\\xA9".length, "a".length\n'),
+    ('block_param', 'def m(&b)\n  b\nend\nputs m.inspect\nputs m { 1 }.call\n'
+                    'def c(&b)\n  b.call(2)\nend\nputs c { |x| x * 10 }\n'
+                    'x = proc { |v| v + 1 }\nputs c(&x)\nputs m(&x) == x\n'
+                    'def t(&b)\n  [b, b]\nend\na = t { }\nputs a[0] == a[1]\n'
+                    'def n(a, *r, &b)\n  yield a\nend\ndef o(&b)\n'
+                    '  n(5, &b)\nend\nputs o { |v| v + 1 }\n'
+                    'def g(&b)\n  [1, 2].map { |i| b.call(i) }\nend\n'
+                    'puts g { |i| i * 3 }.inspect\ndef k(&b)\n  proc(&b)\n'
+                    'end\nputs k(&x) == x\nputs m(&nil).inspect\n'),
+    ('bignum', 'a = 4611686018427387903\nb = a + a + 1\nputs b + 1, b - -1\n'
+               'puts -4611686018427387904 - 4611686018427387905\n'
+               'puts 3037000500 * 3037000500, 3 ** 40, 2 ** 100\n'
+               'x = -9223372036854775807 - 1\nputs(-x, x - 1, x * -1)\n'
+               'big = 2 ** 64\nputs big / 3, big % 7, -big / 3, -big % 7\n'
+               'puts big / -5, big - big, (big + 1) - big, big * big\n'
+               'puts big == 2 ** 64, big > 1, 1 < big, big == 2.0 ** 64\n'
+               'puts big < 1.0e30, big > 1.0e19, big.to_f, big * 1.5\n'
+               'puts 10 ** 20 / 10 ** 18, (-big).inspect, big + 0.5\n'
+               'f = 1\n1.upto(30) { |i| f *= i }\nputs f\n'
+               'puts f / f, (big ** 3) ** 2, big.to_s\n'),
+    ('print_class', 'print 1, "a", nil, :s, 2.5\nprint "\\n"\n'
+                    'puts 1.class, nil.class, Integer.class, Math.class\n'
+                    'puts Object.new.class, (2 ** 70).class, [].class\n'
+                    'puts self.class, -> { }.class, self.class == Object\n'
+                    'class C\nend\nputs C.new.class.new.class\n'
+                    'puts(print("x").inspect)\n'),
+    ('block_break', 'r = [1, 2, 3].each { |x| break x * 10 if x == 2 }\n'
+                    'puts r\ns = 0\n[1, 2, 3].each { |x| next if x == 2\n'
+                    '  s += x }\nputs s\nfor i in 0..5\n  break if i == 3\n'
+                    'end\nputs i\nputs((1..10).map { |x| break x if x > 4\n'
+                    '  x })\n[1, 2].each { |a| [3, 4].each { |b| break }\n'
+                    '  puts a }\nputs(3.times { |i| break }.inspect)\n'
+                    'l = -> { break 7 }\nputs l.call\ndef m\n'
+                    '  [1, 2, 3].each { |x| break x + 100 if x == 3 }\nend\n'
+                    'puts m\nputs [1, 2].each { |x| x }.inspect\n'),
+    ('bit_ops', 'puts 1 << 3, 1 << -1, -8 >> 1, -1 >> 100, 1 << 64\n'
+                'puts((1 << 64) >> 63, 5 & 3, 5 | 3, 5 ^ 3, -6 & 0xff)\n'
+                'puts((2 ** 70) & 0xff, (2 ** 70) | 1, -(2 ** 70) >> 3)\n'
+                'puts 3 << 61, 3 << 62, -1 << 63, 1 >> 64, 7 >> -2\n'
+                'puts 65.chr, 255.chr.length\na = [1]\nb = a << 2 << 3\n'
+                'puts b.inspect, a.inspect\nx = 0\nx = (x << 1) | 1\n'
+                'x <<= 2\nputs x\n'),
+    ('globals', 'puts $x == nil\n$x = 1\ndef f\n  $x += 1\nend\nf\nputs $x\n'
+                '[1, 2].each { |i| $y = i }\nputs $y\nputs($z = 5)\n'
+                'def g\n  $w = ($w || 0) + 1\nend\ng\nputs g\n'),
+    ('math', 'puts Math.sqrt(4)\nputs Math.sqrt(2.0)\n'
+             'puts Math.sqrt(-0.0)\nputs Math.sqrt(0)\n'
+             'puts Math.sqrt(1.0 / 0)\nputs Math.sqrt(0.0 / 0)\n'
+             'puts Math.sqrt(9007199254740993)\nputs Math.sin(0)\n'
+             'puts Math.sin(1.0)\nputs Math.sin(-0.0)\n'
+             'puts Math.sin(1.0 / 0)\nputs Math.cos(0)\n'
+             'puts Math.cos(Math::PI)\nputs Math.cos(-1.0 / 0)\n'
+             'puts Math::PI\nputs Math\nputs Math == Math\n'),
+    ('int_step', 'puts(3.step(0, -1) { |i| puts i })\n'
+                 '1.step(3) { |i| puts i }\n1.step(10, 4) { |i| puts i }\n'
+                 '5.step(1, 2) { |i| puts i }\n'
+                 'puts(1.upto(3) { |i| puts i })\n3.upto(1) { |i| puts i }\n'
+                 'puts 3.to_f\nputs -3.to_f\nputs 9007199254740993.to_f\n'),
+    ('float_pow', 'puts 2.0 ** 3\nputs 2.0 ** 0.5\nputs 1.5 ** 2\n'
+                  'puts 2.0 ** -2\nputs((-2.0) ** 3)\nputs((-2.0) ** 2.0)\n'
+                  'inf = 1.0 / 0\nnan = 0.0 / 0\nputs 0.0 ** -1\n'
+                  'puts((-0.0) ** -1)\nputs((-0.0) ** -2)\nputs 0.0 ** -0.5\n'
+                  'puts 0.0 ** -inf\nputs 10.0 ** 400\nputs((-10.0) ** 401)\n'
+                  'puts((-10.0) ** 400)\nputs 1.0 ** nan\nputs nan ** 0\n'
+                  'puts 2.0 ** inf\nputs((-inf) ** 3)\nputs 10.0 ** -400\n'),
 ]
 
 # bench_clock.rb needs RPyYARV's bench_now_ns, which CRuby does not have.
