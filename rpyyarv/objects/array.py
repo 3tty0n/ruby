@@ -88,10 +88,32 @@ def _grow(w_ary, index):
         w_ary.append(w_nil)
 
 
+def _subseq_stop(n, start, length):
+    """rb_ary_subseq: where length items from start end, or -1 for nil."""
+    if length < 0 or start < 0 or start > n:
+        return -1
+    if length < n - start:
+        return start + length
+    return n
+
+
 class W_Aref(W_CFunc):
     def call(self, w_recv, args_w, w_block):
         assert isinstance(w_recv, W_Array)
-        return aref(w_recv, args_w[0].int_w())
+        if len(args_w) == 1:
+            return aref(w_recv, args_w[0].int_w())
+        if len(args_w) != 2:
+            raise arity_error('[]', len(args_w), '1..2')
+        start = num2long(args_w[0])
+        length = num2long(args_w[1])
+        n = w_recv.length()
+        if start < 0:
+            start += n
+        stop = _subseq_stop(n, start, length)
+        if stop < 0:
+            return w_nil
+        assert start >= 0
+        return W_Array(w_recv.items()[start:stop])
 
 
 class W_Aset(W_CFunc):
@@ -435,11 +457,10 @@ class W_SliceBang(W_CFunc):
                 return w_nil
             return items_w.pop(start)
         length = num2long(args_w[1])
-        if length < 0 or start < 0 or start > len(items_w):
+        stop = _subseq_stop(len(items_w), start, length)
+        if stop < 0:
             return w_nil
-        stop = len(items_w)
-        if length < stop - start:
-            stop = start + length
+        assert start >= 0
         w_sliced = W_Array(items_w[start:stop])
         del items_w[start:stop]
         return w_sliced
@@ -515,7 +536,7 @@ def install(w_class):
     mid = symbols.intern('inject')
     w_class.add_method(mid, W_Inject(mid, 1))  # arity=1: initial value required for now
     aref_id = symbols.intern('[]')
-    w_class.add_method(aref_id, W_Aref(aref_id, 1))
+    w_class.add_method(aref_id, W_Aref(aref_id, -1))
     aset_id = symbols.intern('[]=')
     w_class.add_method(aset_id, W_Aset(aset_id, 2))
     for name in ['length', 'size']:

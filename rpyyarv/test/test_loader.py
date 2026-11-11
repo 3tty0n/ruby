@@ -737,6 +737,12 @@ CRUBY_CASES = [
                  'puts "".unpack("c*").inspect, "\u00e9".unpack("c*").inspect\n'
                  'puts 200.chr.unpack("c*").inspect\n'
                  'puts ("\\x1" * 3).unpack("c*").inspect\n'),
+    ('array_aref_start_length', 'a = [1, 2, 3, 4, 5]\n'
+                                'puts a[1, 2].inspect, a[-2, 5].inspect, a[5, 1].inspect\n'
+                                'puts a[6, 1].inspect, a[1, -1].inspect, a[0, 0].inspect\n'
+                                'puts a[-6, 1].inspect, a[1.9, 2.5].inspect\n'
+                                'puts a[0, 2 ** 62].inspect\nb = a[0, 2]\nb << 9\n'
+                                'puts a.inspect, b.inspect\n'),
     ('string_us_ascii_source', '# coding: us-ascii\nputs "\\xC3\\xA9".length, "a".length\n'),
     ('block_param', 'def m(&b)\n  b\nend\nputs m.inspect\nputs m { 1 }.call\n'
                     'def c(&b)\n  b.call(2)\nend\nputs c { |x| x * 10 }\n'
