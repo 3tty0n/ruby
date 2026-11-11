@@ -214,42 +214,124 @@ class W_StrTimes(W_CFunc):
         return W_String(w_recv.str_w() * n, w_recv.encoding)
 
 
-def _fixed_precision(fmt):
-    i = 1
-    if i < len(fmt) and fmt[i] == '0':
+class _Spec(object):
+    """One %-directive: flags, width, precision and conversion."""
+    def __init__(self, text, conv, minus, plus, space, zero, width,
+                 precision):
+        self.text = text
+        self.conv = conv
+        self.minus = minus
+        self.plus = plus
+        self.space = space
+        self.zero = zero
+        self.width = width
+        self.precision = precision
+
+
+def _number_at(fmt, i, what):
+    j = i
+    while j < len(fmt) and fmt[j].isdigit():
+        j += 1
+    if j - i > 9:
+        raise UnsupportedOperation('%s too big (ArgumentError)' % what)
+    return (int(fmt[i:j]) if j > i else 0), j
+
+
+def _parse_spec(fmt, start):
+    """The directive at fmt[start] == '%', or refuse what is not supported."""
+    i = start + 1
+    minus = plus = space = zero = False
+    while i < len(fmt) and fmt[i] in '-+ 0':
+        minus = minus or fmt[i] == '-'
+        plus = plus or fmt[i] == '+'
+        space = space or fmt[i] == ' '
+        zero = zero or fmt[i] == '0'
         i += 1
-    if not fmt.startswith('%') or i >= len(fmt) or fmt[i] != '.':
-        return -1
-    start = i + 1
-    end = start
-    while end < len(fmt) and fmt[end].isdigit():
-        end += 1
-    if end != len(fmt) - 1 or fmt[end] != 'f' or end - start > 3:
-        return -1
-    if end == start:
-        return 0
-    return int(fmt[start:end])
+    width, i = _number_at(fmt, i, 'width')
+    precision = -1
+    if i < len(fmt) and fmt[i] == '.':
+        precision, i = _number_at(fmt, i + 1, 'precision')
+    if i == len(fmt):
+        raise UnsupportedOperation('incomplete format specifier; use %% '
+                                   '(double %) instead')
+    conv = fmt[i]
+    text = fmt[start:i + 1]
+    plain = len(text) == 2
+    if not ((conv == 'd' and precision < 0) or conv == 'f'
+            or (conv in 's%' and plain)):
+        raise UnsupportedOperation('format %s is not supported yet' % text)
+    return _Spec(text, conv, minus, plus, space, zero, width, precision)
+
+
+def _pad(sign, body, width, minus, zero):
+    fill = width - len(sign) - len(body)
+    if fill <= 0:
+        return sign + body
+    if minus:
+        return sign + body + ' ' * fill
+    if zero:
+        return sign + '0' * fill + body
+    return ' ' * fill + sign + body
+
+
+def _convert(spec, w_arg):
+    """w_arg written as spec says."""
+    from rpyyarv import interp
+    if spec.conv == 's':
+        return interp.to_s_string(w_arg)
+    if not (isinstance(w_arg, W_Integer) if spec.conv == 'd'
+            else isinstance(w_arg, W_Float)):
+        raise UnsupportedOperation('format %s of %s is not supported yet'
+                                   % (spec.text, w_arg.getclass().name))
+    zero = spec.zero
+    if spec.conv == 'd':
+        body = w_arg.to_s_str()
+    else:
+        x = w_arg.float_w()
+        if math.isnan(x) or math.isinf(x):
+            zero = False
+            body = 'NaN' if math.isnan(x) else '-Inf' if x < 0 else 'Inf'
+        else:
+            body = float_fixed(x, 6 if spec.precision < 0 else spec.precision)
+    sign = '+' if spec.plus else (' ' if spec.space else '')
+    if body.startswith('-'):
+        sign = '-'
+        body = body[1:]
+    return W_String(_pad(sign, body, spec.width, spec.minus, zero))
+
+
+def sprintf(w_fmt, args_w):
+    """sprintf for %d, %f, %s and %%, the conversions benchmarks use."""
+    fmt = w_fmt.str_w()
+    parts_w = []
+    argi = 0
+    lit = 0
+    i = fmt.find('%')
+    while i >= 0:
+        if i > lit:
+            parts_w.append(W_String(fmt[lit:i], w_fmt.encoding))
+        spec = _parse_spec(fmt, i)
+        if spec.conv == '%':
+            parts_w.append(W_String('%'))
+        else:
+            if argi >= len(args_w):
+                raise UnsupportedOperation('too few arguments')
+            parts_w.append(_convert(spec, args_w[argi]))
+            argi += 1
+        lit = i + len(spec.text)
+        i = fmt.find('%', lit)
+    if lit < len(fmt):
+        parts_w.append(W_String(fmt[lit:], w_fmt.encoding))
+    return concat(parts_w)
 
 
 class W_StrFormat(W_CFunc):
     def call(self, w_recv, args_w, w_block):
         assert isinstance(w_recv, W_String)
-        fmt = w_recv.str_w()
-        precision = _fixed_precision(fmt)
-        if precision < 0:
-            raise UnsupportedOperation('format %s is not supported yet' % fmt)
         w_arg = args_w[0]
-        if not isinstance(w_arg, W_Float):
-            raise UnsupportedOperation('format %s of %s is not supported yet'
-                                       % (fmt, w_arg.getclass().name))
-        x = w_arg.floatval
-        if math.isnan(x):
-            return W_String('NaN')
-        if math.isinf(x):
-            if x > 0.0:
-                return W_String('Inf')
-            return W_String('-Inf')
-        return W_String(float_fixed(x, precision))
+        if isinstance(w_arg, W_Array):
+            return sprintf(w_recv, w_arg.items()[:])
+        return sprintf(w_recv, [w_arg])
 
 
 class W_Length(W_CFunc):

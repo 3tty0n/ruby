@@ -6,6 +6,7 @@ from rpyyarv import optable
 from rpyyarv import symbols
 from rpyyarv.error import UnsupportedOperation
 from rpyyarv.methods import W_CFunc
+from rpyyarv.objects import string as stringlib
 from rpyyarv.objects.klass import BOP_EQ
 from rpyyarv.objects.string import W_String
 from rpyyarv.objects.instance import W_Object
@@ -63,6 +64,18 @@ class W_Print(W_CFunc):
                 'print without arguments (it prints $_) is not supported yet')
         for w_arg in args_w:
             write(interp.to_s_string(w_arg).str_w())
+        return w_nil
+
+
+class W_Printf(W_CFunc):
+    def call(self, w_recv, args_w, w_block):
+        if len(args_w) == 0:
+            return w_nil
+        w_fmt = args_w[0]
+        if not isinstance(w_fmt, W_String):
+            raise UnsupportedOperation('printf to %s is not supported yet'
+                                       % w_fmt.getclass().name)
+        write(stringlib.sprintf(w_fmt, args_w[1:]).str_w())
         return w_nil
 
 
@@ -254,6 +267,8 @@ def install(w_class):
     w_class.add_method(puts_id, W_Puts(puts_id, -1, True))  # Kernel#puts is private
     print_id = symbols.intern('print')
     w_class.add_method(print_id, W_Print(print_id, -1, True))
+    printf_id = symbols.intern('printf')
+    w_class.add_method(printf_id, W_Printf(printf_id, -1, True))
     to_s_id = symbols.intern('to_s')
     w_class.add_method(to_s_id, W_ToS(to_s_id, 0))
     integer_id = symbols.intern('Integer')

@@ -1347,9 +1347,14 @@ def test_rest_parameters_are_refused_where_unsupported(source, msg,
 
 
 @pytest.mark.parametrize('source, msg', [
-    ('"%d" % 1\n', 'format %d is not supported yet'),
-    ('"x%.2f" % 1.0\n', 'format x%.2f is not supported yet'),
     ('"%.2f" % 1\n', 'format %.2f of Integer is not supported yet'),
+    ('"%d" % 1.5\n', 'format %d of Float is not supported yet'),
+    ('"%.3d" % 5\n', 'format %.3d is not supported yet'),
+    ('"%5s" % "a"\n', 'format %5s is not supported yet'),
+    ('"%d %d" % [1]\n', 'too few arguments'),
+    ('"%" % 1\n', 'incomplete format specifier; use %% (double %) instead'),
+    ('"%9999999999d" % 1\n', 'width too big (ArgumentError)'),
+    ('printf(1, "x")\n', 'printf to Integer is not supported yet'),
     ('Integer(3.7)\n', 'Integer() of Float is not supported yet'),
     ('Integer("1", 2)\n',
      'Integer() with a base or options is not supported yet')])

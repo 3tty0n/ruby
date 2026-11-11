@@ -743,6 +743,15 @@ CRUBY_CASES = [
                                 'puts a[-6, 1].inspect, a[1.9, 2.5].inspect\n'
                                 'puts a[0, 2 ** 62].inspect\nb = a[0, 2]\nb << 9\n'
                                 'puts a.inspect, b.inspect\n'),
+    ('sprintf', 'puts "%8d|" % 42, "%8d|" % -42, "%-8d|" % -42, "%08d|" % -42\n'
+                'puts "%+d %d" % [5, 2 ** 70], "% d" % 5, "%2d|" % 123\n'
+                'puts "%d" % [1, 2], "%d%%" % 100, "a%sb" % "x"\n'
+                'puts "%8.2f|" % -1.5, "%-8.2f|" % 1.5, "%08.2f|" % -1.5\n'
+                'puts "%+.1f" % 1.0, "%f" % 1.5, "%8.2f|" % (1.0 / 0)\n'
+                'puts "%08.2f|" % -(1.0 / 0), "%+f" % (0.0 / 0)\n'
+                'puts "%s|%s|%s|" % ["\u00e9", 12, nil]\n'
+                'printf("Primes up to %8d %8d\\n", 5120000, 3)\nprintf\n'
+                'puts printf("%d\\n", 7).inspect\n'),
     ('string_us_ascii_source', '# coding: us-ascii\nputs "\\xC3\\xA9".length, "a".length\n'),
     ('block_param', 'def m(&b)\n  b\nend\nputs m.inspect\nputs m { 1 }.call\n'
                     'def c(&b)\n  b.call(2)\nend\nputs c { |x| x * 10 }\n'
