@@ -733,6 +733,10 @@ CRUBY_CASES = [
                     'puts r, 3.downto(5) { puts :x }\n'
                     'puts(5.downto(2) { |i| break i * 10 if i == 3 })\n'
                     'puts 0.zero?, 5.zero?, (2 ** 70).zero?, (-1).zero?\n'),
+    ('unpack_c', 'puts "\\x01\\xFF\\x80a".unpack("c*").inspect\n'
+                 'puts "".unpack("c*").inspect, "\u00e9".unpack("c*").inspect\n'
+                 'puts 200.chr.unpack("c*").inspect\n'
+                 'puts ("\\x1" * 3).unpack("c*").inspect\n'),
     ('string_us_ascii_source', '# coding: us-ascii\nputs "\\xC3\\xA9".length, "a".length\n'),
     ('block_param', 'def m(&b)\n  b\nend\nputs m.inspect\nputs m { 1 }.call\n'
                     'def c(&b)\n  b.call(2)\nend\nputs c { |x| x * 10 }\n'

@@ -184,6 +184,25 @@ class W_StrAppend(W_CFunc):
         return w_recv
 
 
+class W_Unpack(W_CFunc):
+    def call(self, w_recv, args_w, w_block):
+        assert isinstance(w_recv, W_String)
+        fmt = _string_arg('unpack', args_w[0]).str_w()
+        if fmt != 'c*':
+            raise UnsupportedOperation('unpack("%s") is not supported yet'
+                                       % fmt)
+        if w_block is not None:
+            raise UnsupportedOperation('unpack with a block is not supported '
+                                       'yet')
+        items_w = []
+        for c in w_recv.str_w():
+            n = ord(c)
+            if n >= 0x80:
+                n -= 0x100
+            items_w.append(newint(n))
+        return W_Array(items_w)
+
+
 class W_StrTimes(W_CFunc):
     def call(self, w_recv, args_w, w_block):
         assert isinstance(w_recv, W_String)
@@ -392,6 +411,8 @@ def install(w_class):
     w_class.add_method(plus_id, W_StrPlus(plus_id, 1))
     append_id = symbols.intern('<<')
     w_class.add_method(append_id, W_StrAppend(append_id, 1))
+    unpack_id = symbols.intern('unpack')
+    w_class.add_method(unpack_id, W_Unpack(unpack_id, 1))
     times_id = symbols.intern('*')
     w_class.add_method(times_id, W_StrTimes(times_id, 1))
     format_id = symbols.intern('%')
